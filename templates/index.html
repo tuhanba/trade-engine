@@ -1,0 +1,1673 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>AURVEX.Ai — Elite Trading Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ══════════════════════════════════════════════════════════
+   ROOT VARIABLES
+══════════════════════════════════════════════════════════ */
+:root {
+  --bg-void:     #060608;
+  --bg-deep:     #0a0a0f;
+  --bg-card:     #0e0e16;
+  --bg-card2:    #12121c;
+  --bg-glass:    rgba(14,14,22,0.85);
+
+  --gold-1:      #c9a84c;
+  --gold-2:      #e8c96a;
+  --gold-3:      #f5e09a;
+  --gold-dim:    rgba(201,168,76,0.15);
+  --gold-glow:   rgba(201,168,76,0.35);
+
+  --red-1:       #b91c1c;
+  --red-2:       #dc2626;
+  --red-dim:     rgba(185,28,28,0.15);
+  --red-glow:    rgba(185,28,28,0.35);
+
+  --green-1:     #16a34a;
+  --green-2:     #22c55e;
+  --green-dim:   rgba(22,163,74,0.15);
+
+  --text-1:      #f0ead6;
+  --text-2:      #a89b7a;
+  --text-3:      #5a5240;
+  --text-muted:  #3d3628;
+
+  --border:      rgba(201,168,76,0.08);
+  --border-hot:  rgba(201,168,76,0.22);
+
+  --font-hud:    'Orbitron', sans-serif;
+  --font-body:   'Inter', sans-serif;
+  --font-mono:   'JetBrains Mono', monospace;
+
+  --r:           10px;
+  --r-sm:        6px;
+}
+
+/* ══════════════════════════════════════════════════════════
+   RESET & BASE
+══════════════════════════════════════════════════════════ */
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0 }
+html { font-size:14px; scroll-behavior:smooth }
+body {
+  font-family: var(--font-body);
+  background: var(--bg-void);
+  color: var(--text-1);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ══════════════════════════════════════════════════════════
+   ANIMATED BACKGROUND
+══════════════════════════════════════════════════════════ */
+#bg-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ══════════════════════════════════════════════════════════
+   HEADER
+══════════════════════════════════════════════════════════ */
+.hdr {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 68px;
+  background: rgba(6,6,8,0.92);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 rgba(201,168,76,0.06), 0 8px 32px rgba(0,0,0,0.6);
+}
+
+/* Logo — sadece simge, şeffaf arka plan */
+.hdr-logo {
+  width: 68px;
+  min-width: 68px;
+  height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.hdr-logo img {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  filter:
+    drop-shadow(0 0 12px rgba(201,168,76,0.9))
+    drop-shadow(0 0 28px rgba(201,168,76,0.5))
+    drop-shadow(0 0 56px rgba(185,28,28,0.6));
+  animation: logo-breathe 3s ease-in-out infinite;
+}
+@keyframes logo-breathe {
+  0%,100% {
+    filter:
+      drop-shadow(0 0 10px rgba(201,168,76,0.8))
+      drop-shadow(0 0 22px rgba(201,168,76,0.4))
+      drop-shadow(0 0 48px rgba(185,28,28,0.5));
+  }
+  50% {
+    filter:
+      drop-shadow(0 0 18px rgba(201,168,76,1.0))
+      drop-shadow(0 0 40px rgba(201,168,76,0.7))
+      drop-shadow(0 0 80px rgba(185,28,28,0.8));
+  }
+}
+
+/* Dikey ayırıcı */
+.hdr-sep {
+  width: 1px;
+  height: 36px;
+  background: linear-gradient(180deg, transparent, var(--gold-1), transparent);
+  opacity: 0.25;
+  flex-shrink: 0;
+}
+
+/* Marka */
+.hdr-brand {
+  padding: 0 18px;
+  flex-shrink: 0;
+}
+.hdr-name {
+  font-family: var(--font-hud);
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  background: linear-gradient(135deg, var(--gold-3) 0%, var(--gold-1) 50%, var(--red-2) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+.hdr-sub {
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--text-3);
+  text-transform: uppercase;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+}
+
+/* Spacer */
+.hdr-space { flex: 1 }
+
+/* Status pills */
+.hdr-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+}
+.pill {
+  font-family: var(--font-hud);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-weight: 700;
+  cursor: default;
+}
+.pill-live {
+  background: rgba(22,163,74,0.12);
+  border: 1px solid rgba(22,163,74,0.35);
+  color: var(--green-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pill-live::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green-2);
+  box-shadow: 0 0 8px var(--green-2);
+  animation: blink 1.4s ease-in-out infinite;
+}
+@keyframes blink {
+  0%,100% { opacity:1 }
+  50%      { opacity:0.3 }
+}
+.pill-mode {
+  background: rgba(201,168,76,0.08);
+  border: 1px solid rgba(201,168,76,0.2);
+  color: var(--gold-1);
+}
+
+/* Clock */
+.hdr-clock {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  padding: 0 20px 0 4px;
+  letter-spacing: 0.06em;
+}
+
+/* ══════════════════════════════════════════════════════════
+   MAIN LAYOUT
+══════════════════════════════════════════════════════════ */
+.main {
+  position: relative;
+  z-index: 1;
+  padding: 14px 12px 40px;
+  max-width: 520px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ══════════════════════════════════════════════════════════
+   SECTION HEADER
+══════════════════════════════════════════════════════════ */
+.sec-hdr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.sec-hdr-line {
+  width: 3px;
+  height: 14px;
+  background: linear-gradient(180deg, var(--gold-1), var(--red-1));
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.sec-hdr-title {
+  font-family: var(--font-hud);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--text-2);
+  text-transform: uppercase;
+}
+.sec-hdr-badge {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-3);
+  letter-spacing: 0.06em;
+}
+
+/* ══════════════════════════════════════════════════════════
+   BALANCE STRIP
+══════════════════════════════════════════════════════════ */
+.bal-strip {
+  display: grid;
+  grid-template-columns: repeat(5,1fr);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+  position: relative;
+}
+.bal-strip::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-1), var(--red-1), var(--gold-1), transparent);
+  opacity: 0.4;
+}
+.bal-item {
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+.bal-item:last-child { border-right: none }
+.bal-lbl {
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: var(--text-3);
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bal-val {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bal-val.pos { color: var(--green-2) }
+.bal-val.neg { color: var(--red-2) }
+.bal-val.gld { color: var(--gold-2) }
+
+/* ══════════════════════════════════════════════════════════
+   STAT GRID
+══════════════════════════════════════════════════════════ */
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 14px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.stat-card:hover {
+  border-color: var(--border-hot);
+  box-shadow: 0 0 24px rgba(201,168,76,0.06);
+}
+/* Köşe süslemeleri */
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 20px; height: 20px;
+  border-top: 1.5px solid var(--gold-1);
+  border-left: 1.5px solid var(--gold-1);
+  border-radius: var(--r) 0 0 0;
+  opacity: 0.5;
+}
+.stat-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0; right: 0;
+  width: 14px; height: 14px;
+  border-bottom: 1px solid var(--red-1);
+  border-right: 1px solid var(--red-1);
+  border-radius: 0 0 var(--r) 0;
+  opacity: 0.4;
+}
+/* Hover scan efekti */
+.stat-card .scan {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(201,168,76,0.5), transparent);
+  top: -1px;
+  pointer-events: none;
+}
+.stat-card:hover .scan {
+  animation: scan-down 1s ease forwards;
+}
+@keyframes scan-down {
+  0%   { top: 0;    opacity: 0.8 }
+  100% { top: 100%; opacity: 0 }
+}
+/* Arka plan ikon */
+.stat-bg-icon {
+  position: absolute;
+  bottom: 8px; right: 10px;
+  font-size: 28px;
+  opacity: 0.04;
+  pointer-events: none;
+  user-select: none;
+  line-height: 1;
+}
+.stat-lbl {
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  color: var(--text-3);
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  margin-bottom: 6px;
+}
+.stat-val {
+  font-family: var(--font-hud);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--gold-2);
+  margin-bottom: 4px;
+}
+.stat-val.pos { color: var(--green-2) }
+.stat-val.neg { color: var(--red-2) }
+.stat-val.gld { color: var(--gold-2) }
+.stat-sub {
+  font-size: 9px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  margin-bottom: 8px;
+}
+.stat-bar-wrap {
+  height: 2px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.stat-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--gold-1), var(--gold-2));
+  transition: width 1s cubic-bezier(0.4,0,0.2,1);
+}
+.stat-bar-fill.red {
+  background: linear-gradient(90deg, var(--red-1), var(--red-2));
+}
+.stat-bar-fill.green {
+  background: linear-gradient(90deg, var(--green-1), var(--green-2));
+}
+
+/* ══════════════════════════════════════════════════════════
+   CARD (genel)
+══════════════════════════════════════════════════════════ */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+}
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);
+}
+
+/* ══════════════════════════════════════════════════════════
+   PNL CHART CARD
+══════════════════════════════════════════════════════════ */
+.chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.chart-title {
+  font-family: var(--font-hud);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--text-2);
+  text-transform: uppercase;
+}
+.chart-total {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+.chart-wrap {
+  height: 130px;
+  position: relative;
+}
+
+/* ══════════════════════════════════════════════════════════
+   PERFORMANCE METRICS
+══════════════════════════════════════════════════════════ */
+.perf-grid {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 8px;
+}
+.perf-item {
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 10px 10px 8px;
+  text-align: center;
+}
+.perf-lbl {
+  font-size: 7.5px;
+  letter-spacing: 0.14em;
+  color: var(--text-3);
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  margin-bottom: 5px;
+}
+.perf-val {
+  font-family: var(--font-hud);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold-2);
+}
+.perf-val.pos { color: var(--green-2) }
+.perf-val.neg { color: var(--red-2) }
+
+/* ══════════════════════════════════════════════════════════
+   SESSION CARDS
+══════════════════════════════════════════════════════════ */
+.sess-grid {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 8px;
+}
+.sess-card {
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 12px 10px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.sess-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 20%; right: 20%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-1), transparent);
+  opacity: 0.3;
+}
+.sess-flag {
+  font-size: 16px;
+  margin-bottom: 4px;
+  line-height: 1;
+}
+.sess-name {
+  font-family: var(--font-hud);
+  font-size: 7px;
+  letter-spacing: 0.18em;
+  color: var(--text-3);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.sess-wr {
+  font-family: var(--font-hud);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gold-2);
+  line-height: 1;
+  margin-bottom: 3px;
+}
+.sess-wr.pos { color: var(--green-2) }
+.sess-wr.neg { color: var(--red-2) }
+.sess-det {
+  font-size: 8px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+/* ══════════════════════════════════════════════════════════
+   LIVE POSITIONS
+══════════════════════════════════════════════════════════ */
+.pos-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pos-item {
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  position: relative;
+  overflow: hidden;
+}
+.pos-item.long-item { border-left: 2px solid var(--green-2) }
+.pos-item.short-item { border-left: 2px solid var(--red-2) }
+.pos-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.pos-sym {
+  font-family: var(--font-hud);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-1);
+  letter-spacing: 0.06em;
+}
+.pos-dir {
+  font-size: 8px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+}
+.pos-dir.long  { background: var(--green-dim); color: var(--green-2); border: 1px solid rgba(22,163,74,0.25) }
+.pos-dir.short { background: var(--red-dim);   color: var(--red-2);   border: 1px solid rgba(185,28,28,0.25) }
+.pos-pnl {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+.pos-pnl.pos { color: var(--green-2) }
+.pos-pnl.neg { color: var(--red-2) }
+.pos-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pos-meta-item {
+  font-size: 8.5px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+.pos-meta-item span {
+  color: var(--text-2);
+}
+.pos-progress {
+  margin-top: 6px;
+  height: 2px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.pos-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--gold-1), var(--gold-2));
+  transition: width 0.5s ease;
+}
+
+/* ══════════════════════════════════════════════════════════
+   AI BRAIN
+══════════════════════════════════════════════════════════ */
+.ai-grid {
+  display: grid;
+  grid-template-columns: repeat(2,1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ai-param {
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 10px;
+}
+.ai-param-lbl {
+  font-size: 7.5px;
+  letter-spacing: 0.14em;
+  color: var(--text-3);
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  margin-bottom: 4px;
+}
+.ai-param-val {
+  font-family: var(--font-hud);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gold-2);
+}
+.ai-reason {
+  background: rgba(201,168,76,0.04);
+  border: 1px solid rgba(201,168,76,0.1);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  font-size: 10px;
+  color: var(--text-2);
+  line-height: 1.6;
+  font-family: var(--font-mono);
+}
+.ai-reason-lbl {
+  font-size: 7.5px;
+  letter-spacing: 0.14em;
+  color: var(--gold-1);
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  margin-bottom: 4px;
+  display: block;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TRADE HISTORY TABLE
+══════════════════════════════════════════════════════════ */
+.tbl-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+.tbl th {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 7.5px;
+  letter-spacing: 0.14em;
+  color: var(--text-3);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.tbl td {
+  padding: 8px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  white-space: nowrap;
+  color: var(--text-2);
+}
+.tbl tr:last-child td { border-bottom: none }
+.tbl tr:hover td { background: rgba(201,168,76,0.02) }
+.tbl .sym { color: var(--text-1); font-weight: 600; letter-spacing: 0.06em }
+.tbl .win-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.tbl .win-badge.win  { background: var(--green-dim); color: var(--green-2); border: 1px solid rgba(22,163,74,0.2) }
+.tbl .win-badge.loss { background: var(--red-dim);   color: var(--red-2);   border: 1px solid rgba(185,28,28,0.2) }
+.tbl .pnl-pos { color: var(--green-2) }
+.tbl .pnl-neg { color: var(--red-2) }
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 0 4px;
+}
+.pg-btn {
+  background: rgba(201,168,76,0.08);
+  border: 1px solid rgba(201,168,76,0.2);
+  color: var(--gold);
+  padding: 5px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+.pg-btn:hover:not(:disabled) { background: rgba(201,168,76,0.18); }
+.pg-btn:disabled { opacity: 0.35; cursor: default; }
+.pg-info {
+  color: var(--text-2);
+  font-size: 0.82rem;
+  min-width: 50px;
+  text-align: center;
+}
+
+/* ══════════════════════════════════════════════════════════
+   EMPTY STATE
+══════════════════════════════════════════════════════════ */
+.empty {
+  text-align: center;
+  padding: 24px 0;
+  color: var(--text-3);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.empty-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+  opacity: 0.3;
+}
+
+/* ════════════════════════════════════════════════════════
+   LIVE LOG
+════════════════════════════════════════════════════════ */
+.log-box {
+  background: rgba(6,6,8,0.92);
+  border: 1px solid rgba(201,168,76,0.08);
+  border-radius: var(--r);
+  height: 280px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.65;
+  scroll-behavior: smooth;
+}
+.log-box::-webkit-scrollbar { width: 3px }
+.log-box::-webkit-scrollbar-thumb { background: var(--gold-dim); border-radius: 3px }
+.log-line {
+  display: flex;
+  gap: 6px;
+  padding: 1px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.02);
+  word-break: break-all;
+}
+.log-line:last-child { border-bottom: none }
+.log-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-top: 5px;
+}
+.log-text { color: var(--text-2); flex: 1 }
+/* Seviye renkleri */
+.log-line.INFO  .log-dot { background: rgba(201,168,76,0.5) }
+.log-line.INFO  .log-text { color: #7a7060 }
+.log-line.TRADE .log-dot { background: #22c55e }
+.log-line.TRADE .log-text { color: #22c55e }
+.log-line.CLOSE .log-dot { background: #dc2626 }
+.log-line.CLOSE .log-text { color: #dc2626 }
+.log-line.WARNING .log-dot { background: #f59e0b }
+.log-line.WARNING .log-text { color: #f59e0b }
+.log-line.ERROR .log-dot { background: #ef4444 }
+.log-line.ERROR .log-text { color: #ef4444; font-weight: 600 }
+.log-line.DEBUG .log-dot { background: #4b5563 }
+.log-line.DEBUG .log-text { color: #4b5563 }
+.log-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.log-btn {
+  padding: 3px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border-hot);
+  background: var(--gold-dim);
+  color: var(--gold-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  cursor: pointer;
+  letter-spacing: 0.08em;
+  transition: background 0.2s;
+}
+.log-btn:hover { background: rgba(201,168,76,0.25) }
+.log-filter-lbl {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+}
+.log-filter-btn {
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: transparent;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.log-filter-btn.active { border-color: var(--gold-1); color: var(--gold-2); background: var(--gold-dim) }
+.log-status {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-3);
+}
+
+/* ════════════════════════════════════════════════════════
+   FOOTER
+════════════════════════════════════════════════════════ */
+.foot {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 16px;
+  font-size: 9px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  letter-spacing: 0.12em;
+  border-top: 1px solid var(--border);
+}
+
+/* ══════════════════════════════════════════════════════════
+   GOLD DIVIDER
+══════════════════════════════════════════════════════════ */
+.gold-line {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-dim), var(--red-dim), var(--gold-dim), transparent);
+  margin: 2px 0;
+  border: none;
+}
+
+/* ══════════════════════════════════════════════════════════
+   FADE IN ANIMATION
+══════════════════════════════════════════════════════════ */
+@keyframes fadeUp {
+  from { opacity:0; transform:translateY(12px) }
+  to   { opacity:1; transform:translateY(0) }
+}
+.card, .stat-card, .bal-strip, .sess-card, .perf-item {
+  animation: fadeUp 0.4s ease both;
+}
+
+/* ══════════════════════════════════════════════════════════
+   SCROLLBAR
+══════════════════════════════════════════════════════════ */
+::-webkit-scrollbar { width: 4px; height: 4px }
+::-webkit-scrollbar-track { background: transparent }
+::-webkit-scrollbar-thumb { background: var(--gold-dim); border-radius: 4px }
+</style>
+</head>
+<body>
+
+<!-- ANIMATED BACKGROUND -->
+<canvas id="bg-canvas"></canvas>
+
+<!-- ══════════════════════════════════════════════════════════
+     HEADER
+══════════════════════════════════════════════════════════ -->
+<header class="hdr">
+  <div class="hdr-logo">
+    <img src="/static/logo_icon.jpeg" alt="AURVEX">
+  </div>
+  <div class="hdr-sep"></div>
+  <div class="hdr-brand">
+    <div class="hdr-name">AURVEX.Ai</div>
+    <div class="hdr-sub">Elite Trading · Intelligence</div>
+  </div>
+  <div class="hdr-space"></div>
+  <div class="hdr-pills">
+    <div class="pill pill-live" id="status-pill">CANLI</div>
+    <div class="pill pill-mode" id="mode-pill">PAPER</div>
+  </div>
+  <div class="hdr-clock" id="clock">--:--:-- UTC</div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════
+     MAIN
+══════════════════════════════════════════════════════════ -->
+<main class="main">
+
+  <!-- BALANCE STRIP -->
+  <div class="bal-strip">
+    <div class="bal-item">
+      <div class="bal-lbl">Cüzdan</div>
+      <div class="bal-val gld" id="bal-wallet">$—</div>
+    </div>
+    <div class="bal-item">
+      <div class="bal-lbl">Realize</div>
+      <div class="bal-val" id="bal-realized">$—</div>
+    </div>
+    <div class="bal-item">
+      <div class="bal-lbl">Unrealize</div>
+      <div class="bal-val" id="bal-unrealized">+0.00$</div>
+    </div>
+    <div class="bal-item">
+      <div class="bal-lbl">Toplam PNL</div>
+      <div class="bal-val" id="bal-total">$—</div>
+    </div>
+    <div class="bal-item">
+      <div class="bal-lbl">Açık Pos.</div>
+      <div class="bal-val gld" id="bal-open">—</div>
+    </div>
+  </div>
+
+  <!-- STAT GRID -->
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="scan"></div>
+      <div class="stat-bg-icon">⚡</div>
+      <div class="stat-lbl">Toplam Trade</div>
+      <div class="stat-val gld" id="s-total">—</div>
+      <div class="stat-sub" id="s-open-sub">— açık</div>
+      <div class="stat-bar-wrap"><div class="stat-bar-fill" id="s-total-bar" style="width:0%"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="scan"></div>
+      <div class="stat-bg-icon">🎯</div>
+      <div class="stat-lbl">Kazanma Oranı</div>
+      <div class="stat-val" id="s-wr">—</div>
+      <div class="stat-sub" id="s-wl">—W / —L</div>
+      <div class="stat-bar-wrap"><div class="stat-bar-fill" id="s-wr-bar" style="width:0%"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="scan"></div>
+      <div class="stat-bg-icon">📈</div>
+      <div class="stat-lbl">Toplam PNL</div>
+      <div class="stat-val" id="s-pnl">—</div>
+      <div class="stat-sub" id="s-pnl-avg">avg — / trade</div>
+      <div class="stat-bar-wrap"><div class="stat-bar-fill red" id="s-pnl-bar" style="width:50%"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="scan"></div>
+      <div class="stat-bg-icon">⚖</div>
+      <div class="stat-lbl">Profit Factor</div>
+      <div class="stat-val" id="s-pf">—</div>
+      <div class="stat-sub" id="s-rr">avg RR —</div>
+      <div class="stat-bar-wrap"><div class="stat-bar-fill" id="s-pf-bar" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <!-- PNL CHART -->
+  <div class="card">
+    <div class="chart-header">
+      <div class="sec-hdr" style="margin-bottom:0">
+        <div class="sec-hdr-line"></div>
+        <div class="chart-title">Kümülatif PNL</div>
+      </div>
+      <div class="chart-total" id="chart-total">—</div>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="pnl-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- PERFORMANCE -->
+  <div class="card">
+    <div class="sec-hdr">
+      <div class="sec-hdr-line"></div>
+      <div class="sec-hdr-title">Performans Metrikleri</div>
+    </div>
+    <div class="perf-grid">
+      <div class="perf-item">
+        <div class="perf-lbl">En İyi Trade</div>
+        <div class="perf-val pos" id="p-best">—</div>
+      </div>
+      <div class="perf-item">
+        <div class="perf-lbl">En Kötü Trade</div>
+        <div class="perf-val neg" id="p-worst">—</div>
+      </div>
+      <div class="perf-item">
+        <div class="perf-lbl">Max Drawdown</div>
+        <div class="perf-val neg" id="p-dd">—</div>
+      </div>
+      <div class="perf-item">
+        <div class="perf-lbl">Ort. Kazanç</div>
+        <div class="perf-val pos" id="p-avgwin">—</div>
+      </div>
+      <div class="perf-item">
+        <div class="perf-lbl">Ort. Kayıp</div>
+        <div class="perf-val neg" id="p-avgloss">—</div>
+      </div>
+      <div class="perf-item">
+        <div class="perf-lbl">Avg Süre</div>
+        <div class="perf-val" id="p-dur">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SESSION ANALYSIS -->
+  <div class="card">
+    <div class="sec-hdr">
+      <div class="sec-hdr-line"></div>
+      <div class="sec-hdr-title">Seans Analizi</div>
+    </div>
+    <div class="sess-grid">
+      <div class="sess-card">
+        <div class="sess-flag">🌏</div>
+        <div class="sess-name">Asya</div>
+        <div class="sess-wr" id="sess-asia-wr">—%</div>
+        <div class="sess-det" id="sess-asia-det">— trade</div>
+      </div>
+      <div class="sess-card">
+        <div class="sess-flag">🇬🇧</div>
+        <div class="sess-name">Londra</div>
+        <div class="sess-wr" id="sess-london-wr">—%</div>
+        <div class="sess-det" id="sess-london-det">— trade</div>
+      </div>
+      <div class="sess-card">
+        <div class="sess-flag">🗽</div>
+        <div class="sess-name">New York</div>
+        <div class="sess-wr" id="sess-ny-wr">—%</div>
+        <div class="sess-det" id="sess-ny-det">— trade</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIVE POSITIONS -->
+  <div class="card">
+    <div class="sec-hdr">
+      <div class="sec-hdr-line"></div>
+      <div class="sec-hdr-title">Açık Pozisyonlar</div>
+      <div class="sec-hdr-badge" id="live-count">0 aktif</div>
+    </div>
+    <div class="pos-list" id="pos-list">
+      <div class="empty">
+        <div class="empty-icon">📭</div>
+        Açık pozisyon yok
+      </div>
+    </div>
+    <!-- Live Pagination -->
+    <div class="pagination" id="live-pagination" style="display:none">
+      <button class="pg-btn" id="live-pg-prev" onclick="changeLivePage(-1)">‹ Önceki</button>
+      <span class="pg-info" id="live-pg-info">1 / 1</span>
+      <button class="pg-btn" id="live-pg-next" onclick="changeLivePage(1)">› Sonraki</button>
+    </div>
+  </div>
+
+  <!-- AI BRAIN -->
+  <div class="card">
+    <div class="sec-hdr">
+      <div class="sec-hdr-line"></div>
+      <div class="sec-hdr-title">AI Brain — Parametreler</div>
+      <div class="sec-hdr-badge" id="ai-version">v—</div>
+    </div>
+    <div class="ai-grid">
+      <div class="ai-param">
+        <div class="ai-param-lbl">SL Çarpanı</div>
+        <div class="ai-param-val" id="p-sl">—</div>
+      </div>
+      <div class="ai-param">
+        <div class="ai-param-lbl">TP Çarpanı</div>
+        <div class="ai-param-val" id="p-tp">—</div>
+      </div>
+      <div class="ai-param">
+        <div class="ai-param-lbl">Risk %</div>
+        <div class="ai-param-val" id="p-risk">—</div>
+      </div>
+      <div class="ai-param">
+        <div class="ai-param-lbl">RSI 5m</div>
+        <div class="ai-param-val" id="p-rsi5">—</div>
+      </div>
+      <div class="ai-param">
+        <div class="ai-param-lbl">Vol Ratio</div>
+        <div class="ai-param-val" id="p-vol">—</div>
+      </div>
+      <div class="ai-param">
+        <div class="ai-param-lbl">Min Değişim</div>
+        <div class="ai-param-val" id="p-chg">—</div>
+      </div>
+    </div>
+    <div class="ai-reason">
+      <span class="ai-reason-lbl">AI Analiz Notu</span>
+      <span id="ai-reason-text">Parametre yükleniyor...</span>
+    </div>
+  </div>
+
+  <!-- TRADE HISTORY -->
+  <div class="card">
+    <div class="sec-hdr">
+      <div class="sec-hdr-line"></div>
+      <div class="sec-hdr-title">Trade Geçmişi</div>
+      <div class="sec-hdr-badge" id="hist-count">son 50</div>
+    </div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Sembol</th>
+            <th>Yön</th>
+            <th>PNL</th>
+            <th>RR</th>
+            <th>Süre</th>
+            <th>Sonuç</th>
+          </tr>
+        </thead>
+        <tbody id="trade-tbody">
+          <tr><td colspan="6" class="empty">Yükleniyor...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <!-- Pagination -->
+    <div class="pagination" id="trade-pagination" style="display:none">
+      <button class="pg-btn" id="pg-prev" onclick="changePage(-1)">‹ Önceki</button>
+      <span class="pg-info" id="pg-info">1 / 1</span>
+      <button class="pg-btn" id="pg-next" onclick="changePage(1)">› Sonraki</button>
+    </div>
+  </div>
+
+  <!-- LIVE LOG -->
+  <div class="card">
+    <div class="sec-hdr">
+      <div class="sec-hdr-line"></div>
+      <div class="sec-hdr-title">Canlı Log</div>
+      <div class="sec-hdr-badge" id="log-count">—</div>
+    </div>
+    <div class="log-box" id="log-box">
+      <div class="empty"><div class="empty-icon">💻</div>Log yükleniyor...</div>
+    </div>
+    <div class="log-controls">
+      <button class="log-btn" onclick="loadLogs(true)">&#8635; Yenile</button>
+      <button class="log-btn" onclick="toggleAutoScroll()" id="autoscroll-btn">Auto-Scroll: AÇIK</button>
+      <span class="log-filter-lbl">Filtre:</span>
+      <button class="log-filter-btn active" data-level="ALL"  onclick="setLogFilter('ALL')">TÜMÜ</button>
+      <button class="log-filter-btn"        data-level="TRADE" onclick="setLogFilter('TRADE')">TRADE</button>
+      <button class="log-filter-btn"        data-level="ERROR" onclick="setLogFilter('ERROR')">HATA</button>
+      <span class="log-status" id="log-status">—</span>
+    </div>
+  </div>
+
+</main>
+
+<footer class="foot">
+  AURVEX.Ai &nbsp;·&nbsp; Elite Trading Intelligence &nbsp;·&nbsp; <span id="foot-time">—</span>
+</footer>
+
+<!-- ══════════════════════════════════════════════════════════
+     SCRIPTS
+══════════════════════════════════════════════════════════ -->
+<script>
+/* ── BACKGROUND CANVAS ─────────────────────────────────── */
+(function(){
+  const c = document.getElementById('bg-canvas');
+  const ctx = c.getContext('2d');
+  let W, H, particles = [];
+
+  function resize(){
+    W = c.width  = window.innerWidth;
+    H = c.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Particles
+  for(let i=0;i<55;i++){
+    particles.push({
+      x: Math.random()*2000, y: Math.random()*2000,
+      r: Math.random()*1.2+0.3,
+      vx: (Math.random()-0.5)*0.18,
+      vy: (Math.random()-0.5)*0.18,
+      gold: Math.random() > 0.35,
+      a: Math.random()*0.5+0.1
+    });
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+
+    // Deep radial gradient bg
+    const grd = ctx.createRadialGradient(W*0.5,H*0.3,0, W*0.5,H*0.3,W*0.9);
+    grd.addColorStop(0, 'rgba(20,14,6,0.6)');
+    grd.addColorStop(0.5, 'rgba(10,8,4,0.4)');
+    grd.addColorStop(1, 'rgba(6,6,8,0)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0,0,W,H);
+
+    // Grid
+    ctx.strokeStyle = 'rgba(201,168,76,0.015)';
+    ctx.lineWidth = 1;
+    for(let x=0;x<W;x+=48){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke() }
+    for(let y=0;y<H;y+=48){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke() }
+
+    // Particles
+    particles.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x % W, p.y % H, p.r, 0, Math.PI*2);
+      ctx.fillStyle = p.gold
+        ? `rgba(201,168,76,${p.a})`
+        : `rgba(185,28,28,${p.a*0.5})`;
+      ctx.fill();
+      p.x += p.vx; p.y += p.vy;
+    });
+
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* ── CLOCK ──────────────────────────────────────────────── */
+function updateClock(){
+  const now = new Date();
+  const h = String(now.getUTCHours()).padStart(2,'0');
+  const m = String(now.getUTCMinutes()).padStart(2,'0');
+  const s = String(now.getUTCSeconds()).padStart(2,'0');
+  const str = `${h}:${m}:${s} UTC`;
+  document.getElementById('clock').textContent = str;
+  document.getElementById('foot-time').textContent = str;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+/* ── HELPERS ────────────────────────────────────────────── */
+function fmt(v){ return (v>=0?'+':'')+v.toFixed(3)+'$' }
+function fmtAbs(v){ return (v>=0?'+':'')+v.toFixed(3)+'$' }
+function setVal(id, text, cls){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.textContent = text;
+  if(cls){
+    el.classList.remove('pos','neg','gld','warn');
+    el.classList.add(cls);
+  }
+}
+
+/* ── PNL CHART ──────────────────────────────────────────── */
+let pnlChart = null;
+function initChart(){
+  const ctx = document.getElementById('pnl-chart').getContext('2d');
+  pnlChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels:[], datasets:[{
+      data: [],
+      borderColor: 'rgba(201,168,76,0.9)',
+      borderWidth: 1.5,
+      fill: true,
+      backgroundColor: function(ctx){
+        const chart = ctx.chart;
+        const {ctx:c, chartArea} = chart;
+        if(!chartArea) return 'transparent';
+        const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+        g.addColorStop(0, 'rgba(201,168,76,0.18)');
+        g.addColorStop(1, 'rgba(201,168,76,0.01)');
+        return g;
+      },
+      tension: 0.4,
+      pointRadius: 2,
+      pointBackgroundColor: 'rgba(201,168,76,0.8)',
+      pointBorderWidth: 0,
+    }]},
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 600 },
+      plugins: { legend:{display:false}, tooltip:{
+        backgroundColor: 'rgba(10,10,15,0.95)',
+        borderColor: 'rgba(201,168,76,0.3)',
+        borderWidth: 1,
+        titleColor: '#c9a84c',
+        bodyColor: '#a89b7a',
+        titleFont: { family:'JetBrains Mono', size:10 },
+        bodyFont:  { family:'JetBrains Mono', size:10 },
+        callbacks: {
+          label: ctx => ' ' + fmt(ctx.raw)
+        }
+      }},
+      scales: {
+        x: { display:false },
+        y: {
+          grid: { color:'rgba(201,168,76,0.04)', drawBorder:false },
+          ticks: { color:'#5a5240', font:{family:'JetBrains Mono',size:9},
+            callback: v => (v>=0?'+':'')+v.toFixed(2)+'$'
+          },
+          border: { display:false }
+        }
+      }
+    }
+  });
+}
+initChart();
+
+async function loadChart(){
+  try {
+    const r = await fetch('/api/pnl_chart');
+    if(!r.ok) return;
+    const j = await r.json();
+    if(!j.ok || !j.data.length) return;
+    const pts = j.data;
+    pnlChart.data.labels   = pts.map((_,i) => '#'+(i+1));
+    pnlChart.data.datasets[0].data = pts.map(p => p.cumulative);
+    const last = pts[pts.length-1].cumulative;
+    pnlChart.data.datasets[0].borderColor = last >= 0
+      ? 'rgba(34,197,94,0.9)' : 'rgba(220,38,38,0.9)';
+    pnlChart.data.datasets[0].backgroundColor = function(ctx){
+      const chart = ctx.chart;
+      const {ctx:c, chartArea} = chart;
+      if(!chartArea) return 'transparent';
+      const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+      if(last >= 0){
+        g.addColorStop(0, 'rgba(34,197,94,0.18)');
+        g.addColorStop(1, 'rgba(34,197,94,0.01)');
+      } else {
+        g.addColorStop(0, 'rgba(220,38,38,0.18)');
+        g.addColorStop(1, 'rgba(220,38,38,0.01)');
+      }
+      return g;
+    };
+    pnlChart.update();
+    const el = document.getElementById('chart-total');
+    el.textContent = fmt(last);
+    el.className = 'chart-total ' + (last>=0?'pnl-pos':'pnl-neg');
+  } catch(e){}
+}
+
+/* ── STATS ──────────────────────────────────────────────── */
+async function loadStats(){
+  try {
+    const r = await fetch('/api/stats');
+    if(!r.ok) return;
+    const j = await r.json();
+    if(!j.ok) return;
+    const d = j.data;
+
+    const wr  = d.win_rate || 0;
+    const pnl = d.total_pnl || 0;
+    const pf  = d.profit_factor || 0;
+
+    setVal('s-total', d.total || 0, 'gld');
+    setVal('s-open-sub', (d.open_count||0)+' açık');
+    document.getElementById('s-total-bar').style.width = Math.min((d.total||0)/200*100,100)+'%';
+
+    setVal('s-wr', wr.toFixed(1)+'%', wr>=50?'pos':wr>=35?'gld':'neg');
+    setVal('s-wl', (d.wins||0)+'W / '+(d.losses||0)+'L');
+    const wrBar = document.getElementById('s-wr-bar');
+    wrBar.style.width = Math.min(wr,100)+'%';
+    wrBar.className = 'stat-bar-fill ' + (wr>=50?'green':'red');
+
+    setVal('s-pnl', fmt(pnl), pnl>=0?'pos':'neg');
+    setVal('s-pnl-avg', 'avg '+(d.total?fmt(pnl/d.total):fmt(0))+' / trade');
+
+    setVal('s-pf', pf.toFixed(2)+'x', pf>=1.5?'pos':pf>=1.0?'gld':'neg');
+    setVal('s-rr', 'avg RR '+(d.avg_rr||0).toFixed(2));
+    document.getElementById('s-pf-bar').style.width = Math.min(pf/3*100,100)+'%';
+
+    // Performance
+    setVal('p-best',    fmt(d.best_trade||0),  'pos');
+    setVal('p-worst',   fmt(d.worst_trade||0), 'neg');
+    setVal('p-dd',      fmt(d.max_drawdown||0),'neg');
+    setVal('p-avgwin',  fmt(d.avg_win||0),     'pos');
+    setVal('p-avgloss', fmt(d.avg_loss||0),    'neg');
+    const dur = d.avg_duration_min || 0;
+    const dh = Math.floor(dur/60), dm = Math.round(dur%60);
+    setVal('p-dur', dh ? `${dh}s ${dm}dk` : `${dm}dk`);
+
+    // Session stats
+    const ss = d.session_stats || {};
+    [['ASIA','asia'],['LONDON','london'],['NEWYORK','ny']].forEach(([key,id]) => {
+      const sd = ss[key] || {};
+      const swr = (sd.win_rate||0).toFixed(1);
+      const cls = (sd.win_rate||0)>=50?'pos':(sd.win_rate||0)>=35?'':' neg';
+      const elWr = document.getElementById('sess-'+id+'-wr');
+      if(elWr){ elWr.textContent = swr+'%'; elWr.className = 'sess-wr'+(cls?' '+cls.trim():'') }
+      const elDet = document.getElementById('sess-'+id+'-det');
+      if(elDet){ elDet.textContent = (sd.total||0)+' trade' }
+    });
+
+  } catch(e){ console.error('stats error',e) }
+}
+
+/* ── PARAMS ─────────────────────────────────────────────── */
+async function loadParams(){
+  try {
+    const r = await fetch('/api/params');
+    if(!r.ok) return;
+    const j = await r.json();
+    if(!j.ok) return;
+    const p = j.data;
+    setVal('p-sl',   (p.sl_atr_mult||0).toFixed(2)+'x');
+    setVal('p-tp',   (p.tp_atr_mult||0).toFixed(2)+'x');
+    setVal('p-risk', (p.risk_pct||0).toFixed(1)+'%');
+    setVal('p-rsi5', (p.rsi5_min||0)+' / '+(p.rsi5_max||0));
+    setVal('p-vol',  (p.vol_ratio_min||0).toFixed(1)+'x');
+    setVal('p-chg',  (p.min_change_pct||0).toFixed(1)+'%');
+    setVal('ai-version', 'v'+(p.version||1));
+    setVal('ai-reason-text', p.ai_reason || 'Henüz analiz yok.');
+  } catch(e){}
+}
+
+/* ── LIVE POSITIONS ─────────────────────────────────────── */
+let _allLive      = [];
+let _livePage     = 1;
+const LIVE_PER_PG = 5;
+
+function renderLivePositions(){
+  const list = document.getElementById('pos-list');
+  const pgEl = document.getElementById('live-pagination');
+  const live = _allLive;
+  const totalPg = Math.max(1, Math.ceil(live.length / LIVE_PER_PG));
+  _livePage = Math.min(_livePage, totalPg);
+  const start = (_livePage - 1) * LIVE_PER_PG;
+  const page  = live.slice(start, start + LIVE_PER_PG);
+
+  if(totalPg > 1){
+    pgEl.style.display = 'flex';
+    document.getElementById('live-pg-info').textContent = _livePage + ' / ' + totalPg;
+    document.getElementById('live-pg-prev').disabled = _livePage <= 1;
+    document.getElementById('live-pg-next').disabled = _livePage >= totalPg;
+  } else {
+    pgEl.style.display = 'none';
+  }
+
+  if(!page.length){
+    list.innerHTML = '<div class="empty"><div class="empty-icon">📭</div>Açık pozisyon yok</div>';
+    return;
+  }
+
+  list.innerHTML = page.map(t => {
+      const isLong = t.direction === 'LONG';
+      const pnl    = t.unrealized_pnl || 0;
+      const rr     = t.current_rr || 0;
+      const entry  = t.entry || 0;
+      const sl     = t.sl || 0;
+      const tp     = t.tp || 0;
+      const cur    = t.current_price || 0;
+      const prog   = sl && tp ? Math.min(Math.max((cur-sl)/(tp-sl)*100,0),100) : 50;
+      return `
+      <div class="pos-item ${isLong?'long-item':'short-item'}">
+        <div class="pos-top">
+          <span class="pos-sym">${t.symbol}</span>
+          <span class="pos-dir ${isLong?'long':'short'}">${t.direction} x${t.leverage||10}</span>
+          <span class="pos-pnl ${pnl>=0?'pos':'neg'}">${fmt(pnl)}</span>
+        </div>
+        <div class="pos-meta">
+          <div class="pos-meta-item">Giriş: <span>${entry.toFixed(4)}</span></div>
+          <div class="pos-meta-item">Anlık: <span>${cur.toFixed(4)}</span></div>
+          <div class="pos-meta-item">RR: <span>${rr.toFixed(2)}</span></div>
+          <div class="pos-meta-item">Süre: <span>${t.hold_str||'—'}</span></div>
+        </div>
+        <div class="pos-progress">
+          <div class="pos-progress-fill" style="width:${prog}%"></div>
+        </div>
+      </div>`;
+    }).join('');
+}
+
+function changeLivePage(dir){
+  const totalPg = Math.max(1, Math.ceil(_allLive.length / LIVE_PER_PG));
+  const newPage = _livePage + dir;
+  if(newPage < 1 || newPage > totalPg) return;
+  _livePage = newPage;
+  renderLivePositions();
+}
+
+async function loadLive(){
+  try {
+    const r = await fetch('/api/live');
+    if(!r.ok) return;
+    const j = await r.json();
+    if(!j.ok) return;
+    const d = j.data;
+
+    // Balance strip
+    const ur = d.total_unrealized || 0;
+    const re = d.total_realized   || 0;
+    const tot = ur + re;
+    setVal('bal-realized',   fmt(re),  re>=0?'pos':'neg');
+    setVal('bal-unrealized', fmt(ur),  ur>=0?'pos':'neg');
+    setVal('bal-total',      fmt(tot), tot>=0?'pos':'neg');
+    setVal('bal-open', (d.live||[]).length);
+
+    // Positions
+    const cnt = document.getElementById('live-count');
+    _allLive = d.live || [];
+    cnt.textContent = _allLive.length + ' aktif';
+    renderLivePositions();
+  } catch(e){}
+}
+
+/* ── BALANCE ──────────────────────────────────────────────── */
+async function loadBalance(){
+  try {
+    const r = await fetch('/api/balance');
+    if(!r.ok) return;
+    const j = await r.json();
+    if(!j.ok) return;
+    const b = j.data.usdt_balance || 0;
+    setVal('bal-wallet', '$'+b.toFixed(2), 'gld');
+  } catch(e){}
+}
+
+/* ── TRADE HISTORY ──────────────────────────────────────── */
+let _currentPage = 1;
+let _totalPages  = 1;
+
+async function loadTrades(page){
+  page = page || _currentPage;
+  try {
+    const r = await fetch('/api/trades?page=' + page + '&limit=10');
+    if(!r.ok) return;
+    const j = await r.json();
+    if(!j.ok) return;
+    const trades = j.data;
+    _currentPage = j.page || 1;
+    _totalPages  = j.total_pages || 1;
+    const total  = j.total_count || 0;
+    const tbody  = document.getElementById('trade-tbody');
+    document.getElementById('hist-count').textContent = total + ' trade';
+
+    // Pagination güncelle
+    const pgEl = document.getElementById('trade-pagination');
+    if(_totalPages > 1){
+      pgEl.style.display = 'flex';
+      document.getElementById('pg-info').textContent = _currentPage + ' / ' + _totalPages;
+      document.getElementById('pg-prev').disabled = _currentPage <= 1;
+      document.getElementById('pg-next').disabled = _currentPage >= _totalPages;
+    } else {
+      pgEl.style.display = 'none';
+    }
+
+    if(!trades.length){
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">Henüz trade yok</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = trades.map(t => {
+      const pnl = t.net_pnl || 0;
+      const rr  = t.r_multiple || 0;
+      const win = pnl > 0;
+      return `<tr>
+        <td class="sym">${t.symbol}</td>
+        <td style="color:${t.direction==='LONG'?'var(--green-2)':'var(--red-2)'}">${t.direction}</td>
+        <td class="${pnl>=0?'pnl-pos':'pnl-neg'}">${fmt(pnl)}</td>
+        <td style="color:var(--text-2)">${rr.toFixed(2)}R</td>
+        <td style="color:var(--text-3)">${t.duration_str||'—'}</td>
+        <td><span class="win-badge ${win?'win':'loss'}">${win?'WIN':'LOSS'}</span></td>
+      </tr>`;
+    }).join('');
+  } catch(e){}
+}
+
+function changePage(dir){
+  const newPage = _currentPage + dir;
+  if(newPage < 1 || newPage > _totalPages) return;
+  _currentPage = newPage;
+  loadTrades(_currentPage);
+}
+/* ── LIVE LOG ─────────────────────────────────────────────── */
+let _logAutoScroll = true;
+let _logFilter     = 'ALL';
+let _allLogLines   = [];
+
+function toggleAutoScroll(){
+  _logAutoScroll = !_logAutoScroll;
+  document.getElementById('autoscroll-btn').textContent =
+    'Auto-Scroll: ' + (_logAutoScroll ? 'AÇIK' : 'KAPALI');
+}
+
+function setLogFilter(level){
+  _logFilter = level;
+  document.querySelectorAll('.log-filter-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.level === level);
+  });
+  renderLogs();
+}
+
+function renderLogs(){
+  const box = document.getElementById('log-box');
+  const lines = _logFilter === 'ALL'
+    ? _allLogLines
+    : _allLogLines.filter(l => l.level === _logFilter);
+
+  if(!lines.length){
+    box.innerHTML = '<div class="empty"><div class="empty-icon">💻</div>Log satırı bulunamadı.</div>';
+    return;
+  }
+
+  box.innerHTML = lines.map(l =>
+    `<div class="log-line ${l.level}">`+
+    `<div class="log-dot"></div>`+
+    `<div class="log-text">${escHtml(l.text)}</div>`+
+    `</div>`
+  ).join('');
+
+  if(_logAutoScroll) box.scrollTop = box.scrollHeight;
+}
+
+function escHtml(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function loadLogs(force){
+  try {
+    const r = await fetch('/api/logs?n=80');
+    if(!r.ok) return;
+    const j = await r.json();
+    if(!j.ok) return;
+    _allLogLines = j.data || [];
+    document.getElementById('log-count').textContent = _allLogLines.length + ' satır';
+    const src = j.path === 'db_fallback' ? 'DB (log dosyası yok)' : j.path.split('/').pop();
+    document.getElementById('log-status').textContent = src + ' • ' + new Date().toLocaleTimeString('tr-TR');
+    renderLogs();
+  } catch(e){ console.error('log error',e) }
+}
+
+/* ── REFRESH ALL ──────────────────────────────────────────────── */
+async function refreshAll(){
+  await Promise.all([
+    loadStats(),
+    loadChart(),
+    loadLive(),
+    loadBalance(),
+    loadTrades(),
+    loadParams(),
+  ]);
+}
+
+refreshAll();
+loadLogs();
+setInterval(refreshAll, 15000);
+setInterval(loadLogs, 10000);
+</script>
+</body>
+</html>
