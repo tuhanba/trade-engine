@@ -488,21 +488,6 @@ def api_hourly_stats():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ── /api/coin_profiles ────────────────────────────────────────────────────────
-@app.route("/api/coin_profiles")
-def api_coin_profiles():
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT * FROM coin_profile WHERE trade_count >= 3 "
-            "ORDER BY win_rate DESC LIMIT 20"
-        ).fetchall()
-        conn.close()
-        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
 @app.route("/api/run-outcome-labeling", methods=["POST"])
 def api_run_outcome_labeling():
     try:
