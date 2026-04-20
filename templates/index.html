@@ -233,6 +233,9 @@ body::before{
 .hf-btn.active{background:var(--gold-bg);border-color:var(--gold-line);color:var(--gold-br);font-weight:700}
 .hf-btn.active.green{background:var(--green-dim);border-color:rgba(74,222,128,0.30);color:var(--green-br)}
 .hf-btn.active.red{background:var(--red-dim);border-color:var(--red-line);color:var(--red-br)}
+.export-btn{background:transparent;border:1px solid rgba(201,168,76,0.18);color:var(--text-muted);font-family:var(--mono);font-size:9px;letter-spacing:0.12em;padding:4px 11px;border-radius:var(--r);cursor:pointer;transition:all var(--t);display:flex;align-items:center;gap:5px}
+.export-btn:hover{border-color:var(--gold-line);color:var(--gold-br);background:var(--gold-bg)}
+.export-btn.loading{opacity:.5;pointer-events:none}
 
 /* PAGINATION */
 .pager{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:15px;padding-top:13px;border-top:1px solid rgba(201,168,76,0.07)}
@@ -433,7 +436,10 @@ body::before{
   <div class="card">
     <div class="card-hdr">
       <div class="card-title">Trade Gecmisi</div>
-      <div class="card-meta" id="histCount">&mdash; islem</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="card-meta" id="histCount">&mdash; islem</div>
+        <button class="export-btn" id="exportBtn" onclick="exportCSV()">&#8595; CSV</button>
+      </div>
     </div>
     <div class="hist-filters">
       <input class="hf-input" id="hfSym" type="text" placeholder="Sembol ara… (BTC, ETH…)" oninput="hfApply()">
@@ -698,6 +704,35 @@ async function loadPositions(){
 
 // HISTORY + FEED GUNCELLEME
 let knownTrades={};
+async function exportCSV(){
+  const btn=document.getElementById("exportBtn");
+  btn.classList.add("loading");btn.textContent="...";
+  try{
+    let url=BASE+"/api/trades?page=1&limit=99999";
+    if(hfSymbol)url+="&symbol="+encodeURIComponent(hfSymbol);
+    if(hfDirection)url+="&direction="+encodeURIComponent(hfDirection);
+    if(hfResult)url+="&result="+encodeURIComponent(hfResult);
+    const j=await(await fetch(url)).json();
+    if(!j.ok)throw new Error("API hatası");
+    const rows=j.data||[];
+    const headers=["ID","Sembol","Yon","Giris","Cikis","PNL_USDT","R_Multiple","Sure_dk","Durum","Acilis","Kapanis"];
+    const esc=v=>v==null?"":String(v).replace(/"/g,'""');
+    const csv=[headers.join(","),...rows.map(t=>[
+      t.id,t.symbol,t.direction,
+      t.entry,t.exit_price,t.pnl_usdt,t.r_multiple,
+      t.duration_min!=null?Number(t.duration_min).toFixed(1):"",
+      t.status,t.open_time,t.close_time
+    ].map(v=>'"'+esc(v)+'"').join(","))].join("\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    const d=new Date().toISOString().slice(0,10);
+    a.download="aurvex_trades_"+d+".csv";
+    a.click();URL.revokeObjectURL(a.href);
+  }catch(e){console.error(e);alert("Export hatası: "+e.message)}
+  finally{btn.classList.remove("loading");btn.innerHTML="&#8595; CSV"}
+}
+
 function hfDir(btn,val){hfDirection=val;document.querySelectorAll("#hfDirGroup .hf-btn").forEach(b=>{b.classList.remove("active","green","red")});btn.classList.add("active");loadHistory(1)}
 function hfRes(btn,val){hfResult=val;document.querySelectorAll("#hfResGroup .hf-btn").forEach(b=>{b.classList.remove("active","green","red")});btn.classList.add("active");if(val==="WIN")btn.classList.add("green");else if(val==="LOSS")btn.classList.add("red");loadHistory(1)}
 function hfApply(){hfSymbol=(document.getElementById("hfSym").value||"").trim();loadHistory(1)}
