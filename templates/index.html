@@ -564,6 +564,19 @@ function axSend(){
   },800);
 }
 
+// PNL COUNTER ANIMATION
+const _posCardPnl={};let _urPrev=null;
+function animateNum(el,from,to,fmt,dur=720){
+  const s=performance.now();
+  function step(now){
+    const t=Math.min((now-s)/dur,1);
+    const ease=1-Math.pow(1-t,3);
+    el.textContent=fmt(from+(to-from)*ease);
+    if(t<1)requestAnimationFrame(step);else el.textContent=fmt(to);
+  }
+  requestAnimationFrame(step);
+}
+
 // VALUE FLASH HELPER
 function setVal(id,text,cls){
   const el=document.getElementById(id);if(!el)return;
@@ -647,7 +660,11 @@ async function loadPositions(){
     const j=await(await fetch(BASE+"/api/live")).json();if(!j.ok)return;
     const d=j.data,pos=d.live||[],ur=d.total_unrealized||0;
     const urEl=document.getElementById("unreal");
-    urEl.textContent=(ur>=0?"+":"")+ur.toFixed(3)+" USDT";urEl.style.color=ur>=0?"var(--green-br)":"var(--red-br)";
+    urEl.style.color=ur>=0?"var(--green-br)":"var(--red-br)";
+    const urFmt=v=>(v>=0?"+":"")+v.toFixed(3)+" USDT";
+    if(_urPrev!==null&&Math.abs(ur-_urPrev)>0.0005)animateNum(urEl,_urPrev,ur,urFmt);
+    else urEl.textContent=urFmt(ur);
+    _urPrev=ur;
     if(!_posFirst){
       pos.forEach(p=>{
         const key=p.id||p.symbol;
@@ -665,6 +682,17 @@ async function loadPositions(){
       const isL=(p.direction||"").toUpperCase()==="LONG",pnl=p.unrealized_pnl||0,bar=Math.min(Math.abs(p.sl_distance_pct||0),100);
       return "<div class="pos "+(isL?"long-p":"short-p")+""><div class="pos-top"><div><div class="pos-sym">"+p.symbol+"</div><span class="pos-dir "+(isL?"long":"short")+"">"+p.direction+" x"+(p.leverage||"—")+"</span></div><div class="pos-pnl"><div class="pos-pnl-val "+(pnl>=0?"pos-c":"neg-c")+"">"+fp(pnl)+"</div><div class="pos-pnl-pct">"+(pnl>=0?"+":"")+f(p.unrealized_pct,2)+"%</div></div></div><div class="pos-levels"><div><div class="pl-lbl">Entry</div><div class="pl-val entry">"+f(p.entry,5)+"</div></div><div><div class="pl-lbl">Stop</div><div class="pl-val stop">"+f(p.sl,4)+"</div></div><div><div class="pl-lbl">Target</div><div class="pl-val target">"+f(p.tp,4)+"</div></div><div><div class="pl-lbl">RR</div><div class="pl-val rr">"+f(p.current_rr,2)+"R</div></div></div><div class="pos-bar-bg"><div class="pos-bar-fill "+(isL?"long":"short")+"" style="width:"+bar+"%"></div></div><div class="pos-foot"><span>Mark: "+f(p.current_price,5)+"</span><span>SL: "+f(p.sl_distance_pct,1)+"%</span></div></div>";
     }).join("");
+    // Add IDs + animate PnL counters after render
+    const pnlEls=wrap.querySelectorAll(".pos-pnl-val");
+    pos.forEach((p,i)=>{
+      const sym=p.symbol.replace(/\W/g,"");
+      if(pnlEls[i])pnlEls[i].id="pnlv-"+sym;
+      const to=p.unrealized_pnl||0;
+      const from=_posCardPnl[sym]!==undefined?_posCardPnl[sym]:to;
+      const pnlFmt=v=>(v>=0?"+":"")+v.toFixed(3)+"$";
+      if(pnlEls[i]&&Math.abs(to-from)>0.0005)animateNum(pnlEls[i],from,to,pnlFmt);
+      _posCardPnl[sym]=to;
+    });
   }catch(e){console.error(e)}
 }
 
