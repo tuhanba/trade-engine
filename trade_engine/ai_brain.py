@@ -899,7 +899,7 @@ def build_report(stats, sym_stats, changes, drought, loss_streak, win_streak,
             f"Sıkı SL kaybı {pm_insights['tight_sl_rate']:.0%}")
 
     regime_emoji = {"BULLISH":"📈","BEARISH":"📉","CHOPPY":"🌀","NEUTRAL":"➡️","UNKNOWN":"❓"}
-    lines.append(f"\n{regime_emoji.get(regime,'\u2753')} <b>Piyasa Rejimi:</b> {regime}")
+    lines.append(f"\n{regime_emoji.get(regime,'❓')} <b>Piyasa Rejimi:</b> {regime}")
 
     # Markov geçiş matrisi raporu
     if markov_matrix and markov_matrix["sample"] >= 8:
