@@ -31,7 +31,7 @@ from binance.client import Client
 from binance.enums import *
 import pandas as pd
 import requests
-from database import init_db, save_trade, close_trade, get_current_params, get_bot_control, log_rejection, record_portfolio_snapshot, ping_heartbeat
+from database import init_db, save_trade, close_trade, get_current_params, get_bot_control, log_rejection, record_portfolio_snapshot, ping_heartbeat, update_coin_profile, get_coin_edge
 from live_tracker import LiveTracker, init_tracker_tables, save_analysis
 
 try:
@@ -1019,13 +1019,16 @@ def get_hot_coins():
             price = float(t["lastPrice"])
             if vol < p.get("min_volume_m", 5.0):
                 continue
+            base_score = vol * 0.5 + chg * 0.5
+            edge = get_coin_edge(sym)   # 0.5–1.5, geçmişe göre
             candidates.append({
                 "symbol": sym,
                 "volume": vol,
                 "change": float(t["priceChangePercent"]),
                 "price":  price,
-                "score":  vol * 0.5 + chg * 0.5,
+                "score":  base_score * edge,
                 "greedy_score": 0,   # analyze() sonrası ML skoru ile güncellenecek
+                "coin_edge": edge,
             })
         candidates.sort(key=lambda x: x["score"], reverse=True)
         logger.info(f"Hot coins ({len(candidates)} aday): {[c['symbol'] for c in candidates[:6]]}")
@@ -1495,6 +1498,16 @@ def monitor_trades():
                 t.get("trade_data", {}), result, net_pnl,
                 partial_exit=1 if t.get("partial_done") else 0,
                 hold_minutes=round(hold_minutes, 1)
+            )
+            td = t.get("trade_data", {})
+            update_coin_profile(
+                symbol      = symbol,
+                result      = result,
+                net_pnl     = net_pnl,
+                r_multiple  = t.get("r_multiple", 0),
+                direction   = t.get("direction", "LONG"),
+                session     = td.get("session", "OFF"),
+                hold_minutes= round(hold_minutes, 1),
             )
 
             if result == "WIN":

@@ -589,6 +589,14 @@ def api_run_counterfactual():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route("/api/coin-profiles")
+def api_coin_profiles():
+    try:
+        from database import get_coin_profiles
+        return jsonify({"ok": True, "data": get_coin_profiles(30)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.route("/api/ml-calibration")
 def api_ml_calibration():
     try:

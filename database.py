@@ -98,6 +98,30 @@ def init_db():
         updated_by     TEXT DEFAULT 'system',
         last_heartbeat TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS coin_profile (
+        symbol          TEXT PRIMARY KEY,
+        total_trades    INTEGER DEFAULT 0,
+        wins            INTEGER DEFAULT 0,
+        losses          INTEGER DEFAULT 0,
+        win_rate        REAL DEFAULT 0,
+        avg_pnl         REAL DEFAULT 0,
+        avg_rr          REAL DEFAULT 0,
+        avg_hold_min    REAL DEFAULT 0,
+        long_wins       INTEGER DEFAULT 0,
+        long_total      INTEGER DEFAULT 0,
+        short_wins      INTEGER DEFAULT 0,
+        short_total     INTEGER DEFAULT 0,
+        best_direction  TEXT DEFAULT 'BOTH',
+        asia_wins       INTEGER DEFAULT 0,
+        asia_total      INTEGER DEFAULT 0,
+        london_wins     INTEGER DEFAULT 0,
+        london_total    INTEGER DEFAULT 0,
+        ny_wins         INTEGER DEFAULT 0,
+        ny_total        INTEGER DEFAULT 0,
+        best_session    TEXT DEFAULT 'ANY',
+        edge_score      REAL DEFAULT 1.0,
+        last_updated    TEXT DEFAULT (datetime('now'))
+    );
     CREATE TABLE IF NOT EXISTS portfolio_snapshots (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         balance      REAL,
@@ -477,3 +501,128 @@ def get_portfolio_stats() -> dict:
         "total_trades": snap_d.get("total_trades", 0),
         "history":      history,
     }
+
+def update_coin_profile(symbol: str, result: str, net_pnl: float,
+                        r_multiple: float, direction: str,
+                        session: str, hold_minutes: float):
+    try:
+        conn = get_conn()
+        c = conn.cursor()
+        is_win = 1 if result == "WIN" else 0
+        # Mevcut profil varsa al
+        row = c.execute("SELECT * FROM coin_profile WHERE symbol=?", (symbol,)).fetchone()
+        if row:
+            cols = [d[0] for d in c.description]
+            p = dict(zip(cols, row))
+            n    = p["total_trades"] + 1
+            wins = p["wins"] + is_win
+            losses = p["losses"] + (1 - is_win)
+            avg_pnl  = round((p["avg_pnl"] * p["total_trades"] + net_pnl) / n, 4)
+            avg_rr   = round((p["avg_rr"]  * p["total_trades"] + (r_multiple or 0)) / n, 4)
+            avg_hold = round((p["avg_hold_min"] * p["total_trades"] + (hold_minutes or 0)) / n, 2)
+            # Yön istatistikleri
+            long_w  = p["long_wins"]   + (is_win if direction == "LONG"  else 0)
+            long_t  = p["long_total"]  + (1      if direction == "LONG"  else 0)
+            short_w = p["short_wins"]  + (is_win if direction == "SHORT" else 0)
+            short_t = p["short_total"] + (1      if direction == "SHORT" else 0)
+            # Seans istatistikleri
+            asia_w  = p["asia_wins"]   + (is_win if session == "ASIA"    else 0)
+            asia_t  = p["asia_total"]  + (1      if session == "ASIA"    else 0)
+            lon_w   = p["london_wins"] + (is_win if session == "LONDON"  else 0)
+            lon_t   = p["london_total"]+ (1      if session == "LONDON"  else 0)
+            ny_w    = p["ny_wins"]     + (is_win if session == "NEWYORK" else 0)
+            ny_t    = p["ny_total"]    + (1      if session == "NEWYORK" else 0)
+        else:
+            n = 1; wins = is_win; losses = 1 - is_win
+            avg_pnl = round(net_pnl, 4); avg_rr = round(r_multiple or 0, 4)
+            avg_hold = round(hold_minutes or 0, 2)
+            long_w  = is_win if direction == "LONG"  else 0
+            long_t  = 1      if direction == "LONG"  else 0
+            short_w = is_win if direction == "SHORT" else 0
+            short_t = 1      if direction == "SHORT" else 0
+            asia_w  = is_win if session == "ASIA"    else 0
+            asia_t  = 1      if session == "ASIA"    else 0
+            lon_w   = is_win if session == "LONDON"  else 0
+            lon_t   = 1      if session == "LONDON"  else 0
+            ny_w    = is_win if session == "NEWYORK" else 0
+            ny_t    = 1      if session == "NEWYORK" else 0
+
+        win_rate = round(wins / n * 100, 1)
+
+        # best_direction: en yüksek win rate'li yön
+        long_wr  = long_w  / long_t  if long_t  >= 3 else None
+        short_wr = short_w / short_t if short_t >= 3 else None
+        if long_wr and short_wr:
+            best_dir = "LONG" if long_wr > short_wr + 0.1 else ("SHORT" if short_wr > long_wr + 0.1 else "BOTH")
+        else:
+            best_dir = "BOTH"
+
+        # best_session
+        sess_rates = {}
+        if asia_t >= 3: sess_rates["ASIA"]    = asia_w / asia_t
+        if lon_t  >= 3: sess_rates["LONDON"]  = lon_w  / lon_t
+        if ny_t   >= 3: sess_rates["NEWYORK"] = ny_w   / ny_t
+        best_sess = max(sess_rates, key=sess_rates.get) if sess_rates else "ANY"
+
+        # edge_score: bu coin'in genel win rate'i ile karşılaştırma (0.5–1.5)
+        # 50% baseline, her +5% için +0.1, her -5% için -0.1, [0.5, 1.5] aralığında
+        edge = 1.0 + (win_rate - 50) / 50.0
+        edge = round(max(0.5, min(1.5, edge)), 3)
+
+        c.execute("""
+            INSERT INTO coin_profile
+              (symbol, total_trades, wins, losses, win_rate, avg_pnl, avg_rr, avg_hold_min,
+               long_wins, long_total, short_wins, short_total, best_direction,
+               asia_wins, asia_total, london_wins, london_total, ny_wins, ny_total,
+               best_session, edge_score, last_updated)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+            ON CONFLICT(symbol) DO UPDATE SET
+              total_trades=excluded.total_trades, wins=excluded.wins,
+              losses=excluded.losses, win_rate=excluded.win_rate,
+              avg_pnl=excluded.avg_pnl, avg_rr=excluded.avg_rr,
+              avg_hold_min=excluded.avg_hold_min,
+              long_wins=excluded.long_wins, long_total=excluded.long_total,
+              short_wins=excluded.short_wins, short_total=excluded.short_total,
+              best_direction=excluded.best_direction,
+              asia_wins=excluded.asia_wins, asia_total=excluded.asia_total,
+              london_wins=excluded.london_wins, london_total=excluded.london_total,
+              ny_wins=excluded.ny_wins, ny_total=excluded.ny_total,
+              best_session=excluded.best_session,
+              edge_score=excluded.edge_score, last_updated=datetime('now')
+        """, (symbol, n, wins, losses, win_rate, avg_pnl, avg_rr, avg_hold,
+              long_w, long_t, short_w, short_t, best_dir,
+              asia_w, asia_t, lon_w, lon_t, ny_w, ny_t,
+              best_sess, edge))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+def get_coin_profiles(limit: int = 20) -> list:
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT symbol, total_trades, win_rate, avg_pnl, avg_rr,
+               best_direction, best_session, edge_score, last_updated
+        FROM coin_profile
+        WHERE total_trades >= 3
+        ORDER BY edge_score DESC, total_trades DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
+    conn.close()
+    cols = ["symbol","total_trades","win_rate","avg_pnl","avg_rr",
+            "best_direction","best_session","edge_score","last_updated"]
+    return [dict(zip(cols, r)) for r in rows]
+
+def get_coin_edge(symbol: str) -> float:
+    try:
+        conn = get_conn()
+        row = conn.execute(
+            "SELECT edge_score, total_trades FROM coin_profile WHERE symbol=?",
+            (symbol,)
+        ).fetchone()
+        conn.close()
+        if row and row[1] >= 5:
+            return row[0]
+    except Exception:
+        pass
+    return 1.0  # bilinmeyen coin → nötr

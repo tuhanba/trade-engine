@@ -475,6 +475,33 @@ body::before{
     </div>
   </div>
 
+  <!-- COIN PROFILES -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-hdr">
+      <div class="card-title">Coin Profilleri</div>
+      <div class="card-meta" id="cpMeta">&mdash; coin</div>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px" id="cpTable">
+        <thead>
+          <tr style="color:var(--text-muted);border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:6px 8px;font-weight:500">Sembol</th>
+            <th style="text-align:center;padding:6px 8px;font-weight:500">Trade</th>
+            <th style="text-align:center;padding:6px 8px;font-weight:500">Win%</th>
+            <th style="text-align:center;padding:6px 8px;font-weight:500">Avg PNL</th>
+            <th style="text-align:center;padding:6px 8px;font-weight:500">Avg RR</th>
+            <th style="text-align:center;padding:6px 8px;font-weight:500">Yon</th>
+            <th style="text-align:center;padding:6px 8px;font-weight:500">Seans</th>
+            <th style="text-align:center;padding:6px 8px;font-weight:500">Edge</th>
+          </tr>
+        </thead>
+        <tbody id="cpBody">
+          <tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:16px">Veri bekleniyor...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- HISTORY -->
   <div class="card">
     <div class="card-hdr">
@@ -821,6 +848,33 @@ function renderPager(pag){
   wrap.innerHTML=h;
 }
 
+async function loadCoinProfiles(){
+  try{
+    const j=await(await fetch(BASE+"/api/coin-profiles")).json();
+    if(!j.ok)return;
+    const coins=j.data||[];
+    document.getElementById("cpMeta").textContent=coins.length+" coin";
+    const tb=document.getElementById("cpBody");
+    if(!coins.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:16px">Henuz veri yok (min 3 trade gerekli)</td></tr>';return;}
+    tb.innerHTML=coins.map(c=>{
+      const wrCol=c.win_rate>=55?"var(--green-br)":c.win_rate>=45?"var(--gold-br)":"var(--red-br)";
+      const pnlCol=c.avg_pnl>=0?"var(--green-br)":"var(--red-br)";
+      const edgeCol=c.edge_score>=1.1?"var(--green-br)":c.edge_score>=0.9?"var(--text)":"var(--red-br)";
+      const dirBadge=c.best_direction==="LONG"?'<span style="color:var(--green-br)">LONG</span>':c.best_direction==="SHORT"?'<span style="color:var(--red-br)">SHORT</span>':'<span style="color:var(--text-muted)">HER</span>';
+      return '<tr style="border-bottom:1px solid rgba(201,168,76,0.06)">'+
+        '<td style="padding:6px 8px;color:var(--gold-br);font-weight:600">'+c.symbol.replace("USDT","")+'</td>'+
+        '<td style="text-align:center;padding:6px 8px;color:var(--text-muted)">'+c.total_trades+'</td>'+
+        '<td style="text-align:center;padding:6px 8px;color:'+wrCol+';font-weight:600">'+c.win_rate+'%</td>'+
+        '<td style="text-align:center;padding:6px 8px;color:'+pnlCol+'">'+(c.avg_pnl>=0?"+":"")+c.avg_pnl+'$</td>'+
+        '<td style="text-align:center;padding:6px 8px;color:var(--text)">'+c.avg_rr+'R</td>'+
+        '<td style="text-align:center;padding:6px 8px">'+dirBadge+'</td>'+
+        '<td style="text-align:center;padding:6px 8px;color:var(--text-muted)">'+c.best_session+'</td>'+
+        '<td style="text-align:center;padding:6px 8px;color:'+edgeCol+';font-weight:600">'+c.edge_score+'x</td>'+
+      '</tr>';
+    }).join("");
+  }catch(e){console.error(e)}
+}
+
 async function loadMLCalibration(){
   try{
     const j=await(await fetch(BASE+"/api/ml-calibration")).json();
@@ -872,13 +926,13 @@ async function loadPortfolio(){
   }catch(e){console.error(e)}
 }
 
-async function init(){await Promise.all([loadStats(),loadChart(),loadPortfolio(),loadMLCalibration(),loadPositions(),loadHistory(curPage)])}
+async function init(){await Promise.all([loadStats(),loadChart(),loadPortfolio(),loadMLCalibration(),loadCoinProfiles(),loadPositions(),loadHistory(curPage)])}
 init();
 let _cd8=8,_cd15=15;
 const _rp=document.getElementById("refreshPill");
 setInterval(()=>{
   _cd8--;_cd15--;
-  if(_cd8<=0){loadStats();loadPortfolio();loadPositions();loadMLCalibration();_cd8=8;_rp.classList.add("pulse");setTimeout(()=>_rp.classList.remove("pulse"),700)}
+  if(_cd8<=0){loadStats();loadPortfolio();loadPositions();loadMLCalibration();loadCoinProfiles();_cd8=8;_rp.classList.add("pulse");setTimeout(()=>_rp.classList.remove("pulse"),700)}
   if(_cd15<=0){loadChart();loadHistory(curPage);_cd15=15}
   _rp.textContent="↻ "+_cd8+"s";
 },1000);
