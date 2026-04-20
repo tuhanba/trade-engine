@@ -1432,7 +1432,8 @@ def monitor_trades():
             close_trade(t["trade_id"], exit_price, result, net_pnl)
 
             if t.get("paper"):
-                update_paper_balance(net_pnl)
+                # partial_realized kısmi çıkışlarda zaten eklendi; sadece kalan pozisyon PNL'ini güncelle
+                update_paper_balance(round(gross_pnl - commission_cost, 4))
 
             save_pattern(
                 t.get("trade_data", {}), result, net_pnl,

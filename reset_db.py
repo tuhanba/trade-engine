@@ -1,7 +1,11 @@
 """
 AURVEX Bot — Trade Verisi Sıfırlama Scripti
-Sadece trade geçmişini ve bakiyeyi sıfırlar.
-AI Brain verileri (params, ai_logs, pattern_memory, ml_training_data) KORUNUR.
+Sadece trade geçmişini temizler, bakiyeyi 250'ye sıfırlar.
+AX'in öğrenilmiş kişiliği KORUNUR:
+  ✓ params, best_params  — öğrenilmiş parametreler
+  ✓ coin_profile         — coin kişilikleri
+  ✓ coin_cooldown        — soğuma listesi
+  ✓ ai_logs              — AX analiz geçmişi
 
 Kullanım: python3 /root/trade_engine/reset_db.py
 """
@@ -16,29 +20,27 @@ print(f"[reset] DB yolu: {DB_PATH}")
 conn = sqlite3.connect(DB_PATH)
 c = conn.cursor()
 
-# Mevcut tabloları listele
 c.execute("SELECT name FROM sqlite_master WHERE type='table'")
 tables = [row[0] for row in c.fetchall()]
 print(f"[reset] Bulunan tablolar: {tables}")
 
-# Sadece trade verileri temizlenir — AI Brain verileri KORUNUR
+# Sadece trade kaynaklı veriler temizlenir
+TRADE_TABLES = [
+    "trades",
+    "open_trades",
+    "trade_postmortem",
+    "trade_analysis",
+    "pattern_memory",
+    "daily_summary",
+    "daily_stats",
+    "trade_log",
+]
+
 cleared = []
-
-if "trades" in tables:
-    c.execute("DELETE FROM trades")
-    cleared.append("trades")
-
-if "open_trades" in tables:
-    c.execute("DELETE FROM open_trades")
-    cleared.append("open_trades")
-
-if "daily_stats" in tables:
-    c.execute("DELETE FROM daily_stats")
-    cleared.append("daily_stats")
-
-if "trade_log" in tables:
-    c.execute("DELETE FROM trade_log")
-    cleared.append("trade_log")
+for tbl in TRADE_TABLES:
+    if tbl in tables:
+        c.execute(f"DELETE FROM {tbl}")
+        cleared.append(tbl)
 
 # Paper account sıfırla — 250 USDT
 if "paper_account" in tables:
@@ -57,7 +59,5 @@ print(f"\n[reset] Temizlenen tablolar:")
 for t in cleared:
     print(f"  ✓ {t}")
 
-print(f"\n[reset] TAMAMLANDI — {STARTING_BALANCE} USDT ile temiz başlangıç hazır.")
-print("[reset] AI Brain verileri (params, ai_logs, pattern_memory, ml_training_data) KORUNDU.")
-print("[reset] Şimdi botu başlatabilirsiniz:")
-print("  bash /root/trade_engine/restart.sh")
+print(f"\n[reset] TAMAMLANDI — {STARTING_BALANCE} USDT ile temiz başlangıç.")
+print("[reset] AX kişiliği KORUNDU (params, coin_profile, ai_logs).")

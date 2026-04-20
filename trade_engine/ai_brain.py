@@ -1,6 +1,6 @@
 """
-ai_brain.py — AURVEX AI Brain v3.1
-=====================================
+ai_brain.py — AX v4.0  (AURVEX Intelligence Engine)
+=====================================================
 Tam öğrenme döngüsü:
   1. Her trade kapandığında MAE/MFE/verimlilik analizi (post_trade_analysis)
   2. Postmortem geçmişinden gerçek parametre öğrenmesi (postmortem_insights)
@@ -194,6 +194,34 @@ def calc_stats(trades):
         "long_wr": long_wr, "short_wr": short_wr,
         "long_count": len(longs), "short_count": len(shorts),
     }
+
+def calc_expectancy_score(stats):
+    """
+    WR, profit factor ve RR'yi birleştiren -1..+1 arası performans skoru.
+    WR tek başına yanıltıcıdır: %55 WR + 0.5 avg_rr kötüdür,
+    %45 WR + 2.0 avg_rr mükemmeldir. Bu skor ikisini dengeler.
+    """
+    if not stats or stats["total"] < 5:
+        return 0.0
+    wr  = stats["win_rate"]
+    pf  = stats["profit_factor"]
+    rr  = stats["avg_rr"]
+    pnl = stats["total_pnl"]
+
+    # WR bileşeni: 0.35'te 0, 0.65'te +1, 0.20'de -1
+    wr_score = max(-1.0, min(1.0, (wr - 0.35) / 0.30))
+    # Profit factor bileşeni: 1.0'da 0, 2.5'te +1, 0'da -0.67
+    pf_score = max(-1.0, min(1.0, (pf - 1.0) / 1.5))
+    # RR bileşeni: 0.5'te 0, 2.0'de +1
+    rr_score = max(-1.0, min(1.0, (rr - 0.5) / 1.5))
+
+    score = 0.35 * wr_score + 0.45 * pf_score + 0.20 * rr_score
+    if pnl > 0:
+        score = min(1.0, score + 0.05)
+    elif pnl < 0:
+        score = max(-1.0, score - 0.05)
+    return round(score, 3)
+
 
 def calc_symbol_stats(trades):
     by_sym = defaultdict(list)
@@ -575,6 +603,93 @@ def calc_markov_matrix(trades, symbol=None):
     }
 
 
+def simulate_params(conn, candidate_params, current_params):
+    """
+    MAE/MFE tabanlı hızlı backtest: yeni SL/TP çarpanlarını geçmiş
+    trade_postmortem verileriyle simüle eder.
+
+    Mantık:
+    - SL_dist_new = original_sl_dist × (new_sl_mult / cur_sl_mult)
+    - TP_dist_new = original_tp_dist × (new_tp_mult / cur_tp_mult)
+    - MAE >= SL_dist_new  → stopped out (LOSS)
+    - MFE >= TP_dist_new  → TP hit (WIN)
+    - Diğer              → orijinal sonuç kullanılır
+
+    Döndürür: {wins, losses, total, win_rate, total_pnl, sample} veya None
+    """
+    try:
+        rows = conn.execute("""
+            SELECT p.mfe, p.mae, p.actual_pnl, p.sl_tightness,
+                   t.direction, t.entry, t.sl, t.tp
+            FROM trade_postmortem p
+            JOIN trades t ON p.trade_id = t.id
+            WHERE p.mfe IS NOT NULL AND p.mae IS NOT NULL
+              AND t.entry > 0 AND t.sl > 0 AND t.tp > 0
+            ORDER BY p.created_at DESC LIMIT 120
+        """).fetchall()
+    except Exception:
+        return None
+
+    if not rows or len(rows) < 10:
+        return None
+
+    cur_sl_m = max(current_params.get("sl_atr_mult", 1.2), 0.1)
+    cur_tp_m = max(current_params.get("tp_atr_mult", 2.0), 0.1)
+    new_sl_m = max(candidate_params.get("sl_atr_mult", 1.2), 0.1)
+    new_tp_m = max(candidate_params.get("tp_atr_mult", 2.0), 0.1)
+    sl_scale = new_sl_m / cur_sl_m
+    tp_scale = new_tp_m / cur_tp_m
+
+    wins, losses, total_pnl = 0, 0, 0.0
+
+    for r in rows:
+        entry   = r["entry"]
+        sl_dist = abs(entry - r["sl"]) * sl_scale
+        tp_dist = abs(entry - r["tp"]) * tp_scale
+
+        if r["direction"] == "LONG":
+            mfe_dist = max(0.0, r["mfe"] - entry)
+            mae_dist = max(0.0, entry - r["mae"])
+        else:
+            mfe_dist = max(0.0, entry - r["mfe"])
+            mae_dist = max(0.0, r["mae"] - entry)
+
+        actual = r["actual_pnl"] or 0.0
+        actual_abs = abs(actual) if actual != 0 else 1.0
+
+        orig_sl = abs(entry - r["sl"])
+        orig_tp = abs(entry - r["tp"])
+
+        if mae_dist >= sl_dist:
+            # Yeni SL'e çarptı
+            pnl_est = -actual_abs * (sl_dist / max(orig_sl, 1e-9))
+            losses += 1
+            total_pnl += pnl_est
+        elif mfe_dist >= tp_dist:
+            # Yeni TP'ye ulaştı
+            pnl_est = actual_abs * (tp_dist / max(orig_tp, 1e-9))
+            wins += 1
+            total_pnl += pnl_est
+        else:
+            # Sonuç değişmez
+            if actual > 0:
+                wins += 1
+            else:
+                losses += 1
+            total_pnl += actual
+
+    total = wins + losses
+    if total == 0:
+        return None
+
+    return {
+        "wins": wins, "losses": losses, "total": total,
+        "win_rate": round(wins / total, 3),
+        "total_pnl": round(total_pnl, 3),
+        "sample": len(rows),
+    }
+
+
 def markov_insight(matrix, regime):
     """
     Markov matrisinden parametre önerisi üretir.
@@ -722,15 +837,24 @@ def optimize(current, stats, sym_stats, drought, loss_streak, win_streak,
         p["tp_atr_mult"] = clamp(p["tp_atr_mult"] + 0.10, *PARAM_BOUNDS["tp_atr_mult"])
         changes.append("🟢 Kazanç serisi → Risk ve TP artırıldı")
 
-    if wr < 0.32 and not loss_streak:
+    # Expectancy score: WR + PF + RR birleşik karar
+    ex_score = calc_expectancy_score(stats)
+    if ex_score < -0.30 and not loss_streak:
         p["vol_ratio_min"]  = clamp(p["vol_ratio_min"]  + 0.15, *PARAM_BOUNDS["vol_ratio_min"])
         p["min_change_pct"] = clamp(p["min_change_pct"] + 0.20, *PARAM_BOUNDS["min_change_pct"])
         p["sl_atr_mult"]    = clamp(p["sl_atr_mult"]    - 0.08, *PARAM_BOUNDS["sl_atr_mult"])
-        changes.append(f"⚠️ Win rate kritik ({wr:.0%}) → Giriş kriterleri sıkılaştırıldı")
-    elif wr > 0.60 and pf > 1.8:
+        changes.append(
+            f"⚠️ AX Skor: {ex_score:+.2f} (WR:{wr:.0%} PF:{pf:.2f}) → Giriş kriterleri sıkılaştırıldı")
+    elif ex_score > 0.35:
         p["risk_pct"]    = clamp(p["risk_pct"]    + 0.10, *PARAM_BOUNDS["risk_pct"])
         p["tp_atr_mult"] = clamp(p["tp_atr_mult"] + 0.15, *PARAM_BOUNDS["tp_atr_mult"])
-        changes.append(f"✅ Güçlü performans WR:{wr:.0%} PF:{pf:.2f} → TP ve risk artırıldı")
+        changes.append(
+            f"✅ AX Skor: {ex_score:+.2f} (WR:{wr:.0%} PF:{pf:.2f} RR:{rr:.2f}) → Risk ve TP artırıldı")
+    elif ex_score < -0.10 and not loss_streak:
+        # Orta-kötü: sadece hafif filtre sıkılaştır
+        p["vol_ratio_min"] = clamp(p["vol_ratio_min"] + 0.08, *PARAM_BOUNDS["vol_ratio_min"])
+        changes.append(
+            f"📊 AX Skor: {ex_score:+.2f} → Hafif filtre düzenlemesi")
 
     if rr < 0.85 and not drought:
         p["tp_atr_mult"] = clamp(p["tp_atr_mult"] + 0.20, *PARAM_BOUNDS["tp_atr_mult"])
@@ -858,7 +982,7 @@ def check_eod_summary(conn, today_trades):
         f"📉 Max DD: {s['max_drawdown']:.3f}$  |  Toplam: {s['total']} trade",
         f"🏆 En iyi coin:  <b>{best_sym}</b> ({sym_pnl.get(best_sym, 0):+.3f}$)",
         f"❌ En kötü coin: <b>{worst_sym}</b> ({sym_pnl.get(worst_sym, 0):+.3f}$)", "",
-        "🤖 AI Brain yarın da seninle.",
+        "🤖 AX yarın da seninle. Güçlü kal.",
     ])
 
 
@@ -870,15 +994,17 @@ def build_report(stats, sym_stats, changes, drought, loss_streak, win_streak,
                  new_params, current, regime, heatmap, cooldowns,
                  ot_count, pm_insights, rolled_back,
                  dangerous_coins, best_coins, bad_hours,
-                 markov_matrix=None):
-    lines = ["🧠 <b>AI BEYİN RAPORU v3.2</b>\n"]
+                 markov_matrix=None, backtest_result=None):
+    lines = ["🤖 <b>AX RAPORU v4.0</b>\n"]
 
     if rolled_back:
         lines.append("🔄 <b>ROLLBACK UYGULANDII</b> — En iyi parametre setine geri dönüldü.\n")
 
     if stats and stats["total"] > 0:
-        wr = stats["win_rate"]
-        we = "✅" if wr >= 0.50 else "⚠️" if wr >= 0.35 else "❌"
+        wr    = stats["win_rate"]
+        score = calc_expectancy_score(stats)
+        we    = "✅" if wr >= 0.50 else "⚠️" if wr >= 0.35 else "❌"
+        se    = "🟢" if score > 0.2 else "🟡" if score > -0.1 else "🔴"
         lines += [
             f"📊 <b>Son 48 Saat</b> ({stats['total']} trade)",
             f"{we} Win Rate: {wr:.1%}  ({stats['wins']}W / {stats['losses']}L)",
@@ -887,9 +1013,19 @@ def build_report(stats, sym_stats, changes, drought, loss_streak, win_streak,
             f"📉 Max DD: {stats['max_drawdown']:.3f}$  |  SL Hit: {stats['sl_hit_ratio']:.0%}",
             f"⬆️ Long WR: {stats.get('long_wr',0):.0%} ({stats.get('long_count',0)})"
             f"   ⬇️ Short WR: {stats.get('short_wr',0):.0%} ({stats.get('short_count',0)})",
+            f"{se} <b>AX Performans Skoru: {score:+.2f}</b>  (WR+PF+RR birleşik)",
         ]
     else:
         lines.append("📊 Henüz yeterli trade verisi yok.")
+
+    # Backtest sonucu
+    if backtest_result:
+        bt = backtest_result
+        bt_we = "✅" if bt["win_rate"] >= 0.50 else "⚠️" if bt["win_rate"] >= 0.35 else "❌"
+        lines.append(
+            f"\n🔁 <b>AX Backtest</b> ({bt['sample']} geçmiş trade, MAE/MFE sim.):\n"
+            f"  {bt_we} Sim. WR: {bt['win_rate']:.1%} | Sim. PNL: {bt['total_pnl']:+.3f}$"
+        )
 
     if pm_insights and pm_insights["sample_count"] >= 5:
         lines.append(
@@ -899,7 +1035,7 @@ def build_report(stats, sym_stats, changes, drought, loss_streak, win_streak,
             f"Sıkı SL kaybı {pm_insights['tight_sl_rate']:.0%}")
 
     regime_emoji = {"BULLISH":"📈","BEARISH":"📉","CHOPPY":"🌀","NEUTRAL":"➡️","UNKNOWN":"❓"}
-    lines.append(f"\n{regime_emoji.get(regime,'\u2753')} <b>Piyasa Rejimi:</b> {regime}")
+    lines.append(f"\n{regime_emoji.get(regime,'❓')} <b>Piyasa Rejimi:</b> {regime}")
 
     # Markov geçiş matrisi raporu
     if markov_matrix and markov_matrix["sample"] >= 8:
@@ -1168,6 +1304,126 @@ def post_trade_analysis(trade_id, client_ref=None, tg_fn=None):
 # ANA GİRİŞ NOKTASI
 # ═══════════════════════════════════════════════════════════
 
+def ax_chat(message, conn=None):
+    """
+    AX'in doğal dil konuşma arayüzü.
+    Telegram veya herhangi bir kanaldan gelen mesajlara Türkçe yanıt üretir.
+    Rapor, sohbet, piyasa soruları — hepsini anlar.
+    """
+    msg = (message or "").strip().lower()
+    should_close = conn is None
+    if conn is None:
+        conn = db()
+
+    try:
+        # Genel durum / rapor
+        if any(w in msg for w in ["nasıl", "durum", "ne var", "naber", "rapor", "özet", "anlat"]):
+            recent = get_trades(conn, hours=24, limit=150)
+            stats  = calc_stats(recent)
+            if not stats or stats["total"] == 0:
+                return ("🤖 <b>AX burada!</b> Henüz bugün kapanan trade yok. "
+                        "Sinyalleri izliyorum, bekle.")
+            wr    = stats["win_rate"]
+            pnl   = stats["total_pnl"]
+            score = calc_expectancy_score(stats)
+            if   pnl > 5  and score > 0.3:  mood = "çok iyi gidiyor 🔥"
+            elif pnl > 0  and score > 0:    mood = "pozitif taraftayız 👍"
+            elif pnl > -5:                  mood = "zorlu ama idare ediyoruz 😤"
+            else:                           mood = "sert bir dönem var 🔴"
+            return (
+                f"🤖 <b>AX — Son 24 Saat</b>\n"
+                f"• {stats['total']} trade, {mood}\n"
+                f"• Win Rate: {wr:.1%} ({stats['wins']}W / {stats['losses']}L)\n"
+                f"• PNL: {pnl:+.3f}$ | PF: {stats['profit_factor']:.2f} | RR: {stats['avg_rr']:.2f}\n"
+                f"• AX Performans Skoru: {score:+.2f}"
+            )
+
+        # En iyi coin
+        if any(w in msg for w in ["en iyi", "güçlü", "favori", "hangi coin", "öneri"]):
+            best = get_best_coins(conn)
+            if not best:
+                return ("🔍 <b>AX:</b> Henüz güçlü coin profili oluşmadı. "
+                        "Birkaç trade daha gerekli.")
+            c = best[0]
+            dir_str = f" | Yön: {c['preferred_direction']}" if c["preferred_direction"] != "BOTH" else ""
+            return (
+                f"🏆 <b>AX'in en güvendiği coin: {c['symbol']}</b>\n"
+                f"• WR: {c['win_rate']:.0%} | Avg RR: {c['avg_rr']:.2f}{dir_str}\n"
+                f"• {len(best)} güçlü coin profili mevcut."
+            )
+
+        # Tehlikeli coinler
+        if any(w in msg for w in ["tehlikeli", "kaçın", "kötü", "zararlı", "sorunlu"]):
+            dangerous = get_dangerous_coins(conn)
+            if not dangerous:
+                return "✅ <b>AX:</b> Şu an tehlikeli coin görmüyorum, piyasa temiz."
+            names = ", ".join(c["symbol"] for c in dangerous[:3])
+            scores = " | ".join(
+                f"{c['symbol']} ({c['danger_score']:.0f}/8)" for c in dangerous[:3])
+            return (
+                f"⚠️ <b>AX Uyarısı — Tehlikeli Coinler:</b>\n"
+                f"• {scores}\n"
+                f"Bu coinlerde geçmişte sürekli zarar oluştu, dikkatli ol."
+            )
+
+        # Bugünkü durum
+        if any(w in msg for w in ["bugün", "today", "günlük"]):
+            today_t = get_today_trades(conn)
+            stats   = calc_stats(today_t)
+            if not stats or stats["total"] == 0:
+                return "📅 <b>AX:</b> Bugün henüz kapanan trade yok."
+            wr  = stats["win_rate"]
+            pnl = stats["total_pnl"]
+            we  = "✅" if wr >= 0.50 else "⚠️" if wr >= 0.35 else "❌"
+            return (
+                f"📅 <b>Bugün {stats['total']} trade:</b>\n"
+                f"{we} WR: {wr:.1%} | PNL: {pnl:+.3f}$\n"
+                f"• PF: {stats['profit_factor']:.2f} | Avg RR: {stats['avg_rr']:.2f}\n"
+                f"• Max DD: {stats['max_drawdown']:.3f}$"
+            )
+
+        # Piyasa / rejim
+        if any(w in msg for w in ["piyasa", "rejim", "trend", "market"]):
+            recent = get_trades(conn, hours=24, limit=150)
+            regime = get_market_regime(recent)
+            emojis = {"BULLISH": "📈", "BEARISH": "📉", "CHOPPY": "🌀",
+                      "NEUTRAL": "➡️", "UNKNOWN": "❓"}
+            yorum  = {
+                "BULLISH": "Long fırsatlarına ağırlık veriyorum.",
+                "BEARISH": "Short fırsatları daha güvenli görünüyor.",
+                "CHOPPY":  "Piyasa gürültülü, filtrelerimi sıkılaştırdım.",
+                "NEUTRAL": "Her iki yön dengede, normal strateji devam.",
+                "UNKNOWN": "Yeterli veri yok, bekle.",
+            }
+            return (
+                f"{emojis.get(regime, '❓')} <b>AX Piyasa Analizi: {regime}</b>\n"
+                f"• {yorum.get(regime, '')}"
+            )
+
+        # Yardım / ne yapabilirsin
+        if any(w in msg for w in ["yardım", "ne yapabilir", "komut", "help"]):
+            return (
+                "🤖 <b>AX — Yapabileceklerim:</b>\n\n"
+                "• <b>'nasıl gidiyoruz'</b> → 24 saat performans özeti\n"
+                "• <b>'en iyi coin'</b> → güçlü coin profilleri\n"
+                "• <b>'tehlikeli coinler'</b> → kaçınılması gerekenler\n"
+                "• <b>'bugün'</b> → günlük trade özeti\n"
+                "• <b>'piyasa'</b> → piyasa rejimi analizi\n"
+                "• <b>'rapor'</b> → tam AI raporu\n\n"
+                "Her zaman burdayım. 💪"
+            )
+
+        # Varsayılan
+        return (
+            "🤖 <b>AX burada!</b> Ne demek istediğini tam anlayamadım.\n"
+            "'yardım' yaz, yapabileceklerimi listelerim."
+        )
+
+    finally:
+        if should_close:
+            conn.close()
+
+
 _EOD_CACHE = [None]
 
 
@@ -1213,6 +1469,7 @@ def analyze_and_adapt():
         # Acil rollback kontrolü
         rolled_back, rollback_p = try_rollback_to_best(conn, last20_stats)
 
+        backtest_result = None
         if rolled_back:
             new_params = rollback_p
             changes    = [
@@ -1233,6 +1490,32 @@ def analyze_and_adapt():
                             *PARAM_BOUNDS[key])
                 changes.extend(markov_changes)
 
+            # Backtest: yeni parametreler geçmişte nasıl performans gösterirdi?
+            backtest_result = simulate_params(conn, new_params, current)
+            if backtest_result and stats and changes:
+                cur_score = calc_expectancy_score(stats)
+                # Basit bir backtest expectancy tahmini
+                bt_wr  = backtest_result["win_rate"]
+                bt_pnl = backtest_result["total_pnl"]
+                bt_pf  = max(0.01, abs(bt_pnl))
+                bt_score = calc_expectancy_score({
+                    "total": backtest_result["total"],
+                    "wins": backtest_result["wins"],
+                    "losses": backtest_result["losses"],
+                    "win_rate": bt_wr,
+                    "total_pnl": bt_pnl,
+                    "profit_factor": (1.0 + bt_pnl / bt_pf) if bt_pnl >= 0 else 0.5,
+                    "avg_rr": stats.get("avg_rr", 1.0),
+                })
+                # Backtest belirgin kötüyse değişikliği uygulama
+                if bt_score < cur_score - 0.25 and bt_pnl < 0:
+                    changes = [
+                        f"⛔ AX Backtest: yeni params simülasyonda kötü "
+                        f"(WR:{bt_wr:.0%} PNL:{bt_pnl:+.1f}$) "
+                        f"→ mevcut parametreler korundu"]
+                    new_params = current
+                    backtest_result = None
+
             if changes:
                 save_params(conn, new_params, " | ".join(changes), changes)
 
@@ -1243,7 +1526,8 @@ def analyze_and_adapt():
             heatmap, cooldowns,
             ot_count, pm_insights, rolled_back,
             dangerous_coins, best_coins, bad_hours,
-            markov_matrix=markov_matrix)
+            markov_matrix=markov_matrix,
+            backtest_result=backtest_result)
 
         log_analysis(conn, stats, insight, changes)
 
@@ -1257,7 +1541,7 @@ def analyze_and_adapt():
 
     except Exception as e:
         import traceback
-        return f"AI Brain hata: {e}\n{traceback.format_exc()[:500]}"
+        return f"AX hata: {e}\n{traceback.format_exc()[:500]}"
 
 
 def get_eod_report():

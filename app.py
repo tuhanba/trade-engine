@@ -380,5 +380,74 @@ def api_logs():
         return jsonify({"ok": False, "error": str(e), "data": []}), 500
 
 
+# ── /api/ax-chat ─────────────────────────────────────────────────────────────
+@app.route("/api/ax-chat", methods=["POST"])
+def api_ax_chat():
+    try:
+        msg = (request.json or {}).get("message", "").strip()
+        if not msg:
+            return jsonify({"ok": False, "error": "Mesaj boş"}), 400
+        from trade_engine.ai_brain import ax_chat
+        reply = ax_chat(msg)
+        return jsonify({"ok": True, "reply": reply})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/hourly_stats ─────────────────────────────────────────────────────────
+@app.route("/api/hourly_stats")
+def api_hourly_stats():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT close_time, net_pnl FROM trades "
+            "WHERE status NOT IN ('OPEN') AND close_time IS NOT NULL "
+            "ORDER BY close_time DESC LIMIT 500"
+        ).fetchall()
+        conn.close()
+        from collections import defaultdict
+        by_hour = defaultdict(list)
+        for r in rows:
+            ct = r["close_time"] or ""
+            if len(ct) >= 13:
+                try:
+                    by_hour[int(ct[11:13])].append(r["net_pnl"] or 0)
+                except Exception:
+                    pass
+        result = []
+        for h in range(24):
+            trades = by_hour.get(h, [])
+            total  = len(trades)
+            wins   = sum(1 for p in trades if p > 0)
+            pnl    = sum(trades)
+            result.append({
+                "hour":     h,
+                "total":    total,
+                "wins":     wins,
+                "win_rate": round(wins / total * 100, 1) if total > 0 else None,
+                "pnl":      round(pnl, 3),
+            })
+        return jsonify({"ok": True, "data": result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/coin_profiles ────────────────────────────────────────────────────────
+@app.route("/api/coin_profiles")
+def api_coin_profiles():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM coin_profile WHERE trade_count >= 3 "
+            "ORDER BY win_rate DESC LIMIT 20"
+        ).fetchall()
+        conn.close()
+        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
