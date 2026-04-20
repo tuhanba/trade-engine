@@ -4,22 +4,21 @@
   "nodes": [
     {
       "parameters": {
-        "updates": ["message"],
-        "additionalFields": {}
+        "httpMethod": "POST",
+        "path": "tg-commands",
+        "options": {}
       },
       "id": "c1000001-0001-0001-0001-000000000001",
-      "name": "Telegram Trigger",
-      "type": "n8n-nodes-base.telegramTrigger",
-      "typeVersion": 1.1,
+      "name": "Telegram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "position": [240, 300],
-      "credentials": {
-        "telegramApi": {"id": "1", "name": "AX Telegram Bot"}
-      }
+      "webhookId": "tg-commands-ax"
     },
     {
       "parameters": {
         "dataType": "string",
-        "value1": "={{ ($json.message.text || '').split(' ')[0].toLowerCase() }}",
+        "value1": "={{ (($json.body.message || {}).text || '').split(' ')[0].toLowerCase() }}",
         "rules": {
           "rules": [
             {"value2": "/pause",  "output": 0},
@@ -52,7 +51,7 @@
       "name": "Pause",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [700, 100]
+      "position": [700, 80]
     },
     {
       "parameters": {
@@ -64,7 +63,7 @@
       "name": "Resume",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [700, 220]
+      "position": [700, 200]
     },
     {
       "parameters": {
@@ -76,7 +75,7 @@
       "name": "Finish",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [700, 340]
+      "position": [700, 320]
     },
     {
       "parameters": {
@@ -87,7 +86,7 @@
       "name": "Status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [700, 460]
+      "position": [700, 440]
     },
     {
       "parameters": {
@@ -98,26 +97,26 @@
       "name": "Balance",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [700, 580]
+      "position": [700, 560]
     },
     {
       "parameters": {
-        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
-        "text": "={{ $json.message || ('✅ ' + ($json.status || 'ok')) }}",
-        "additionalFields": {"parse_mode": "HTML"}
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $json.tg_token + '/sendMessage' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $('Telegram Webhook').item.json.body.message.chat.id, text: $json.message || ('✅ ' + ($json.status || 'ok')), parse_mode: 'HTML' }) }}",
+        "options": {}
       },
       "id": "c1000001-0001-0001-0001-000000000008",
-      "name": "Yanıt Gönder",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
-      "position": [940, 340],
-      "credentials": {
-        "telegramApi": {"id": "1", "name": "AX Telegram Bot"}
-      }
+      "name": "Yanit Gonder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [940, 320]
     }
   ],
   "connections": {
-    "Telegram Trigger": {
+    "Telegram Webhook": {
       "main": [[{"node": "Komut Router", "type": "main", "index": 0}]]
     },
     "Komut Router": {
@@ -130,11 +129,11 @@
         []
       ]
     },
-    "Pause":   {"main": [[{"node": "Yanıt Gönder", "type": "main", "index": 0}]]},
-    "Resume":  {"main": [[{"node": "Yanıt Gönder", "type": "main", "index": 0}]]},
-    "Finish":  {"main": [[{"node": "Yanıt Gönder", "type": "main", "index": 0}]]},
-    "Status":  {"main": [[{"node": "Yanıt Gönder", "type": "main", "index": 0}]]},
-    "Balance": {"main": [[{"node": "Yanıt Gönder", "type": "main", "index": 0}]]}
+    "Pause":   {"main": [[{"node": "Yanit Gonder", "type": "main", "index": 0}]]},
+    "Resume":  {"main": [[{"node": "Yanit Gonder", "type": "main", "index": 0}]]},
+    "Finish":  {"main": [[{"node": "Yanit Gonder", "type": "main", "index": 0}]]},
+    "Status":  {"main": [[{"node": "Yanit Gonder", "type": "main", "index": 0}]]},
+    "Balance": {"main": [[{"node": "Yanit Gonder", "type": "main", "index": 0}]]}
   },
   "active": false,
   "settings": {"executionOrder": "v1"}

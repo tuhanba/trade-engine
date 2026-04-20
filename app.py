@@ -500,20 +500,23 @@ def api_outcome_stats():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _tg_meta():
+    return {"tg_token": os.getenv("TELEGRAM_BOT_TOKEN",""), "chat_id": os.getenv("TELEGRAM_CHAT_ID","")}
+
 @app.route("/api/bot/pause", methods=["POST"])
 def api_bot_pause():
     set_bot_control(paused=True, updated_by="n8n")
-    return jsonify({"ok": True, "status": "paused"})
+    return jsonify({"ok": True, "status": "paused", "message": "⏸ <b>Bot duraklatıldı.</b>\nYeni trade açılmayacak.", **_tg_meta()})
 
 @app.route("/api/bot/resume", methods=["POST"])
 def api_bot_resume():
     set_bot_control(paused=False, finish_mode=False, updated_by="n8n")
-    return jsonify({"ok": True, "status": "active"})
+    return jsonify({"ok": True, "status": "active", "message": "▶️ <b>Bot aktif.</b>\nTarama devam ediyor.", **_tg_meta()})
 
 @app.route("/api/bot/finish", methods=["POST"])
 def api_bot_finish():
     set_bot_control(finish_mode=True, updated_by="n8n")
-    return jsonify({"ok": True, "status": "finish_mode"})
+    return jsonify({"ok": True, "status": "finish_mode", "message": "🏁 <b>Bitirme modu.</b>\nAçık trade'ler kapanınca bot durur.", **_tg_meta()})
 
 @app.route("/api/bot/status")
 def api_bot_status():
