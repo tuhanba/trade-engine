@@ -582,6 +582,19 @@ def api_coin_profiles():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route("/api/run-backtest", methods=["POST"])
+def api_run_backtest():
+    try:
+        from backtest import run_backtest
+        body = request.json or {}
+        result = run_backtest(
+            tp_range=body.get("tp_range"),
+            sl_range=body.get("sl_range"),
+        )
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.route("/api/run-autotune", methods=["POST"])
 def api_run_autotune():
     try:
