@@ -272,6 +272,10 @@ body::before{
 .toast-bar{position:absolute;bottom:0;left:0;height:2px;border-radius:0 0 2px 2px;animation:toast-bar linear forwards}
 .toast-open .toast-bar{background:var(--green-br)}.toast-win .toast-bar{background:var(--gold-br)}.toast-loss .toast-bar{background:var(--red-br)}
 @keyframes toast-bar{from{width:100%}to{width:0%}}
+
+/* VALUE FLASH */
+@keyframes val-flash{0%{opacity:1}18%{opacity:.45;transform:scale(.96)}55%{opacity:1;filter:brightness(2.0);transform:scale(1.05)}100%{opacity:1;filter:brightness(1);transform:scale(1)}}
+.val-flash{animation:val-flash .46s cubic-bezier(.25,1,.5,1) both}
 </style>
 </head>
 <body>
@@ -560,31 +564,40 @@ function axSend(){
   },800);
 }
 
+// VALUE FLASH HELPER
+function setVal(id,text,cls){
+  const el=document.getElementById(id);if(!el)return;
+  const changed=el.textContent!==String(text);
+  el.textContent=text;
+  if(cls!==undefined)el.className=cls;
+  if(changed){el.classList.remove("val-flash");void el.offsetWidth;el.classList.add("val-flash")}
+}
+
 // STATS
 async function loadStats(){
   try{
     const j=await(await fetch(BASE+"/api/stats")).json();
     if(!j.ok)return;
     const d=j.data,p=d.params||{};
-    document.getElementById("stTotal").textContent=d.total||0;
-    document.getElementById("stOpen").textContent=(d.open_count||0)+" acik";
+    setVal("stTotal",d.total||0);
+    setVal("stOpen",(d.open_count||0)+" acik");
     document.getElementById("bWin").style.width=Math.min(d.win_rate||0,100)+"%";
-    const wr=d.win_rate||0;const wrEl=document.getElementById("stWR");
-    wrEl.textContent=wr.toFixed(1)+"%";wrEl.className="sc-val "+(wr>=45?"pos":wr>=35?"warn":"neg");
+    const wr=d.win_rate||0;
+    setVal("stWR",wr.toFixed(1)+"%","sc-val "+(wr>=45?"pos":wr>=35?"warn":"neg"));
     document.getElementById("bWR").style.width=Math.min(wr,100)+"%";
-    document.getElementById("stWL").textContent=(d.wins||0)+"W / "+(d.losses||0)+"L";
-    const pnl=d.total_pnl||0;const pnlEl=document.getElementById("stPNL");
-    pnlEl.textContent=fp(pnl);pnlEl.className="sc-val "+(pnl>0?"pos":pnl<0?"neg":"");
-    document.getElementById("stAvg").textContent="avg "+fp(d.avg_pnl)+" / trade";
-    const pf=d.profit_factor||0;const pfEl=document.getElementById("stPF");
-    pfEl.textContent=f(pf,2)+"x";pfEl.className="sc-val "+(pf>=1.5?"pos":pf>=1?"warn":"neg");
-    document.getElementById("stRR").textContent="avg RR "+f(d.avg_rr,2);
-    document.getElementById("mBest").textContent=fp(d.best_trade);
-    document.getElementById("mWorst").textContent=fp(d.worst_trade);
-    document.getElementById("mDD").textContent="-"+f(d.max_drawdown,3)+"$";
-    document.getElementById("mAWin").textContent=fp(d.avg_win);
-    document.getElementById("mALoss").textContent=fp(d.avg_loss);
-    document.getElementById("mDur").textContent=f(d.avg_dur,1)+"dk";
+    setVal("stWL",(d.wins||0)+"W / "+(d.losses||0)+"L");
+    const pnl=d.total_pnl||0;
+    setVal("stPNL",fp(pnl),"sc-val "+(pnl>0?"pos":pnl<0?"neg":""));
+    setVal("stAvg","avg "+fp(d.avg_pnl)+" / trade");
+    const pf=d.profit_factor||0;
+    setVal("stPF",f(pf,2)+"x","sc-val "+(pf>=1.5?"pos":pf>=1?"warn":"neg"));
+    setVal("stRR","avg RR "+f(d.avg_rr,2));
+    setVal("mBest",fp(d.best_trade));
+    setVal("mWorst",fp(d.worst_trade));
+    setVal("mDD","-"+f(d.max_drawdown,3)+"$");
+    setVal("mAWin",fp(d.avg_win));
+    setVal("mALoss",fp(d.avg_loss));
+    setVal("mDur",f(d.avg_dur,1)+"dk");
     document.getElementById("pVer").textContent="v"+(p.version||1);
     document.getElementById("pR5").textContent=(p.rsi5_min||"—")+"–"+(p.rsi5_max||"—");
     document.getElementById("pR1").textContent=(p.rsi1_min||"—")+"–"+(p.rsi1_max||"—");
