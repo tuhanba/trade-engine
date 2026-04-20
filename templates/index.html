@@ -534,8 +534,8 @@ function addFeedItem(time,type,text,pnl){
   if(feedItems.length===0)wrap.innerHTML="";
   const div=document.createElement("div");
   div.className="feed-item";
-  const pnlHtml=pnl?"<span class="feed-pnl "+(pnl>0?"pos-c":"neg-c")+"">"+fp(pnl)+"</span>":"";
-  div.innerHTML="<span class="feed-time">"+time+"</span><div class="feed-dot "+type+""></div><span class="feed-text">"+text+"</span>"+pnlHtml;
+  const pnlHtml=pnl?'<span class="feed-pnl '+(pnl>0?"pos-c":"neg-c")+'">'+fp(pnl)+'</span>':"";
+  div.innerHTML='<span class="feed-time">'+time+'</span><div class="feed-dot '+type+'"></div><span class="feed-text">'+text+"</span>"+pnlHtml;
   wrap.insertBefore(div,wrap.firstChild);
   feedItems.unshift({time,type,text,pnl});
   if(feedItems.length>50){wrap.removeChild(wrap.lastChild);feedItems.pop()}
@@ -683,10 +683,10 @@ async function loadPositions(){
     lastTradeIds=new Set(pos.map(p=>p.id||p.symbol));
     _posFirst=false;
     const wrap=document.getElementById("posList");
-    if(!pos.length){wrap.innerHTML="<div class="empty">— Acik Pozisyon Yok —</div>";return}
+    if(!pos.length){wrap.innerHTML='<div class="empty">— Acik Pozisyon Yok —</div>';return}
     wrap.innerHTML=pos.map(p=>{
       const isL=(p.direction||"").toUpperCase()==="LONG",pnl=p.unrealized_pnl||0,bar=Math.min(Math.abs(p.sl_distance_pct||0),100);
-      return "<div class="pos "+(isL?"long-p":"short-p")+""><div class="pos-top"><div><div class="pos-sym">"+p.symbol+"</div><span class="pos-dir "+(isL?"long":"short")+"">"+p.direction+" x"+(p.leverage||"—")+"</span></div><div class="pos-pnl"><div class="pos-pnl-val "+(pnl>=0?"pos-c":"neg-c")+"">"+fp(pnl)+"</div><div class="pos-pnl-pct">"+(pnl>=0?"+":"")+f(p.unrealized_pct,2)+"%</div></div></div><div class="pos-levels"><div><div class="pl-lbl">Entry</div><div class="pl-val entry">"+f(p.entry,5)+"</div></div><div><div class="pl-lbl">Stop</div><div class="pl-val stop">"+f(p.sl,4)+"</div></div><div><div class="pl-lbl">Target</div><div class="pl-val target">"+f(p.tp,4)+"</div></div><div><div class="pl-lbl">RR</div><div class="pl-val rr">"+f(p.current_rr,2)+"R</div></div></div><div class="pos-bar-bg"><div class="pos-bar-fill "+(isL?"long":"short")+"" style="width:"+bar+"%"></div></div><div class="pos-foot"><span>Mark: "+f(p.current_price,5)+"</span><span>SL: "+f(p.sl_distance_pct,1)+"%</span></div></div>";
+      return '<div class="pos '+(isL?"long-p":"short-p")+'"><div class="pos-top"><div><div class="pos-sym">'+p.symbol+'</div><span class="pos-dir '+(isL?"long":"short")+'">'+p.direction+' x'+(p.leverage||"—")+'</span></div><div class="pos-pnl"><div class="pos-pnl-val '+(pnl>=0?"pos-c":"neg-c")+'">'+fp(pnl)+'</div><div class="pos-pnl-pct">'+(pnl>=0?"+":"")+f(p.unrealized_pct,2)+'%</div></div></div><div class="pos-levels"><div><div class="pl-lbl">Entry</div><div class="pl-val entry">'+f(p.entry,5)+'</div></div><div><div class="pl-lbl">Stop</div><div class="pl-val stop">'+f(p.sl,4)+'</div></div><div><div class="pl-lbl">Target</div><div class="pl-val target">'+f(p.tp,4)+'</div></div><div><div class="pl-lbl">RR</div><div class="pl-val rr">'+f(p.current_rr,2)+'R</div></div></div><div class="pos-bar-bg"><div class="pos-bar-fill '+(isL?"long":"short")+'" style="width:'+bar+'%"></div></div><div class="pos-foot"><span>Mark: '+f(p.current_price,5)+'</span><span>SL: '+f(p.sl_distance_pct,1)+'%</span></div></div>';
     }).join("");
     // Add IDs + animate PnL counters after render
     const pnlEls=wrap.querySelectorAll(".pos-pnl-val");
@@ -761,10 +761,10 @@ async function loadHistory(page=1){
       }
     });
     const tb=document.getElementById("histBody");
-    if(!trades.length){tb.innerHTML="<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:30px;font-family:var(--orb);letter-spacing:.16em;font-size:9px">KAYIT YOK</td></tr>";renderPager(pag);return}
+    if(!trades.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:30px;font-family:var(--orb);letter-spacing:.16em;font-size:9px">KAYIT YOK</td></tr>';renderPager(pag);return}
     tb.innerHTML=trades.map(t=>{
       const isL=(t.direction||"").toUpperCase()==="LONG",pnl=t.pnl_usdt||0,st=(t.status||"").toUpperCase(),win=st==="WIN"||(st==="MANUAL"&&pnl>0),dur=t.duration_str||(t.duration_min?Math.round(t.duration_min)+"dk":"—");
-      return "<tr><td class="td-sym">"+(t.symbol||"—")+"</td><td><span class="badge "+(isL?"b-long":"b-short")+"">"+(t.direction||"—")+"</span></td><td>"+f(t.entry,5)+"</td><td>"+f(t.exit_price,5)+"</td><td class=""+(pnl>=0?"pos-c":"neg-c")+"">"+fp(pnl)+"</td><td class="gld-c">"+f(t.r_multiple,2)+"R</td><td><span class="dur">"+dur+"</span></td><td><span class="badge "+(win?"b-win":"b-loss")+"">"+st+"</span></td></tr>";
+      return '<tr><td class="td-sym">'+(t.symbol||"—")+'</td><td><span class="badge '+(isL?"b-long":"b-short")+'">'+(t.direction||"—")+'</span></td><td>'+f(t.entry,5)+'</td><td>'+f(t.exit_price,5)+'</td><td class="'+(pnl>=0?"pos-c":"neg-c")+'">'+fp(pnl)+'</td><td class="gld-c">'+f(t.r_multiple,2)+'R</td><td><span class="dur">'+dur+'</span></td><td><span class="badge '+(win?"b-win":"b-loss")+'">'+st+'</span></td></tr>';
     }).join("");renderPager(pag);
   }catch(e){console.error(e)}
 }
@@ -772,9 +772,9 @@ async function loadHistory(page=1){
 function renderPager(pag){
   const wrap=document.getElementById("pager"),tot=pag.total_pages||1,cur=pag.page||1;
   if(tot<=1){wrap.innerHTML="";return}
-  let h="<button class="pb" "+(cur<=1?"disabled":"")+" onclick="loadHistory("+(cur-1)+")">&#8249;</button>";
-  for(let i=1;i<=tot;i++){if(i===1||i===tot||Math.abs(i-cur)<=2)h+="<button class="pb "+(i===cur?"active":"")+"" onclick="loadHistory("+i+")">" +i+"</button>";else if(Math.abs(i-cur)===3)h+="<span class="pinfo">&#8230;</span>"}
-  h+="<button class="pb" "+(cur>=tot?"disabled":"")+" onclick="loadHistory("+(cur+1)+")">&#8250;</button><span class="pinfo">"+cur+" / "+tot+"</span>";
+  let h='<button class="pb" '+(cur<=1?"disabled":"")+' onclick="loadHistory('+(cur-1)+')">&#8249;</button>';
+  for(let i=1;i<=tot;i++){if(i===1||i===tot||Math.abs(i-cur)<=2)h+='<button class="pb '+(i===cur?"active":"")+'" onclick="loadHistory('+i+')">' +i+'</button>';else if(Math.abs(i-cur)===3)h+='<span class="pinfo">&#8230;</span>'}
+  h+='<button class="pb" '+(cur>=tot?"disabled":"")+' onclick="loadHistory('+(cur+1)+')">&#8250;</button><span class="pinfo">'+cur+' / '+tot+'</span>';
   wrap.innerHTML=h;
 }
 
