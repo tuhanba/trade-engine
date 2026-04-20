@@ -469,6 +469,36 @@ def api_coin_profiles():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route("/api/run-outcome-labeling", methods=["POST"])
+def api_run_outcome_labeling():
+    try:
+        from outcome_labeler import run_labeling
+        limit = request.json.get("limit", 20) if request.is_json else 20
+        result = run_labeling(limit)
+        result["tg_token"] = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        result["chat_id"]  = os.getenv("TELEGRAM_CHAT_ID", "")
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/outcome-stats")
+def api_outcome_stats():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""
+            SELECT quality, COUNT(*) as count,
+                   ROUND(AVG(mfe_pct),3) as avg_mfe,
+                   ROUND(AVG(mae_pct),3) as avg_mae,
+                   ROUND(AVG(exit_eff),3) as avg_eff
+            FROM outcome_labels
+            GROUP BY quality ORDER BY count DESC
+        """).fetchall()
+        conn.close()
+        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)

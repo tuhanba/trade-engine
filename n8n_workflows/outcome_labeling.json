@@ -1,0 +1,83 @@
+{
+  "id": "2",
+  "name": "Outcome Labeling — 15dk",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "minutes", "minutesInterval": 15}]
+        }
+      },
+      "id": "b1000001-0001-0001-0001-000000000001",
+      "name": "Her 15 Dakika",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5000/api/run-outcome-labeling",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"limit\": 20}",
+        "options": {}
+      },
+      "id": "b1000001-0001-0001-0001-000000000002",
+      "name": "Label Trades",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.labeled }}",
+              "rightValue": 0,
+              "operator": {"type": "number", "operation": "gt"}
+            }
+          ]
+        }
+      },
+      "id": "b1000001-0001-0001-0001-000000000003",
+      "name": "Yeni Label Var mi",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $('Label Trades').item.json.tg_token + '/sendMessage' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $('Label Trades').item.json.chat_id, text: '📊 <b>Outcome Labeling</b>\\n\\n' + $json.labeled + ' trade etiketlendi\\n' + ($json.results || []).join('\\n'), parse_mode: 'HTML' }) }}",
+        "options": {}
+      },
+      "id": "b1000001-0001-0001-0001-000000000004",
+      "name": "Telegram Rapor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 200]
+    }
+  ],
+  "connections": {
+    "Her 15 Dakika": {
+      "main": [[{"node": "Label Trades", "type": "main", "index": 0}]]
+    },
+    "Label Trades": {
+      "main": [[{"node": "Yeni Label Var mi", "type": "main", "index": 0}]]
+    },
+    "Yeni Label Var mi": {
+      "main": [
+        [{"node": "Telegram Rapor", "type": "main", "index": 0}],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {"executionOrder": "v1"}
+}
