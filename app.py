@@ -555,6 +555,14 @@ def api_run_counterfactual():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route("/api/portfolio")
+def api_portfolio():
+    try:
+        from database import get_portfolio_stats
+        return jsonify({"ok": True, "data": get_portfolio_stats()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.route("/api/run-rejection-labeling", methods=["POST"])
 def api_run_rejection_labeling():
     try:

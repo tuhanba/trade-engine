@@ -97,6 +97,17 @@ def init_db():
         updated_at  TEXT DEFAULT (datetime('now')),
         updated_by  TEXT DEFAULT 'system'
     );
+    CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        balance      REAL,
+        peak_balance REAL,
+        drawdown_pct REAL,
+        daily_pnl    REAL,
+        win_streak   INTEGER DEFAULT 0,
+        loss_streak  INTEGER DEFAULT 0,
+        total_trades INTEGER DEFAULT 0,
+        created_at   TEXT DEFAULT (datetime('now'))
+    );
     CREATE TABLE IF NOT EXISTS rejected_signals (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         symbol      TEXT,
@@ -378,3 +389,79 @@ def save_ai_log(log: dict):
           log["avg_rr"], log["insight"], log["changes"]))
     conn.commit()
     conn.close()
+
+def record_portfolio_snapshot():
+    try:
+        conn = get_conn()
+        c = conn.cursor()
+        # Current balance
+        row = c.execute("SELECT paper_balance FROM paper_account WHERE id=1").fetchone()
+        balance = row[0] if row else 250.0
+        # Peak balance from snapshots or starting balance
+        peak_row = c.execute("SELECT MAX(balance) FROM portfolio_snapshots").fetchone()
+        peak = max(peak_row[0] or 250.0, balance, 250.0)
+        drawdown_pct = round((balance - peak) / peak * 100, 2) if peak > 0 else 0.0
+        # Today's PnL (UTC)
+        today_row = c.execute("""
+            SELECT ROUND(SUM(net_pnl), 4) FROM trades
+            WHERE status IN ('WIN','LOSS','MANUAL')
+            AND date(close_time) = date('now')
+        """).fetchone()
+        daily_pnl = today_row[0] or 0.0
+        # Streak
+        recent = c.execute("""
+            SELECT status FROM trades
+            WHERE status IN ('WIN','LOSS')
+            ORDER BY id DESC LIMIT 20
+        """).fetchall()
+        win_streak = 0; loss_streak = 0
+        for r in recent:
+            if r[0] == 'WIN':
+                if loss_streak == 0:
+                    win_streak += 1
+                else:
+                    break
+            else:
+                if win_streak == 0:
+                    loss_streak += 1
+                else:
+                    break
+        total_row = c.execute(
+            "SELECT COUNT(*) FROM trades WHERE status IN ('WIN','LOSS','MANUAL')"
+        ).fetchone()
+        total = total_row[0] or 0
+        c.execute("""
+            INSERT INTO portfolio_snapshots
+              (balance, peak_balance, drawdown_pct, daily_pnl, win_streak, loss_streak, total_trades)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (balance, peak, drawdown_pct, daily_pnl, win_streak, loss_streak, total))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+def get_portfolio_stats() -> dict:
+    conn = get_conn()
+    c = conn.cursor()
+    # Latest snapshot
+    snap = c.execute(
+        "SELECT * FROM portfolio_snapshots ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    cols = [d[0] for d in c.description]
+    snap_d = dict(zip(cols, snap)) if snap else {}
+    # Balance history (last 50 for sparkline)
+    hist = c.execute(
+        "SELECT balance, created_at FROM portfolio_snapshots ORDER BY id DESC LIMIT 50"
+    ).fetchall()
+    history = [{"balance": r[0], "at": r[1]} for r in reversed(hist)]
+    conn.close()
+    return {
+        "balance":      snap_d.get("balance", 250.0),
+        "peak_balance": snap_d.get("peak_balance", 250.0),
+        "drawdown_pct": snap_d.get("drawdown_pct", 0.0),
+        "daily_pnl":    snap_d.get("daily_pnl", 0.0),
+        "win_streak":   snap_d.get("win_streak", 0),
+        "loss_streak":  snap_d.get("loss_streak", 0),
+        "total_trades": snap_d.get("total_trades", 0),
+        "history":      history,
+    }

@@ -31,7 +31,7 @@ from binance.client import Client
 from binance.enums import *
 import pandas as pd
 import requests
-from database import init_db, save_trade, close_trade, get_current_params, get_bot_control, log_rejection
+from database import init_db, save_trade, close_trade, get_current_params, get_bot_control, log_rejection, record_portfolio_snapshot
 from live_tracker import LiveTracker, init_tracker_tables, save_analysis
 
 try:
@@ -1478,6 +1478,7 @@ def monitor_trades():
 
             # DB'ye kapat (net_pnl de kaydedilsin)
             close_trade(t["trade_id"], exit_price, result, net_pnl)
+            record_portfolio_snapshot()
 
             if t.get("paper"):
                 # partial_realized kısmi çıkışlarda zaten eklendi; sadece kalan pozisyon PNL'ini güncelle

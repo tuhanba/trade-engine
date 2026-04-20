@@ -37,7 +37,8 @@ TRADE_TABLES = [
     "trades", "open_trades", "pattern_memory",
     "trade_postmortem", "trade_analysis",
     "daily_summary", "daily_stats", "trade_log",
-    "outcome_labels", "counterfactual_analysis", "rejected_signals",
+    "outcome_labels", "counterfactual_analysis",
+    "rejected_signals", "portfolio_snapshots",
 ]
 
 cleared = []

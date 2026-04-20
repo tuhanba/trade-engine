@@ -78,8 +78,17 @@ body::before{
 .main{max-width:1440px;margin:0 auto;padding:18px 22px;position:relative;z-index:1}
 
 /* STATS GRID */
-.sg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.sg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px}
 @media(max-width:860px){.sg{grid-template-columns:repeat(2,1fr)}}
+.port-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+@media(max-width:860px){.port-strip{grid-template-columns:repeat(2,1fr)}}
+.psc{background:var(--card);border:1px solid var(--border);border-top:2px solid rgba(96,165,250,0.5);padding:14px 18px;border-radius:var(--r)}
+.psc-label{font-family:var(--orb);font-size:8px;letter-spacing:.12em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px}
+.psc-val{font-family:var(--mono);font-size:17px;font-weight:600;color:var(--text)}
+.psc-sub{font-size:10px;color:var(--text-muted);margin-top:3px}
+.psc-bar{height:3px;background:rgba(96,165,250,0.12);border-radius:2px;margin-top:8px;overflow:hidden}
+.psc-bar-f{height:100%;background:rgba(96,165,250,0.55);border-radius:2px;transition:width .5s ease}
+.streak-win{color:var(--green-br)}.streak-loss{color:var(--red-br)}
 .sc{background:var(--card);border:1px solid var(--border);border-top:2px solid var(--gold);padding:16px 18px;position:relative;overflow:hidden;border-radius:var(--r);transition:all var(--t)}
 .sc::after{content:'';position:absolute;top:0;left:-120%;width:50%;height:100%;background:linear-gradient(90deg,transparent,rgba(201,168,76,0.05),transparent);transition:left .7s ease;pointer-events:none}
 .sc:hover::after{left:160%}
@@ -312,6 +321,32 @@ body::before{
     <div class="sc"><div class="sc-label">Kazanma Orani</div><div class="sc-val" id="stWR">&mdash;</div><div class="sc-sub" id="stWL">&mdash;W / &mdash;L</div><div class="sc-bar"><div class="sc-bar-f" id="bWR" style="width:0%"></div></div></div>
     <div class="sc"><div class="sc-label">Toplam PNL</div><div class="sc-val" id="stPNL">&mdash;</div><div class="sc-sub" id="stAvg">avg &mdash; / trade</div></div>
     <div class="sc"><div class="sc-label">Profit Factor</div><div class="sc-val warn" id="stPF">&mdash;</div><div class="sc-sub" id="stRR">avg RR &mdash;</div></div>
+  </div>
+
+  <!-- PORTFOLIO LEDGER -->
+  <div class="port-strip">
+    <div class="psc">
+      <div class="psc-label">Bakiye</div>
+      <div class="psc-val" id="ptBal">&mdash;</div>
+      <div class="psc-sub">Zirve: <span id="ptPeak">&mdash;</span></div>
+      <div class="psc-bar"><div class="psc-bar-f" id="ptBalBar" style="width:100%"></div></div>
+    </div>
+    <div class="psc">
+      <div class="psc-label">Drawdown</div>
+      <div class="psc-val neg" id="ptDD">&mdash;</div>
+      <div class="psc-sub" id="ptDDSub">zirve altında</div>
+      <div class="psc-bar"><div class="psc-bar-f" id="ptDDBar" style="width:0%;background:rgba(239,68,68,0.55)"></div></div>
+    </div>
+    <div class="psc">
+      <div class="psc-label">Seri</div>
+      <div class="psc-val" id="ptStreak">&mdash;</div>
+      <div class="psc-sub" id="ptStreakSub">&mdash;</div>
+    </div>
+    <div class="psc">
+      <div class="psc-label">Bugun PNL</div>
+      <div class="psc-val" id="ptDay">&mdash;</div>
+      <div class="psc-sub" id="ptDaySub">UTC bugun</div>
+    </div>
   </div>
 
   <!-- TRADINGVIEW CANLI MUM GRAFİGİ -->
@@ -778,13 +813,39 @@ function renderPager(pag){
   wrap.innerHTML=h;
 }
 
-async function init(){await Promise.all([loadStats(),loadChart(),loadPositions(),loadHistory(curPage)])}
+async function loadPortfolio(){
+  try{
+    const j=await(await fetch(BASE+"/api/portfolio")).json();
+    if(!j.ok)return;
+    const d=j.data;
+    const bal=d.balance||250;const peak=d.peak_balance||250;
+    setVal("ptBal",bal.toFixed(2)+" USDT","psc-val "+(bal>=250?"pos":"neg"));
+    document.getElementById("ptPeak").textContent=peak.toFixed(2)+" USDT";
+    const pct=Math.abs(d.drawdown_pct||0);
+    const ddEl=document.getElementById("ptDD");
+    ddEl.textContent=(pct>0?"-":"")+pct.toFixed(2)+"%";
+    ddEl.className="psc-val "+(pct>10?"neg":pct>5?"warn":"dim");
+    document.getElementById("ptDDSub").textContent=pct>0?(peak-bal).toFixed(2)+"$ zirve altinda":"zirve noktasinda";
+    document.getElementById("ptDDBar").style.width=Math.min(pct*3,100)+"%";
+    document.getElementById("ptBalBar").style.width=Math.min(bal/peak*100,100)+"%";
+    const ws=d.win_streak||0;const ls=d.loss_streak||0;
+    const stEl=document.getElementById("ptStreak");
+    if(ws>0){stEl.textContent=ws+"W Seri";stEl.className="psc-val streak-win";}
+    else if(ls>0){stEl.textContent=ls+"L Seri";stEl.className="psc-val streak-loss";}
+    else{stEl.textContent="—";stEl.className="psc-val";}
+    document.getElementById("ptStreakSub").textContent=(d.total_trades||0)+" toplam trade";
+    const dpnl=d.daily_pnl||0;
+    setVal("ptDay",(dpnl>=0?"+":"")+dpnl.toFixed(3)+" USDT","psc-val "+(dpnl>0?"pos":dpnl<0?"neg":""));
+  }catch(e){console.error(e)}
+}
+
+async function init(){await Promise.all([loadStats(),loadChart(),loadPortfolio(),loadPositions(),loadHistory(curPage)])}
 init();
 let _cd8=8,_cd15=15;
 const _rp=document.getElementById("refreshPill");
 setInterval(()=>{
   _cd8--;_cd15--;
-  if(_cd8<=0){loadStats();loadPositions();_cd8=8;_rp.classList.add("pulse");setTimeout(()=>_rp.classList.remove("pulse"),700)}
+  if(_cd8<=0){loadStats();loadPortfolio();loadPositions();_cd8=8;_rp.classList.add("pulse");setTimeout(()=>_rp.classList.remove("pulse"),700)}
   if(_cd15<=0){loadChart();loadHistory(curPage);_cd15=15}
   _rp.textContent="↻ "+_cd8+"s";
 },1000);
