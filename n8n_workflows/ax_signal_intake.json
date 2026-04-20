@@ -17,18 +17,6 @@
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "{\"status\":\"ok\"}",
-        "options": {}
-      },
-      "id": "a1b2c3d4-0001-0001-0001-000000000002",
-      "name": "Respond OK",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [460, 200]
-    },
-    {
-      "parameters": {
         "method": "POST",
         "url": "={{ 'https://api.telegram.org/bot' + $json.body.tg_token + '/sendMessage' }}",
         "sendBody": true,
@@ -47,11 +35,6 @@
     "Signal Webhook": {
       "main": [
         [
-          {
-            "node": "Respond OK",
-            "type": "main",
-            "index": 0
-          },
           {
             "node": "Telegram Notify",
             "type": "main",
