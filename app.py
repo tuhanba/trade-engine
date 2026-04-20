@@ -582,6 +582,17 @@ def api_coin_profiles():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route("/api/run-autotune", methods=["POST"])
+def api_run_autotune():
+    try:
+        from ax_autotune import run_autotune
+        result = run_autotune()
+        result["tg_token"] = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        result["chat_id"]  = os.getenv("TELEGRAM_CHAT_ID", "")
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.route("/api/ml-calibration")
 def api_ml_calibration():
     try:

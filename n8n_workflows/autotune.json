@@ -1,0 +1,80 @@
+{
+  "id": "5",
+  "name": "AX Auto-Tune — 6 Saatte Bir",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 6}]
+        }
+      },
+      "id": "at-0001-0001-0001-0001-000000000001",
+      "name": "Her 6 Saat",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5000/api/run-autotune",
+        "options": { "timeout": 30000 }
+      },
+      "id": "at-0001-0001-0001-0001-000000000002",
+      "name": "Auto-Tune Calistir",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.changed }}",
+              "rightValue": true,
+              "operator": {"type": "boolean", "operation": "equals"}
+            }
+          ]
+        }
+      },
+      "id": "at-0001-0001-0001-0001-000000000003",
+      "name": "Degisiklik Var mi",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $json.tg_token + '/sendMessage' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chat_id, text: '🧠 <b>AX AUTO-TUNE</b>\\n\\n⚡ Parametre güncellendi: v' + $json.new_version + '\\n\\n📊 <b>' + $json.change_key + '</b>: ' + $json.change_old + ' → ' + $json.change_new + '\\n\\n📝 ' + $json.reason + '\\n\\n📈 Analiz (' + $json.n + ' trade):\\nWin Rate: ' + $json.win_rate + '%\\nAvg Win R: ' + $json.avg_win_r + '\\nAvg Loss R: ' + $json.avg_loss_r + '\\nExpectancy: ' + $json.expectancy + '\\nProfit Factor: ' + $json.profit_factor, parse_mode: 'HTML' }) }}",
+        "options": {}
+      },
+      "id": "at-0001-0001-0001-0001-000000000004",
+      "name": "Telegram Bildirim",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 200]
+    }
+  ],
+  "connections": {
+    "Her 6 Saat": {
+      "main": [[{"node": "Auto-Tune Calistir", "type": "main", "index": 0}]]
+    },
+    "Auto-Tune Calistir": {
+      "main": [[{"node": "Degisiklik Var mi", "type": "main", "index": 0}]]
+    },
+    "Degisiklik Var mi": {
+      "main": [
+        [{"node": "Telegram Bildirim", "type": "main", "index": 0}],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {"executionOrder": "v1"}
+}
