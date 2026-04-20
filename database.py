@@ -91,11 +91,12 @@ def init_db():
         updated_at TEXT
     );
     CREATE TABLE IF NOT EXISTS bot_control (
-        id          INTEGER PRIMARY KEY DEFAULT 1,
-        paused      INTEGER DEFAULT 0,
-        finish_mode INTEGER DEFAULT 0,
-        updated_at  TEXT DEFAULT (datetime('now')),
-        updated_by  TEXT DEFAULT 'system'
+        id             INTEGER PRIMARY KEY DEFAULT 1,
+        paused         INTEGER DEFAULT 0,
+        finish_mode    INTEGER DEFAULT 0,
+        updated_at     TEXT DEFAULT (datetime('now')),
+        updated_by     TEXT DEFAULT 'system',
+        last_heartbeat TEXT DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS portfolio_snapshots (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,6 +166,17 @@ def log_rejection(symbol: str, reason: str, features: dict):
             features.get("trend_4h"),
             features.get("price"),
         ))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+def ping_heartbeat():
+    try:
+        conn = get_conn()
+        conn.execute(
+            "UPDATE bot_control SET last_heartbeat=datetime('now') WHERE id=1"
+        )
         conn.commit()
         conn.close()
     except Exception:

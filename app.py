@@ -36,6 +36,40 @@ def index():
     return render_template("index.html")
 
 
+# ── /api/health ───────────────────────────────────────────────────────────────
+@app.route("/api/health")
+def api_health():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute(
+            "SELECT last_heartbeat, paused, finish_mode FROM bot_control WHERE id=1"
+        ).fetchone()
+        conn.close()
+        if not row:
+            return jsonify({"ok": False, "bot_alive": False, "reason": "no bot_control row"})
+        last_hb, paused, finish = row
+        from datetime import datetime, timezone
+        try:
+            hb_dt = datetime.fromisoformat(last_hb.replace("Z", "+00:00"))
+            if hb_dt.tzinfo is None:
+                hb_dt = hb_dt.replace(tzinfo=timezone.utc)
+            age_sec = (datetime.now(timezone.utc) - hb_dt).total_seconds()
+        except Exception:
+            age_sec = 9999
+        bot_alive = age_sec < 120  # 2 dakikadan eski heartbeat → ölü say
+        return jsonify({
+            "ok":             True,
+            "bot_alive":      bot_alive,
+            "heartbeat_age":  round(age_sec, 0),
+            "last_heartbeat": last_hb,
+            "paused":         bool(paused),
+            "finish_mode":    bool(finish),
+            "tg_token":       os.getenv("TELEGRAM_BOT_TOKEN", ""),
+            "chat_id":        os.getenv("TELEGRAM_CHAT_ID", ""),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "bot_alive": False, "reason": str(e)}), 500
+
 # ── /api/stats ────────────────────────────────────────────────────────────────
 @app.route("/api/stats")
 def api_stats():

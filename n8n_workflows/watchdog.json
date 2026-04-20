@@ -1,0 +1,137 @@
+{
+  "id": "4",
+  "name": "Watchdog — Bot Canlilik",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "minutes", "minutesInterval": 3}]
+        }
+      },
+      "id": "wd-0001-0001-0001-0001-000000000001",
+      "name": "Her 3 Dakika",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:5000/api/health",
+        "options": { "timeout": 12000 }
+      },
+      "id": "wd-0001-0001-0001-0001-000000000002",
+      "name": "Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.bot_alive }}",
+              "rightValue": true,
+              "operator": {"type": "boolean", "operation": "equals"}
+            }
+          ]
+        }
+      },
+      "id": "wd-0001-0001-0001-0001-000000000003",
+      "name": "Bot Canli mi",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "wd-0001-0001-0001-0001-000000000008",
+      "name": "30s Bekle",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [900, 420],
+      "webhookId": "wd-wait-30s"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:5000/api/health",
+        "options": { "timeout": 12000 }
+      },
+      "id": "wd-0001-0001-0001-0001-000000000004",
+      "name": "Tekrar Kontrol",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 420],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.bot_alive }}",
+              "rightValue": true,
+              "operator": {"type": "boolean", "operation": "equals"}
+            }
+          ]
+        }
+      },
+      "id": "wd-0001-0001-0001-0001-000000000005",
+      "name": "Hala Olu mu",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $('Health Check').item.json.tg_token + '/sendMessage' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $('Health Check').item.json.chat_id, text: '🚨 <b>BOT ÇÖKTÜ!</b>\\n\\nscalp_bot.py yanıt vermiyor.\\nSon heartbeat: ' + ($('Health Check').item.json.last_heartbeat || '?') + '\\nYaş: ' + ($('Health Check').item.json.heartbeat_age || '?') + 's\\n\\n<code>pkill -f scalp_bot.py; nohup python3 /root/trade_engine/scalp_bot.py > /root/trade_engine/bot.log 2>&1 &</code>', parse_mode: 'HTML' }) }}",
+        "options": {}
+      },
+      "id": "wd-0001-0001-0001-0001-000000000006",
+      "name": "Alarm Gonder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1560, 500]
+    }
+  ],
+  "connections": {
+    "Her 3 Dakika": {
+      "main": [[{"node": "Health Check", "type": "main", "index": 0}]]
+    },
+    "Health Check": {
+      "main": [[{"node": "Bot Canli mi", "type": "main", "index": 0}]]
+    },
+    "Bot Canli mi": {
+      "main": [
+        [],
+        [{"node": "30s Bekle", "type": "main", "index": 0}]
+      ]
+    },
+    "30s Bekle": {
+      "main": [[{"node": "Tekrar Kontrol", "type": "main", "index": 0}]]
+    },
+    "Tekrar Kontrol": {
+      "main": [[{"node": "Hala Olu mu", "type": "main", "index": 0}]]
+    },
+    "Hala Olu mu": {
+      "main": [
+        [],
+        [{"node": "Alarm Gonder", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {"executionOrder": "v1"}
+}

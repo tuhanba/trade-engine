@@ -31,7 +31,7 @@ from binance.client import Client
 from binance.enums import *
 import pandas as pd
 import requests
-from database import init_db, save_trade, close_trade, get_current_params, get_bot_control, log_rejection, record_portfolio_snapshot
+from database import init_db, save_trade, close_trade, get_current_params, get_bot_control, log_rejection, record_portfolio_snapshot, ping_heartbeat
 from live_tracker import LiveTracker, init_tracker_tables, save_analysis
 
 try:
@@ -1658,6 +1658,7 @@ def main():
 
             if now - last_scan_time >= SCAN_INTERVAL:
                 last_scan_time = now
+                ping_heartbeat()
 
                 # n8n/Flask üzerinden gelen kontrol komutlarını oku
                 try:
