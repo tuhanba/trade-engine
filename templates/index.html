@@ -626,7 +626,7 @@ async function loadStats(){
     document.getElementById("pRisk").textContent=(p.risk_pct||"—")+"%";
     const la=d.last_ai||{};
     document.getElementById("aiBox").textContent="⚡ AI Brain — "+(la.insight||p.ai_reason||"Parametreler aktif");
-    const sm={};(d.session_stats||[]).forEach(s=>{sm[s.session]=s});
+    const sm=d.session_stats||{};
     function fSess(key,wrId,dId){
       const s=sm[key];const w=document.getElementById(wrId);
       if(s&&s.total>0){w.textContent=s.win_rate.toFixed(0)+"%";w.style.color=s.win_rate>=45?"var(--green-br)":s.win_rate>=35?"var(--gold-br)":"var(--red-br)";document.getElementById(dId).textContent=s.wins+"W/"+(s.total-s.wins)+"L · "+(s.pnl>=0?"+":"")+s.pnl.toFixed(2)+"$"}
