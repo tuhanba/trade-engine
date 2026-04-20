@@ -31,7 +31,8 @@ def deploy(wf_path):
 
     if name in existing:
         wf_id = existing[name]
-        r = requests.put(f"{N8N_URL}/api/v1/workflows/{wf_id}", headers=headers, json=data)
+        payload = {k: v for k, v in data.items() if k != "id"}
+        r = requests.put(f"{N8N_URL}/api/v1/workflows/{wf_id}", headers=headers, json=payload)
         action = "Güncellendi"
     else:
         data.pop("id", None)
