@@ -222,6 +222,18 @@ body::before{
 .pos-c{color:var(--green-br)}.neg-c{color:var(--red-br)}.gld-c{color:var(--gold-br)}.dim-c{color:var(--text-muted)}
 .dur{font-family:var(--raj);font-size:10px;font-weight:500;color:var(--text-muted);background:rgba(201,168,76,0.05);padding:2px 8px;border-radius:var(--r)}
 
+/* HISTORY FILTERS */
+.hist-filters{display:flex;align-items:center;gap:8px;margin-bottom:13px;flex-wrap:wrap}
+.hf-input{flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:10px;padding:6px 11px;border-radius:var(--r);outline:none;transition:all var(--t)}
+.hf-input:focus{border-color:var(--gold-line);box-shadow:0 0 10px var(--gold-bg)}
+.hf-input::placeholder{color:var(--text-muted)}
+.hf-group{display:flex;gap:4px}
+.hf-btn{background:var(--surface);border:1px solid var(--border);color:var(--text-muted);font-family:var(--mono);font-size:9px;letter-spacing:0.10em;padding:5px 11px;border-radius:var(--r);cursor:pointer;transition:all var(--t)}
+.hf-btn:hover{border-color:var(--gold-line);color:var(--gold-br)}
+.hf-btn.active{background:var(--gold-bg);border-color:var(--gold-line);color:var(--gold-br);font-weight:700}
+.hf-btn.active.green{background:var(--green-dim);border-color:rgba(74,222,128,0.30);color:var(--green-br)}
+.hf-btn.active.red{background:var(--red-dim);border-color:var(--red-line);color:var(--red-br)}
+
 /* PAGINATION */
 .pager{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:15px;padding-top:13px;border-top:1px solid rgba(201,168,76,0.07)}
 .pb{width:29px;height:29px;background:var(--surface);border:1px solid var(--border);color:var(--text-muted);font-family:var(--mono);font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all var(--t);border-radius:var(--r)}
@@ -400,6 +412,19 @@ body::before{
       <div class="card-title">Trade Gecmisi</div>
       <div class="card-meta" id="histCount">&mdash; islem</div>
     </div>
+    <div class="hist-filters">
+      <input class="hf-input" id="hfSym" type="text" placeholder="Sembol ara… (BTC, ETH…)" oninput="hfApply()">
+      <div class="hf-group" id="hfDirGroup">
+        <button class="hf-btn active" onclick="hfDir(this,'')">TÜM</button>
+        <button class="hf-btn" onclick="hfDir(this,'LONG')">LONG</button>
+        <button class="hf-btn" onclick="hfDir(this,'SHORT')">SHORT</button>
+      </div>
+      <div class="hf-group" id="hfResGroup">
+        <button class="hf-btn active" onclick="hfRes(this,'')">TÜM</button>
+        <button class="hf-btn" onclick="hfRes(this,'WIN')">WIN</button>
+        <button class="hf-btn" onclick="hfRes(this,'LOSS')">LOSS</button>
+      </div>
+    </div>
     <table class="hist-table">
       <thead><tr>
         <th>Sembol</th><th>Yon</th><th>Giris</th><th>Cikis</th>
@@ -420,6 +445,7 @@ body::before{
 
 <script>
 const BASE="";let chart=null,curPage=1;const PER=10;
+let hfSymbol="",hfDirection="",hfResult="";
 const f=(v,d=4)=>v==null?"—":Number(v).toFixed(d);
 const fp=(v,d=3)=>v==null?"—":(Number(v)>=0?"+":"")+Number(v).toFixed(d)+"$";
 const fc=(v)=>{const n=Number(v);return n>0?"pos-c":n<0?"neg-c":"dim-c"};
@@ -588,11 +614,20 @@ async function loadPositions(){
 
 // HISTORY + FEED GUNCELLEME
 let knownTrades={};
+function hfDir(btn,val){hfDirection=val;document.querySelectorAll("#hfDirGroup .hf-btn").forEach(b=>{b.classList.remove("active","green","red")});btn.classList.add("active");loadHistory(1)}
+function hfRes(btn,val){hfResult=val;document.querySelectorAll("#hfResGroup .hf-btn").forEach(b=>{b.classList.remove("active","green","red")});btn.classList.add("active");if(val==="WIN")btn.classList.add("green");else if(val==="LOSS")btn.classList.add("red");loadHistory(1)}
+function hfApply(){hfSymbol=(document.getElementById("hfSym").value||"").trim();loadHistory(1)}
+
 async function loadHistory(page=1){
   try{
     curPage=page;
-    const j=await(await fetch(BASE+"/api/trades?page="+page+"&per_page="+PER)).json();if(!j.ok)return;
-    const trades=j.data||[],pag=j.pagination||{};
+    let url=BASE+"/api/trades?page="+page+"&limit="+PER;
+    if(hfSymbol)url+="&symbol="+encodeURIComponent(hfSymbol);
+    if(hfDirection)url+="&direction="+encodeURIComponent(hfDirection);
+    if(hfResult)url+="&result="+encodeURIComponent(hfResult);
+    const j=await(await fetch(url)).json();if(!j.ok)return;
+    const trades=j.data||[];
+    const pag={total:j.total_count||0,total_pages:j.total_pages||1,page:j.page||1};
     document.getElementById("histCount").textContent=(pag.total||0)+" islem";
     // Feed guncelle
     const nowTime=new Date().toUTCString().split(" ")[4].substring(0,5);

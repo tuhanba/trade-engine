@@ -112,15 +112,36 @@ def api_pnl_chart():
 @app.route("/api/trades")
 def api_trades():
     try:
-        page  = int(request.args.get("page", 1))
-        limit = int(request.args.get("limit", 10))
-        # Tüm kapanmış trade sayısını al
+        page      = int(request.args.get("page", 1))
+        limit     = int(request.args.get("limit", 10))
+        sym_q     = (request.args.get("symbol", "")).strip().upper()
+        dir_q     = (request.args.get("direction", "")).strip().upper()
+        result_q  = (request.args.get("result", "")).strip().upper()
+
         all_trades = get_trades(limit=10000, status="closed")
-        total_count = len(all_trades)
+
+        filtered = []
+        for t in all_trades:
+            if sym_q and sym_q not in (t.get("symbol") or "").upper():
+                continue
+            if dir_q and dir_q != (t.get("direction") or "").upper():
+                continue
+            if result_q:
+                pnl = t.get("pnl_usdt") or 0
+                st  = (t.get("status") or "").upper()
+                is_win = st == "WIN" or (st not in ("WIN","LOSS") and pnl > 0)
+                if result_q == "WIN" and not is_win:
+                    continue
+                if result_q == "LOSS" and is_win:
+                    continue
+            filtered.append(t)
+
+        total_count = len(filtered)
         total_pages = max(1, (total_count + limit - 1) // limit)
         page = max(1, min(page, total_pages))
         offset = (page - 1) * limit
-        trades = all_trades[offset:offset + limit]
+        trades = filtered[offset:offset + limit]
+
         result = []
         for t in trades:
             dur_str, dur_min = _fmt_duration(t.get("open_time"), t.get("close_time"))
