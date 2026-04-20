@@ -31,7 +31,7 @@ from binance.client import Client
 from binance.enums import *
 import pandas as pd
 import requests
-from database import init_db, save_trade, close_trade, get_current_params, get_bot_control
+from database import init_db, save_trade, close_trade, get_current_params, get_bot_control, log_rejection
 from live_tracker import LiveTracker, init_tracker_tables, save_analysis
 
 try:
@@ -787,12 +787,14 @@ def analyze(symbol, coin_info=None):
     # Asya seansında daha sıkı volatilite filtresi (gevşetildi)
     bb_min = 1.7 if asia_session else 1.3  # 2.0/1.5 → 1.7/1.3
     if bb_width < bb_min:
+        log_rejection(symbol, "bb_width_low", {"adx15": adx15, "bb_width": bb_width, "volume_m": volume_m, "price": c15})
         return null
 
     adx_threshold = 23 if asia_session else 20  # 25/22 → 23/20
     if volume_m < 20.0:
         adx_threshold = 25 if asia_session else 22  # 28/25 → 25/22
         if bb_width < (2.2 if asia_session else 1.8):  # 2.5/2.0 → 2.2/1.8
+            log_rejection(symbol, "low_vol_bb_low", {"adx15": adx15, "bb_width": bb_width, "volume_m": volume_m, "price": c15})
             return null
 
     trend_up15 = (
@@ -809,6 +811,7 @@ def analyze(symbol, coin_info=None):
     )
 
     if not trend_up15 and not trend_down15:
+        log_rejection(symbol, "no_15m_trend", {"adx15": adx15, "bb_width": bb_width, "volume_m": volume_m, "price": c15})
         return null
 
     # BTC Korelasyon Filtresi (PASIF — sadece log, müdahale yok)
@@ -856,6 +859,12 @@ def analyze(symbol, coin_info=None):
     )  # VWAP kaldırıldı
 
     if not bull5 and not bear5:
+        direction_15 = "LONG" if trend_up15 else "SHORT"
+        log_rejection(symbol, "no_5m_signal", {
+            "direction": direction_15, "adx15": adx15, "bb_width": bb_width,
+            "rsi5": rsi5, "atr5": atr5, "volume_m": volume_m,
+            "btc_trend": btc_trend, "trend_4h": trend_4h, "price": c5,
+        })
         return null
 
     # --- 1m GİRİŞ ---
@@ -895,8 +904,18 @@ def analyze(symbol, coin_info=None):
     funding = get_funding_rate(symbol)
     funding_favorable = 1
     if bull5 and funding > 0.001:   # Gevşetildi: 0.0005 → 0.001
+        log_rejection(symbol, "funding_unfavorable", {
+            "direction": "LONG", "adx15": adx15, "bb_width": bb_width,
+            "rsi5": rsi5, "atr5": atr5, "rv": rv, "funding": round(funding * 100, 4),
+            "volume_m": volume_m, "btc_trend": btc_trend, "trend_4h": trend_4h, "price": c1,
+        })
         return null
     if bear5 and funding < -0.001:  # Gevşetildi: -0.0005 → -0.001
+        log_rejection(symbol, "funding_unfavorable", {
+            "direction": "SHORT", "adx15": adx15, "bb_width": bb_width,
+            "rsi5": rsi5, "atr5": atr5, "rv": rv, "funding": round(funding * 100, 4),
+            "volume_m": volume_m, "btc_trend": btc_trend, "trend_4h": trend_4h, "price": c1,
+        })
         return null
 
     ob_ratio = get_order_book_ratio(symbol)
@@ -946,6 +965,13 @@ def analyze(symbol, coin_info=None):
         direction = "SHORT"
 
     if not direction:
+        direction_15 = "LONG" if bull5 else "SHORT"
+        log_rejection(symbol, "rsi1_out_of_range", {
+            "direction": direction_15, "adx15": adx15, "bb_width": bb_width,
+            "rsi5": rsi5, "rsi1": rsi1, "atr5": atr5, "rv": rv,
+            "funding": round(funding * 100, 4),
+            "volume_m": volume_m, "btc_trend": btc_trend, "trend_4h": trend_4h, "price": c1,
+        })
         return null
 
     return {

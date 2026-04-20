@@ -97,6 +97,29 @@ def init_db():
         updated_at  TEXT DEFAULT (datetime('now')),
         updated_by  TEXT DEFAULT 'system'
     );
+    CREATE TABLE IF NOT EXISTS rejected_signals (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol      TEXT,
+        direction   TEXT,
+        reason      TEXT,
+        adx15       REAL,
+        bb_width    REAL,
+        rsi5        REAL,
+        rsi1        REAL,
+        rv          REAL,
+        funding     REAL,
+        atr5        REAL,
+        volume_m    REAL,
+        btc_trend   TEXT,
+        trend_4h    TEXT,
+        price       REAL,
+        rejected_at TEXT DEFAULT (datetime('now')),
+        labeled     INTEGER DEFAULT 0,
+        outcome_5m  REAL,
+        outcome_15m REAL,
+        outcome_60m REAL,
+        would_win   INTEGER
+    );
     INSERT OR IGNORE INTO paper_account (id, paper_balance, updated_at)
     VALUES (1, 250.0, datetime('now'));
     INSERT OR IGNORE INTO bot_control (id, paused, finish_mode)
@@ -106,6 +129,35 @@ def init_db():
     """)
     conn.commit()
     conn.close()
+
+def log_rejection(symbol: str, reason: str, features: dict):
+    try:
+        conn = get_conn()
+        conn.execute("""
+        INSERT INTO rejected_signals
+          (symbol, direction, reason, adx15, bb_width, rsi5, rsi1, rv,
+           funding, atr5, volume_m, btc_trend, trend_4h, price)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            symbol,
+            features.get("direction"),
+            reason,
+            features.get("adx15"),
+            features.get("bb_width"),
+            features.get("rsi5"),
+            features.get("rsi1"),
+            features.get("rv"),
+            features.get("funding"),
+            features.get("atr5"),
+            features.get("volume_m"),
+            features.get("btc_trend"),
+            features.get("trend_4h"),
+            features.get("price"),
+        ))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 def get_bot_control():
     conn = get_conn()

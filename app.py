@@ -555,5 +555,22 @@ def api_run_counterfactual():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route("/api/run-rejection-labeling", methods=["POST"])
+def api_run_rejection_labeling():
+    try:
+        from rejection_labeler import run_rejection_labeling
+        result = run_rejection_labeling(30)
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/rejection-stats", methods=["GET"])
+def api_rejection_stats():
+    try:
+        from rejection_labeler import get_rejection_stats
+        return jsonify(get_rejection_stats())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
