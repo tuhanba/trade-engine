@@ -253,6 +253,25 @@ body::before{
 .card{animation:fadeUp .32s ease both}
 .sc{animation:fadeUp .26s ease both}
 .sc:nth-child(1){animation-delay:.00s}.sc:nth-child(2){animation-delay:.07s}.sc:nth-child(3){animation-delay:.14s}.sc:nth-child(4){animation-delay:.21s}
+
+/* TOAST */
+#toastWrap{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column-reverse;gap:8px;pointer-events:none}
+.toast{min-width:240px;max-width:310px;padding:12px 15px 16px;border-radius:var(--r);font-family:var(--mono);font-size:11px;display:flex;align-items:flex-start;gap:10px;pointer-events:all;cursor:pointer;position:relative;overflow:hidden;animation:toast-in .28s ease both;box-shadow:0 10px 40px rgba(0,0,0,0.70)}
+.toast.removing{animation:toast-out .25s ease both}
+@keyframes toast-in{from{opacity:0;transform:translateX(48px)}to{opacity:1;transform:translateX(0)}}
+@keyframes toast-out{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(48px)}}
+.toast-open{background:#07120d;border:1px solid rgba(74,222,128,0.28);border-left:3px solid var(--green-br)}
+.toast-win{background:#12100600;border:1px solid var(--gold-line);border-left:3px solid var(--gold-br);background:#121006}
+.toast-loss{background:#120808;border:1px solid var(--red-line);border-left:3px solid var(--red-br)}
+.toast-icon{font-size:15px;line-height:1;flex-shrink:0;margin-top:1px}
+.toast-open .toast-icon{color:var(--green-br)}.toast-win .toast-icon{color:var(--gold-br)}.toast-loss .toast-icon{color:var(--red-br)}
+.toast-body{flex:1;min-width:0}
+.toast-title{font-weight:700;margin-bottom:3px;letter-spacing:0.04em}
+.toast-open .toast-title{color:var(--green-br)}.toast-win .toast-title{color:var(--gold-br)}.toast-loss .toast-title{color:var(--red-br)}
+.toast-sub{color:var(--text-muted);font-size:9.5px;letter-spacing:0.05em}
+.toast-bar{position:absolute;bottom:0;left:0;height:2px;border-radius:0 0 2px 2px;animation:toast-bar linear forwards}
+.toast-open .toast-bar{background:var(--green-br)}.toast-win .toast-bar{background:var(--gold-br)}.toast-loss .toast-bar{background:var(--red-br)}
+@keyframes toast-bar{from{width:100%}to{width:0%}}
 </style>
 </head>
 <body>
@@ -485,6 +504,19 @@ function setTF(btn,tf){
   btn.classList.add("active");tvTF=tf;loadTV();
 }
 
+// TOAST
+function showToast(type,title,sub,dur=4200){
+  const wrap=document.getElementById("toastWrap");
+  const t=document.createElement("div");
+  t.className="toast toast-"+type;
+  const ic={open:"▲",win:"✓",loss:"✗"}[type]||"●";
+  t.innerHTML='<div class="toast-icon">'+ic+'</div><div class="toast-body"><div class="toast-title">'+title+'</div>'+(sub?'<div class="toast-sub">'+sub+'</div>':'')+'</div><div class="toast-bar" style="animation-duration:'+dur+'ms"></div>';
+  wrap.appendChild(t);
+  t.addEventListener("click",()=>_rmToast(t));
+  setTimeout(()=>_rmToast(t),dur);
+}
+function _rmToast(t){t.classList.add("removing");setTimeout(()=>t.remove(),280)}
+
 // CANLI AKIS
 const feedItems=[];
 function addFeedItem(time,type,text,pnl){
@@ -596,13 +628,24 @@ async function loadChart(){
 }
 
 // POSITIONS
-let lastTradeIds=new Set();
+let lastTradeIds=new Set();let _posFirst=true;
 async function loadPositions(){
   try{
     const j=await(await fetch(BASE+"/api/live")).json();if(!j.ok)return;
     const d=j.data,pos=d.live||[],ur=d.total_unrealized||0;
     const urEl=document.getElementById("unreal");
     urEl.textContent=(ur>=0?"+":"")+ur.toFixed(3)+" USDT";urEl.style.color=ur>=0?"var(--green-br)":"var(--red-br)";
+    if(!_posFirst){
+      pos.forEach(p=>{
+        const key=p.id||p.symbol;
+        if(!lastTradeIds.has(key)){
+          const dir=(p.direction||"").toUpperCase();
+          showToast("open",p.symbol+" "+dir+" AÇILDI","Giriş: "+f(p.entry,5)+" · x"+(p.leverage||"—"));
+        }
+      });
+    }
+    lastTradeIds=new Set(pos.map(p=>p.id||p.symbol));
+    _posFirst=false;
     const wrap=document.getElementById("posList");
     if(!pos.length){wrap.innerHTML="<div class="empty">— Acik Pozisyon Yok —</div>";return}
     wrap.innerHTML=pos.map(p=>{
@@ -638,6 +681,7 @@ async function loadHistory(page=1){
         const pnl=t.pnl_usdt||0;const st=(t.status||"").toUpperCase();
         const win=st==="WIN"||(pnl>0);
         addFeedItem(nowTime,win?"close-win":"close-loss","<b>"+(t.symbol||"")+"</b> "+(t.direction||"")+" kapandi",pnl);
+        showToast(win?"win":"loss",(t.symbol||"")+" "+(t.direction||"")+" KAPANDI",(pnl>=0?"+":"")+pnl.toFixed(3)+" USDT · "+(win?"KAR":"ZARAR"));
       }
     });
     const tb=document.getElementById("histBody");
@@ -669,5 +713,6 @@ setInterval(()=>{
   _rp.textContent="↻ "+_cd8+"s";
 },1000);
 </script>
+<div id="toastWrap"></div>
 </body>
 </html>
