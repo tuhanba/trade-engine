@@ -546,5 +546,14 @@ def api_bot_status():
            f"🔢 Toplam trade: {stats.get('total',0)}")
     return jsonify({"ok": True, "message": msg, "tg_token": tg_token, "chat_id": tg_chat, **ctrl})
 
+@app.route("/api/run-counterfactual", methods=["POST"])
+def api_run_counterfactual():
+    try:
+        from counterfactual_engine import run_counterfactual
+        result = run_counterfactual(30)
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)

@@ -31,11 +31,23 @@
     },
     {
       "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5000/api/run-counterfactual",
+        "options": {}
+      },
+      "id": "b1000001-0001-0001-0001-000000000005",
+      "name": "Counterfactual",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
         "conditions": {
           "options": {"caseSensitive": true},
           "conditions": [
             {
-              "leftValue": "={{ $json.labeled }}",
+              "leftValue": "={{ $('Label Trades').item.json.labeled }}",
               "rightValue": 0,
               "operator": {"type": "number", "operation": "gt"}
             }
@@ -46,7 +58,7 @@
       "name": "Yeni Label Var mi",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [680, 300]
+      "position": [900, 300]
     },
     {
       "parameters": {
@@ -54,14 +66,14 @@
         "url": "={{ 'https://api.telegram.org/bot' + $('Label Trades').item.json.tg_token + '/sendMessage' }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ chat_id: $('Label Trades').item.json.chat_id, text: '📊 <b>Outcome Labeling</b>\\n\\n' + $json.labeled + ' trade etiketlendi\\n' + ($json.results || []).join('\\n'), parse_mode: 'HTML' }) }}",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $('Label Trades').item.json.chat_id, text: '🔬 <b>Analiz Tamamlandı</b>\\n\\nLabeled: ' + $('Label Trades').item.json.labeled + '\\nCF: ' + ($json.analyzed||0) + '\\n\\n' + ($('Label Trades').item.json.results||[]).slice(0,5).join('\\n'), parse_mode: 'HTML' }) }}",
         "options": {}
       },
       "id": "b1000001-0001-0001-0001-000000000004",
       "name": "Telegram Rapor",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [900, 200]
+      "position": [1120, 200]
     }
   ],
   "connections": {
@@ -69,6 +81,9 @@
       "main": [[{"node": "Label Trades", "type": "main", "index": 0}]]
     },
     "Label Trades": {
+      "main": [[{"node": "Counterfactual", "type": "main", "index": 0}]]
+    },
+    "Counterfactual": {
       "main": [[{"node": "Yeni Label Var mi", "type": "main", "index": 0}]]
     },
     "Yeni Label Var mi": {
