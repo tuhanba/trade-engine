@@ -171,6 +171,21 @@ def get_filters(symbol):
     except Exception as e:
         raise Exception(f"get_filters hata: {e}")
 
+N8N_WEBHOOK = os.getenv("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/ax-signal")
+
+def notify_n8n(event_type, payload):
+    """AX sinyallerini n8n'e iletir — fire and forget."""
+    try:
+        data = {
+            "event": event_type,
+            "tg_token": TG_TOKEN,
+            "chat_id": TG_CHAT,
+            **payload
+        }
+        requests.post(N8N_WEBHOOK, json=data, timeout=2)
+    except:
+        pass
+
 def tg(msg):
     """Merkezi Telegram gönderici. Her zaman TelegramManager üzerinden gönderir."""
     if tg_manager:
@@ -1170,6 +1185,13 @@ def place_order(sig):
         f"💸 F: {sig['funding']}%\n\n"
         f"💰 Bakiye: ${get_balance():.2f}"
     )
+    notify_n8n("trade_open", {
+        "symbol": symbol, "direction": direction,
+        "entry": round(trade_entry, 6), "sl": trade_sl, "tp": trade_tp,
+        "leverage": leverage, "rr": rr, "ml_score": ml_score,
+        "adx": sig.get("adx15"), "balance": round(get_balance(), 2),
+        "message": f"⚡ <b>n8n</b> | {dir_emoji} <b>{symbol}</b> x{leverage}\nEntry: <code>{trade_entry:.6f}</code> | RR 1:{rr} | ML:{ml_score}"
+    })
     return True
 
 # =============================================================================
