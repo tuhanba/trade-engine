@@ -444,6 +444,14 @@ body::before{
         <div class="param"><div class="param-k">Risk %</div><div class="param-v" id="pRisk">&mdash;</div></div>
       </div>
       <div class="ai-box" id="aiBox">&#9889; AI Brain yukluyor...</div>
+      <div style="margin-top:10px;padding:10px 12px;background:rgba(96,165,250,0.05);border:1px solid rgba(96,165,250,0.15);border-radius:2px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-family:var(--orb);font-size:8px;letter-spacing:.1em;color:var(--text-muted)">ML CONFIDENCE</span>
+          <span id="mlStatus" style="font-family:var(--mono);font-size:9px;color:var(--text-muted)">yukluyor...</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap" id="mlBuckets"></div>
+        <div style="margin-top:6px;font-size:10px;color:var(--text-muted)" id="mlInfo">&mdash;</div>
+      </div>
     </div>
 
     <!-- AX CHAT -->
@@ -813,6 +821,31 @@ function renderPager(pag){
   wrap.innerHTML=h;
 }
 
+async function loadMLCalibration(){
+  try{
+    const j=await(await fetch(BASE+"/api/ml-calibration")).json();
+    if(!j.ok)return;
+    const s=j.status||{};const c=j.calibration||{};
+    const active=s.filter_active;
+    const auc=s.cv_accuracy||0;const n=s.n_samples||0;
+    document.getElementById("mlStatus").textContent=active?"AKTIF FILTRE":"PASIF (log)";
+    document.getElementById("mlStatus").style.color=active?"var(--green-br)":"var(--gold-br)";
+    const bkt=c.buckets||{};
+    const bktEl=document.getElementById("mlBuckets");
+    bktEl.innerHTML="";
+    const order=["0-20","20-40","40-60","60-80","80-100"];
+    order.forEach(k=>{
+      const b=bkt[k];if(!b||!b.total)return;
+      const wr=b.win_rate;
+      const col=wr>=55?"var(--green-br)":wr>=45?"var(--gold-br)":"var(--red-br)";
+      bktEl.innerHTML+='<div style="text-align:center;flex:1;min-width:40px"><div style="font-family:var(--mono);font-size:9px;color:var(--text-muted)">'+k+'</div><div style="font-family:var(--mono);font-size:12px;font-weight:600;color:'+col+'">'+(wr!=null?wr+"%":"—")+'</div><div style="font-size:9px;color:var(--text-muted)">'+b.total+'t</div></div>';
+    });
+    const needs=c.activation_needs||{};
+    const aucNeeds=needs.min_auc||0.57;const nNeeds=needs.min_samples||50;
+    document.getElementById("mlInfo").textContent='AUC: '+auc+' | Veri: '+n+' | Aktif icin: AUC≥'+aucNeeds+' + '+nNeeds+'t';
+  }catch(e){console.error(e)}
+}
+
 async function loadPortfolio(){
   try{
     const j=await(await fetch(BASE+"/api/portfolio")).json();
@@ -839,13 +872,13 @@ async function loadPortfolio(){
   }catch(e){console.error(e)}
 }
 
-async function init(){await Promise.all([loadStats(),loadChart(),loadPortfolio(),loadPositions(),loadHistory(curPage)])}
+async function init(){await Promise.all([loadStats(),loadChart(),loadPortfolio(),loadMLCalibration(),loadPositions(),loadHistory(curPage)])}
 init();
 let _cd8=8,_cd15=15;
 const _rp=document.getElementById("refreshPill");
 setInterval(()=>{
   _cd8--;_cd15--;
-  if(_cd8<=0){loadStats();loadPortfolio();loadPositions();_cd8=8;_rp.classList.add("pulse");setTimeout(()=>_rp.classList.remove("pulse"),700)}
+  if(_cd8<=0){loadStats();loadPortfolio();loadPositions();loadMLCalibration();_cd8=8;_rp.classList.add("pulse");setTimeout(()=>_rp.classList.remove("pulse"),700)}
   if(_cd15<=0){loadChart();loadHistory(curPage);_cd15=15}
   _rp.textContent="↻ "+_cd8+"s";
 },1000);

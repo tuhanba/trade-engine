@@ -555,6 +555,17 @@ def api_run_counterfactual():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route("/api/ml-calibration")
+def api_ml_calibration():
+    try:
+        from ml_signal_scorer import get_scorer
+        scorer = get_scorer()
+        calib  = scorer.calibrate()
+        status = scorer.get_status()
+        return jsonify({"ok": True, "calibration": calib, "status": status})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.route("/api/portfolio")
 def api_portfolio():
     try:

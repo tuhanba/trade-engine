@@ -28,8 +28,10 @@ logger = logging.getLogger(__name__)
 DB_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_model.pkl")
 
-MIN_TRAIN_SAMPLES = 30
-SCORE_THRESHOLD   = 52   # Daha düşük eşik — az veriyle de çalışsın
+MIN_TRAIN_SAMPLES    = 30
+SCORE_THRESHOLD      = 52    # Daha düşük eşik — az veriyle de çalışsın
+ACTIVATION_MIN_AUC   = 0.57  # Filtreyi aktif et için min ROC-AUC
+ACTIVATION_MIN_SAMP  = 50    # Filtreyi aktif et için min trade sayısı
 
 
 class MLSignalScorer:
@@ -378,14 +380,85 @@ class MLSignalScorer:
         except Exception as e:
             logger.debug(f"ML model yüklenemedi (ilk çalıştırma): {e}")
 
+    def is_calibrated(self) -> bool:
+        """Model edge kanıtladı mı? Evet ise filtreyi aktif et."""
+        return (
+            self.trained
+            and self.n_samples >= ACTIVATION_MIN_SAMP
+            and self.cv_accuracy >= ACTIVATION_MIN_AUC
+        )
+
+    def calibrate(self) -> dict:
+        """
+        Geçmiş pattern_memory verisi üzerinde ML skorunu retroaktif hesaplar,
+        skor aralıklarına göre gerçek win rate'i ölçer.
+        Dönüş: bucket win rates + summary
+        """
+        if not self.trained:
+            return {"error": "Model henüz eğitilmedi"}
+        try:
+            rows = self._load_training_data()
+            if not rows:
+                return {"error": "Veri yok"}
+            buckets = {
+                "0-20":  {"total": 0, "wins": 0},
+                "20-40": {"total": 0, "wins": 0},
+                "40-60": {"total": 0, "wins": 0},
+                "60-80": {"total": 0, "wins": 0},
+                "80-100":{"total": 0, "wins": 0},
+            }
+            for row in rows:
+                features = self._row_to_features(row)
+                label    = 1 if row[14] == "WIN" else 0
+                # Skoru hesapla
+                import numpy as np
+                X = np.array([features])
+                X_s = self.scaler.transform(X)
+                proba = self.model.predict_proba(X_s)[0]
+                win_p = proba[1] if len(proba) > 1 else 0.5
+                score = int(round(win_p * 100))
+                key = ("0-20" if score < 20 else
+                       "20-40" if score < 40 else
+                       "40-60" if score < 60 else
+                       "60-80" if score < 80 else "80-100")
+                buckets[key]["total"] += 1
+                buckets[key]["wins"]  += label
+            result = {}
+            for k, v in buckets.items():
+                t = v["total"]
+                w = v["wins"]
+                result[k] = {
+                    "total":    t,
+                    "wins":     w,
+                    "win_rate": round(w / t * 100, 1) if t else None,
+                }
+            # Edge test: high-score bucket win_rate > low-score bucket?
+            hi = result["60-80"]["win_rate"] or result["80-100"]["win_rate"] or 0
+            lo = result["0-20"]["win_rate"] or result["20-40"]["win_rate"] or 100
+            edge_confirmed = bool(hi is not None and lo is not None and hi > lo + 5)
+            return {
+                "buckets":       result,
+                "edge_confirmed": edge_confirmed,
+                "n_samples":     len(rows),
+                "cv_auc":        round(self.cv_accuracy, 3),
+                "filter_active": self.is_calibrated(),
+                "activation_needs": {
+                    "min_auc":     ACTIVATION_MIN_AUC,
+                    "min_samples": ACTIVATION_MIN_SAMP,
+                },
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
     def get_status(self) -> dict:
         return {
-            "trained":     self.trained,
-            "n_samples":   self.n_samples,
-            "last_train":  str(self.last_train) if self.last_train else None,
-            "threshold":   SCORE_THRESHOLD,
-            "cv_accuracy": round(self.cv_accuracy, 3),
-            "top_features": sorted(self.feature_imp.items(), key=lambda x: -x[1])[:5] if self.feature_imp else [],
+            "trained":        self.trained,
+            "n_samples":      self.n_samples,
+            "last_train":     str(self.last_train) if self.last_train else None,
+            "threshold":      SCORE_THRESHOLD,
+            "cv_accuracy":    round(self.cv_accuracy, 3),
+            "filter_active":  self.is_calibrated(),
+            "top_features":   sorted(self.feature_imp.items(), key=lambda x: -x[1])[:5] if self.feature_imp else [],
         }
 
 

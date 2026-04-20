@@ -1053,15 +1053,22 @@ def place_order(sig):
     if atr <= 0:
         return False
 
-    # ML SİNYAL SKORU (PASIF — veri biriktirme aşamasında engelleme yok)
-    # Yeterli veri biriktikten sonra aktif edilecek.
+    # ML SİNYAL SKORU — kalibre edilmişse aktif filtre, yoksa pasif log
     if ML_SCORER_AVAILABLE:
         ml_ok, ml_score = ml_should_trade(sig)
         sig["ml_score"] = ml_score
-        if not ml_ok:
-            logger.info(f"{symbol} {direction} ML düşük skor (skor={ml_score}) — pasif, devam ediliyor")
+        scorer = get_scorer()
+        if scorer.is_calibrated():
+            if not ml_ok:
+                logger.info(f"{symbol} {direction} ML FİLTRE — düşük skor {ml_score}/100 → trade reddedildi")
+                return False
+            else:
+                logger.info(f"{symbol} {direction} ML aktif skor: {ml_score}/100 ✓")
         else:
-            logger.info(f"{symbol} {direction} ML skoru: {ml_score}/100")
+            if not ml_ok:
+                logger.info(f"{symbol} {direction} ML düşük skor {ml_score}/100 — henüz pasif (n={scorer.n_samples})")
+            else:
+                logger.info(f"{symbol} {direction} ML skor: {ml_score}/100")
     else:
         sig["ml_score"] = 50
 
