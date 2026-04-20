@@ -29,13 +29,15 @@ def deploy(wf_path):
     name = data.get("name", wf_path.stem)
     existing = get_existing()
 
+    READONLY = {"id", "active"}
     if name in existing:
         wf_id = existing[name]
-        payload = {k: v for k, v in data.items() if k != "id"}
+        payload = {k: v for k, v in data.items() if k not in READONLY}
         r = requests.put(f"{N8N_URL}/api/v1/workflows/{wf_id}", headers=headers, json=payload)
         action = "Güncellendi"
     else:
-        data.pop("id", None)
+        for k in READONLY:
+            data.pop(k, None)
         r = requests.post(f"{N8N_URL}/api/v1/workflows", headers=headers, json=data)
         action = "Oluşturuldu"
         if r.status_code in (200, 201):
