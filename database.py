@@ -90,11 +90,40 @@ def init_db():
         paper_balance REAL DEFAULT 250.0,
         updated_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS bot_control (
+        id          INTEGER PRIMARY KEY DEFAULT 1,
+        paused      INTEGER DEFAULT 0,
+        finish_mode INTEGER DEFAULT 0,
+        updated_at  TEXT DEFAULT (datetime('now')),
+        updated_by  TEXT DEFAULT 'system'
+    );
     INSERT OR IGNORE INTO paper_account (id, paper_balance, updated_at)
     VALUES (1, 250.0, datetime('now'));
+    INSERT OR IGNORE INTO bot_control (id, paused, finish_mode)
+    VALUES (1, 0, 0);
     INSERT OR IGNORE INTO params (version,updated_at,ai_reason)
     VALUES (1,datetime('now'),'Initial params');
     """)
+    conn.commit()
+    conn.close()
+
+def get_bot_control():
+    conn = get_conn()
+    row = conn.execute("SELECT paused, finish_mode FROM bot_control WHERE id=1").fetchone()
+    conn.close()
+    return {"paused": bool(row[0]), "finish_mode": bool(row[1])} if row else {"paused": False, "finish_mode": False}
+
+def set_bot_control(paused=None, finish_mode=None, updated_by="system"):
+    conn = get_conn()
+    if paused is not None and finish_mode is not None:
+        conn.execute("UPDATE bot_control SET paused=?, finish_mode=?, updated_at=datetime('now'), updated_by=? WHERE id=1",
+                     (int(paused), int(finish_mode), updated_by))
+    elif paused is not None:
+        conn.execute("UPDATE bot_control SET paused=?, updated_at=datetime('now'), updated_by=? WHERE id=1",
+                     (int(paused), updated_by))
+    elif finish_mode is not None:
+        conn.execute("UPDATE bot_control SET finish_mode=?, updated_at=datetime('now'), updated_by=? WHERE id=1",
+                     (int(finish_mode), updated_by))
     conn.commit()
     conn.close()
 

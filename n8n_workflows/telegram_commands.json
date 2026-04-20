@@ -1,0 +1,141 @@
+{
+  "id": "3",
+  "name": "Telegram Komut Merkezi",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "id": "c1000001-0001-0001-0001-000000000001",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "credentials": {
+        "telegramApi": {"id": "1", "name": "AX Telegram Bot"}
+      }
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ ($json.message.text || '').split(' ')[0].toLowerCase() }}",
+        "rules": {
+          "rules": [
+            {"value2": "/pause",  "output": 0},
+            {"value2": "/dur",    "output": 0},
+            {"value2": "/devam",  "output": 1},
+            {"value2": "/resume", "output": 1},
+            {"value2": "/bitir",  "output": 2},
+            {"value2": "/finish", "output": 2},
+            {"value2": "/status", "output": 3},
+            {"value2": "/durum",  "output": 3},
+            {"value2": "/bakiye", "output": 4},
+            {"value2": "/balance","output": 4}
+          ]
+        },
+        "fallbackOutput": 5
+      },
+      "id": "c1000001-0001-0001-0001-000000000002",
+      "name": "Komut Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5000/api/bot/pause",
+        "options": {}
+      },
+      "id": "c1000001-0001-0001-0001-000000000003",
+      "name": "Pause",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5000/api/bot/resume",
+        "options": {}
+      },
+      "id": "c1000001-0001-0001-0001-000000000004",
+      "name": "Resume",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5000/api/bot/finish",
+        "options": {}
+      },
+      "id": "c1000001-0001-0001-0001-000000000005",
+      "name": "Finish",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 340]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:5000/api/bot/status",
+        "options": {}
+      },
+      "id": "c1000001-0001-0001-0001-000000000006",
+      "name": "Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 460]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:5000/api/balance",
+        "options": {}
+      },
+      "id": "c1000001-0001-0001-0001-000000000007",
+      "name": "Balance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 580]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.message || ('✅ ' + ($json.status || 'ok')) }}",
+        "additionalFields": {"parse_mode": "HTML"}
+      },
+      "id": "c1000001-0001-0001-0001-000000000008",
+      "name": "Yanıt Gönder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [940, 340],
+      "credentials": {
+        "telegramApi": {"id": "1", "name": "AX Telegram Bot"}
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [[{"node": "Komut Router", "type": "main", "index": 0}]]
+    },
+    "Komut Router": {
+      "main": [
+        [{"node": "Pause",   "type": "main", "index": 0}],
+        [{"node": "Resume",  "type": "main", "index": 0}],
+        [{"node": "Finish",  "type": "main", "index": 0}],
+        [{"node": "Status",  "type": "main", "index": 0}],
+        [{"node": "Balance", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Pause":   {"main": [[{"node": "Yanıt Gönder", "type": "main", "index": 0}]]},
+    "Resume":  {"main": [[{"node": "Yanıt Gönder", "type": "main", "index": 0}]]},
+    "Finish":  {"main": [[{"node": "Yanıt Gönder", "type": "main", "index": 0}]]},
+    "Status":  {"main": [[{"node": "Yanıt Gönder", "type": "main", "index": 0}]]},
+    "Balance": {"main": [[{"node": "Yanıt Gönder", "type": "main", "index": 0}]]}
+  },
+  "active": false,
+  "settings": {"executionOrder": "v1"}
+}

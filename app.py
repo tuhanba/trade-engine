@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
-from database import init_db, get_trades, get_stats, get_current_params
+from database import init_db, get_trades, get_stats, get_current_params, get_bot_control, set_bot_control
 from binance.client import Client
 
 load_dotenv()
@@ -499,6 +499,49 @@ def api_outcome_stats():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+
+@app.route("/api/bot/pause", methods=["POST"])
+def api_bot_pause():
+    set_bot_control(paused=True, updated_by="n8n")
+    return jsonify({"ok": True, "status": "paused"})
+
+@app.route("/api/bot/resume", methods=["POST"])
+def api_bot_resume():
+    set_bot_control(paused=False, finish_mode=False, updated_by="n8n")
+    return jsonify({"ok": True, "status": "active"})
+
+@app.route("/api/bot/finish", methods=["POST"])
+def api_bot_finish():
+    set_bot_control(finish_mode=True, updated_by="n8n")
+    return jsonify({"ok": True, "status": "finish_mode"})
+
+@app.route("/api/bot/status")
+def api_bot_status():
+    ctrl = get_bot_control()
+    stats = get_stats()
+    bal = 0
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("SELECT paper_balance FROM paper_account WHERE id=1").fetchone()
+        conn.close()
+        bal = round(row[0], 2) if row else 0
+    except: pass
+    open_count = 0
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        open_count = conn.execute("SELECT COUNT(*) FROM trades WHERE status='OPEN'").fetchone()[0]
+        conn.close()
+    except: pass
+    mode = "⏸ DURAKLATILDI" if ctrl["paused"] else ("🏁 BİTİRME MODU" if ctrl["finish_mode"] else "✅ AKTİF")
+    tg_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    tg_chat  = os.getenv("TELEGRAM_CHAT_ID", "")
+    msg = (f"📊 <b>AX Bot Durumu</b>\n\n"
+           f"⚡ Mod: {mode}\n"
+           f"💰 Bakiye: <code>${bal}</code>\n"
+           f"📈 Açık trade: {open_count}\n"
+           f"📉 Win Rate: {stats.get('win_rate',0):.1f}%\n"
+           f"🔢 Toplam trade: {stats.get('total',0)}")
+    return jsonify({"ok": True, "message": msg, "tg_token": tg_token, "chat_id": tg_chat, **ctrl})
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)

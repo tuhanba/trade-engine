@@ -31,7 +31,7 @@ from binance.client import Client
 from binance.enums import *
 import pandas as pd
 import requests
-from database import init_db, save_trade, close_trade, get_current_params
+from database import init_db, save_trade, close_trade, get_current_params, get_bot_control
 from live_tracker import LiveTracker, init_tracker_tables, save_analysis
 
 try:
@@ -1624,6 +1624,15 @@ def main():
 
             if now - last_scan_time >= SCAN_INTERVAL:
                 last_scan_time = now
+
+                # n8n/Flask üzerinden gelen kontrol komutlarını oku
+                try:
+                    ctrl = get_bot_control()
+                    if tg_manager:
+                        tg_manager._paused      = ctrl["paused"]
+                        tg_manager._finish_mode = ctrl["finish_mode"]
+                except Exception:
+                    pass
 
                 active_cb, remaining_cb = is_circuit_breaker_active()
                 if active_cb:
