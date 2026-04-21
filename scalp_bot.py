@@ -54,6 +54,9 @@ except ImportError:
 
 try:
     from telegram_manager import TelegramManager
+    TG_MANAGER_AVAILABLE = True
+except ImportError:
+    TG_MANAGER_AVAILABLE = False
 try:
     from n8n_bridge import (register_bot, notify_trade_open,
                              notify_trade_close, notify_ai_report, notify_alert)
@@ -64,9 +67,6 @@ except ImportError:
     def notify_trade_close(*a, **kw): pass
     def notify_ai_report(*a, **kw): pass
     def notify_alert(*a, **kw): pass
-    TG_MANAGER_AVAILABLE = True
-except ImportError:
-    TG_MANAGER_AVAILABLE = False
 
 load_dotenv()
 
