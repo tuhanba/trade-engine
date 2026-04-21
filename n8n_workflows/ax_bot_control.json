@@ -12,7 +12,10 @@
       "name": "Webhook: Kontrol",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "position": [240, 300]
+      "position": [
+        240,
+        300
+      ]
     },
     {
       "parameters": {
@@ -22,14 +25,22 @@
       "name": "Aksiyon Yönlendir",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [480, 300]
+      "position": [
+        480,
+        300
+      ]
     },
     {
       "parameters": {
         "url": "={{ $json.url }}",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{"name": "X-AX-Secret", "value": "={{ $json.secret }}"}]
+          "parameters": [
+            {
+              "name": "X-AX-Secret",
+              "value": "={{ $json.secret }}"
+            }
+          ]
         },
         "options": {}
       },
@@ -37,17 +48,38 @@
       "name": "Bot API Çağır",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [720, 300]
+      "position": [
+        720,
+        300
+      ]
     }
   ],
   "connections": {
     "Webhook: Kontrol": {
-      "main": [[{"node": "Aksiyon Yönlendir", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Aksiyon Yönlendir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Aksiyon Yönlendir": {
-      "main": [[{"node": "Bot API Çağır", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Bot API Çağır",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
-  "settings": {}
+  "settings": {},
+  "id": "ac08756c",
+  "versionId": "8ef3dd97-98c9-4687-a6bf-02f3836315fc"
 }
