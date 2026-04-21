@@ -79,7 +79,7 @@ TG_CHAT        = os.getenv("TELEGRAM_CHAT_ID", "")
 # KONFIGÜRASYON
 # =============================================================================
 PAPER_MODE               = True
-ML_SCORE_THRESHOLD       = 50   # Bu skorun altındaki sinyaller reddedilir
+ML_SCORE_THRESHOLD       = 40   # Analiz: 40 puan altı sinyaller engellenir
 ML_RETRAIN_INTERVAL      = 50   # Her 50 kapanışta bir modeli yeniden eğit
 MAX_OPEN                 = 10  # Veri biriktirme: 3 → 10
 SCAN_INTERVAL            = 20
@@ -95,6 +95,8 @@ BLACKLIST = {
     "EURUSDT","PAXGUSDT","XAUTUSDT","XUSDUSDT","USDEUSDT",
     "TUSDUSDT","BUSDUSDT","USDTUSDT","WBTCUSDT","STOUSDT",
     "OMNIUSDT","RADUSDT","CTSIUSDT","BTCUSDT","ETHUSDT",
+    # Analiz: düşük WR, sürekli kayıp
+    "AAVEUSDT","ADAUSDT","PENGUUSDT","GUNUSDT","ZECUSDT","ENAUSDT",
 }
 
 logging.basicConfig(
@@ -1023,12 +1025,19 @@ def place_order(sig):
     if atr <= 0:
         return False
 
-    # ML SİNYAL SKORU — 30 puan altı engellenir
+    # SAAT FİLTRESİ — analiz: 11, 12, 14 UTC kötü saatler
+    now_hour = datetime.now(timezone.utc).hour
+    BAD_HOURS = {11, 12, 14}
+    if now_hour in BAD_HOURS:
+        logger.info(f"{symbol} {direction} Saat filtresi: {now_hour}:00 UTC kötü saat — trade engellendi")
+        return False
+
+    # ML SİNYAL SKORU — 40 puan altı engellenir
     if ML_SCORER_AVAILABLE:
         ml_ok, ml_score = ml_should_trade(sig)
         sig["ml_score"] = ml_score
         if not ml_ok:
-            logger.info(f"{symbol} {direction} ML filtre: skor={ml_score} < 30 — trade engellendi")
+            logger.info(f"{symbol} {direction} ML filtre: skor={ml_score} < 40 — trade engellendi")
             return False
         else:
             logger.info(f"{symbol} {direction} ML skoru: {ml_score}/100 ✓")
