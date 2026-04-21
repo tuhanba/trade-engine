@@ -119,6 +119,8 @@ class TelegramManager:
         self._offset    = 0
         self._poll_thread = None
         self._handlers  = {}   # komut → callable
+        self._get_balance_fn = None
+        self._get_open_trades_fn = None
 
     # ── public API ──────────────────────────────────────────────
 
@@ -135,7 +137,12 @@ class TelegramManager:
         """Komut handler kaydet. handler(args: str) şeklinde çağrılır."""
         self._handlers[command.lstrip("/")] = handler
 
-    def start(self):
+    def start(self, get_balance_fn=None, get_open_trades_fn=None):
+        """Polling thread'i başlat. Opsiyonel callback'ler kaydedilir."""
+        if get_balance_fn:
+            self._get_balance_fn = get_balance_fn
+        if get_open_trades_fn:
+            self._get_open_trades_fn = get_open_trades_fn
         if self._poll_thread and self._poll_thread.is_alive():
             return
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
@@ -144,6 +151,19 @@ class TelegramManager:
 
     def stop(self):
         pass   # daemon thread otomatik kapanır
+
+    def send_startup(self, balance, params, symbol_count, ai_available):
+        """Bot başlangıç mesajı gönder."""
+        ai_str = "✅ Aktif" if ai_available else "❌ Pasif"
+        self.send(
+            f"🟢 <b>AURVEX BOT AKTİF</b>\n"
+            f"⏰ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}\n\n"
+            f"💰 Bakiye: ${balance:.2f}\n"
+            f"🕐 7/24 tarama aktif\n"
+            f"✅ {symbol_count} sembol\n"
+            f"🧠 AI Brain: {ai_str}\n"
+            f"⛔ Devre Kesici: 5 kayıp = 120dk"
+        )
 
     # ── polling ─────────────────────────────────────────────────
 
@@ -243,9 +263,12 @@ class TelegramManager:
 
     def _cmd_balance(self):
         try:
-            from database import get_paper_account
-            acc = get_paper_account()
-            bal = acc.get("balance", 0) if acc else 0
+            if self._get_balance_fn:
+                bal = self._get_balance_fn()
+            else:
+                from database import get_paper_account
+                acc = get_paper_account()
+                bal = acc.get("balance", 0) if acc else 0
             self.send(f"💰 <b>Bakiye</b>: ${bal:.2f}")
         except Exception as e:
             self.send(f"Bakiye alınamadı: {e}")
