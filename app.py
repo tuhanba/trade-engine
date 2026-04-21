@@ -388,5 +388,57 @@ def api_logs():
 
 
 
+# ── /api/coin_library ─────────────────────────────────────────────────────────────────────────
+@app.route("/api/coin_library")
+def api_coin_library():
+    """Coin Library: tüm coin profilleri ve istatistikleri"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        # coin_params tablosu yoksa boş dön
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='coin_params'")
+        if not c.fetchone():
+            conn.close()
+            return jsonify({"ok": True, "data": [], "note": "coin_params tablosu henüz oluşturulmadı"})
+        c.execute("""
+            SELECT symbol, profile, total_trades, wins, losses,
+                   ROUND(win_rate*100, 1) as win_rate_pct,
+                   ROUND(avg_pnl, 4) as avg_pnl,
+                   sl_atr_mult, tp_atr_mult, risk_pct, max_leverage,
+                   enabled, last_updated, notes
+            FROM coin_params
+            ORDER BY total_trades DESC, symbol ASC
+        """)
+        rows = [dict(r) for r in c.fetchall()]
+        conn.close()
+        return jsonify({"ok": True, "data": rows, "total": len(rows)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/coin_library/<symbol>", methods=["POST"])
+def api_coin_library_update(symbol):
+    """Coin profilini güncelle (enable/disable, profil değiştir)"""
+    try:
+        data = request.get_json() or {}
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        allowed = ["enabled", "profile", "sl_atr_mult", "tp_atr_mult",
+                   "risk_pct", "max_leverage", "notes"]
+        updates = {k: v for k, v in data.items() if k in allowed}
+        if not updates:
+            conn.close()
+            return jsonify({"ok": False, "error": "Güncellenecek alan yok"}), 400
+        set_clause = ", ".join(f"{k}=?" for k in updates)
+        values = list(updates.values()) + [symbol]
+        c.execute(f"UPDATE coin_params SET {set_clause} WHERE symbol=?", values)
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "symbol": symbol, "updated": updates})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)

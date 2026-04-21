@@ -68,6 +68,19 @@ except ImportError:
     def notify_ai_report(*a, **kw): pass
     def notify_alert(*a, **kw): pass
 
+try:
+    from coin_library import (
+        init_coin_library, get_coin_params,
+        update_coin_stats, is_coin_enabled
+    )
+    COIN_LIBRARY_AVAILABLE = True
+except ImportError:
+    COIN_LIBRARY_AVAILABLE = False
+    def init_coin_library(): pass
+    def get_coin_params(sym): return {}
+    def update_coin_stats(sym, result, pnl): pass
+    def is_coin_enabled(sym): return True
+
 load_dotenv()
 
 BINANCE_KEY    = os.getenv("BINANCE_API_KEY", "")
@@ -754,6 +767,10 @@ def analyze(symbol, coin_info=None):
     null = {"direction": None, "symbol": symbol}
     p    = get_params()
 
+    # Coin Library: bu coin aktif mi?
+    if COIN_LIBRARY_AVAILABLE and not is_coin_enabled(symbol):
+        return null
+
     # Devre kesici kontrolü
     active, remaining = is_circuit_breaker_active()
     if active:
@@ -1047,13 +1064,22 @@ def place_order(sig):
     tp_mult      = get_dynamic_tp_mult(atr, price)
     risk_pct     = get_dynamic_risk_pct(p["risk_pct"])
 
-    # TEHLİKELİ COİN PROFİLİ — geniş SL, küçük pozisyon, uzak TP
+    # COİN LIBRARY — coin-bazlı parametre profili
+    coin_p = get_coin_params(symbol) if COIN_LIBRARY_AVAILABLE else {}
     is_dangerous = symbol in DANGEROUS_COINS
-    if is_dangerous:
-        sl_atr_mult = 1.8          # Normal 1.2-1.3 yerine geniş SL
-        tp_mult     = max(tp_mult, 2.5)  # Daha uzak TP
-        risk_pct    = min(risk_pct, 0.5) # Max %0.5 risk (küçük lot)
-        logger.info(f"{symbol} TEHLİKELİ PROFİL — SL=1.8x ATR, risk=%0.5, TP=2.5x")
+    if coin_p.get("sl_atr_mult"):
+        # Coin library'de kayıt var — coin-bazlı parametreler kullan
+        sl_atr_mult = coin_p["sl_atr_mult"]
+        tp_mult     = max(tp_mult, coin_p.get("tp_atr_mult", tp_mult))
+        risk_pct    = min(risk_pct, coin_p.get("risk_pct", risk_pct))
+        leverage    = min(leverage, coin_p.get("max_leverage", leverage))
+        logger.info(f"{symbol} CoinLib profil={coin_p.get('profile','?')} SL={sl_atr_mult} TP={tp_mult:.1f} risk={risk_pct:.2f}%")
+    elif is_dangerous:
+        # Fallback: eski DANGEROUS_COINS mantığı
+        sl_atr_mult = 1.8
+        tp_mult     = max(tp_mult, 2.5)
+        risk_pct    = min(risk_pct, 0.5)
+        logger.info(f"{symbol} TEHLİKELİ PROFİL (fallback) — SL=1.8x ATR, risk=0.5%")
     else:
         sl_atr_mult = p["sl_atr_mult"]
 
@@ -1472,6 +1498,10 @@ def monitor_trades():
                 hold_minutes=round(hold_minutes, 1)
             )
 
+            # Coin Library istatistik güncelle
+            if COIN_LIBRARY_AVAILABLE:
+                update_coin_stats(symbol, result, net_pnl)
+
             if result == "WIN":
                 consecutive_losses = 0
             else:
@@ -1577,6 +1607,10 @@ def main():
     init_tracker_tables()
     if PAPER_MODE:
         init_paper_account()
+    # Coin Library başlat
+    if COIN_LIBRARY_AVAILABLE:
+        init_coin_library()
+        logger.info("[CoinLibrary] Coin-bazlı parametre library aktif")
     load_futures_symbols()
     if PAPER_MODE:
         sync_open_paper_trades()
