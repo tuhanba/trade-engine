@@ -122,6 +122,14 @@ class TelegramManager:
         self._get_balance_fn = None
         self._get_open_trades_fn = None
 
+    @property
+    def is_paused(self):
+        return self.paused
+
+    @property
+    def is_finish_mode(self):
+        return self.finish_mode
+
     # ── public API ──────────────────────────────────────────────
 
     def send(self, text, parse_mode="HTML"):
@@ -151,6 +159,14 @@ class TelegramManager:
 
     def stop(self):
         pass   # daemon thread otomatik kapanır
+
+    def notify_finish_complete(self, balance):
+        """Finish modu tamamlandı, tüm trade'ler kapandı."""
+        self.send(
+            f"🏁 <b>Finish Modu Tamamlandı</b>\n"
+            f"💰 Son Bakiye: ${balance:.2f}\n"
+            f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+        )
 
     def send_startup(self, balance, params, symbol_count, ai_available):
         """Bot başlangıç mesajı gönder."""
