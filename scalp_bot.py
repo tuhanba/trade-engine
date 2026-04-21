@@ -1012,15 +1012,15 @@ def place_order(sig):
     if atr <= 0:
         return False
 
-    # ML SİNYAL SKORU (PASIF — veri biriktirme aşamasında engelleme yok)
-    # Yeterli veri biriktikten sonra aktif edilecek.
+    # ML SİNYAL SKORU — 30 puan altı engellenir
     if ML_SCORER_AVAILABLE:
         ml_ok, ml_score = ml_should_trade(sig)
         sig["ml_score"] = ml_score
         if not ml_ok:
-            logger.info(f"{symbol} {direction} ML düşük skor (skor={ml_score}) — pasif, devam ediliyor")
+            logger.info(f"{symbol} {direction} ML filtre: skor={ml_score} < 30 — trade engellendi")
+            return False
         else:
-            logger.info(f"{symbol} {direction} ML skoru: {ml_score}/100")
+            logger.info(f"{symbol} {direction} ML skoru: {ml_score}/100 ✓")
     else:
         sig["ml_score"] = 50
 
