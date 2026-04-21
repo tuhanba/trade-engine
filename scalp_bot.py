@@ -79,7 +79,7 @@ TG_CHAT        = os.getenv("TELEGRAM_CHAT_ID", "")
 # KONFIGÜRASYON
 # =============================================================================
 PAPER_MODE               = True
-ML_SCORE_THRESHOLD       = 40   # Analiz: 40 puan altı sinyaller engellenir
+ML_SCORE_THRESHOLD       = 35   # Analiz: 35 puan altı sinyaller engellenir
 ML_RETRAIN_INTERVAL      = 50   # Her 50 kapanışta bir modeli yeniden eğit
 MAX_OPEN                 = 10  # Veri biriktirme: 3 → 10
 SCAN_INTERVAL            = 20
@@ -95,8 +95,12 @@ BLACKLIST = {
     "EURUSDT","PAXGUSDT","XAUTUSDT","XUSDUSDT","USDEUSDT",
     "TUSDUSDT","BUSDUSDT","USDTUSDT","WBTCUSDT","STOUSDT",
     "OMNIUSDT","RADUSDT","CTSIUSDT","BTCUSDT","ETHUSDT",
-    # Analiz: düşük WR, sürekli kayıp
-    "AAVEUSDT","ADAUSDT","PENGUUSDT","GUNUSDT","ZECUSDT","ENAUSDT",
+}
+
+# Tehlikeli coinler: blacklist değil, özel profil (geniş SL, küçük lot, uzak TP)
+DANGEROUS_COINS = {
+    "AAVEUSDT", "ADAUSDT", "PENGUUSDT", "GUNUSDT",
+    "ZECUSDT", "ENAUSDT", "TONUSDT", "HIGHUSDT",
 }
 
 logging.basicConfig(
@@ -1025,19 +1029,12 @@ def place_order(sig):
     if atr <= 0:
         return False
 
-    # SAAT FİLTRESİ — analiz: 11, 12, 14 UTC kötü saatler
-    now_hour = datetime.now(timezone.utc).hour
-    BAD_HOURS = {11, 12, 14}
-    if now_hour in BAD_HOURS:
-        logger.info(f"{symbol} {direction} Saat filtresi: {now_hour}:00 UTC kötü saat — trade engellendi")
-        return False
-
-    # ML SİNYAL SKORU — 40 puan altı engellenir
+    # ML SİNYAL SKORU — 35 puan altı engellenir
     if ML_SCORER_AVAILABLE:
         ml_ok, ml_score = ml_should_trade(sig)
         sig["ml_score"] = ml_score
         if not ml_ok:
-            logger.info(f"{symbol} {direction} ML filtre: skor={ml_score} < 40 — trade engellendi")
+            logger.info(f"{symbol} {direction} ML filtre: skor={ml_score} < 35 — trade engellendi")
             return False
         else:
             logger.info(f"{symbol} {direction} ML skoru: {ml_score}/100 ✓")
@@ -1050,7 +1047,17 @@ def place_order(sig):
     tp_mult      = get_dynamic_tp_mult(atr, price)
     risk_pct     = get_dynamic_risk_pct(p["risk_pct"])
 
-    sl_dist = atr * p["sl_atr_mult"]
+    # TEHLİKELİ COİN PROFİLİ — geniş SL, küçük pozisyon, uzak TP
+    is_dangerous = symbol in DANGEROUS_COINS
+    if is_dangerous:
+        sl_atr_mult = 1.8          # Normal 1.2-1.3 yerine geniş SL
+        tp_mult     = max(tp_mult, 2.5)  # Daha uzak TP
+        risk_pct    = min(risk_pct, 0.5) # Max %0.5 risk (küçük lot)
+        logger.info(f"{symbol} TEHLİKELİ PROFİL — SL=1.8x ATR, risk=%0.5, TP=2.5x")
+    else:
+        sl_atr_mult = p["sl_atr_mult"]
+
+    sl_dist = atr * sl_atr_mult
     tp_dist = atr * tp_mult
 
     if direction == "LONG":
