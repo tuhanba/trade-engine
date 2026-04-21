@@ -520,7 +520,7 @@ async function loadStats(){
     document.getElementById("stRR").textContent="avg RR "+f(d.avg_rr,2);
     document.getElementById("mBest").textContent=fp(d.best_trade);
     document.getElementById("mWorst").textContent=fp(d.worst_trade);
-    document.getElementById("mDD").textContent="-"+f(d.max_drawdown,3)+"$";
+    document.getElementById("mDD").textContent=f(Math.abs(d.max_drawdown||0),3)+"$";
     document.getElementById("mAWin").textContent=fp(d.avg_win);
     document.getElementById("mALoss").textContent=fp(d.avg_loss);
     document.getElementById("mDur").textContent=f(d.avg_dur,1)+"dk";
@@ -533,7 +533,7 @@ async function loadStats(){
     document.getElementById("pRisk").textContent=(p.risk_pct||"—")+"%";
     const la=d.last_ai||{};
     document.getElementById("aiBox").textContent="⚡ AI Brain — "+(la.insight||p.ai_reason||"Parametreler aktif");
-    const sm={};(d.session_stats||[]).forEach(s=>{sm[s.session]=s});
+    const sm=d.session_stats||{};
     function fSess(key,wrId,dId){
       const s=sm[key];const w=document.getElementById(wrId);
       if(s&&s.total>0){w.textContent=s.win_rate.toFixed(0)+"%";w.style.color=s.win_rate>=45?"var(--green-br)":s.win_rate>=35?"var(--gold-br)":"var(--red-br)";document.getElementById(dId).textContent=s.wins+"W/"+(s.total-s.wins)+"L · "+(s.pnl>=0?"+":"")+s.pnl.toFixed(2)+"$"}
@@ -597,7 +597,7 @@ async function loadHistory(page=1){
       if(!knownTrades[t.id]){
         knownTrades[t.id]=true;
         const isL=(t.direction||"").toUpperCase()==="LONG";
-        const pnl=t.pnl_usdt||0;const st=(t.status||"").toUpperCase();
+        const pnl=t.net_pnl||0;const st=(t.status||"").toUpperCase();
         const win=st==="WIN"||(pnl>0);
         addFeedItem(nowTime,win?"close-win":"close-loss","<b>"+(t.symbol||"")+"</b> "+(t.direction||"")+" kapandi",pnl);
       }
@@ -605,7 +605,7 @@ async function loadHistory(page=1){
     const tb=document.getElementById("histBody");
     if(!trades.length){tb.innerHTML="<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:30px;font-family:var(--orb);letter-spacing:.16em;font-size:9px">KAYIT YOK</td></tr>";renderPager(pag);return}
     tb.innerHTML=trades.map(t=>{
-      const isL=(t.direction||"").toUpperCase()==="LONG",pnl=t.pnl_usdt||0,st=(t.status||"").toUpperCase(),win=st==="WIN"||(st==="MANUAL"&&pnl>0),dur=t.duration_str||(t.duration_min?Math.round(t.duration_min)+"dk":"—");
+      const isL=(t.direction||"").toUpperCase()==="LONG",pnl=t.net_pnl||0,st=(t.status||"").toUpperCase(),win=st==="WIN"||(st==="MANUAL"&&pnl>0),dur=t.duration_str||(t.duration_min?Math.round(t.duration_min)+"dk":"—");
       return "<tr><td class="td-sym">"+(t.symbol||"—")+"</td><td><span class="badge "+(isL?"b-long":"b-short")+"">"+(t.direction||"—")+"</span></td><td>"+f(t.entry,5)+"</td><td>"+f(t.exit_price,5)+"</td><td class=""+(pnl>=0?"pos-c":"neg-c")+"">"+fp(pnl)+"</td><td class="gld-c">"+f(t.r_multiple,2)+"R</td><td><span class="dur">"+dur+"</span></td><td><span class="badge "+(win?"b-win":"b-loss")+"">"+st+"</span></td></tr>";
     }).join("");renderPager(pag);
   }catch(e){console.error(e)}
