@@ -29,7 +29,7 @@ DB_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.d
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_model.pkl")
 
 MIN_TRAIN_SAMPLES = 30
-SCORE_THRESHOLD   = 40   # Analiz: 40 puan altı sinyaller engellenir
+SCORE_THRESHOLD   = 35   # Analiz: 35 puan altı sinyaller engellenir
 
 
 class MLSignalScorer:
