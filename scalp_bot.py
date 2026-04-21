@@ -54,6 +54,16 @@ except ImportError:
 
 try:
     from telegram_manager import TelegramManager
+try:
+    from n8n_bridge import (register_bot, notify_trade_open,
+                             notify_trade_close, notify_ai_report, notify_alert)
+    N8N_AVAILABLE = True
+except ImportError:
+    N8N_AVAILABLE = False
+    def notify_trade_open(*a, **kw): pass
+    def notify_trade_close(*a, **kw): pass
+    def notify_ai_report(*a, **kw): pass
+    def notify_alert(*a, **kw): pass
     TG_MANAGER_AVAILABLE = True
 except ImportError:
     TG_MANAGER_AVAILABLE = False
@@ -385,6 +395,7 @@ def run_ai_brain():
         insight = analyze_and_adapt()
         if insight:
             tg(f"🧠 <b>AI Brain Raporu</b>\n\n{insight[:800]}")
+            notify_ai_report(insight=insight)
     except Exception as e:
         logger.error(f"AI Brain hata: {e}")
 
@@ -1170,6 +1181,11 @@ def place_order(sig):
         f"💸 F: {sig['funding']}%\n\n"
         f"💰 Bakiye: ${get_balance():.2f}"
     )
+    notify_trade_open(
+        symbol=symbol, direction=direction, entry=trade_entry,
+        sl=trade_sl, tp=trade_tp, leverage=leverage,
+        ml_score=ml_score, rr=rr, balance=get_balance()
+    )
     return True
 
 # =============================================================================
@@ -1492,6 +1508,12 @@ def monitor_trades():
                 f"💰 Bakiye: ${_bal_after:.2f}"
             )
             logger.info(f"{result}: {symbol} @ {exit_price:.6f} | Net: {net_pnl:.3f}$ | Ardışık Kayıp: {consecutive_losses}")
+            notify_trade_close(
+                symbol=symbol, direction=t['direction'], result=result,
+                net_pnl=net_pnl, exit_price=exit_price,
+                hold_minutes=hold_minutes, balance=get_balance(),
+                actual_rr=actual_rr
+            )
 
             closed_trade_counter += 1
             if closed_trade_counter % AI_BRAIN_THRESHOLD == 0:
@@ -1551,6 +1573,13 @@ def main():
         set_client(client, tg)
 
     # TelegramManager başlat
+    if N8N_AVAILABLE:
+        register_bot(
+            tg_manager=tg_manager,
+            get_balance_fn=get_balance,
+            get_open_trades_fn=lambda: open_trades,
+            run_ai_brain_fn=run_ai_brain,
+        )
     if tg_manager:
         tg_manager.start(
             get_balance_fn=get_balance,

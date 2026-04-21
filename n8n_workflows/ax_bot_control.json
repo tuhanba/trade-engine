@@ -1,0 +1,53 @@
+{
+  "name": "AX — Bot Kontrol Paneli",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ax-control",
+        "responseMode": "onReceived",
+        "responseData": "firstEntryJson"
+      },
+      "id": "webhook-control",
+      "name": "Webhook: Kontrol",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json;\nconst action = body.action;\nconst BASE = 'http://localhost:5000';\nconst SECRET = 'aurvex-ax-secret';\nconst endpoints = {\n  pause:      { method: 'POST', url: `${BASE}/n8n/pause` },\n  resume:     { method: 'POST', url: `${BASE}/n8n/resume` },\n  status:     { method: 'GET',  url: `${BASE}/n8n/status` },\n  ai_trigger: { method: 'POST', url: `${BASE}/n8n/ai_trigger` },\n  finish:     { method: 'POST', url: `${BASE}/n8n/finish` },\n};\nconst ep = endpoints[action];\nif (!ep) return [{ json: { error: 'Bilinmeyen: ' + action } }];\nreturn [{ json: { url: ep.url, method: ep.method, secret: SECRET } }];"
+      },
+      "id": "route-action",
+      "name": "Aksiyon Yönlendir",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{"name": "X-AX-Secret", "value": "={{ $json.secret }}"}]
+        },
+        "options": {}
+      },
+      "id": "call-bot",
+      "name": "Bot API Çağır",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Webhook: Kontrol": {
+      "main": [[{"node": "Aksiyon Yönlendir", "type": "main", "index": 0}]]
+    },
+    "Aksiyon Yönlendir": {
+      "main": [[{"node": "Bot API Çağır", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {}
+}

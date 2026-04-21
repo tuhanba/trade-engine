@@ -1,6 +1,11 @@
 import os, json, sqlite3
 from datetime import datetime, timezone
 from flask import Flask, render_template, jsonify, request
+try:
+    from n8n_bridge import n8n_bp
+    N8N_AVAILABLE = True
+except ImportError:
+    N8N_AVAILABLE = False
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
 from database import init_db, get_trades, get_stats, get_current_params
@@ -10,6 +15,8 @@ load_dotenv()
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "scalp2026")
 socketio = SocketIO(app, cors_allowed_origins="*")
+if N8N_AVAILABLE:
+    app.register_blueprint(n8n_bp)
 client = Client(os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_API_SECRET", ""))
 
 init_db()
