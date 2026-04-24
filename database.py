@@ -153,6 +153,26 @@ def init_db():
         coin_behavior TEXT,
         created_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS coin_profile (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT UNIQUE NOT NULL,
+        trade_count INTEGER DEFAULT 0,
+        win_rate REAL DEFAULT 0.0,
+        avg_r REAL DEFAULT 0.0,
+        profit_factor REAL DEFAULT 0.0,
+        avg_mfe REAL DEFAULT 0.0,
+        avg_mae REAL DEFAULT 0.0,
+        best_session TEXT,
+        worst_session TEXT,
+        preferred_direction TEXT,
+        best_rr_zone TEXT,
+        danger_score REAL DEFAULT 0.0,
+        cooldown_status INTEGER DEFAULT 0,
+        volatility_profile TEXT,
+        spread_quality TEXT,
+        fakeout_rate REAL DEFAULT 0.0,
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
     INSERT OR IGNORE INTO paper_account (id, paper_balance, updated_at)
     VALUES (1, 250.0, datetime('now'));
     INSERT OR IGNORE INTO params (version, updated_at, ai_reason)
