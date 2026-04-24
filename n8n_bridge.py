@@ -1,140 +1,198 @@
 """
-n8n_bridge.py — AX ↔ n8n Köprüsü
-==================================
-• Bot → n8n : trade_open, trade_close, ai_report, alert
-• n8n → Bot : /n8n/pause, /n8n/resume, /n8n/status, /n8n/ai_trigger, /n8n/finish
+n8n_bridge.py — AX ↔ n8n köprüsü (sadece raporlama/monitoring)
+
+n8n'in yapacakları:
+  - Günlük rapor tetikleme  (/n8n/daily_report)
+  - Haftalık rapor tetikleme (/n8n/weekly_report)
+  - Health ping             (/n8n/health)
+  - Crash alert             (/n8n/crash_alert  POST)
+  - Backup job              (/n8n/backup)
+
+n8n KARAR VERMEZ. pause/resume/finish sadece Telegram'dan yapılır.
 """
 
-import os
-import threading
 import logging
-import requests
+import threading
 from datetime import datetime, timezone
-from flask import Blueprint, request, jsonify
+
+import requests
+from flask import Blueprint, jsonify, request
+
+import config
+from database import get_conn
 
 logger = logging.getLogger(__name__)
 
-N8N_BASE        = os.getenv("N8N_BASE_URL", "http://localhost:5678")
-N8N_TRADE_OPEN  = os.getenv("N8N_WEBHOOK_TRADE_OPEN",  f"{N8N_BASE}/webhook/ax-trade-open")
-N8N_TRADE_CLOSE = os.getenv("N8N_WEBHOOK_TRADE_CLOSE", f"{N8N_BASE}/webhook/ax-trade-close")
-N8N_AI_REPORT   = os.getenv("N8N_WEBHOOK_AI_REPORT",   f"{N8N_BASE}/webhook/ax-ai-report")
-N8N_ALERT       = os.getenv("N8N_WEBHOOK_ALERT",       f"{N8N_BASE}/webhook/ax-alert")
-N8N_SECRET      = os.getenv("N8N_SECRET", "aurvex-ax-secret")
+N8N_SECRET = config.N8N_WEBHOOK_URL   # secret olarak webhook url'ini kullan
+_SECRET    = "ax-n8n-2026"            # .env'den alınabilir, şimdilik sabit
 
-_bot_refs = {
-    "tg_manager":      None,
-    "get_balance":     None,
-    "get_open_trades": None,
-    "run_ai_brain":    None,
-}
-
-def register_bot(tg_manager=None, get_balance_fn=None,
-                 get_open_trades_fn=None, run_ai_brain_fn=None):
-    _bot_refs["tg_manager"]       = tg_manager
-    _bot_refs["get_balance"]      = get_balance_fn
-    _bot_refs["get_open_trades"]  = get_open_trades_fn
-    _bot_refs["run_ai_brain"]     = run_ai_brain_fn
-    logger.info("[n8n_bridge] Bot referansları kaydedildi.")
-
-# =============================================================================
-# BOT → n8n BİLDİRİMLER
-# =============================================================================
-def _post(url: str, payload: dict, timeout: int = 5):
-    try:
-        r = requests.post(
-            url, json=payload,
-            headers={"X-AX-Secret": N8N_SECRET, "Content-Type": "application/json"},
-            timeout=timeout
-        )
-        if r.status_code not in (200, 201):
-            logger.warning(f"[n8n_bridge] POST {url} → {r.status_code}")
-    except Exception as e:
-        logger.debug(f"[n8n_bridge] n8n kapalı olabilir: {e}")
-
-def notify_trade_open(symbol, direction, entry, sl, tp, leverage, ml_score, rr, balance):
-    threading.Thread(target=_post, args=(N8N_TRADE_OPEN, {
-        "event": "trade_open", "timestamp": datetime.now(timezone.utc).isoformat(),
-        "symbol": symbol, "direction": direction, "entry": entry,
-        "sl": sl, "tp": tp, "leverage": leverage,
-        "ml_score": ml_score, "rr": rr, "balance": balance,
-    }), daemon=True).start()
-
-def notify_trade_close(symbol, direction, result, net_pnl, exit_price,
-                       hold_minutes, balance, actual_rr=0):
-    threading.Thread(target=_post, args=(N8N_TRADE_CLOSE, {
-        "event": "trade_close", "timestamp": datetime.now(timezone.utc).isoformat(),
-        "symbol": symbol, "direction": direction, "result": result,
-        "net_pnl": net_pnl, "exit_price": exit_price,
-        "hold_minutes": hold_minutes, "balance": balance, "actual_rr": actual_rr,
-    }), daemon=True).start()
-
-def notify_ai_report(insight, win_rate=0, total_pnl=0, changes=None, trades_analyzed=0):
-    threading.Thread(target=_post, args=(N8N_AI_REPORT, {
-        "event": "ai_report", "timestamp": datetime.now(timezone.utc).isoformat(),
-        "insight": insight[:500], "win_rate": win_rate,
-        "total_pnl": total_pnl, "changes": changes or [],
-        "trades_analyzed": trades_analyzed,
-    }), daemon=True).start()
-
-def notify_alert(alert_type, message, severity="warning"):
-    threading.Thread(target=_post, args=(N8N_ALERT, {
-        "event": "alert", "timestamp": datetime.now(timezone.utc).isoformat(),
-        "type": alert_type, "message": message, "severity": severity,
-    }), daemon=True).start()
-
-# =============================================================================
-# n8n → BOT KONTROL ENDPOINT'LERİ
-# =============================================================================
 n8n_bp = Blueprint("n8n", __name__, url_prefix="/n8n")
 
-def _auth():
-    return request.headers.get("X-AX-Secret") == N8N_SECRET
 
-@n8n_bp.route("/pause", methods=["POST"])
-def n8n_pause():
-    if not _auth(): return jsonify({"ok": False, "error": "Unauthorized"}), 401
-    tg = _bot_refs.get("tg_manager")
-    if tg: tg._paused = True
-    logger.info("[n8n_bridge] Bot PAUSE edildi.")
-    return jsonify({"ok": True, "status": "paused"})
+# ── Auth ──────────────────────────────────────────────────────────────────────
 
-@n8n_bp.route("/resume", methods=["POST"])
-def n8n_resume():
-    if not _auth(): return jsonify({"ok": False, "error": "Unauthorized"}), 401
-    tg = _bot_refs.get("tg_manager")
-    if tg: tg._paused = False
-    logger.info("[n8n_bridge] Bot RESUME edildi.")
-    return jsonify({"ok": True, "status": "running"})
+def _auth() -> bool:
+    return request.headers.get("X-AX-Secret") == _SECRET
 
-@n8n_bp.route("/finish", methods=["POST"])
-def n8n_finish():
-    if not _auth(): return jsonify({"ok": False, "error": "Unauthorized"}), 401
-    tg = _bot_refs.get("tg_manager")
-    if tg: tg._finish_mode = True
-    logger.info("[n8n_bridge] Bot FINISH moduna alındı.")
-    return jsonify({"ok": True, "status": "finish_mode"})
 
-@n8n_bp.route("/status", methods=["GET"])
-def n8n_status():
-    if not _auth(): return jsonify({"ok": False, "error": "Unauthorized"}), 401
-    tg       = _bot_refs.get("tg_manager")
-    bal_fn   = _bot_refs.get("get_balance")
-    trades_fn = _bot_refs.get("get_open_trades")
-    return jsonify({
-        "ok":          True,
-        "paused":      tg._paused       if tg else False,
-        "finish_mode": tg._finish_mode  if tg else False,
-        "balance":     bal_fn()         if bal_fn else 0,
-        "open_trades": len(trades_fn()) if trades_fn else 0,
-        "timestamp":   datetime.now(timezone.utc).isoformat(),
+def _unauth():
+    return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+
+# ── Bot → n8n (outbound, fire-and-forget) ────────────────────────────────────
+
+def _post_to_n8n(payload: dict):
+    """n8n webhook'una asenkron POST at."""
+    url = config.N8N_WEBHOOK_URL
+    if not url:
+        return
+    def _send():
+        try:
+            requests.post(url, json=payload,
+                          headers={"X-AX-Secret": _SECRET},
+                          timeout=5)
+        except Exception as e:
+            logger.debug(f"[n8n] webhook hata: {e}")
+    threading.Thread(target=_send, daemon=True).start()
+
+
+def ping_health():
+    """60 saniyede bir health durumunu n8n'e gönder."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM system_state WHERE id=1")
+    row = c.fetchone()
+    c.execute("SELECT COUNT(*) FROM trades WHERE status='OPEN'")
+    open_cnt = c.fetchone()[0]
+    c.execute("SELECT paper_balance FROM paper_account WHERE id=1")
+    bal = float((c.fetchone() or [250])[0])
+    conn.close()
+
+    state = dict(row) if row else {}
+    _post_to_n8n({
+        "event":           "health_ping",
+        "timestamp":       datetime.now(timezone.utc).isoformat(),
+        "bot_status":      state.get("bot_status", "unknown"),
+        "circuit_breaker": bool(state.get("circuit_breaker_active")),
+        "open_trades":     open_cnt,
+        "balance":         bal,
     })
 
-@n8n_bp.route("/ai_trigger", methods=["POST"])
-def n8n_ai_trigger():
-    if not _auth(): return jsonify({"ok": False, "error": "Unauthorized"}), 401
-    ai_fn = _bot_refs.get("run_ai_brain")
-    if ai_fn:
-        threading.Thread(target=ai_fn, daemon=True).start()
-        logger.info("[n8n_bridge] AI Brain n8n tarafından tetiklendi.")
-        return jsonify({"ok": True, "message": "AI Brain başlatıldı"})
-    return jsonify({"ok": False, "error": "run_ai_brain yok"}), 500
+
+def post_crash_alert(error: str):
+    """Kritik hata olduğunda n8n'e bildir."""
+    _post_to_n8n({
+        "event":     "crash_alert",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "error":     error[:500],
+    })
+
+
+def post_daily_summary():
+    """Günlük özeti n8n'e gönder (backup/arşiv için)."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""
+        SELECT COUNT(*),
+               SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END),
+               ROUND(SUM(net_pnl),4),
+               ROUND(AVG(r_multiple),3)
+        FROM trades
+        WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
+          AND close_time >= ?
+    """, (today,))
+    row = c.fetchone()
+    conn.close()
+    _post_to_n8n({
+        "event":       "daily_summary",
+        "date":        today,
+        "total":       row[0] or 0,
+        "wins":        row[1] or 0,
+        "total_pnl":   row[2] or 0,
+        "avg_r":       row[3] or 0,
+    })
+
+
+# ── n8n → Bot (inbound webhooks) ─────────────────────────────────────────────
+
+@n8n_bp.route("/health", methods=["GET"])
+def n8n_health():
+    """n8n health check — bot canlı mı?"""
+    if not _auth():
+        return _unauth()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT last_heartbeat, bot_status FROM system_state WHERE id=1")
+    row = c.fetchone()
+    conn.close()
+    if row:
+        hb = row["last_heartbeat"] or ""
+        status = row["bot_status"] or "unknown"
+    else:
+        hb, status = "", "unknown"
+    return jsonify({
+        "ok":            True,
+        "bot_status":    status,
+        "last_heartbeat": hb,
+        "timestamp":     datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@n8n_bp.route("/daily_report", methods=["POST"])
+def n8n_daily_report():
+    """n8n günlük raporu Telegram'a göndermeyi tetikler."""
+    if not _auth():
+        return _unauth()
+    try:
+        from telegram_manager import notify_daily_report
+        threading.Thread(target=notify_daily_report, daemon=True).start()
+        logger.info("[n8n] Günlük rapor tetiklendi.")
+        return jsonify({"ok": True, "message": "daily_report tetiklendi"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@n8n_bp.route("/weekly_report", methods=["POST"])
+def n8n_weekly_report():
+    """n8n haftalık raporu Telegram'a göndermeyi tetikler."""
+    if not _auth():
+        return _unauth()
+    try:
+        from telegram_manager import notify_weekly_report
+        threading.Thread(target=notify_weekly_report, daemon=True).start()
+        logger.info("[n8n] Haftalık rapor tetiklendi.")
+        return jsonify({"ok": True, "message": "weekly_report tetiklendi"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@n8n_bp.route("/crash_alert", methods=["POST"])
+def n8n_crash_alert():
+    """n8n crash alert aldı, Telegram'a ilet."""
+    if not _auth():
+        return _unauth()
+    data = request.get_json() or {}
+    msg  = data.get("message", "Bilinmeyen crash")
+    try:
+        from telegram_manager import notify_critical
+        notify_critical(msg)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@n8n_bp.route("/backup", methods=["POST"])
+def n8n_backup():
+    """n8n backup job tetiklendiğinde DB snapshot al."""
+    if not _auth():
+        return _unauth()
+    try:
+        import shutil, os
+        src = config.DB_PATH
+        dst = config.DB_PATH + f".backup_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}"
+        shutil.copy2(src, dst)
+        logger.info(f"[n8n] DB backup: {dst}")
+        return jsonify({"ok": True, "backup": os.path.basename(dst)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
