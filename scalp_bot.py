@@ -21,6 +21,11 @@ from execution_engine import open_trade, check_trade
 from coin_library import (
     seed_initial_profiles, update_coin_profile, log_coin_memory,
 )
+try:
+    import telegram_manager as _tg
+    _TG = True
+except Exception:
+    _TG = False
 
 # ---------- Logging ----------
 _log_file = os.path.join(config.LOG_DIR, "ax_bot.log")
@@ -188,6 +193,11 @@ def _record_result(result: str):
         logger.warning(
             f"[Bot] CIRCUIT BREAKER aktif — {config.CIRCUIT_BREAKER_MINUTES}dk"
         )
+        if _TG:
+            try:
+                _tg.notify_circuit_breaker(until)
+            except Exception:
+                pass
     else:
         _set_state(consecutive_losses=losses)
 
@@ -264,6 +274,11 @@ def _after_close(trade: dict):
         mfe=0,
         mae=0,
     )
+    if _TG:
+        try:
+            _tg.notify_trade_close(trade)
+        except Exception:
+            pass
     logger.info(f"[Bot] Post-trade: #{trade['id']} {result}")
 
 
@@ -306,6 +321,13 @@ def _scan_and_signal():
             )
             conn.commit()
             conn.close()
+            if _TG:
+                try:
+                    t = _get_trade(tid)
+                    if t:
+                        _tg.notify_trade_open(t)
+                except Exception:
+                    pass
 
 
 # ---------- Trade takip ----------
@@ -342,6 +364,11 @@ def run():
 
     init_db()
     seed_initial_profiles()
+    if _TG:
+        try:
+            _tg.start_polling()
+        except Exception as e:
+            logger.warning(f"[Bot] Telegram başlatılamadı: {e}")
     _set_state(
         bot_status="running",
         ax_mode=config.AX_MODE,
