@@ -105,6 +105,28 @@ def init_db():
         peak_balance REAL DEFAULT 250.0,
         note TEXT DEFAULT ''
     );
+    CREATE TABLE IF NOT EXISTS signal_candidates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        entry REAL,
+        sl REAL,
+        tp1 REAL,
+        tp2 REAL,
+        runner_target REAL,
+        rr REAL,
+        expected_mfe_r REAL,
+        score INTEGER DEFAULT 0,
+        confidence REAL DEFAULT 0.0,
+        decision TEXT DEFAULT 'PENDING',
+        veto_reason TEXT,
+        session TEXT,
+        market_regime TEXT,
+        ax_mode TEXT,
+        execution_mode TEXT,
+        linked_trade_id INTEGER,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
     INSERT OR IGNORE INTO paper_account (id, paper_balance, updated_at)
     VALUES (1, 250.0, datetime('now'));
     INSERT OR IGNORE INTO params (version, updated_at, ai_reason)
