@@ -1,15 +1,21 @@
 [Unit]
-Description=AURVEX.Ai Dashboard
-After=network.target
+Description=AX Dashboard (Flask)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/trade_engine
-ExecStart=/root/trade_engine/venv/bin/python3 /root/trade_engine/app.py
-Restart=always
-RestartSec=5
+WorkingDirectory=/root/trade-engine
+EnvironmentFile=/root/trade-engine/.env
+ExecStart=/root/trade-engine/venv/bin/python3 /root/trade-engine/app.py
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
 Environment=PYTHONUNBUFFERED=1
+StandardOutput=append:/root/trade-engine/logs/dashboard-stdout.log
+StandardError=append:/root/trade-engine/logs/dashboard-stderr.log
 
 [Install]
 WantedBy=multi-user.target

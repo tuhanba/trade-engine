@@ -1,0 +1,26 @@
+[Unit]
+Description=AX n8n Bridge
+After=network-online.target aurvex-dashboard.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/trade-engine
+EnvironmentFile=/root/trade-engine/.env
+ExecStart=/root/trade-engine/venv/bin/python3 -c "
+from app import app, socketio
+from n8n_bridge import n8n_bp
+app.register_blueprint(n8n_bp)
+socketio.run(app, host='0.0.0.0', port=5001, use_reloader=False)
+"
+Restart=on-failure
+RestartSec=15
+StartLimitIntervalSec=300
+StartLimitBurst=5
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=append:/root/trade-engine/logs/n8n-bridge-stdout.log
+StandardError=append:/root/trade-engine/logs/n8n-bridge-stderr.log
+
+[Install]
+WantedBy=multi-user.target
