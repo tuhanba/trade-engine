@@ -9,6 +9,9 @@ def get_conn():
 
 def init_db():
     conn = get_conn()
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.commit()
     c = conn.cursor()
     c.executescript("""
     CREATE TABLE IF NOT EXISTS trades (
