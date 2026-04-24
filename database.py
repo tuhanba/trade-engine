@@ -135,6 +135,24 @@ def init_db():
         linked_trade_id INTEGER,
         created_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS trade_postmortem (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trade_id INTEGER UNIQUE,
+        symbol TEXT,
+        direction TEXT,
+        mfe REAL,
+        mae REAL,
+        efficiency REAL,
+        missed_gain REAL,
+        sl_tightness REAL,
+        hold_minutes REAL,
+        best_possible_tp REAL,
+        exit_quality REAL,
+        setup_quality REAL,
+        session_result TEXT,
+        coin_behavior TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
     INSERT OR IGNORE INTO paper_account (id, paper_balance, updated_at)
     VALUES (1, 250.0, datetime('now'));
     INSERT OR IGNORE INTO params (version, updated_at, ai_reason)
