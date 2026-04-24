@@ -7,8 +7,10 @@ Sadece orkestrasyon yapar, iş mantığı modüllerde:
 """
 
 import logging
+import os
 import time
 from datetime import datetime, timezone, timedelta
+from logging.handlers import RotatingFileHandler
 
 import config
 from database import get_conn, init_db
@@ -21,13 +23,17 @@ from coin_library import (
 )
 
 # ---------- Logging ----------
+_log_file = os.path.join(config.LOG_DIR, "ax_bot.log")
+_rot_handler = RotatingFileHandler(
+    _log_file, maxBytes=10 * 1024 * 1024, backupCount=7, encoding="utf-8"
+)
+_rot_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(message)s")
+)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(f"{config.LOG_DIR}/ax_bot.log"),
-    ],
+    handlers=[logging.StreamHandler(), _rot_handler],
 )
 logger = logging.getLogger("scalp_bot")
 
