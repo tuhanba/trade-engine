@@ -223,6 +223,21 @@ def init_db():
         worst_coin TEXT,
         created_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS best_params (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        context TEXT,
+        sl_atr_mult REAL,
+        tp1_r REAL,
+        tp2_r REAL,
+        trail_atr_mult REAL,
+        min_rr REAL,
+        min_expected_mfe_r REAL,
+        win_rate REAL,
+        profit_factor REAL,
+        avg_r REAL,
+        sample_size INTEGER,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
     INSERT OR IGNORE INTO paper_account (id, paper_balance, updated_at)
     VALUES (1, 250.0, datetime('now'));
     INSERT OR IGNORE INTO params (version, updated_at, ai_reason)
