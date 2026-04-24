@@ -192,6 +192,21 @@ def init_db():
         cooldown_until TEXT NOT NULL,
         created_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS daily_summary (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT UNIQUE NOT NULL,
+        total_trades INTEGER DEFAULT 0,
+        wins INTEGER DEFAULT 0,
+        losses INTEGER DEFAULT 0,
+        win_rate REAL DEFAULT 0.0,
+        total_pnl REAL DEFAULT 0.0,
+        avg_r REAL DEFAULT 0.0,
+        profit_factor REAL DEFAULT 0.0,
+        max_drawdown REAL DEFAULT 0.0,
+        best_trade_id INTEGER,
+        worst_trade_id INTEGER,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
     INSERT OR IGNORE INTO paper_account (id, paper_balance, updated_at)
     VALUES (1, 250.0, datetime('now'));
     INSERT OR IGNORE INTO params (version, updated_at, ai_reason)
