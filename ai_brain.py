@@ -17,13 +17,14 @@ scalp_bot.py entegrasyon:
   threading.Thread(target=post_trade_analysis, args=(trade_id,), daemon=True).start()
 """
 
+import os
 import sqlite3
 import json
 import threading
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-DB_PATH = "/root/trade_engine/trading.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
 
 PARAM_BOUNDS = {
     "sl_atr_mult":    (0.8,  2.5),

@@ -308,7 +308,7 @@ class TelegramManager:
 
     def _cmd_report(self):
         try:
-            from trade_engine.ai_brain import build_report
+            from ai_brain import build_report
             report = build_report()
             self.send(report[:4000])
         except Exception as e:
