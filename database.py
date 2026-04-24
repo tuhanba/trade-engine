@@ -238,6 +238,19 @@ def init_db():
         sample_size INTEGER,
         created_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS system_state (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        ax_mode TEXT DEFAULT 'execute',
+        execution_mode TEXT DEFAULT 'paper',
+        bot_status TEXT DEFAULT 'running',
+        circuit_breaker_active INTEGER DEFAULT 0,
+        circuit_breaker_until TEXT,
+        consecutive_losses INTEGER DEFAULT 0,
+        daily_loss_pct REAL DEFAULT 0.0,
+        last_heartbeat TEXT,
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    INSERT OR IGNORE INTO system_state (id) VALUES (1);
     INSERT OR IGNORE INTO paper_account (id, paper_balance, updated_at)
     VALUES (1, 250.0, datetime('now'));
     INSERT OR IGNORE INTO params (version, updated_at, ai_reason)
