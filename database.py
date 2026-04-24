@@ -173,6 +173,18 @@ def init_db():
         fakeout_rate REAL DEFAULT 0.0,
         updated_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS coin_market_memory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT NOT NULL,
+        session TEXT,
+        market_regime TEXT,
+        direction TEXT,
+        result TEXT,
+        r_multiple REAL,
+        mfe REAL,
+        mae REAL,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
     INSERT OR IGNORE INTO paper_account (id, paper_balance, updated_at)
     VALUES (1, 250.0, datetime('now'));
     INSERT OR IGNORE INTO params (version, updated_at, ai_reason)
