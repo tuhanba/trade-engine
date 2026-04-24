@@ -1,1 +1,11 @@
 __pycache__/
+*.pyc
+*.pyo
+.env
+trading.db
+trading.db-wal
+trading.db-shm
+logs/*.log
+*.egg-info/
+.venv/
+venv/
