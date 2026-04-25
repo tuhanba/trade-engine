@@ -1,10 +1,12 @@
 """
 telegram_manager.py — AX Telegram Yöneticisi
 =============================================
-• Mesaj gönderme (retry + kuyruk)
-• Komut alma (long-polling)
-• /status /pause /devam /bitir /bakiye /trades /ax /rapor
-• Drawdown uyarısı, finish modu, pause modu
+Komutlar:
+  /status   /pause    /resume   /finish
+  /balance  /trades   /ax       /report
+  /calendar /weekly   /coin     /mode
+  /paper    /live     /signal   /execute
+  /help
 """
 
 import os
@@ -12,72 +14,61 @@ import threading
 import time
 import logging
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from collections import deque
+
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PAPER_MODE
 
 logger = logging.getLogger(__name__)
 
-# Token'lar modül yüklenirken değil, kullanılırken okunur (load_dotenv sonrası)
-def _get_token():
-    return os.getenv("TELEGRAM_BOT_TOKEN", "")
 
-def _get_chat():
-    return os.getenv("TELEGRAM_CHAT_ID", "")
+# ─────────────────────────────────────────────────────────────────────────────
+# DÜŞÜK SEVİYE — retry'lı HTTP gönderici
+# ─────────────────────────────────────────────────────────────────────────────
 
+def _token() -> str:
+    return os.getenv("TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN)
 
-# ─────────────────────────────────────────────────────────────────
-# DÜŞÜK SEVİYE: retry'lı gönderici
-# ─────────────────────────────────────────────────────────────────
+def _chat() -> str:
+    return os.getenv("TELEGRAM_CHAT_ID", TELEGRAM_CHAT_ID)
 
-def _send_raw(text, parse_mode="HTML", retries=3):
-    """Telegram'a doğrudan HTTP POST — en fazla `retries` kez dener."""
-    token = _get_token()
-    chat  = _get_chat()
+def _send_raw(text: str, parse_mode: str = "HTML", retries: int = 3) -> bool:
+    token = _token()
+    chat  = _chat()
     if not token or not chat:
-        logger.warning("Telegram: TOKEN veya CHAT_ID eksik, mesaj gönderilemedi.")
         return False
-    api_base = f"https://api.telegram.org/bot{token}"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
     for attempt in range(1, retries + 1):
         try:
-            resp = requests.post(
-                f"{api_base}/sendMessage",
-                json={
-                    "chat_id":    chat,
-                    "text":       text[:4096],
-                    "parse_mode": parse_mode,
-                },
-                timeout=8,
-            )
+            resp = requests.post(url, json={
+                "chat_id": chat, "text": text[:4096], "parse_mode": parse_mode,
+            }, timeout=8)
             if resp.status_code == 200:
                 return True
             if resp.status_code == 429:
-                retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
-                logger.warning(f"Telegram rate limit — {retry_after}s bekleniyor")
-                time.sleep(retry_after)
+                wait = resp.json().get("parameters", {}).get("retry_after", 5)
+                time.sleep(wait)
                 continue
-            logger.warning(f"Telegram API hata {resp.status_code}: {resp.text[:200]}")
-        except requests.exceptions.Timeout:
-            logger.warning(f"Telegram timeout (deneme {attempt}/{retries})")
         except Exception as e:
-            logger.warning(f"Telegram gönderim hatası: {e}")
+            logger.debug(f"Telegram gönderim hatası: {e}")
         if attempt < retries:
             time.sleep(2 ** attempt)
     return False
 
 
-# ─────────────────────────────────────────────────────────────────
-# KUYRUK: ana thread'i bloke etmeden gönder
-# ─────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# KUYRUK — ana thread'i bloke etmeden gönder
+# ─────────────────────────────────────────────────────────────────────────────
 
-class _SendQueue:
+class _Queue:
     def __init__(self):
-        self._q = deque()
-        self._lock = threading.Lock()
-        self._event = threading.Event()
+        self._q      = deque()
+        self._lock   = threading.Lock()
+        self._event  = threading.Event()
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
 
-    def push(self, text, parse_mode="HTML"):
+    def push(self, text: str, parse_mode: str = "HTML"):
         with self._lock:
             self._q.append((text, parse_mode))
         self._event.set()
@@ -94,101 +85,68 @@ class _SendQueue:
                 _send_raw(text, pm)
                 time.sleep(0.05)
 
+_queue = _Queue()
 
-_queue = _SendQueue()
 
-
-# ─────────────────────────────────────────────────────────────────
-# KOMUT POLLING
-# ─────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# TELEGRAM MANAGER
+# ─────────────────────────────────────────────────────────────────────────────
 
 class TelegramManager:
-    """
-    Kullanım:
-        tg = TelegramManager(binance_client)
-        tg.paper_mode = True
-        tg.start()          # polling thread başlar
-        tg.send("mesaj")
-    """
-
     def __init__(self, client=None):
-        self.client     = client
-        self.paper_mode = True
-        self.paused     = False
+        self.client      = client
+        self.paper_mode  = PAPER_MODE
+        self.paused      = False
         self.finish_mode = False
-        self._offset    = 0
+        self._offset     = 0
         self._poll_thread = None
-        self._handlers  = {}   # komut → callable
-        self._get_balance_fn = None
-        self._get_open_trades_fn = None
-        self._run_ai_brain_fn = None
+        self._handlers   = {}
+
+        # Callback'ler
+        self._get_balance_fn         = None
+        self._get_open_trades_fn     = None
+        self._run_ai_brain_fn        = None
         self._get_circuit_breaker_fn = None
 
     @property
-    def is_paused(self):
+    def is_paused(self) -> bool:
         return self.paused
 
     @property
-    def is_finish_mode(self):
+    def is_finish_mode(self) -> bool:
         return self.finish_mode
 
-    # ── public API ──────────────────────────────────────────────
+    # ── Public API ───────────────────────────────────────────────────────────
 
-    def send(self, text, parse_mode="HTML"):
-        token = _get_token()
-        chat  = _get_chat()
-        if not token or not chat:
-            logger.warning("Telegram: TOKEN veya CHAT_ID eksik, mesaj gönderilemedi.")
+    def send(self, text: str, parse_mode: str = "HTML"):
+        if not _token() or not _chat():
             return
         prefix = "🧪 <b>[PAPER]</b> " if self.paper_mode else ""
         _queue.push(prefix + text, parse_mode)
 
     def register(self, command: str, handler):
-        """Komut handler kaydet. handler(args: str) şeklinde çağrılır."""
         self._handlers[command.lstrip("/")] = handler
 
     def start(self, get_balance_fn=None, get_open_trades_fn=None,
               run_ai_brain_fn=None, get_circuit_breaker_fn=None):
-        """Polling thread'i başlat. Opsiyonel callback'ler kaydedilir."""
-        if get_balance_fn:
-            self._get_balance_fn = get_balance_fn
-        if get_open_trades_fn:
-            self._get_open_trades_fn = get_open_trades_fn
-        if run_ai_brain_fn:
-            self._run_ai_brain_fn = run_ai_brain_fn
-        if get_circuit_breaker_fn:
-            self._get_circuit_breaker_fn = get_circuit_breaker_fn
+        if get_balance_fn:         self._get_balance_fn         = get_balance_fn
+        if get_open_trades_fn:     self._get_open_trades_fn     = get_open_trades_fn
+        if run_ai_brain_fn:        self._run_ai_brain_fn        = run_ai_brain_fn
+        if get_circuit_breaker_fn: self._get_circuit_breaker_fn = get_circuit_breaker_fn
         if self._poll_thread and self._poll_thread.is_alive():
             return
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._poll_thread.start()
         logger.info("TelegramManager başlatıldı.")
 
-    def stop(self):
-        pass   # daemon thread otomatik kapanır
-
-    def notify_finish_complete(self, balance):
-        """Finish modu tamamlandı, tüm trade'ler kapandı."""
+    def notify_finish_complete(self, balance: float):
         self.send(
             f"🏁 <b>Finish Modu Tamamlandı</b>\n"
             f"💰 Son Bakiye: ${balance:.2f}\n"
             f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
         )
 
-    def send_startup(self, balance, params, symbol_count, ai_available):
-        """Bot başlangıç mesajı gönder."""
-        ai_str = "✅ Aktif" if ai_available else "❌ Pasif"
-        self.send(
-            f"🟢 <b>AURVEX BOT AKTİF</b>\n"
-            f"⏰ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}\n\n"
-            f"💰 Bakiye: ${balance:.2f}\n"
-            f"🕐 7/24 tarama aktif\n"
-            f"✅ {symbol_count} sembol\n"
-            f"🧠 AI Brain: {ai_str}\n"
-            f"⛔ Devre Kesici: 5 kayıp = 120dk"
-        )
-
-    # ── polling ─────────────────────────────────────────────────
+    # ── Polling ──────────────────────────────────────────────────────────────
 
     def _poll_loop(self):
         while True:
@@ -199,117 +157,168 @@ class TelegramManager:
             time.sleep(1)
 
     def _fetch_updates(self):
-        token = _get_token()
-        chat  = _get_chat()
+        token = _token()
+        chat  = _chat()
         if not token or not chat:
             time.sleep(5)
             return
-        api_base = f"https://api.telegram.org/bot{token}"
         resp = requests.get(
-            f"{api_base}/getUpdates",
+            f"https://api.telegram.org/bot{token}/getUpdates",
             params={"offset": self._offset, "timeout": 10, "limit": 10},
             timeout=15,
         )
         if resp.status_code != 200:
             return
-        data = resp.json()
-        for upd in data.get("result", []):
+        for upd in resp.json().get("result", []):
             self._offset = upd["update_id"] + 1
             msg = upd.get("message") or upd.get("edited_message")
             if not msg:
                 continue
-            # sadece kendi chat'imizden gelen komutları işle
             if str(msg.get("chat", {}).get("id", "")) != str(chat):
                 continue
             text = msg.get("text", "").strip()
             if not text.startswith("/"):
                 continue
-            parts   = text.split(None, 1)
-            cmd     = parts[0].lstrip("/").split("@")[0].lower()
-            args    = parts[1] if len(parts) > 1 else ""
+            parts = text.split(None, 1)
+            cmd   = parts[0].lstrip("/").split("@")[0].lower()
+            args  = parts[1] if len(parts) > 1 else ""
             self._dispatch(cmd, args)
 
-    def _dispatch(self, cmd, args):
-        # built-in komutlar
-        if cmd == "status":
-            self._cmd_status()
-        elif cmd in ("pause", "duraklat"):
+    def _dispatch(self, cmd: str, args: str):
+        handlers = {
+            "status":   self._cmd_status,
+            "ax":       self._cmd_ax,
+            "help":     self._cmd_help,
+            "balance":  self._cmd_balance,
+            "bakiye":   self._cmd_balance,
+            "trades":   self._cmd_trades,
+            "pozisyon": self._cmd_trades,
+            "rapor":    self._cmd_report,
+            "report":   self._cmd_report,
+            "calendar": self._cmd_calendar,
+            "takvim":   self._cmd_calendar,
+            "weekly":   self._cmd_weekly,
+            "haftalik": self._cmd_weekly,
+            "signal":   self._cmd_signal_stats,
+            "coin":     lambda: self._cmd_coin(args),
+            "mode":     self._cmd_mode,
+        }
+
+        if cmd in ("pause", "duraklat"):
             self.paused = True
-            self.send("⏸ Bot duraklatıldı. Devam için /devam")
-        elif cmd in ("devam", "resume"):
+            self.send("⏸ Bot duraklatıldı. Devam için /resume")
+        elif cmd in ("resume", "devam"):
             self.paused = False
             self.send("▶️ Bot devam ediyor.")
-        elif cmd in ("bitir", "finish"):
+        elif cmd in ("finish", "bitir"):
             self.finish_mode = True
             self.send("🏁 Finish modu aktif — açık trade'ler kapanınca bot durur.")
-        elif cmd in ("bakiye", "balance"):
-            self._cmd_balance()
-        elif cmd in ("trades", "pozisyon"):
-            self._cmd_trades()
-        elif cmd in ("rapor", "report"):
-            self._cmd_report()
-        elif cmd == "ax":
-            self._cmd_ax()
-        elif cmd == "help":
-            self._cmd_help()
-        # kayıtlı dış handler'lar
+        elif cmd == "paper":
+            self.paper_mode = True
+            self.send("📝 Paper moda geçildi.")
+        elif cmd == "live":
+            self.paper_mode = False
+            self.send("⚠️ Live moda geçildi. Dikkatli ol!")
+        elif cmd == "execute":
+            self.send("ℹ️ AX execute modu zaten aktif.")
+        elif cmd in handlers:
+            fn = handlers[cmd]
+            fn() if cmd != "coin" else self._cmd_coin(args)
         elif cmd in self._handlers:
             try:
                 self._handlers[cmd](args)
             except Exception as e:
-                logger.warning(f"Komut handler hatası [{cmd}]: {e}")
+                logger.warning(f"Handler hatası [{cmd}]: {e}")
         else:
             self.send(f"❓ Bilinmeyen komut: /{cmd}\n/help ile komutları gör.")
 
-    # ── built-in komut yanıtları ─────────────────────────────────
+    # ── Komut Yanıtları ──────────────────────────────────────────────────────
 
     def _cmd_help(self):
         self.send(
             "📋 <b>AX Komutları</b>\n\n"
+            "<b>Durum</b>\n"
             "/status — Bot durumu\n"
-            "/bakiye — Güncel bakiye\n"
+            "/ax — Detaylı durum (bakiye, CB, trade)\n"
+            "/balance — Güncel bakiye\n"
             "/trades — Açık pozisyonlar\n"
+            "/mode — Mevcut mod\n\n"
+            "<b>Kontrol</b>\n"
             "/pause — Botu duraklat\n"
-            "/devam — Botu devam ettir\n"
-            "/bitir — Finish modu (açık trade'ler kapanınca dur)\n"
-            "/rapor — AI Brain özeti\n"
-            "/ax — AX durum raporu"
+            "/resume — Devam et\n"
+            "/finish — Finish modu\n\n"
+            "<b>Analiz</b>\n"
+            "/report — AI Brain raporu\n"
+            "/calendar — Günlük PnL takvimi\n"
+            "/weekly — Haftalık özet\n"
+            "/signal — Sinyal istatistikleri\n"
+            "/coin BTCUSDT — Coin detayı"
         )
 
     def _cmd_status(self):
-        mode = "PAPER" if self.paper_mode else "LIVE"
-        state = "⏸ DURAKLATILDI" if self.paused else ("🏁 FİNİSH" if self.finish_mode else "✅ AKTİF")
+        mode  = "PAPER" if self.paper_mode else "LIVE"
+        state = ("⏸ DURAKLATILDI" if self.paused
+                 else "🏁 FİNİSH" if self.finish_mode
+                 else "✅ AKTİF")
         self.send(
             f"🤖 <b>AX Bot Durumu</b>\n\n"
             f"Mod: {mode}\n"
             f"Durum: {state}\n"
-            f"Zaman: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+            f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+        )
+
+    def _cmd_ax(self):
+        mode  = "PAPER" if self.paper_mode else "LIVE"
+        state = ("⏸ DURAKLATILDI" if self.paused
+                 else "🏁 FİNİSH" if self.finish_mode
+                 else "RUNNING")
+        try:
+            bal = self._get_balance_fn() if self._get_balance_fn else 0
+        except Exception:
+            bal = 0
+        try:
+            trades = self._get_open_trades_fn() if self._get_open_trades_fn else []
+            tc = len(trades)
+        except Exception:
+            tc = 0
+        cb_line = ""
+        if self._get_circuit_breaker_fn:
+            try:
+                active, rem = self._get_circuit_breaker_fn()
+                cb_line = f"Circuit Breaker: {'🔴 Aktif (' + str(rem) + 'dk)' if active else '🟢 Kapalı'}\n"
+            except Exception:
+                pass
+        self.send(
+            f"🤖 <b>AX Bot Durumu</b>\n\n"
+            f"Mod: <b>{mode}</b> | Durum: <b>{state}</b>\n"
+            f"{cb_line}"
+            f"Açık trade: {tc}\n"
+            f"Bakiye: <b>${bal:.2f}</b>\n"
+            f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
         )
 
     def _cmd_balance(self):
         try:
-            if self._get_balance_fn:
-                bal = self._get_balance_fn()
-            else:
-                from database import get_paper_account
-                acc = get_paper_account()
-                bal = acc.get("balance", 0) if acc else 0
+            bal = self._get_balance_fn() if self._get_balance_fn else None
+            if bal is None:
+                from database import get_paper_balance
+                bal = get_paper_balance()
             self.send(f"💰 <b>Bakiye</b>: ${bal:.2f}")
         except Exception as e:
             self.send(f"Bakiye alınamadı: {e}")
 
     def _cmd_trades(self):
         try:
-            from database import get_trades
-            trades = get_trades(limit=20, status="open")
+            trades = (self._get_open_trades_fn() if self._get_open_trades_fn
+                      else __import__("database").get_open_trades())
             if not trades:
                 self.send("📭 Açık pozisyon yok.")
                 return
-            lines = ["📊 <b>Açık Pozisyonlar</b>\n"]
+            lines = [f"📊 <b>Açık Pozisyonlar ({len(trades)})</b>\n"]
             for t in trades:
                 lines.append(
-                    f"• {t['symbol']} {t['direction']} "
-                    f"@ {t.get('entry', t.get('entry_price', '?'))}"
+                    f"• <b>{t['symbol']}</b> {t['direction']} "
+                    f"@ {t.get('entry', '?')}"
                 )
             self.send("\n".join(lines))
         except Exception as e:
@@ -319,48 +328,95 @@ class TelegramManager:
         if not self._run_ai_brain_fn:
             self.send("❌ AI Brain bağlı değil.")
             return
-        try:
-            self.send("🧠 AI Brain analiz ediliyor, bekleyin...")
-            self._run_ai_brain_fn()
-        except Exception as e:
-            self.send(f"Rapor alınamadı: {e}")
+        self.send("🧠 AI Brain analiz ediliyor, bekleyin...")
+        threading.Thread(target=self._run_ai_brain_fn, daemon=True).start()
 
-    def _cmd_ax(self):
-        mode  = "PAPER" if self.paper_mode else "LIVE"
-        if self.paused:
-            durum = "⏸ DURAKLATILDI"
-        elif self.finish_mode:
-            durum = "🏁 FİNİSH"
-        else:
-            durum = "RUNNING"
-
-        try:
-            bal = self._get_balance_fn() if self._get_balance_fn else 0
-        except Exception:
-            bal = 0
-
-        try:
-            trades = self._get_open_trades_fn() if self._get_open_trades_fn else []
-            trade_count = len(trades)
-        except Exception:
-            trade_count = 0
-
-        cb_line = ""
-        if self._get_circuit_breaker_fn:
-            try:
-                active, remaining = self._get_circuit_breaker_fn()
-                if active:
-                    cb_line = f"Circuit Breaker: 🔴 Aktif ({remaining}dk kaldı)\n"
-                else:
-                    cb_line = "Circuit Breaker: 🟢 Kapalı\n"
-            except Exception:
-                pass
-
+    def _cmd_mode(self):
+        from config import AX_MODE, EXECUTION_MODE
         self.send(
-            f"🤖 <b>AX Bot Durumu</b>\n\n"
-            f"Mod: <b>{mode}</b> | Durum: <b>{durum}</b>\n"
-            f"{cb_line}"
-            f"Açık trade: {trade_count}\n"
-            f"Bakiye: <b>${bal:.2f}</b>\n"
-            f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+            f"⚙️ <b>Mod Bilgisi</b>\n\n"
+            f"AX_MODE: <code>{AX_MODE}</code>\n"
+            f"EXECUTION_MODE: <code>{EXECUTION_MODE}</code>\n"
+            f"Paper: {'✅' if self.paper_mode else '❌'}"
         )
+
+    def _cmd_calendar(self):
+        try:
+            from database import get_daily_summaries
+            days = get_daily_summaries(30)
+            if not days:
+                self.send("📅 Henüz veri yok.")
+                return
+            lines = ["📅 <b>Günlük PnL (Son 30 Gün)</b>\n"]
+            for d in days[:14]:
+                emoji = "🟢" if d["net_pnl"] > 0 else "🔴" if d["net_pnl"] < 0 else "⚪"
+                lines.append(
+                    f"{emoji} {d['date']} | {d['net_pnl']:+.2f}$ | "
+                    f"{d['trade_count']} trade | WR:{d['win_rate']:.0%}"
+                )
+            self.send("\n".join(lines))
+        except Exception as e:
+            self.send(f"Takvim alınamadı: {e}")
+
+    def _cmd_weekly(self):
+        try:
+            from database import get_stats
+            stats7  = get_stats(hours=168)
+            stats30 = get_stats(hours=720)
+            self.send(
+                f"📊 <b>Haftalık Özet</b>\n\n"
+                f"<b>Son 7 Gün</b>\n"
+                f"Trade: {stats7['total']} | WR: {stats7['win_rate']:.0%}\n"
+                f"PnL: {stats7['total_pnl']:+.2f}$ | PF: {stats7['profit_factor']:.2f}\n"
+                f"Avg R: {stats7['avg_r']:.2f} | DD: {stats7['max_drawdown']:.2f}$\n\n"
+                f"<b>Son 30 Gün</b>\n"
+                f"Trade: {stats30['total']} | WR: {stats30['win_rate']:.0%}\n"
+                f"PnL: {stats30['total_pnl']:+.2f}$ | PF: {stats30['profit_factor']:.2f}"
+            )
+        except Exception as e:
+            self.send(f"Haftalık özet alınamadı: {e}")
+
+    def _cmd_signal_stats(self):
+        try:
+            from database import get_conn
+            with get_conn() as conn:
+                rows = conn.execute(
+                    """SELECT decision, COUNT(*) as cnt
+                       FROM signal_candidates
+                       WHERE created_at >= datetime('now', '-7 days')
+                       GROUP BY decision"""
+                ).fetchall()
+            if not rows:
+                self.send("📡 Henüz sinyal kaydı yok.")
+                return
+            lines = ["📡 <b>Sinyal İstatistikleri (7 Gün)</b>\n"]
+            for r in rows:
+                emoji = {"ALLOW": "✅", "VETO": "❌", "WATCH": "👀"}.get(r["decision"], "❓")
+                lines.append(f"{emoji} {r['decision']}: {r['cnt']}")
+            self.send("\n".join(lines))
+        except Exception as e:
+            self.send(f"Sinyal istatistiği alınamadı: {e}")
+
+    def _cmd_coin(self, symbol: str):
+        symbol = symbol.strip().upper()
+        if not symbol:
+            self.send("Kullanım: /coin BTCUSDT")
+            return
+        try:
+            from database import get_coin_profile, get_trades
+            profile = get_coin_profile(symbol)
+            trades  = get_trades(limit=5, symbol=symbol)
+            if not profile:
+                self.send(f"❓ {symbol} için henüz veri yok.")
+                return
+            self.send(
+                f"🪙 <b>{symbol} Profili</b>\n\n"
+                f"Trade: {profile.get('trade_count', 0)} | WR: {profile.get('win_rate', 0):.0%}\n"
+                f"Avg R: {profile.get('avg_r', 0):.2f} | PF: {profile.get('profit_factor', 0):.2f}\n"
+                f"Avg MFE: {profile.get('avg_mfe', 0):.2f}R | MAE: {profile.get('avg_mae', 0):.2f}R\n"
+                f"Danger: {profile.get('danger_score', 0):.2f} | Fakeout: {profile.get('fakeout_rate', 0):.0%}\n"
+                f"Profil: {profile.get('volatility_profile', '?')}\n"
+                f"Tercih: {profile.get('preferred_direction', '?')} | Seans: {profile.get('best_session', '?')}"
+            )
+        except Exception as e:
+            self.send(f"Coin verisi alınamadı: {e}")
