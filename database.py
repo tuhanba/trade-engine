@@ -1,350 +1,682 @@
-import sqlite3, os
-from datetime import datetime, timezone
+"""
+database.py — AX Merkezi Veritabanı
+=====================================
+WAL mode, tek writer, tüm tablolar burada.
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "trading.db")
+Tablolar:
+  trades               — Açık/kapanan trade'ler
+  signal_candidates    — Her sinyal buraya kaydedilir
+  paper_account        — Paper trading bakiyesi
+  params               — Bot parametreleri
+  ai_logs              — AX kararları ve gerekçeleri
+  trade_postmortem     — Trade sonrası MFE/MAE analizi
+  coin_profile         — Coin öğrenme profili
+  coin_market_memory   — Coin piyasa hafızası
+  coin_cooldown        — Coin bazlı bekleme
+  daily_summary        — Günlük özet
+  weekly_summary       — Haftalık özet
+  dashboard_snapshots  — Dashboard geçmişi
+  best_params          — En iyi parametre seti
+  system_state         — Sistem durumu (CB, pause vb.)
+  pattern_memory       — Genel pattern hafızası
+"""
 
-def get_conn():
-    return sqlite3.connect(DB_PATH)
+import sqlite3
+import json
+import logging
+from datetime import datetime, timezone, date, timedelta
+from config import DB_PATH
+
+logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BAĞLANTI
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INIT — TÜM TABLOLAR
+# ─────────────────────────────────────────────────────────────────────────────
 
 def init_db():
-    conn = get_conn()
-    c = conn.cursor()
-    c.executescript("""
-    CREATE TABLE IF NOT EXISTS trades (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        symbol TEXT,
-        direction TEXT,
-        entry REAL,
-        exit_price REAL,
-        sl REAL,
-        tp REAL,
-        qty REAL,
-        leverage INTEGER DEFAULT 10,
-        pnl_usdt REAL,
-        pnl_pct REAL,
-        r_multiple REAL,
-        risk_usdt REAL,
-        status TEXT DEFAULT 'OPEN',
-        open_time TEXT,
-        close_time TEXT,
-        duration_min REAL,
-        rsi5 REAL,
-        rsi1 REAL,
-        vol_ratio REAL,
-        change_24h REAL,
-        volume_m REAL,
-        params_version INTEGER DEFAULT 1,
-        result TEXT,
-        net_pnl REAL DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS params (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        version INTEGER,
-        sl_atr_mult REAL DEFAULT 1.2,
-        tp_atr_mult REAL DEFAULT 2.0,
-        rsi5_min REAL DEFAULT 35,
-        rsi5_max REAL DEFAULT 75,
-        rsi1_min REAL DEFAULT 35,
-        rsi1_max REAL DEFAULT 72,
-        vol_ratio_min REAL DEFAULT 1.2,
-        min_volume_m REAL DEFAULT 10.0,
-        min_change_pct REAL DEFAULT 2.0,
-        risk_pct REAL DEFAULT 1.5,
-        updated_at TEXT,
-        ai_reason TEXT
-    );
-    CREATE TABLE IF NOT EXISTS ai_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        created_at TEXT,
-        trades_analyzed INTEGER,
-        win_rate REAL,
-        avg_rr REAL,
-        insight TEXT,
-        changes TEXT
-    );
-    CREATE TABLE IF NOT EXISTS pattern_memory (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        symbol TEXT,
-        direction TEXT,
-        result TEXT,
-        net_pnl REAL DEFAULT 0,
-        adx REAL,
-        rv REAL,
-        rsi5 REAL,
-        rsi1 REAL,
-        funding_favorable INTEGER DEFAULT 1,
-        bb_width_pct REAL,
-        ob_ratio REAL,
-        volume_m REAL,
-        btc_trend TEXT DEFAULT 'NEUTRAL',
-        session TEXT DEFAULT 'OFF',
-        hold_minutes REAL DEFAULT 0,
-        partial_exit INTEGER DEFAULT 0,
-        bb_width_chg REAL DEFAULT 0,
-        momentum_3c REAL DEFAULT 0,
-        prev_result TEXT DEFAULT 'NONE',
-        created_at TEXT DEFAULT (datetime('now'))
-    );
-    CREATE TABLE IF NOT EXISTS paper_account (
-        id INTEGER PRIMARY KEY DEFAULT 1,
-        paper_balance REAL DEFAULT 250.0,
-        updated_at TEXT
-    );
-    -- Dashboard snapshot: trades reset olsa bile kümülatif istatistikler korunur
-    CREATE TABLE IF NOT EXISTS dashboard_snapshots (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        snapshot_at TEXT DEFAULT (datetime('now')),
-        total_trades INTEGER DEFAULT 0,
-        wins INTEGER DEFAULT 0,
-        losses INTEGER DEFAULT 0,
-        total_pnl REAL DEFAULT 0.0,
-        peak_balance REAL DEFAULT 250.0,
-        note TEXT DEFAULT ''
-    );
-    INSERT OR IGNORE INTO paper_account (id, paper_balance, updated_at)
-    VALUES (1, 250.0, datetime('now'));
-    INSERT OR IGNORE INTO params (version, updated_at, ai_reason)
-    VALUES (1, datetime('now'), 'Initial params');
-    """)
-    conn.commit()
-    conn.close()
+    with get_conn() as conn:
+        conn.executescript("""
 
-def save_trade(trade: dict) -> int:
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("""
-    INSERT INTO trades (symbol, direction, entry, sl, tp, qty, leverage, risk_usdt,
-    rsi5, rsi1, vol_ratio, change_24h, volume_m, open_time, status, params_version)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        trade["symbol"], trade["direction"], trade["entry"],
-        trade["sl"], trade["tp"], trade["qty"], trade.get("leverage", 10),
-        trade["risk_usdt"], trade.get("rsi5", 0), trade.get("rsi1", 0),
-        trade.get("vol_ratio", 0), trade.get("change_24h", 0),
-        trade.get("volume_m", 0),
-        datetime.now(timezone.utc).isoformat(),
-        "OPEN", trade.get("params_version", 1)
-    ))
-    tid = c.lastrowid
-    conn.commit()
-    conn.close()
-    return tid
+        -- ── trades ──────────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS trades (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol           TEXT NOT NULL,
+            direction        TEXT NOT NULL,
+            status           TEXT DEFAULT 'open',
+            environment      TEXT DEFAULT 'paper',
+            ax_mode          TEXT DEFAULT 'execute',
 
-def close_trade(trade_id: int, exit_price: float, status: str = "WIN", net_pnl: float = None):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT entry, sl, qty, direction, risk_usdt, open_time FROM trades WHERE id=?", (trade_id,))
-    row = c.fetchone()
-    if not row:
-        conn.close()
+            entry            REAL,
+            sl               REAL,
+            tp1              REAL,
+            tp2              REAL,
+            trail_stop       REAL,
+
+            qty              REAL,
+            qty_tp1          REAL,
+            qty_tp2          REAL,
+            qty_runner       REAL,
+
+            realized_pnl     REAL DEFAULT 0,
+            net_pnl          REAL DEFAULT 0,
+            r_multiple       REAL DEFAULT 0,
+
+            tp1_hit          INTEGER DEFAULT 0,
+            tp2_hit          INTEGER DEFAULT 0,
+
+            linked_candidate_id INTEGER,
+            open_time        TEXT,
+            close_time       TEXT,
+            close_price      REAL,
+            close_reason     TEXT,
+            hold_minutes     REAL DEFAULT 0
+        );
+
+        -- ── signal_candidates ────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS signal_candidates (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol           TEXT NOT NULL,
+            direction        TEXT,
+            entry            REAL,
+            sl               REAL,
+            tp1              REAL,
+            tp2              REAL,
+            runner_target    REAL,
+            rr               REAL,
+            expected_mfe_r   REAL,
+            score            REAL DEFAULT 0,
+            confidence       REAL DEFAULT 0,
+            decision         TEXT DEFAULT 'PENDING',
+            veto_reason      TEXT,
+            session          TEXT,
+            market_regime    TEXT,
+            ax_mode          TEXT DEFAULT 'execute',
+            execution_mode   TEXT DEFAULT 'paper',
+            linked_trade_id  INTEGER,
+            created_at       TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── paper_account ────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS paper_account (
+            id              INTEGER PRIMARY KEY CHECK (id = 1),
+            balance         REAL DEFAULT 250.0,
+            initial_balance REAL DEFAULT 250.0,
+            updated_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── params ──────────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS params (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            data       TEXT NOT NULL,
+            reason     TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── ai_logs ─────────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS ai_logs (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            event        TEXT,
+            symbol       TEXT,
+            decision     TEXT,
+            score        REAL,
+            confidence   REAL,
+            reason       TEXT,
+            data         TEXT,
+            created_at   TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── trade_postmortem ─────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS trade_postmortem (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id        INTEGER UNIQUE,
+            symbol          TEXT,
+            direction       TEXT,
+            mfe_r           REAL,
+            mae_r           REAL,
+            efficiency      REAL,
+            missed_gain     REAL,
+            sl_tightness    REAL,
+            hold_minutes    REAL,
+            exit_quality    REAL,
+            setup_quality   REAL,
+            notes           TEXT,
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── coin_profile ─────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS coin_profile (
+            symbol              TEXT PRIMARY KEY,
+            trade_count         INTEGER DEFAULT 0,
+            win_count           INTEGER DEFAULT 0,
+            loss_count          INTEGER DEFAULT 0,
+            win_rate            REAL DEFAULT 0,
+            avg_r               REAL DEFAULT 0,
+            profit_factor       REAL DEFAULT 0,
+            avg_mfe             REAL DEFAULT 0,
+            avg_mae             REAL DEFAULT 0,
+            best_session        TEXT,
+            preferred_direction TEXT,
+            danger_score        REAL DEFAULT 0,
+            fakeout_rate        REAL DEFAULT 0,
+            volatility_profile  TEXT DEFAULT 'normal',
+            updated_at          TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── coin_market_memory ───────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS coin_market_memory (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol     TEXT NOT NULL,
+            session    TEXT,
+            regime     TEXT,
+            direction  TEXT,
+            result     TEXT,
+            r_multiple REAL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── coin_cooldown ────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS coin_cooldown (
+            symbol      TEXT PRIMARY KEY,
+            reason      TEXT,
+            until       TEXT NOT NULL,
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── daily_summary ────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS daily_summary (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            date         TEXT UNIQUE,
+            trade_count  INTEGER DEFAULT 0,
+            win_count    INTEGER DEFAULT 0,
+            loss_count   INTEGER DEFAULT 0,
+            win_rate     REAL DEFAULT 0,
+            gross_pnl    REAL DEFAULT 0,
+            net_pnl      REAL DEFAULT 0,
+            avg_r        REAL DEFAULT 0,
+            max_drawdown REAL DEFAULT 0,
+            balance_eod  REAL DEFAULT 0,
+            created_at   TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── weekly_summary ───────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS weekly_summary (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            week_start   TEXT UNIQUE,
+            trade_count  INTEGER DEFAULT 0,
+            win_count    INTEGER DEFAULT 0,
+            loss_count   INTEGER DEFAULT 0,
+            win_rate     REAL DEFAULT 0,
+            net_pnl      REAL DEFAULT 0,
+            avg_r        REAL DEFAULT 0,
+            best_day     TEXT,
+            worst_day    TEXT,
+            created_at   TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── dashboard_snapshots ──────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS dashboard_snapshots (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            note       TEXT,
+            balance    REAL,
+            data       TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── best_params ──────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS best_params (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            data        TEXT NOT NULL,
+            win_rate    REAL,
+            avg_r       REAL,
+            pnl         REAL,
+            trade_count INTEGER,
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── system_state ─────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS system_state (
+            key        TEXT PRIMARY KEY,
+            value      TEXT,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── pattern_memory ───────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS pattern_memory (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol       TEXT,
+            direction    TEXT,
+            session      TEXT,
+            result       TEXT,
+            net_pnl      REAL,
+            hold_minutes REAL,
+            partial_exit INTEGER DEFAULT 0,
+            created_at   TEXT DEFAULT (datetime('now'))
+        );
+
+        """)
+    logger.info("DB init tamamlandı.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAPER ACCOUNT
+# ─────────────────────────────────────────────────────────────────────────────
+
+def init_paper_account(initial: float = 250.0):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
+            (initial, initial)
+        )
+
+def get_paper_balance() -> float:
+    with get_conn() as conn:
+        row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+        return float(row["balance"]) if row else 250.0
+
+def update_paper_balance(pnl: float):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE paper_account SET balance=balance+?, updated_at=datetime('now') WHERE id=1",
+            (pnl,)
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIGNAL CANDIDATES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_signal_candidate(sig: dict) -> int:
+    sql = """
+        INSERT INTO signal_candidates
+            (symbol, direction, entry, sl, tp1, tp2, runner_target,
+             rr, expected_mfe_r, score, confidence, decision, veto_reason,
+             session, market_regime, ax_mode, execution_mode)
+        VALUES
+            (:symbol, :direction, :entry, :sl, :tp1, :tp2, :runner_target,
+             :rr, :expected_mfe_r, :score, :confidence, :decision, :veto_reason,
+             :session, :market_regime, :ax_mode, :execution_mode)
+    """
+    defaults = {
+        "direction": None, "entry": None, "sl": None,
+        "tp1": None, "tp2": None, "runner_target": None,
+        "rr": 0, "expected_mfe_r": 0, "score": 0, "confidence": 0,
+        "decision": "PENDING", "veto_reason": None,
+        "session": None, "market_regime": None,
+        "ax_mode": "execute", "execution_mode": "paper",
+    }
+    with get_conn() as conn:
+        cur = conn.execute(sql, {**defaults, **sig})
+        return cur.lastrowid
+
+def update_signal_decision(candidate_id: int, decision: str, score: float,
+                            confidence: float, veto_reason: str = None,
+                            linked_trade_id: int = None):
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE signal_candidates
+               SET decision=?, score=?, confidence=?, veto_reason=?, linked_trade_id=?
+               WHERE id=?""",
+            (decision, score, confidence, veto_reason, linked_trade_id, candidate_id)
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRADES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_trade(t: dict) -> int:
+    sql = """
+        INSERT INTO trades
+            (symbol, direction, status, environment, ax_mode,
+             entry, sl, tp1, tp2, trail_stop,
+             qty, qty_tp1, qty_tp2, qty_runner,
+             linked_candidate_id, open_time)
+        VALUES
+            (:symbol, :direction, :status, :environment, :ax_mode,
+             :entry, :sl, :tp1, :tp2, :trail_stop,
+             :qty, :qty_tp1, :qty_tp2, :qty_runner,
+             :linked_candidate_id, :open_time)
+    """
+    defaults = {
+        "status": "open", "environment": "paper", "ax_mode": "execute",
+        "trail_stop": None, "qty_tp1": None, "qty_tp2": None, "qty_runner": None,
+        "linked_candidate_id": None,
+        "open_time": datetime.now(timezone.utc).isoformat(),
+    }
+    with get_conn() as conn:
+        cur = conn.execute(sql, {**defaults, **t})
+        return cur.lastrowid
+
+def update_trade(trade_id: int, fields: dict):
+    if not fields:
         return
-    entry, sl, qty, direction, risk_usdt, open_time = row
-    sl_dist = abs(entry - sl)
-    if direction == "LONG":
-        pnl = (exit_price - entry) * qty
-    else:
-        pnl = (entry - exit_price) * qty
-    r_mult  = pnl / (sl_dist * qty + 1e-10)
-    pnl_pct = pnl / (entry * qty + 1e-10) * 100
-    if status not in ("WIN", "LOSS", "MANUAL"):
-        status = "WIN" if pnl > 0 else "LOSS"
-    result = status
-    if net_pnl is None:
-        net_pnl = round(pnl, 4)
-    try:
-        ot  = datetime.fromisoformat(open_time.replace("Z", "+00:00"))
-        dur = (datetime.now(timezone.utc) - ot).total_seconds() / 60
-    except:
-        dur = 0
-    c.execute("""
-    UPDATE trades SET exit_price=?, pnl_usdt=?, pnl_pct=?, r_multiple=?,
-    status=?, result=?, net_pnl=?, close_time=?, duration_min=? WHERE id=?
-    """, (exit_price, round(pnl, 4), round(pnl_pct, 4),
-          round(r_mult, 4), status, result, round(net_pnl, 4),
-          datetime.now(timezone.utc).isoformat(),
-          round(dur, 1), trade_id))
-    conn.commit()
-    conn.close()
+    sets = ", ".join(f"{k}=?" for k in fields)
+    vals = list(fields.values()) + [trade_id]
+    with get_conn() as conn:
+        conn.execute(f"UPDATE trades SET {sets} WHERE id=?", vals)
 
-def get_trades(limit=100, status=None):
-    conn = get_conn()
-    c = conn.cursor()
-    if status == "OPEN":
-        c.execute("SELECT * FROM trades WHERE status=? ORDER BY id DESC LIMIT ?", ("OPEN", limit))
-    elif status:
-        c.execute("""SELECT * FROM trades
-                     WHERE status IN ('WIN','LOSS','MANUAL','CLOSED')
-                     ORDER BY id DESC LIMIT ?""", (limit,))
-    else:
-        c.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,))
-    rows = c.fetchall()
-    cols = [d[0] for d in c.description]
-    conn.close()
-    return [dict(zip(cols, r)) for r in rows]
+def close_trade(trade_id: int, close_price: float, net_pnl: float,
+                reason: str, hold_minutes: float = 0):
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE trades SET
+                status='closed', close_price=?, net_pnl=?, close_reason=?,
+                hold_minutes=?, close_time=?
+               WHERE id=?""",
+            (close_price, net_pnl, reason, hold_minutes, now, trade_id)
+        )
 
-def get_stats():
-    conn = get_conn()
-    c = conn.cursor()
-    # Mevcut session istatistikleri
-    c.execute("""
-    SELECT COUNT(*) total,
-           SUM(CASE WHEN status='WIN' THEN 1 ELSE 0 END) wins,
-           SUM(CASE WHEN status='LOSS' THEN 1 ELSE 0 END) losses,
-           ROUND(AVG(net_pnl), 4) avg_pnl,
-           ROUND(SUM(net_pnl), 4) total_pnl,
-           ROUND(AVG(r_multiple), 4) avg_rr,
-           ROUND(AVG(duration_min), 1) avg_dur
-    FROM trades WHERE status IN ('WIN','LOSS','MANUAL','CLOSED')
-    """)
-    row  = c.fetchone()
-    cols = [d[0] for d in c.description]
-    stats = dict(zip(cols, row))
-    stats["wins"]       = stats["wins"]   or 0
-    stats["losses"]     = stats["losses"] or 0
-    stats["total"]      = stats["total"]  or 0
-    stats["avg_pnl"]    = stats["avg_pnl"]    or 0
-    stats["total_pnl"]  = stats["total_pnl"]  or 0
-    stats["avg_rr"]     = stats["avg_rr"]     or 0
-    stats["avg_dur"]    = stats["avg_dur"]    or 0
-    stats["win_rate"]   = round(stats["wins"] / (stats["total"] + 1e-10) * 100, 1) if stats["total"] else 0
+def get_trade(trade_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
+        return dict(row) if row else None
 
-    # Kümülatif istatistikler — snapshot'lardan topla + mevcut session
-    c.execute("SELECT COALESCE(SUM(total_trades),0), COALESCE(SUM(wins),0), COALESCE(SUM(losses),0), COALESCE(SUM(total_pnl),0) FROM dashboard_snapshots")
-    snap = c.fetchone()
-    stats["cumulative_trades"] = (snap[0] or 0) + stats["total"]
-    stats["cumulative_wins"]   = (snap[1] or 0) + stats["wins"]
-    stats["cumulative_losses"] = (snap[2] or 0) + stats["losses"]
-    stats["cumulative_pnl"]    = round((snap[3] or 0) + stats["total_pnl"], 4)
-    cum_total = stats["cumulative_trades"]
-    stats["cumulative_win_rate"] = round(stats["cumulative_wins"] / (cum_total + 1e-10) * 100, 1) if cum_total else 0
+def get_open_trades() -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM trades WHERE status IN ('open','tp1_hit','runner') ORDER BY open_time"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
-    # Profit factor
-    c.execute("""
-    SELECT ROUND(SUM(CASE WHEN status='WIN' THEN net_pnl ELSE 0 END), 4),
-           ROUND(ABS(SUM(CASE WHEN status='LOSS' THEN net_pnl ELSE 0 END)), 4)
-    FROM trades WHERE status IN ('WIN','LOSS','MANUAL','CLOSED')
-    """)
-    pf_row       = c.fetchone()
-    gross_profit = pf_row[0] or 0
-    gross_loss   = pf_row[1] or 0
-    if gross_loss > 0:
-        stats["profit_factor"] = round(gross_profit / gross_loss, 2)
-    elif gross_profit > 0:
-        stats["profit_factor"] = round(gross_profit, 2)
-    else:
-        stats["profit_factor"] = 0.0
+def get_trades(limit: int = 100, status: str = None, symbol: str = None) -> list:
+    sql = "SELECT * FROM trades WHERE 1=1"
+    params = []
+    if status:
+        sql += " AND status=?"
+        params.append(status)
+    if symbol:
+        sql += " AND symbol=?"
+        params.append(symbol)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
-    # Best / worst / avg_win / avg_loss
-    c.execute("""
-    SELECT MAX(net_pnl), MIN(net_pnl),
-           AVG(CASE WHEN status='WIN' THEN net_pnl END),
-           AVG(CASE WHEN status='LOSS' THEN net_pnl END)
-    FROM trades WHERE status IN ('WIN','LOSS','MANUAL','CLOSED')
-    """)
-    perf_row = c.fetchone()
-    stats["best_trade"]       = round(perf_row[0] or 0, 4)
-    stats["worst_trade"]      = round(perf_row[1] or 0, 4)
-    stats["avg_win"]          = round(perf_row[2] or 0, 4)
-    stats["avg_loss"]         = round(perf_row[3] or 0, 4)
-    stats["avg_duration_min"] = stats.get("avg_dur", 0)
 
-    # Max drawdown
-    c.execute("SELECT net_pnl FROM trades WHERE status IN ('WIN','LOSS','MANUAL','CLOSED') ORDER BY id")
-    pnls = [r[0] or 0 for r in c.fetchall()]
-    cum = 0; peak = 0; max_dd = 0
-    for p in pnls:
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTMORTEM
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_postmortem(data: dict):
+    sql = """
+        INSERT OR REPLACE INTO trade_postmortem
+            (trade_id, symbol, direction, mfe_r, mae_r, efficiency,
+             missed_gain, sl_tightness, hold_minutes, exit_quality, setup_quality, notes)
+        VALUES
+            (:trade_id, :symbol, :direction, :mfe_r, :mae_r, :efficiency,
+             :missed_gain, :sl_tightness, :hold_minutes, :exit_quality, :setup_quality, :notes)
+    """
+    defaults = {k: None for k in ["symbol","direction","mfe_r","mae_r","efficiency",
+                                   "missed_gain","sl_tightness","hold_minutes",
+                                   "exit_quality","setup_quality","notes"]}
+    with get_conn() as conn:
+        conn.execute(sql, {**defaults, **data})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COIN PROFILE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_coin_profile(symbol: str) -> dict:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM coin_profile WHERE symbol=?", (symbol,)
+        ).fetchone()
+        return dict(row) if row else {}
+
+def upsert_coin_profile(symbol: str, fields: dict):
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT symbol FROM coin_profile WHERE symbol=?", (symbol,)
+        ).fetchone()
+        if existing:
+            sets = ", ".join(f"{k}=?" for k in fields) + ", updated_at=datetime('now')"
+            conn.execute(
+                f"UPDATE coin_profile SET {sets} WHERE symbol=?",
+                list(fields.values()) + [symbol]
+            )
+        else:
+            fields["symbol"] = symbol
+            cols = ", ".join(fields.keys())
+            vals = ", ".join("?" * len(fields))
+            conn.execute(
+                f"INSERT INTO coin_profile ({cols}) VALUES ({vals})",
+                list(fields.values())
+            )
+
+def save_coin_market_memory(symbol: str, session: str, regime: str,
+                             direction: str, result: str, r_multiple: float):
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO coin_market_memory
+               (symbol, session, regime, direction, result, r_multiple)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (symbol, session, regime, direction, result, r_multiple)
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COIN COOLDOWN
+# ─────────────────────────────────────────────────────────────────────────────
+
+def set_coin_cooldown(symbol: str, minutes: int, reason: str = ""):
+    until = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO coin_cooldown (symbol, reason, until) VALUES (?, ?, ?)",
+            (symbol, reason, until)
+        )
+
+def is_coin_in_cooldown(symbol: str) -> bool:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT until FROM coin_cooldown WHERE symbol=? AND until > ?",
+            (symbol, now)
+        ).fetchone()
+        return row is not None
+
+def clear_expired_cooldowns():
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        conn.execute("DELETE FROM coin_cooldown WHERE until <= ?", (now,))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DAILY / WEEKLY SUMMARY
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_daily_summary(data: dict):
+    sql = """
+        INSERT OR REPLACE INTO daily_summary
+            (date, trade_count, win_count, loss_count, win_rate,
+             gross_pnl, net_pnl, avg_r, max_drawdown, balance_eod)
+        VALUES
+            (:date, :trade_count, :win_count, :loss_count, :win_rate,
+             :gross_pnl, :net_pnl, :avg_r, :max_drawdown, :balance_eod)
+    """
+    defaults = {k: 0 for k in ["trade_count","win_count","loss_count","win_rate",
+                                "gross_pnl","net_pnl","avg_r","max_drawdown","balance_eod"]}
+    defaults["date"] = date.today().isoformat()
+    with get_conn() as conn:
+        conn.execute(sql, {**defaults, **data})
+
+def get_daily_summaries(days: int = 30) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM daily_summary ORDER BY date DESC LIMIT ?", (days,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+def save_weekly_summary(data: dict):
+    sql = """
+        INSERT OR REPLACE INTO weekly_summary
+            (week_start, trade_count, win_count, loss_count, win_rate,
+             net_pnl, avg_r, best_day, worst_day)
+        VALUES
+            (:week_start, :trade_count, :win_count, :loss_count, :win_rate,
+             :net_pnl, :avg_r, :best_day, :worst_day)
+    """
+    defaults = {k: 0 for k in ["trade_count","win_count","loss_count","win_rate","net_pnl","avg_r"]}
+    defaults.update({"best_day": None, "worst_day": None})
+    with get_conn() as conn:
+        conn.execute(sql, {**defaults, **data})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STATS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_stats(hours: int = 48) -> dict:
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM trades WHERE status='closed' AND close_time >= ?", (cutoff,)
+        ).fetchall()
+
+    trades = [dict(r) for r in rows]
+    if not trades:
+        return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0,
+                "total_pnl": 0, "avg_win": 0, "avg_loss": 0,
+                "avg_r": 0, "profit_factor": 0, "max_drawdown": 0}
+
+    wins   = [t for t in trades if t["net_pnl"] > 0]
+    losses = [t for t in trades if t["net_pnl"] <= 0]
+    pnls   = [t["net_pnl"] for t in trades]
+
+    gross_win  = sum(t["net_pnl"] for t in wins)
+    gross_loss = abs(sum(t["net_pnl"] for t in losses))
+
+    cum, peak, max_dd = 0, 0, 0
+    for p in reversed(pnls):
         cum += p
-        if cum > peak: peak = cum
-        dd = cum - peak
-        if dd < max_dd: max_dd = dd
-    stats["max_drawdown"] = round(max_dd, 4)
+        peak = max(peak, cum)
+        max_dd = max(max_dd, peak - cum)
 
-    # Açık trade sayısı
-    c.execute("SELECT COUNT(*) FROM trades WHERE status='OPEN'")
-    stats["open_count"] = c.fetchone()[0]
+    return {
+        "total":         len(trades),
+        "wins":          len(wins),
+        "losses":        len(losses),
+        "win_rate":      len(wins) / len(trades),
+        "total_pnl":     sum(pnls),
+        "avg_win":       gross_win  / len(wins)   if wins   else 0,
+        "avg_loss":      gross_loss / len(losses) if losses else 0,
+        "avg_r":         sum(t["r_multiple"] for t in trades) / len(trades),
+        "profit_factor": gross_win / gross_loss if gross_loss > 0 else 0,
+        "max_drawdown":  max_dd,
+    }
 
-    # Bakiye
-    c.execute("SELECT paper_balance FROM paper_account LIMIT 1")
-    bal_row = c.fetchone()
-    stats["paper_balance"]  = round(float(bal_row[0]) if bal_row else 250.0, 4)
-    stats["usdt_balance"]   = stats["paper_balance"]
-    stats["usdt_available"] = stats["paper_balance"]
 
-    # Params ve AI log
-    c.execute("SELECT * FROM params ORDER BY version DESC LIMIT 1")
-    p  = c.fetchone()
-    pc = [d[0] for d in c.description]
-    stats["params"] = dict(zip(pc, p)) if p else {}
+# ─────────────────────────────────────────────────────────────────────────────
+# SYSTEM STATE
+# ─────────────────────────────────────────────────────────────────────────────
 
-    c.execute("SELECT * FROM ai_logs ORDER BY id DESC LIMIT 1")
-    a  = c.fetchone()
-    ac = [d[0] for d in c.description]
-    stats["last_ai"] = dict(zip(ac, a)) if a else {}
+def get_state(key: str, default=None):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM system_state WHERE key=?", (key,)
+        ).fetchone()
+        if row is None:
+            return default
+        try:
+            return json.loads(row["value"])
+        except Exception:
+            return row["value"]
 
-    conn.close()
-    return stats
+def set_state(key: str, value):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO system_state (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+            (key, json.dumps(value))
+        )
 
-def save_snapshot(note: str = "manual_reset"):
-    """Trades silinmeden önce mevcut istatistikleri snapshot olarak kaydet."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("""
-    SELECT COUNT(*),
-           SUM(CASE WHEN status='WIN' THEN 1 ELSE 0 END),
-           SUM(CASE WHEN status='LOSS' THEN 1 ELSE 0 END),
-           ROUND(SUM(net_pnl), 4),
-           MAX(paper_balance)
-    FROM trades
-    LEFT JOIN paper_account ON paper_account.id = 1
-    WHERE status IN ('WIN','LOSS','MANUAL','CLOSED')
-    """)
-    row = c.fetchone()
-    total = row[0] or 0
-    if total > 0:
-        c.execute("""
-        INSERT INTO dashboard_snapshots (total_trades, wins, losses, total_pnl, peak_balance, note)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """, (total, row[1] or 0, row[2] or 0, row[3] or 0, row[4] or 250.0, note))
-        conn.commit()
-    conn.close()
 
-def get_current_params():
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT * FROM params ORDER BY version DESC LIMIT 1")
-    row  = c.fetchone()
-    cols = [d[0] for d in c.description]
-    conn.close()
-    return dict(zip(cols, row)) if row else {}
+# ─────────────────────────────────────────────────────────────────────────────
+# AI LOGS
+# ─────────────────────────────────────────────────────────────────────────────
 
-def save_params(params: dict, reason: str):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT MAX(version) FROM params")
-    v = (c.fetchone()[0] or 0) + 1
-    c.execute("""
-    INSERT INTO params (version, sl_atr_mult, tp_atr_mult, rsi5_min, rsi5_max,
-    rsi1_min, rsi1_max, vol_ratio_min, min_volume_m, min_change_pct, risk_pct,
-    updated_at, ai_reason)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (v, params["sl_atr_mult"], params["tp_atr_mult"],
-          params["rsi5_min"], params["rsi5_max"],
-          params["rsi1_min"], params["rsi1_max"],
-          params["vol_ratio_min"], params["min_volume_m"],
-          params["min_change_pct"], params["risk_pct"],
-          datetime.now(timezone.utc).isoformat(), reason))
-    conn.commit()
-    conn.close()
-    return v
+def save_ai_log(event: str, symbol: str = None, decision: str = None,
+                score: float = None, confidence: float = None,
+                reason: str = None, data: dict = None):
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO ai_logs (event, symbol, decision, score, confidence, reason, data)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (event, symbol, decision, score, confidence, reason,
+             json.dumps(data) if data else None)
+        )
 
-def save_ai_log(log: dict):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("""
-    INSERT INTO ai_logs (created_at, trades_analyzed, win_rate, avg_rr, insight, changes)
-    VALUES (?, ?, ?, ?, ?, ?)
-    """, (datetime.now(timezone.utc).isoformat(),
-          log["trades_analyzed"], log["win_rate"],
-          log["avg_rr"], log["insight"], log["changes"]))
-    conn.commit()
-    conn.close()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PARAMS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_current_params() -> dict:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT data FROM params ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            try:
+                return json.loads(row["data"])
+            except Exception:
+                pass
+    return {}
+
+def save_params(params: dict, reason: str = ""):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO params (data, reason) VALUES (?, ?)",
+            (json.dumps(params), reason)
+        )
+
+def save_best_params(params: dict, win_rate: float, avg_r: float,
+                     pnl: float, trade_count: int):
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO best_params (data, win_rate, avg_r, pnl, trade_count)
+               VALUES (?, ?, ?, ?, ?)""",
+            (json.dumps(params), win_rate, avg_r, pnl, trade_count)
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DASHBOARD SNAPSHOT
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_snapshot(note: str = "", balance: float = 0, data: dict = None):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO dashboard_snapshots (note, balance, data) VALUES (?, ?, ?)",
+            (note, balance, json.dumps(data or {}))
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PATTERN MEMORY
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_pattern(symbol: str, direction: str, session: str, result: str,
+                 net_pnl: float, hold_minutes: float = 0, partial_exit: int = 0):
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO pattern_memory
+               (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
+        )
