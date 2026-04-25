@@ -32,33 +32,23 @@ def compute_daily(date_str: str | None = None) -> dict | None:
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
         with get_conn() as conn:
+            # Sadece net_pnl kullan — 'result' kolonu trades tablosunda yok
             rows = conn.execute(
                 """
-                SELECT net_pnl, result, close_reason, entry, sl
+                SELECT net_pnl
                 FROM trades
-                WHERE DATE(close_time) = ? AND status IN ('closed_win','closed_loss','sl','trail','timeout','tp1_hit','runner','open')
+                WHERE DATE(close_time) = ?
                   AND close_time IS NOT NULL
                 """,
                 (date_str,),
             ).fetchall()
 
-            if not rows:
-                rows = conn.execute(
-                    """
-                    SELECT net_pnl, result, close_reason, entry, sl
-                    FROM trades
-                    WHERE DATE(close_time) = ?
-                      AND close_time IS NOT NULL
-                    """,
-                    (date_str,),
-                ).fetchall()
-
         trade_count = len(rows)
         if trade_count == 0:
             return None
 
-        pnls = [r[0] or 0 for r in rows]
-        wins  = sum(1 for r in rows if (r[0] or 0) > 0)
+        pnls   = [r[0] or 0 for r in rows]
+        wins   = sum(1 for p in pnls if p > 0)
         losses = trade_count - wins
         net_pnl = sum(pnls)
         win_rate = wins / trade_count if trade_count else 0
@@ -165,7 +155,9 @@ def compute_weekly(week_start: str | None = None) -> dict | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_calendar_data(days: int = 30) -> list[dict]:
-    """Son N günlük PnL verisi — dashboard calendar için."""
+    """Son N günlük PnL verisi — dashboard calendar için.
+    Önce daily_summary tablosuna bakar; boşsa trades'den anlık hesaplar.
+    """
     try:
         with get_conn() as conn:
             rows = conn.execute(
@@ -178,18 +170,46 @@ def get_calendar_data(days: int = 30) -> list[dict]:
                 (days,),
             ).fetchall()
 
-        return [
-            {
-                "date":        r[0],
-                "net_pnl":     round(r[1] or 0, 4),
-                "trade_count": r[2] or 0,
-                "win_count":   r[3] or 0,
-                "loss_count":  r[4] or 0,
-            }
-            for r in reversed(rows)
-        ]
+            if rows:
+                return [
+                    {
+                        "date":        r[0],
+                        "net_pnl":     round(r[1] or 0, 4),
+                        "trade_count": r[2] or 0,
+                        "win_count":   r[3] or 0,
+                        "loss_count":  r[4] or 0,
+                    }
+                    for r in reversed(rows)
+                ]
+
+            # Fallback: trades tablosundan anlık hesapla
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+            rows2 = conn.execute(
+                """
+                SELECT DATE(close_time) as d,
+                       SUM(net_pnl) as pnl,
+                       COUNT(*) as tc,
+                       SUM(CASE WHEN net_pnl > 0  THEN 1 ELSE 0 END) as wins,
+                       SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END) as losses
+                FROM trades
+                WHERE DATE(close_time) >= ? AND close_time IS NOT NULL
+                GROUP BY DATE(close_time)
+                ORDER BY d ASC
+                """,
+                (cutoff,),
+            ).fetchall()
+            return [
+                {
+                    "date":        r[0],
+                    "net_pnl":     round(r[1] or 0, 4),
+                    "trade_count": r[2] or 0,
+                    "win_count":   r[3] or 0,
+                    "loss_count":  r[4] or 0,
+                }
+                for r in rows2
+            ]
     except Exception as e:
-        logger.error(f"[Dashboard] get_calendar_data hatası: {e}")
+        logger.error(f"[Dashboard] get_calendar_data hatasi: {e}")
         return []
 
 
@@ -270,7 +290,7 @@ def get_ax_status() -> dict:
             today_signals = row2[0] or 0
 
             row3 = conn.execute(
-                "SELECT COUNT(*) FROM signal_candidates WHERE DATE(created_at)=? AND ax_decision='ALLOW'",
+                "SELECT COUNT(*) FROM signal_candidates WHERE DATE(created_at)=? AND decision='ALLOW'",
                 (today,),
             ).fetchone()
             today_allowed = row3[0] or 0

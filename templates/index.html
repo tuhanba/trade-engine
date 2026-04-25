@@ -538,6 +538,64 @@ body::before{
     </table>
     <div class="pager" id="pager"></div>
   </div>
+
+  <!-- ── EQUITy CURVE ──────────────────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:12px" id="equitySec">
+    <div class="card-hdr">
+      <div class="card-title">Equity Curve</div>
+      <div class="card-meta" id="equityMeta">—</div>
+    </div>
+    <div class="chart-wrap" style="height:160px"><canvas id="equityChart"></canvas></div>
+  </div>
+
+  <!-- ── WINRATE / RR / EXPECTANCY ────────────────────────────────────────── -->
+  <div class="g2b" style="margin-bottom:12px">
+    <div class="card">
+      <div class="card-hdr">
+        <div class="card-title">WinRate / RR Analizi</div>
+        <div class="card-meta" id="rrMeta">—</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px">
+        <div class="pm"><div class="pm-label">Win Rate</div><div class="pm-val" id="rrWR">—</div></div>
+        <div class="pm"><div class="pm-label">Avg RR</div><div class="pm-val" id="rrRR">—</div></div>
+        <div class="pm"><div class="pm-label">Expectancy</div><div class="pm-val" id="rrExp">—</div></div>
+      </div>
+      <div style="font-family:var(--mono);font-size:10px;padding:9px 12px;border:1px solid var(--border);border-left:3px solid var(--gold-br);background:var(--surface);border-radius:var(--r)">
+        Durum: <span id="rrStatus" style="color:var(--gold-br);font-weight:700">—</span>
+        &nbsp;|&nbsp; Hedef: WR %45-55, RR &ge;1.5x
+      </div>
+    </div>
+
+    <!-- ── VETO STATS ─────────────────────────────────────────────────────── -->
+    <div class="card">
+      <div class="card-hdr">
+        <div class="card-title">Veto Analizi</div>
+        <div class="card-meta" id="vetoMeta">—</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:10px">
+        <div class="pm"><div class="pm-label">ALLOW</div><div class="pm-val pos" id="vAllow">—</div></div>
+        <div class="pm"><div class="pm-label">VETO</div><div class="pm-val neg" id="vVeto">—</div></div>
+        <div class="pm"><div class="pm-label">WATCH</div><div class="pm-val" id="vWatch">—</div></div>
+        <div class="pm"><div class="pm-label">Allow WR</div><div class="pm-val" id="vAllowWR">—</div></div>
+      </div>
+      <div id="vetoReasons" style="display:flex;flex-direction:column;gap:3px;max-height:80px;overflow-y:auto"></div>
+    </div>
+  </div>
+
+  <!-- ── HEALTH CHECK ──────────────────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-hdr">
+      <div class="card-title">Sistem Sagligi</div>
+      <div class="card-meta" id="healthMeta">—</div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:11px">
+      <span id="hDB"  style="padding:4px 10px;border-radius:2px;border:1px solid var(--border)">DB —</span>
+      <span id="hBN"  style="padding:4px 10px;border-radius:2px;border:1px solid var(--border)">Binance —</span>
+      <span id="hDash" style="padding:4px 10px;border-radius:2px;border:1px solid var(--border)">Dashboard —</span>
+      <span id="hScan" style="padding:4px 10px;border-radius:2px;border:1px solid var(--border);color:var(--text-muted)">Son Tarama: —</span>
+      <span id="hTrade" style="padding:4px 10px;border-radius:2px;border:1px solid var(--border);color:var(--text-muted)">Son Trade: —</span>
+    </div>
+  </div>
 </main>
 
 <footer class="foot">
@@ -708,7 +766,7 @@ async function loadPositions(){
     if(!pos.length){wrap.innerHTML="<div class="empty">— Acik Pozisyon Yok —</div>";return}
     wrap.innerHTML=pos.map(p=>{
       const isL=(p.direction||"").toUpperCase()==="LONG",pnl=p.unrealized_pnl||0,bar=Math.min(Math.abs(p.sl_distance_pct||0),100);
-      return "<div class="pos "+(isL?"long-p":"short-p")+""><div class="pos-top"><div><div class="pos-sym">"+p.symbol+"</div><span class="pos-dir "+(isL?"long":"short")+"">"+p.direction+" x"+(p.leverage||"—")+"</span></div><div class="pos-pnl"><div class="pos-pnl-val "+(pnl>=0?"pos-c":"neg-c")+"">"+fp(pnl)+"</div><div class="pos-pnl-pct">"+(pnl>=0?"+":"")+f(p.unrealized_pct,2)+"%</div></div></div><div class="pos-levels"><div><div class="pl-lbl">Entry</div><div class="pl-val entry">"+f(p.entry,5)+"</div></div><div><div class="pl-lbl">Stop</div><div class="pl-val stop">"+f(p.sl,4)+"</div></div><div><div class="pl-lbl">Target</div><div class="pl-val target">"+f(p.tp,4)+"</div></div><div><div class="pl-lbl">RR</div><div class="pl-val rr">"+f(p.current_rr,2)+"R</div></div></div><div class="pos-bar-bg"><div class="pos-bar-fill "+(isL?"long":"short")+"" style="width:"+bar+"%"></div></div><div class="pos-foot"><span>Mark: "+f(p.current_price,5)+"</span><span>SL: "+f(p.sl_distance_pct,1)+"%</span></div></div>";
+      return "<div class="pos "+(isL?"long-p":"short-p")+""><div class="pos-top"><div><div class="pos-sym">"+p.symbol+"</div><span class="pos-dir "+(isL?"long":"short")+"">"+p.direction+" x"+(p.leverage||"—")+"</span></div><div class="pos-pnl"><div class="pos-pnl-val "+(pnl>=0?"pos-c":"neg-c")+"">"+fp(pnl)+"</div><div class="pos-pnl-pct">"+(pnl>=0?"+":"")+f(p.unrealized_pct,2)+"%</div></div></div><div class="pos-levels"><div><div class="pl-lbl">Entry</div><div class="pl-val entry">"+f(p.entry,5)+"</div></div><div><div class="pl-lbl">Stop</div><div class="pl-val stop">"+f(p.sl,4)+"</div></div><div><div class="pl-lbl">Target</div><div class="pl-val target">"+f(p.tp1||p.tp,4)+"</div></div><div><div class="pl-lbl">RR</div><div class="pl-val rr">"+f(p.current_rr,2)+"R</div></div></div><div class="pos-bar-bg"><div class="pos-bar-fill "+(isL?"long":"short")+"" style="width:"+bar+"%"></div></div><div class="pos-foot"><span>Mark: "+f(p.current_price,5)+"</span><span>SL: "+f(p.sl_distance_pct,1)+"%</span></div></div>";
     }).join("");
   }catch(e){console.error(e)}
 }
@@ -894,11 +952,136 @@ async function loadCoinProfiles(){
   }catch(e){console.error("coinProfiles",e)}
 }
 
-async function init(){await Promise.all([loadStats(),loadChart(),loadPositions(),loadHistory(curPage),loadAxStatus(),loadCalendar(),loadWeekly(),loadCoinProfiles()])}
+
+// ── EQUITY CURVE ────────────────────────────────────────────────────────────
+let equityChart = null;
+async function loadEquityCurve() {
+  try {
+    const j = await fetch(BASE + "/api/equity-curve").then(r => r.json());
+    if (!j.ok) return;
+    const pts = j.data || [];
+    if (!pts.length) { document.getElementById("equityMeta").textContent = "Veri yok"; return; }
+    const last = pts[pts.length - 1];
+    const isPos = (last.cumulative || 0) >= 0;
+    document.getElementById("equityMeta").textContent =
+      (isPos ? "+" : "") + (last.cumulative || 0).toFixed(2) + "$ / " + pts.length + " trade";
+    const ctx = document.getElementById("equityChart").getContext("2d");
+    if (equityChart) equityChart.destroy();
+    equityChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: pts.map((_, i) => "#" + (i + 1)),
+        datasets: [
+          {
+            label: "Bakiye",
+            data: pts.map(p => p.balance),
+            borderColor: isPos ? "#4ADE80" : "#EF4444",
+            backgroundColor: isPos ? "rgba(74,222,128,0.06)" : "rgba(239,68,68,0.06)",
+            borderWidth: 1.8, pointRadius: 0, tension: 0.35, fill: true, yAxisID: "y"
+          },
+          {
+            label: "Drawdown",
+            data: pts.map(p => p.drawdown),
+            borderColor: "rgba(185,28,28,0.5)",
+            backgroundColor: "rgba(185,28,28,0.05)",
+            borderWidth: 1, pointRadius: 0, tension: 0.35, fill: true, yAxisID: "y"
+          }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false },
+          y: {
+            grid: { color: "rgba(201,168,76,0.04)" },
+            ticks: { color: "rgba(175,158,125,0.45)", font: { family: "JetBrains Mono", size: 9 },
+                     callback: v => (v >= 0 ? "+" : "") + v.toFixed(1) + "$" }
+          }
+        }
+      }
+    });
+  } catch (e) { console.error("equityCurve", e); }
+}
+
+// ── WINRATE / RR / EXPECTANCY ───────────────────────────────────────────────
+async function loadWinrateRR() {
+  try {
+    const j = await fetch(BASE + "/api/winrate-rr").then(r => r.json());
+    if (!j.ok) return;
+    const d = j.data;
+    document.getElementById("rrWR").textContent = (d.current_wr || 0).toFixed(1) + "%";
+    document.getElementById("rrRR").textContent = (d.current_rr || 0).toFixed(2) + "x";
+    const exp = d.current_expectancy || 0;
+    const expEl = document.getElementById("rrExp");
+    expEl.textContent = (exp >= 0 ? "+" : "") + exp.toFixed(3) + "R";
+    expEl.className = "pm-val " + (exp > 0 ? "pos" : exp < 0 ? "neg" : "dim");
+    const statusMap = {
+      strong_zone: ["GUCLU ZONE", "var(--green-br)"],
+      profitable_zone: ["KARLI ZONE", "var(--gold-br)"],
+      breakeven: ["BASABASIMA", "var(--text-muted)"],
+      below_breakeven: ["KARIN ALTINDA", "var(--red-br)"]
+    };
+    const [stTxt, stClr] = statusMap[d.status] || ["—", "var(--text-muted)"];
+    const stEl = document.getElementById("rrStatus");
+    stEl.textContent = stTxt; stEl.style.color = stClr;
+    document.getElementById("rrMeta").textContent =
+      "WR " + (d.current_wr || 0).toFixed(1) + "% | Exp " + exp.toFixed(3) + "R";
+  } catch (e) { console.error("winrateRR", e); }
+}
+
+// ── VETO STATS ───────────────────────────────────────────────────────────────
+async function loadVetoStats() {
+  try {
+    const j = await fetch(BASE + "/api/veto-stats").then(r => r.json());
+    if (!j.ok) return;
+    const d = j.data;
+    document.getElementById("vAllow").textContent = d.decisions.ALLOW || 0;
+    document.getElementById("vVeto").textContent  = d.decisions.VETO  || 0;
+    document.getElementById("vWatch").textContent = d.decisions.WATCH || 0;
+    document.getElementById("vAllowWR").textContent = (d.allow_win_rate || 0).toFixed(1) + "%";
+    document.getElementById("vetoMeta").textContent = (d.total || 0) + " sinyal";
+    const reasons = d.veto_reasons || {};
+    const wrap = document.getElementById("vetoReasons");
+    const entries = Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    if (entries.length) {
+      wrap.innerHTML = entries.map(([k, v]) =>
+        '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;padding:2px 6px;border-radius:2px;background:var(--surface)">' +
+        '<span style="color:var(--text-muted)">' + k + '</span>' +
+        '<span style="color:var(--red-br)">' + v + '</span></div>'
+      ).join("");
+    }
+  } catch (e) { console.error("vetoStats", e); }
+}
+
+// ── HEALTH CHECK ─────────────────────────────────────────────────────────────
+async function loadHealth() {
+  try {
+    const j = await fetch(BASE + "/api/health").then(r => r.json());
+    if (!j.ok) return;
+    const d = j.data;
+    function badge(el, ok, label) {
+      el.textContent = label + (ok ? " OK" : " HATA");
+      el.style.color = ok ? "var(--green-br)" : "var(--red-br)";
+      el.style.borderColor = ok ? "rgba(74,222,128,0.25)" : "rgba(185,28,28,0.25)";
+    }
+    badge(document.getElementById("hDB"),   d.db_connected,   "DB");
+    badge(document.getElementById("hBN"),   d.binance_client, "Binance");
+    badge(document.getElementById("hDash"), d.dashboard_ok,   "Dashboard");
+    const fmtTime = s => s ? s.split("T")[1]?.substring(0, 5) + " UTC" : "—";
+    document.getElementById("hScan").textContent  = "Son Tarama: " + fmtTime(d.last_scan_at);
+    document.getElementById("hTrade").textContent = "Son Trade: "  + fmtTime(d.last_trade_at);
+    document.getElementById("healthMeta").textContent =
+      new Date().toLocaleTimeString("tr-TR", { timeZone: "UTC" }) + " UTC";
+  } catch (e) { console.error("health", e); }
+}
+
+async function init(){await Promise.all([loadStats(),loadChart(),loadPositions(),loadHistory(curPage),loadAxStatus(),loadCalendar(),loadWeekly(),loadCoinProfiles(),loadEquityCurve(),loadWinrateRR(),loadVetoStats(),loadHealth()])}
 init();
 setInterval(()=>{loadStats();loadPositions();loadAxStatus()},8000);
 setInterval(()=>{loadChart();loadHistory(curPage)},15000);
-setInterval(()=>{loadCalendar();loadWeekly();loadCoinProfiles()},120000);
+setInterval(()=>{loadCalendar();loadWeekly();loadCoinProfiles();loadEquityCurve();loadWinrateRR();loadVetoStats()},120000);
+setInterval(loadHealth,30000);
 </script>
 </body>
 </html>
