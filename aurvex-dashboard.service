@@ -1,14 +1,17 @@
 [Unit]
-Description=AURVEX.Ai Dashboard
-After=network.target
+Description=AURVEX.Ai Dashboard (Flask + SocketIO)
+After=network.target aurvex-bot.service
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/root/trade_engine
+EnvironmentFile=-/root/trade_engine/.env
 ExecStart=/root/trade_engine/venv/bin/python3 /root/trade_engine/app.py
 Restart=always
-RestartSec=5
+RestartSec=10
+StandardOutput=append:/root/trade_engine/logs/dashboard.log
+StandardError=append:/root/trade_engine/logs/dashboard.log
 Environment=PYTHONUNBUFFERED=1
 
 [Install]

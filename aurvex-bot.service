@@ -1,14 +1,17 @@
 [Unit]
-Description=AURVEX.Ai Scalp Bot
+Description=AURVEX.Ai Scalp Bot (AX Trading Engine)
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/root/trade_engine
+EnvironmentFile=-/root/trade_engine/.env
 ExecStart=/root/trade_engine/venv/bin/python3 /root/trade_engine/scalp_bot.py
 Restart=always
-RestartSec=10
+RestartSec=15
+StandardOutput=append:/root/trade_engine/logs/bot.log
+StandardError=append:/root/trade_engine/logs/bot.log
 Environment=PYTHONUNBUFFERED=1
 
 [Install]

@@ -1,0 +1,13 @@
+/root/trade_engine/logs/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root root
+    postrotate
+        systemctl kill --signal=USR1 aurvex-bot.service 2>/dev/null || true
+        systemctl kill --signal=USR1 aurvex-dashboard.service 2>/dev/null || true
+    endscript
+}
