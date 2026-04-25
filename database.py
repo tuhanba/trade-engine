@@ -302,12 +302,24 @@ def _migrate(conn):
         ("coin_params", "min_volume_m",       "REAL DEFAULT 15.0"),
         ("coin_params", "enabled",            "INTEGER DEFAULT 1"),
         ("coin_params", "updated_at",         "TEXT DEFAULT (datetime('now'))"),
+        # paper_account — eski şemada 'paper_balance', yeni şemada 'balance'
+        ("paper_account", "balance",         "REAL DEFAULT 250.0"),
+        ("paper_account", "initial_balance", "REAL DEFAULT 250.0"),
     ]
     for table, col, col_type in migrations:
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
         except Exception:
             pass  # Kolon zaten var
+
+    # paper_account: eski paper_balance → yeni balance kolonuna kopyala
+    try:
+        conn.execute(
+            "UPDATE paper_account SET balance = paper_balance "
+            "WHERE balance IS NULL OR balance = 250.0"
+        )
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────

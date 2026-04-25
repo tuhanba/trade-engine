@@ -8,7 +8,10 @@ except ImportError:
     N8N_AVAILABLE = False
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
-from database import init_db, get_trades, get_stats, get_current_params
+from database import (
+    init_db, get_trades, get_stats, get_current_params,
+    get_open_trades, get_paper_balance, get_conn,
+)
 from binance.client import Client
 import dashboard_service as dash_svc
 
@@ -50,43 +53,32 @@ def index():
 def api_stats():
     try:
         stats = get_stats()
-        # Session stats from pattern_memory
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            sess_stats = {}
-            for sess in ["ASIA", "LONDON", "NEWYORK"]:
-                c.execute(
-                    "SELECT COUNT(*), SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END), "
-                    "SUM(CASE WHEN result='WIN' THEN net_pnl ELSE 0 END), "
-                    "SUM(CASE WHEN result='LOSS' THEN net_pnl ELSE 0 END) "
-                    "FROM pattern_memory WHERE session=?", (sess,)
-                )
-                row = c.fetchone()
-                total_s = row[0] or 0
-                wins_s  = row[1] or 0
-                pnl_w   = row[2] or 0
-                pnl_l   = row[3] or 0
-                sess_stats[sess] = {
-                    "total":    total_s,
-                    "wins":     wins_s,
-                    "losses":   total_s - wins_s,
-                    "win_rate": round(wins_s / (total_s + 1e-10) * 100, 1),
-                    "pnl":      round(pnl_w + pnl_l, 3),
-                }
-            conn.close()
-            stats["session_stats"] = sess_stats
-        except:
-            pass
 
-        # ML model durumu
+        # Seans istatistikleri — coin_market_memory tablosundan
         try:
-            from ml_signal_scorer import get_scorer
-            ml_status = get_scorer().get_status()
-            stats["ml_status"] = ml_status
-        except:
-            stats["ml_status"] = {"trained": False, "n_samples": 0}
+            with get_conn() as conn:
+                sess_stats = {}
+                for sess in ["ASIA", "LONDON", "NEW_YORK"]:
+                    row = conn.execute(
+                        "SELECT COUNT(*), "
+                        "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END), "
+                        "SUM(CASE WHEN result='WIN' THEN r_multiple ELSE 0 END), "
+                        "SUM(CASE WHEN result='LOSS' THEN r_multiple ELSE 0 END) "
+                        "FROM coin_market_memory WHERE session=?", (sess,)
+                    ).fetchone()
+                    total_s = row[0] or 0
+                    wins_s  = row[1] or 0
+                    sess_stats[sess] = {
+                        "total":    total_s,
+                        "wins":     wins_s,
+                        "losses":   total_s - wins_s,
+                        "win_rate": round(wins_s / max(total_s, 1) * 100, 1),
+                    }
+                stats["session_stats"] = sess_stats
+        except Exception:
+            stats["session_stats"] = {}
 
+        stats["ml_status"] = {"trained": False, "n_samples": 0}
         return jsonify({"ok": True, "data": stats})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -147,7 +139,7 @@ def api_trades():
 @app.route("/api/live")
 def api_live():
     try:
-        open_trades = get_trades(limit=20, status="OPEN")
+        open_trades = get_open_trades()
         live = []
         total_unrealized = 0.0
 
@@ -155,7 +147,7 @@ def api_live():
             symbol    = t["symbol"]
             entry     = t["entry"] or 0
             sl        = t["sl"] or 0
-            tp        = t["tp"] or 0
+            tp        = t.get("tp1") or t.get("tp") or 0
             qty       = t["qty"] or 0
             direction = t["direction"]
             hold_str, hold_min = _fmt_duration(t.get("open_time"))
@@ -210,28 +202,7 @@ def api_live():
 @app.route("/api/balance")
 def api_balance():
     try:
-        # Paper mode bakiyesi
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("SELECT paper_balance FROM paper_account LIMIT 1")
-            row = c.fetchone()
-            conn.close()
-            paper_balance = float(row[0]) if row else 250.0
-        except:
-            paper_balance = 250.0
-
-        # Binance bakiyesi (opsiyonel)
-        usdt_balance = 0
-        try:
-            account = client.futures_account_balance()
-            for b in account:
-                if b["asset"] == "USDT":
-                    usdt_balance = float(b["balance"])
-                    break
-        except:
-            pass
-
+        paper_balance = get_paper_balance()
         return jsonify({"ok": True, "data": {
             "paper_balance":  round(paper_balance, 4),
             "usdt_balance":   round(paper_balance, 4),
@@ -263,39 +234,19 @@ def api_params():
 # ── /api/coin_stats ───────────────────────────────────────────────────────────
 @app.route("/api/coin_stats")
 def api_coin_stats():
-    """En iyi ve en kötü performanslı coinler"""
+    """En iyi ve en kötü performanslı coinler — coin_profile tablosundan"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("""
-            SELECT symbol,
-                   COUNT(*) as total,
-                   SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins,
-                   SUM(net_pnl) as total_pnl,
-                   AVG(CASE WHEN result='WIN' THEN net_pnl END) as avg_win,
-                   AVG(CASE WHEN result='LOSS' THEN net_pnl END) as avg_loss
-            FROM pattern_memory
-            WHERE result IN ('WIN','LOSS')
-            GROUP BY symbol
-            HAVING total >= 3
-            ORDER BY total_pnl DESC
-            LIMIT 20
-        """)
-        rows = c.fetchall()
-        conn.close()
-        result = []
-        for row in rows:
-            sym, total, wins, pnl, avg_w, avg_l = row
-            result.append({
-                "symbol":   sym,
-                "total":    total or 0,
-                "wins":     wins or 0,
-                "losses":   (total or 0) - (wins or 0),
-                "win_rate": round((wins or 0) / max(total, 1) * 100, 1),
-                "total_pnl": round(pnl or 0, 3),
-                "avg_win":  round(avg_w or 0, 3),
-                "avg_loss": round(avg_l or 0, 3),
-            })
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT symbol, trade_count, win_count, loss_count,
+                       ROUND(win_rate*100,1) as win_rate_pct,
+                       avg_r, profit_factor, danger_score
+                FROM coin_profile
+                WHERE trade_count >= 3
+                ORDER BY profit_factor DESC
+                LIMIT 20
+            """).fetchall()
+        result = [dict(r) for r in rows]
         return jsonify({"ok": True, "data": result})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -324,10 +275,11 @@ def api_logs():
     """
     import re
     LOG_PATHS = [
+        "/root/trade_engine/logs/ax_bot.log",
+        "/root/trade_engine/logs/bot.log",
         "/root/trade_engine/bot.log",
         "/root/trade_engine/scalp_bot.log",
-        "/tmp/scalp_bot.log",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.log"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "ax_bot.log"),
     ]
     n = min(int(request.args.get("n", 80)), 300)
     lines_out = []
@@ -368,20 +320,18 @@ def api_logs():
 
     # Log dosyası bulunamadı — DB'den son trade'leri log gibi döndür
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT symbol, direction, result, net_pnl, created_at "
-            "FROM pattern_memory ORDER BY id DESC LIMIT ?", (n,)
-        ).fetchall()
-        conn.close()
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT symbol, direction, close_reason, net_pnl, close_time "
+                "FROM trades WHERE close_time IS NOT NULL ORDER BY id DESC LIMIT ?", (n,)
+            ).fetchall()
         for r in reversed(rows):
             r = dict(r)
             pnl = r.get("net_pnl", 0) or 0
-            res = r.get("result", "")
-            level = "TRADE" if res == "WIN" else "CLOSE" if res == "LOSS" else "INFO"
+            res = "WIN" if pnl > 0 else "LOSS"
+            level = "TRADE" if pnl > 0 else "CLOSE"
             lines_out.append({
-                "text":  f"[{r.get('created_at','')}] {r.get('symbol','')} {r.get('direction','')} → {res}  PNL: {pnl:+.4f}$",
+                "text":  f"[{r.get('close_time','')}] {r.get('symbol','')} {r.get('direction','')} → {r.get('close_reason','?').upper()}  PNL: {pnl:+.4f}$",
                 "level": level,
             })
         return jsonify({"ok": True, "data": lines_out, "path": "db_fallback", "total": len(lines_out)})
@@ -403,18 +353,17 @@ def api_coin_library():
         if not c.fetchone():
             conn.close()
             return jsonify({"ok": True, "data": [], "note": "coin_params tablosu henüz oluşturulmadı"})
-        c.execute("""
-            SELECT symbol, profile, total_trades, wins, losses,
-                   ROUND(win_rate*100, 1) as win_rate_pct,
-                   ROUND(avg_pnl, 4) as avg_pnl,
-                   sl_atr_mult, tp_atr_mult, risk_pct, max_leverage,
-                   enabled, last_updated, notes
-            FROM coin_params
-            ORDER BY total_trades DESC, symbol ASC
-        """)
-        rows = [dict(r) for r in c.fetchall()]
+        with get_conn() as conn2:
+            rows2 = conn2.execute("""
+                SELECT symbol,
+                       COALESCE(volatility_profile, 'normal') as profile,
+                       sl_atr_mult, tp_atr_mult, risk_pct, max_leverage,
+                       enabled, updated_at
+                FROM coin_params
+                ORDER BY symbol ASC
+            """).fetchall()
         conn.close()
-        return jsonify({"ok": True, "data": rows, "total": len(rows)})
+        return jsonify({"ok": True, "data": [dict(r) for r in rows2], "total": len(rows2)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -424,19 +373,15 @@ def api_coin_library_update(symbol):
     """Coin profilini güncelle (enable/disable, profil değiştir)"""
     try:
         data = request.get_json() or {}
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        allowed = ["enabled", "profile", "sl_atr_mult", "tp_atr_mult",
-                   "risk_pct", "max_leverage", "notes"]
+        allowed = ["enabled", "volatility_profile", "sl_atr_mult", "tp_atr_mult",
+                   "risk_pct", "max_leverage"]
         updates = {k: v for k, v in data.items() if k in allowed}
         if not updates:
-            conn.close()
             return jsonify({"ok": False, "error": "Güncellenecek alan yok"}), 400
-        set_clause = ", ".join(f"{k}=?" for k in updates)
-        values = list(updates.values()) + [symbol]
-        c.execute(f"UPDATE coin_params SET {set_clause} WHERE symbol=?", values)
-        conn.commit()
-        conn.close()
+        sets = ", ".join(f"{k}=?" for k in updates)
+        vals = list(updates.values()) + [symbol]
+        with get_conn() as conn:
+            conn.execute(f"UPDATE coin_params SET {sets} WHERE symbol=?", vals)
         return jsonify({"ok": True, "symbol": symbol, "updated": updates})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
