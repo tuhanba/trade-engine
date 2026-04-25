@@ -239,6 +239,60 @@ body::before{
 .card{animation:fadeUp .32s ease both}
 .sc{animation:fadeUp .26s ease both}
 .sc:nth-child(1){animation-delay:.00s}.sc:nth-child(2){animation-delay:.07s}.sc:nth-child(3){animation-delay:.14s}.sc:nth-child(4){animation-delay:.21s}
+
+/* AX STATUS PANEL */
+.ax-status-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+@media(max-width:860px){.ax-status-grid{grid-template-columns:repeat(2,1fr)}}
+.axs{background:var(--surface);border:1px solid var(--border);padding:12px 14px;border-radius:var(--r);position:relative;overflow:hidden;transition:all var(--t)}
+.axs:hover{border-color:var(--gold-line);transform:translateY(-1px)}
+.axs-label{font-family:var(--orb);font-size:7px;letter-spacing:0.20em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px}
+.axs-val{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--gold-br);line-height:1}
+.axs-val.pos{color:var(--green-br)}.axs-val.neg{color:var(--red-br)}.axs-val.warn{color:#F59E0B}
+.axs-sub{font-family:var(--raj);font-size:10px;color:var(--text-muted);margin-top:3px}
+.cb-active{border-top:2px solid var(--red-br) !important;animation:cb-pulse 1.4s ease-in-out infinite}
+@keyframes cb-pulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.0)}50%{box-shadow:0 0 14px 2px rgba(239,68,68,0.25)}}
+
+/* CALENDAR */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-day{aspect-ratio:1;border-radius:var(--r);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--mono);font-size:9px;cursor:default;transition:all var(--t);border:1px solid transparent;position:relative}
+.cal-day:hover{transform:scale(1.08);z-index:10}
+.cal-day .cal-date{font-size:7px;color:var(--text-muted);margin-bottom:2px;font-family:var(--orb);letter-spacing:0.06em}
+.cal-day .cal-pnl{font-weight:700;font-size:10px}
+.cal-day.green{background:rgba(21,128,61,0.22);border-color:rgba(74,222,128,0.22)}.cal-day.green .cal-pnl{color:var(--green-br)}
+.cal-day.red{background:rgba(185,28,28,0.22);border-color:rgba(239,68,68,0.20)}.cal-day.red .cal-pnl{color:var(--red-br)}
+.cal-day.empty{background:rgba(201,168,76,0.02);border-color:rgba(201,168,76,0.04)}.cal-day.empty .cal-pnl{color:var(--text-muted)}
+.cal-wday{font-family:var(--orb);font-size:7px;letter-spacing:0.14em;color:var(--text-muted);text-align:center;padding-bottom:5px;text-transform:uppercase}
+.cal-legend{display:flex;gap:16px;margin-top:10px;font-family:var(--mono);font-size:9px;color:var(--text-muted)}
+.cal-legend-dot{width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:4px;vertical-align:middle}
+
+/* WEEKLY TABLE */
+.weekly-table{width:100%;border-collapse:collapse}
+.weekly-table th{font-family:var(--orb);font-size:7px;letter-spacing:0.20em;text-transform:uppercase;color:var(--text-muted);font-weight:500;text-align:left;padding:8px 10px;border-bottom:1px solid rgba(201,168,76,0.10)}
+.weekly-table td{padding:8px 10px;border-bottom:1px solid rgba(201,168,76,0.04);font-family:var(--mono);font-size:11px;color:var(--text-sec);vertical-align:middle;transition:background var(--t)}
+.weekly-table tr:hover td{background:rgba(201,168,76,0.03);color:var(--text)}
+.weekly-table tr:last-child td{border-bottom:none}
+
+/* COIN PROFILES */
+.cp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+@media(max-width:900px){.cp-grid{grid-template-columns:repeat(2,1fr)}}
+.cp{background:var(--surface);border:1px solid var(--border);padding:11px 13px;border-radius:var(--r);transition:all var(--t)}
+.cp:hover{border-color:var(--gold-line);transform:translateY(-1px)}
+.cp-sym{font-family:var(--orb);font-size:12px;font-weight:800;color:var(--gold-dim);letter-spacing:0.06em;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between}
+.cp-tag{font-family:var(--mono);font-size:7px;letter-spacing:0.10em;padding:2px 8px;border-radius:2px;text-transform:uppercase;font-weight:700}
+.cp-tag.stable{color:#60A5FA;background:rgba(96,165,250,0.10);border:1px solid rgba(96,165,250,0.20)}
+.cp-tag.normal{color:var(--gold-br);background:var(--gold-bg);border:1px solid var(--gold-line)}
+.cp-tag.volatile{color:#F59E0B;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.20)}
+.cp-tag.dangerous{color:var(--red-br);background:var(--red-dim);border:1px solid var(--red-line)}
+.cp-row{display:grid;grid-template-columns:1fr 1fr;gap:5px;font-family:var(--mono);font-size:10px}
+.cp-k{color:var(--text-muted);font-size:9px}.cp-v{color:var(--text)}
+.cp-v.pos{color:var(--green-br)}.cp-v.neg{color:var(--red-br)}.cp-v.warn{color:#F59E0B}
+
+/* SIGNAL DOUGHNUT */
+.sig-row{display:flex;align-items:center;gap:18px;margin-top:10px}
+.sig-stat{text-align:center;flex:1}
+.sig-stat-val{font-family:var(--mono);font-size:22px;font-weight:700}
+.sig-stat-lbl{font-family:var(--orb);font-size:7px;letter-spacing:0.18em;text-transform:uppercase;color:var(--text-muted);margin-top:2px}
+.sig-allow{color:var(--green-br)}.sig-veto{color:var(--red-br)}.sig-watch{color:#F59E0B}
 </style>
 </head>
 <body>
@@ -388,6 +442,82 @@ body::before{
           <button class="ax-send" onclick="axSend()">GONDER</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- AX STATUS -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-hdr">
+      <div class="card-title">AX Sistem Durumu</div>
+      <div class="card-meta" id="axStatusMeta">yukleniyor...</div>
+    </div>
+    <div class="ax-status-grid" id="axStatusGrid">
+      <div class="axs"><div class="axs-label">Bakiye</div><div class="axs-val" id="axBalance">—</div><div class="axs-sub">Paper USDT</div></div>
+      <div class="axs"><div class="axs-label">Acik Pozisyon</div><div class="axs-val" id="axOpenTrades">—</div><div class="axs-sub">aktif trade</div></div>
+      <div class="axs"><div class="axs-label">Bugun PNL</div><div class="axs-val" id="axTodayPnl">—</div><div class="axs-sub" id="axTodayTrades">—</div></div>
+      <div class="axs" id="axCbCard"><div class="axs-label">Circuit Breaker</div><div class="axs-val" id="axCb">—</div><div class="axs-sub" id="axCbSub">—</div></div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:160px">
+        <div style="font-family:var(--orb);font-size:7px;letter-spacing:0.18em;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase">Sinyal Dagilimi (Bugun)</div>
+        <div class="sig-row">
+          <div class="sig-stat"><div class="sig-stat-val sig-allow" id="sigAllow">—</div><div class="sig-stat-lbl">ALLOW</div></div>
+          <div class="sig-stat"><div class="sig-stat-val sig-veto" id="sigVeto">—</div><div class="sig-stat-lbl">VETO</div></div>
+          <div class="sig-stat"><div class="sig-stat-val sig-watch" id="sigWatch">—</div><div class="sig-stat-lbl">WATCH</div></div>
+          <div class="sig-stat"><div class="sig-stat-val" id="sigTotal" style="color:var(--text-muted)">—</div><div class="sig-stat-lbl">TOPLAM</div></div>
+        </div>
+      </div>
+      <div style="flex:1;min-width:120px;display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:11px">
+        <div><span style="color:var(--text-muted);font-size:9px;font-family:var(--orb);letter-spacing:0.14em">MOD</span><br><span id="axMode" style="color:var(--gold-br);font-weight:700;letter-spacing:0.08em">—</span></div>
+        <div><span style="color:var(--text-muted);font-size:9px;font-family:var(--orb);letter-spacing:0.14em">DURUM</span><br><span id="axPaused" style="font-weight:700">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CALENDAR + WEEKLY -->
+  <div class="g2b" style="margin-bottom:12px">
+    <div class="card">
+      <div class="card-hdr">
+        <div class="card-title">30 Gunluk Takvim</div>
+        <div class="card-meta" id="calMeta">—</div>
+      </div>
+      <div class="cal-grid" id="calWdays">
+        <div class="cal-wday">Pzt</div><div class="cal-wday">Sal</div><div class="cal-wday">Car</div>
+        <div class="cal-wday">Per</div><div class="cal-wday">Cum</div><div class="cal-wday">Cmt</div><div class="cal-wday">Paz</div>
+      </div>
+      <div class="cal-grid" id="calGrid" style="margin-top:4px">
+        <div class="cal-day empty"><div class="cal-pnl">...</div></div>
+      </div>
+      <div class="cal-legend">
+        <span><span class="cal-legend-dot" style="background:rgba(21,128,61,0.45)"></span>Kazanc</span>
+        <span><span class="cal-legend-dot" style="background:rgba(185,28,28,0.45)"></span>Kayip</span>
+        <span><span class="cal-legend-dot" style="background:rgba(201,168,76,0.10)"></span>Veri yok</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hdr">
+        <div class="card-title">Haftalik Ozet</div>
+        <div class="card-meta" id="weeklyMeta">son 8 hafta</div>
+      </div>
+      <table class="weekly-table">
+        <thead><tr>
+          <th>Hafta</th><th>Trade</th><th>WR%</th><th>Net PNL</th><th>En İyi</th><th>En Kotu</th>
+        </tr></thead>
+        <tbody id="weeklyBody">
+          <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;font-family:var(--orb);font-size:9px;letter-spacing:0.16em">YUKLENIYOR...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- COIN PROFİLLERİ -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-hdr">
+      <div class="card-title">Coin Ogrenme Profilleri</div>
+      <div class="card-meta" id="cpMeta">—</div>
+    </div>
+    <div class="cp-grid" id="cpGrid">
+      <div class="cp"><div class="cp-sym" style="color:var(--text-muted)">YUKLENIYOR...</div></div>
     </div>
   </div>
 
@@ -620,10 +750,155 @@ function renderPager(pag){
   wrap.innerHTML=h;
 }
 
-async function init(){await Promise.all([loadStats(),loadChart(),loadPositions(),loadHistory(curPage)])}
+// ── AX STATUS ──────────────────────────────────────────────────────────────
+async function loadAxStatus(){
+  try{
+    const [jsAx,jsSig]=await Promise.all([
+      fetch(BASE+"/api/ax_status").then(r=>r.json()),
+      fetch(BASE+"/api/signal_stats?days=1").then(r=>r.json()),
+    ]);
+    if(jsAx.ok){
+      const d=jsAx.data;
+      document.getElementById("axBalance").textContent="$"+f(d.balance,2);
+      const ot=document.getElementById("axOpenTrades");
+      ot.textContent=d.open_trades;
+      ot.className="axs-val"+(d.open_trades>0?" warn":"");
+      const tp=document.getElementById("axTodayPnl");
+      tp.textContent=(d.today_pnl>=0?"+":"")+f(d.today_pnl,2)+"$";
+      tp.className="axs-val"+(d.today_pnl>0?" pos":d.today_pnl<0?" neg":"");
+      document.getElementById("axTodayTrades").textContent=d.today_trades+" trade bugun";
+      const cbCard=document.getElementById("axCbCard");
+      const cbEl=document.getElementById("axCb");
+      const cbSub=document.getElementById("axCbSub");
+      if(d.circuit_breaker_active){
+        cbCard.classList.add("cb-active");
+        cbEl.textContent="AKTİF";cbEl.className="axs-val neg";
+        cbSub.textContent="Bekleniyor...";
+      } else {
+        cbCard.classList.remove("cb-active");
+        cbEl.textContent="KAPALI";cbEl.className="axs-val pos";
+        cbSub.textContent="Normal";
+      }
+      document.getElementById("axMode").textContent=(d.mode||"paper").toUpperCase();
+      const pausedEl=document.getElementById("axPaused");
+      pausedEl.textContent=d.paused?"DURAKLATILDI":"AKTİF";
+      pausedEl.style.color=d.paused?"var(--gold-br)":"var(--green-br)";
+      document.getElementById("axStatusMeta").textContent=new Date().toLocaleTimeString("tr-TR",{timeZone:"UTC"})+" UTC";
+    }
+    if(jsSig.ok){
+      const s=jsSig.data;
+      document.getElementById("sigAllow").textContent=s.ALLOW||0;
+      document.getElementById("sigVeto").textContent=s.VETO||0;
+      document.getElementById("sigWatch").textContent=s.WATCH||0;
+      document.getElementById("sigTotal").textContent=s.total||0;
+    }
+  }catch(e){console.error("axStatus",e)}
+}
+
+// ── CALENDAR ───────────────────────────────────────────────────────────────
+async function loadCalendar(){
+  try{
+    const j=await fetch(BASE+"/api/daily_pnl?days=35").then(r=>r.json());
+    if(!j.ok)return;
+    const data=j.data; // [{date,net_pnl,trade_count}...]
+    const byDate={};
+    data.forEach(d=>{byDate[d.date]=d});
+
+    // Build 35-day grid aligned to Monday
+    const today=new Date();
+    const endDate=new Date(today);
+    endDate.setUTCHours(0,0,0,0);
+    const startDate=new Date(endDate);
+    startDate.setUTCDate(startDate.getUTCDate()-34);
+    // Align start to Monday
+    const dow=startDate.getUTCDay(); // 0=Sun
+    const offset=dow===0?6:dow-1;
+    startDate.setUTCDate(startDate.getUTCDate()-offset);
+
+    const grid=document.getElementById("calGrid");
+    const cells=[];
+    const cur=new Date(startDate);
+    let totalPnl=0,tradeDays=0;
+    while(cur<=endDate||cells.length%7!==0){
+      const ds=cur.toISOString().split("T")[0];
+      const rec=byDate[ds];
+      const isFuture=cur>endDate;
+      const inRange=cur>=new Date(today.getTime()-34*86400000);
+      let cls="cal-day";let dateStr=cur.getUTCDate().toString();
+      let pnlStr="";
+      if(isFuture){cls+=" empty";pnlStr=""}
+      else if(!inRange){cls+=" empty";pnlStr=""}
+      else if(rec){
+        if(rec.net_pnl>0){cls+=" green";totalPnl+=rec.net_pnl;tradeDays++;}
+        else if(rec.net_pnl<0){cls+=" red";totalPnl+=rec.net_pnl;tradeDays++;}
+        else{cls+=" empty";}
+        pnlStr=(rec.net_pnl>=0?"+":"")+rec.net_pnl.toFixed(1);
+      } else {cls+=" empty";pnlStr="";}
+      cells.push('<div class="'+cls+'" title="'+ds+(rec?" | "+rec.trade_count+" trade":"")+'"><div class="cal-date">'+dateStr+'</div><div class="cal-pnl">'+pnlStr+'</div></div>');
+      cur.setUTCDate(cur.getUTCDate()+1);
+    }
+    grid.innerHTML=cells.join("");
+    document.getElementById("calMeta").textContent=(totalPnl>=0?"+":"")+totalPnl.toFixed(2)+"$ / "+tradeDays+" gun";
+  }catch(e){console.error("calendar",e)}
+}
+
+// ── WEEKLY ─────────────────────────────────────────────────────────────────
+async function loadWeekly(){
+  try{
+    const j=await fetch(BASE+"/api/weekly?weeks=8").then(r=>r.json());
+    if(!j.ok)return;
+    const rows=j.data;
+    const tbody=document.getElementById("weeklyBody");
+    if(!rows.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;font-family:var(--orb);font-size:9px;letter-spacing:.14em">VERİ YOK</td></tr>';return}
+    tbody.innerHTML=rows.reverse().map(w=>{
+      const pnl=w.net_pnl||0;
+      const wr=w.win_rate||0;
+      return '<tr>'
+        +'<td style="font-family:var(--orb);font-size:9px;letter-spacing:.08em;color:var(--gold-dim)">'+w.week_start+'</td>'
+        +'<td>'+w.trade_count+'</td>'
+        +'<td class="'+(wr>=50?"pos-c":wr>=40?"gld-c":"neg-c")+'">'+wr.toFixed(1)+'%</td>'
+        +'<td class="'+(pnl>=0?"pos-c":"neg-c")+'">'+(pnl>=0?"+":"")+pnl.toFixed(2)+'$</td>'
+        +'<td style="color:var(--green-br);font-size:10px">'+(w.best_day||'—')+'</td>'
+        +'<td style="color:var(--red-br);font-size:10px">'+(w.worst_day||'—')+'</td>'
+        +'</tr>';
+    }).join("");
+  }catch(e){console.error("weekly",e)}
+}
+
+// ── COIN PROFILES ──────────────────────────────────────────────────────────
+async function loadCoinProfiles(){
+  try{
+    const j=await fetch(BASE+"/api/coin_profiles").then(r=>r.json());
+    if(!j.ok)return;
+    const coins=j.data;
+    const grid=document.getElementById("cpGrid");
+    document.getElementById("cpMeta").textContent=coins.length+" coin";
+    if(!coins.length){grid.innerHTML='<div class="cp"><div class="cp-sym" style="color:var(--text-muted)">Henuz veri yok</div></div>';return}
+    grid.innerHTML=coins.map(c=>{
+      const vp=(c.volatility_profile||"normal").toLowerCase();
+      const wr=c.win_rate_pct||0;
+      const pf=c.profit_factor||0;
+      const ds=c.danger_score||0;
+      return '<div class="cp">'
+        +'<div class="cp-sym"><span>'+c.symbol+'</span><span class="cp-tag '+vp+'">'+vp.toUpperCase()+'</span></div>'
+        +'<div class="cp-row">'
+        +'<span class="cp-k">Toplam</span><span class="cp-v">'+c.trade_count+' trade</span>'
+        +'<span class="cp-k">WR</span><span class="cp-v '+(wr>=55?"pos":wr>=45?"":"neg")+'">'+wr.toFixed(1)+'%</span>'
+        +'<span class="cp-k">Avg R</span><span class="cp-v '+(pf>=1?"pos":"neg")+'">'+f(c.avg_r,2)+'R</span>'
+        +'<span class="cp-k">Danger</span><span class="cp-v '+(ds>0.6?"neg":ds>0.3?"warn":"pos")+'">'+f(ds,2)+'</span>'
+        +'<span class="cp-k">Yon</span><span class="cp-v">'+(c.preferred_direction||'—')+'</span>'
+        +'<span class="cp-k">Seans</span><span class="cp-v">'+(c.best_session||'—')+'</span>'
+        +'</div>'
+        +'</div>';
+    }).join("");
+  }catch(e){console.error("coinProfiles",e)}
+}
+
+async function init(){await Promise.all([loadStats(),loadChart(),loadPositions(),loadHistory(curPage),loadAxStatus(),loadCalendar(),loadWeekly(),loadCoinProfiles()])}
 init();
-setInterval(()=>{loadStats();loadPositions()},8000);
+setInterval(()=>{loadStats();loadPositions();loadAxStatus()},8000);
 setInterval(()=>{loadChart();loadHistory(curPage)},15000);
+setInterval(()=>{loadCalendar();loadWeekly();loadCoinProfiles()},120000);
 </script>
 </body>
 </html>

@@ -10,6 +10,7 @@ from flask_socketio import SocketIO
 from dotenv import load_dotenv
 from database import init_db, get_trades, get_stats, get_current_params
 from binance.client import Client
+import dashboard_service as dash_svc
 
 load_dotenv()
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -20,6 +21,7 @@ if N8N_AVAILABLE:
 client = Client(os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_API_SECRET", ""))
 
 init_db()
+dash_svc.start()
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
 
@@ -436,6 +438,93 @@ def api_coin_library_update(symbol):
         conn.commit()
         conn.close()
         return jsonify({"ok": True, "symbol": symbol, "updated": updates})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/daily_pnl ────────────────────────────────────────────────────────────
+@app.route("/api/daily_pnl")
+def api_daily_pnl():
+    """30 günlük takvim verisi."""
+    try:
+        days = int(request.args.get("days", 30))
+        data = dash_svc.get_calendar_data(days)
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/weekly ───────────────────────────────────────────────────────────────
+@app.route("/api/weekly")
+def api_weekly():
+    """Son 8 haftalık özet."""
+    try:
+        weeks = int(request.args.get("weeks", 8))
+        data = dash_svc.get_weekly_data(weeks)
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/ax_status ────────────────────────────────────────────────────────────
+@app.route("/api/ax_status")
+def api_ax_status():
+    """AX sistem durumu: CB, açık trade, bakiye, bugünkü PnL."""
+    try:
+        data = dash_svc.get_ax_status()
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/coin_profiles ────────────────────────────────────────────────────────
+@app.route("/api/coin_profiles")
+def api_coin_profiles():
+    """Tüm coin öğrenme profilleri (coin_profile tablosu)."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT symbol, trade_count, win_count, loss_count,
+                   ROUND(win_rate*100,1) as win_rate_pct,
+                   avg_r, profit_factor, danger_score, fakeout_rate,
+                   volatility_profile, preferred_direction, best_session,
+                   updated_at
+            FROM coin_profile
+            ORDER BY trade_count DESC, danger_score DESC
+            """
+        ).fetchall()
+        conn.close()
+        result = [dict(r) for r in rows]
+        return jsonify({"ok": True, "data": result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/signal_stats ─────────────────────────────────────────────────────────
+@app.route("/api/signal_stats")
+def api_signal_stats():
+    """Bugünkü sinyal istatistikleri: ALLOW/VETO/WATCH dağılımı."""
+    try:
+        days = int(request.args.get("days", 1))
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            """
+            SELECT ax_decision, COUNT(*) as cnt
+            FROM signal_candidates
+            WHERE created_at >= datetime('now', ?)
+            GROUP BY ax_decision
+            """,
+            (f"-{days} days",),
+        ).fetchall()
+        conn.close()
+        stats = {"ALLOW": 0, "VETO": 0, "WATCH": 0, "total": 0}
+        for dec, cnt in rows:
+            if dec in stats:
+                stats[dec] = cnt
+            stats["total"] += cnt
+        return jsonify({"ok": True, "data": stats})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
