@@ -7,12 +7,13 @@ import threading
 import time
 import sqlite3
 import os
+from config import DB_PATH
 import logging
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
+
 
 TICK_INTERVAL = 15  # saniye
 

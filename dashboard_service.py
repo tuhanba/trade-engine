@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 
 from database import (
     get_conn, save_daily_summary, save_weekly_summary,
-    get_paper_balance,
+    get_paper_account_balance, get_system_state_value, get_trades
 )
 
 logger = logging.getLogger(__name__)
@@ -34,10 +34,10 @@ def compute_daily(date_str: str | None = None) -> dict | None:
         with get_conn() as conn:
             rows = conn.execute(
                 """
-                SELECT net_pnl, result, close_reason, entry, sl
+                SELECT *
                 FROM trades
                 WHERE DATE(close_time) = ? AND status IN ('closed_win','closed_loss','sl','trail','timeout','tp1_hit','runner','open')
-                  AND close_time IS NOT NULL
+                  AND status = 'closed'
                 """,
                 (date_str,),
             ).fetchall()
@@ -45,10 +45,10 @@ def compute_daily(date_str: str | None = None) -> dict | None:
             if not rows:
                 rows = conn.execute(
                     """
-                    SELECT net_pnl, result, close_reason, entry, sl
+                    SELECT *
                     FROM trades
                     WHERE DATE(close_time) = ?
-                      AND close_time IS NOT NULL
+                      AND status = 'closed'
                     """,
                     (date_str,),
                 ).fetchall()
@@ -57,8 +57,9 @@ def compute_daily(date_str: str | None = None) -> dict | None:
         if trade_count == 0:
             return None
 
-        pnls = [r[0] or 0 for r in rows]
-        wins  = sum(1 for r in rows if (r[0] or 0) > 0)
+        pnls = [r["net_pnl"] or 0 for r in rows]
+        rs = [r["r_multiple"] or 0 for r in rows if r["status"] == "closed"]
+        wins  = sum(1 for pnl in pnls if pnl > 0)
         losses = trade_count - wins
         net_pnl = sum(pnls)
         win_rate = wins / trade_count if trade_count else 0
@@ -75,7 +76,7 @@ def compute_daily(date_str: str | None = None) -> dict | None:
             if dd > max_dd:
                 max_dd = dd
 
-        balance = get_paper_balance()
+        balance = get_paper_account_balance()
 
         data = {
             "date":        date_str,
@@ -85,7 +86,7 @@ def compute_daily(date_str: str | None = None) -> dict | None:
             "win_rate":    round(win_rate, 4),
             "gross_pnl":   round(net_pnl, 4),
             "net_pnl":     round(net_pnl, 4),
-            "avg_r":       0,
+            "avg_r":       round(sum(rs) / len(rs) if rs else 0, 4),
             "max_drawdown": round(max_dd, 4),
             "balance_eod": round(balance, 4),
         }
@@ -117,10 +118,10 @@ def compute_weekly(week_start: str | None = None) -> dict | None:
         with get_conn() as conn:
             rows = conn.execute(
                 """
-                SELECT DATE(close_time) as cdate, net_pnl
+                SELECT *
                 FROM trades
                 WHERE DATE(close_time) BETWEEN ? AND ?
-                  AND close_time IS NOT NULL
+                  AND status = 'closed'
                 """,
                 (week_start, week_end_date.isoformat()),
             ).fetchall()
@@ -129,7 +130,8 @@ def compute_weekly(week_start: str | None = None) -> dict | None:
             return None
 
         trade_count = len(rows)
-        pnls   = [r[1] or 0 for r in rows]
+        pnls   = [r["net_pnl"] or 0 for r in rows]
+        rs = [r["r_multiple"] or 0 for r in rows if r["status"] == "closed"]
         wins   = sum(1 for p in pnls if p > 0)
         losses = trade_count - wins
         net_pnl = sum(pnls)
@@ -137,7 +139,9 @@ def compute_weekly(week_start: str | None = None) -> dict | None:
 
         # Best / worst day
         daily: dict[str, float] = {}
-        for cdate, pnl in rows:
+        for r in rows:
+            cdate = r["close_time"].split("T")[0]
+            pnl = r["net_pnl"]
             daily[cdate] = daily.get(cdate, 0) + (pnl or 0)
         best_day  = max(daily, key=daily.get) if daily else None
         worst_day = min(daily, key=daily.get) if daily else None
@@ -149,7 +153,7 @@ def compute_weekly(week_start: str | None = None) -> dict | None:
             "loss_count":  losses,
             "win_rate":    round(win_rate, 4),
             "net_pnl":     round(net_pnl, 4),
-            "avg_r":       0,
+            "avg_r":       round(sum(rs) / len(rs) if rs else 0, 4),
             "best_day":    best_day,
             "worst_day":   worst_day,
         }
@@ -232,7 +236,7 @@ def get_weekly_data(weeks: int = 8) -> list[dict]:
 def get_ax_status() -> dict:
     """AX sistemi anlık durumu."""
     try:
-        from database import get_state, get_open_trades, get_paper_balance
+        from database import get_system_state_value as get_state, get_open_trades, get_paper_account_balance as get_paper_balance
 
         cb_until = get_state("circuit_breaker_until")
         cb_active = False
@@ -247,7 +251,7 @@ def get_ax_status() -> dict:
                 pass
 
         open_trades = get_open_trades()
-        balance = get_paper_balance()
+        balance = get_paper_account_balance()
 
         paused_val = get_state("paused")
         paused = paused_val == "1"
@@ -257,7 +261,7 @@ def get_ax_status() -> dict:
         with get_conn() as conn:
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             row = conn.execute(
-                "SELECT COUNT(*), SUM(net_pnl) FROM trades WHERE DATE(close_time)=? AND close_time IS NOT NULL",
+                "SELECT COUNT(*), SUM(net_pnl) FROM trades WHERE DATE(close_time)=? AND status = 'closed'",
                 (today,),
             ).fetchone()
             today_trades = row[0] or 0
@@ -270,7 +274,7 @@ def get_ax_status() -> dict:
             today_signals = row2[0] or 0
 
             row3 = conn.execute(
-                "SELECT COUNT(*) FROM signal_candidates WHERE DATE(created_at)=? AND ax_decision='ALLOW'",
+                "SELECT COUNT(*) FROM signal_candidates WHERE DATE(created_at)=? AND decision='ALLOW'",
                 (today,),
             ).fetchone()
             today_allowed = row3[0] or 0

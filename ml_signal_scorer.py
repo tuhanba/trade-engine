@@ -18,6 +18,8 @@ Hedef: WIN (1) veya LOSS (0)
 """
 
 import os
+from config import DB_PATH
+from database import get_conn
 import sqlite3
 import logging
 import pickle
@@ -25,7 +27,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-DB_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
+
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_model.pkl")
 
 MIN_TRAIN_SAMPLES = 30
@@ -56,7 +58,7 @@ class MLSignalScorer:
     def _load_training_data(self):
         """Pattern memory tablosundan genişletilmiş eğitim verisi çeker."""
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_conn()
             c = conn.cursor()
             c.execute("""
                 SELECT

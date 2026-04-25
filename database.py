@@ -272,134 +272,53 @@ def init_db():
     # ── Eski şemadan yeni kolonlara migration ─────────────────────────────────
     with get_conn() as conn:
         _migrate(conn)
-    logger.info("DB init tamamlandı.")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MIGRATION
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _migrate(conn):
-    """Eksik kolonları ekle — her çalıştırmada idempotent."""
-    migrations = [
-        # trades tablosu — yeni kolonlar
-        ("trades", "qty_tp1",            "REAL"),
-        ("trades", "qty_tp2",            "REAL"),
-        ("trades", "qty_runner",         "REAL"),
-        ("trades", "trail_stop",         "REAL"),
-        ("trades", "realized_pnl",       "REAL DEFAULT 0"),
-        ("trades", "r_multiple",         "REAL DEFAULT 0"),
-        ("trades", "tp1_hit",            "INTEGER DEFAULT 0"),
-        ("trades", "tp2_hit",            "INTEGER DEFAULT 0"),
-        ("trades", "linked_candidate_id","INTEGER"),
-        ("trades", "hold_minutes",       "REAL DEFAULT 0"),
-        ("trades", "ax_mode",            "TEXT DEFAULT 'execute'"),
-        ("trades", "environment",        "TEXT DEFAULT 'paper'"),
-        ("trades", "close_reason",       "TEXT"),
-        # coin_params tablosu — yeni kolonlar
-        ("coin_params", "volatility_profile", "TEXT DEFAULT 'normal'"),
-        ("coin_params", "sl_atr_mult",        "REAL DEFAULT 1.3"),
-        ("coin_params", "tp_atr_mult",        "REAL DEFAULT 2.0"),
-        ("coin_params", "risk_pct",           "REAL DEFAULT 1.0"),
-        ("coin_params", "max_leverage",       "INTEGER DEFAULT 15"),
-        ("coin_params", "min_adx",            "REAL DEFAULT 20"),
-        ("coin_params", "min_bb_width",       "REAL DEFAULT 1.3"),
-        ("coin_params", "min_volume_m",       "REAL DEFAULT 15.0"),
-        ("coin_params", "enabled",            "INTEGER DEFAULT 1"),
-        ("coin_params", "updated_at",         "TEXT DEFAULT (datetime('now'))"),
-        # paper_account — eski şemada 'paper_balance', yeni şemada 'balance'
-        ("paper_account", "balance",         "REAL DEFAULT 250.0"),
-        ("paper_account", "initial_balance", "REAL DEFAULT 250.0"),
-        # coin_cooldown — eski şemada eksik kolonlar
-        ("coin_cooldown", "until",      "TEXT DEFAULT '2000-01-01T00:00:00'"),
-        ("coin_cooldown", "reason",     "TEXT"),
-        ("coin_cooldown", "created_at", "TEXT DEFAULT (datetime('now'))"),
-        # signal_candidates — yeni kolonlar
-        ("signal_candidates", "runner_target",  "REAL"),
-        ("signal_candidates", "expected_mfe_r", "REAL DEFAULT 0"),
-        ("signal_candidates", "market_regime",  "TEXT"),
-        ("signal_candidates", "ax_mode",        "TEXT DEFAULT 'execute'"),
-        ("signal_candidates", "execution_mode", "TEXT DEFAULT 'paper'"),
-        ("signal_candidates", "linked_trade_id","INTEGER"),
-    ]
-    for table, col, col_type in migrations:
-        try:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
-        except Exception:
-            pass  # Kolon zaten var
+    """Veritabanı şema değişikliklerini uygular."""
+    # Örnek: _add_column(conn, 'trades', 'new_col', 'TEXT')
+    pass
 
-    # paper_account: eski paper_balance → yeni balance kolonuna kopyala
-    try:
-        conn.execute(
-            "UPDATE paper_account SET balance = paper_balance "
-            "WHERE balance IS NULL OR balance = 250.0"
-        )
-    except Exception:
-        pass
+def _table_has_column(conn, table_name, column_name):
+    cursor = conn.execute(f"PRAGMA table_info({table_name})")
+    columns = [row['name'] for row in cursor.fetchall()]
+    return column_name in columns
+
+def _add_column(conn, table_name, column_name, column_type):
+    if not _table_has_column(conn, table_name, column_name):
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+        logger.info(f"'{table_name}' tablosuna '{column_name}' kolonu eklendi.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAPER ACCOUNT
+# OKUMA / YAZMA
 # ─────────────────────────────────────────────────────────────────────────────
 
-def init_paper_account(initial: float = 250.0):
+def get_trades(limit=20, offset=0, status=None, symbol=None):
+    """Trade listesini döndürür."""
     with get_conn() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
-            (initial, initial)
-        )
+        query = "SELECT * FROM trades WHERE 1=1"
+        params = []
+        if symbol:
+            query += " AND symbol=?"
+            params.append(symbol)
+        if status:
+            query += " AND status=?"
+            params.append(status)
+        query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+        params.append(limit)
+        params.append(offset)
+        rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
 
-def get_paper_balance() -> float:
+def get_trade(trade_id: int):
     with get_conn() as conn:
-        row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
-        return float(row["balance"]) if row else 250.0
-
-def update_paper_balance(pnl: float):
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE paper_account SET balance=balance+?, updated_at=datetime('now') WHERE id=1",
-            (pnl,)
-        )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SIGNAL CANDIDATES
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_signal_candidate(sig: dict) -> int:
-    sql = """
-        INSERT INTO signal_candidates
-            (symbol, direction, entry, sl, tp1, tp2, runner_target,
-             rr, expected_mfe_r, score, confidence, decision, veto_reason,
-             session, market_regime, ax_mode, execution_mode)
-        VALUES
-            (:symbol, :direction, :entry, :sl, :tp1, :tp2, :runner_target,
-             :rr, :expected_mfe_r, :score, :confidence, :decision, :veto_reason,
-             :session, :market_regime, :ax_mode, :execution_mode)
-    """
-    defaults = {
-        "direction": None, "entry": None, "sl": None,
-        "tp1": None, "tp2": None, "runner_target": None,
-        "rr": 0, "expected_mfe_r": 0, "score": 0, "confidence": 0,
-        "decision": "PENDING", "veto_reason": None,
-        "session": None, "market_regime": None,
-        "ax_mode": "execute", "execution_mode": "paper",
-    }
-    with get_conn() as conn:
-        cur = conn.execute(sql, {**defaults, **sig})
-        return cur.lastrowid
-
-def update_signal_decision(candidate_id: int, decision: str, score: float,
-                            confidence: float, veto_reason: str = None,
-                            linked_trade_id: int = None):
-    with get_conn() as conn:
-        conn.execute(
-            """UPDATE signal_candidates
-               SET decision=?, score=?, confidence=?, veto_reason=?, linked_trade_id=?
-               WHERE id=?""",
-            (decision, score, confidence, veto_reason, linked_trade_id, candidate_id)
-        )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TRADES
-# ─────────────────────────────────────────────────────────────────────────────
+        row = conn.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
+        return dict(row) if row else None
 
 def save_trade(t: dict) -> int:
     sql = """
@@ -408,338 +327,531 @@ def save_trade(t: dict) -> int:
              entry, sl, tp1, tp2, trail_stop,
              qty, qty_tp1, qty_tp2, qty_runner,
              linked_candidate_id, open_time)
-        VALUES
-            (:symbol, :direction, :status, :environment, :ax_mode,
-             :entry, :sl, :tp1, :tp2, :trail_stop,
-             :qty, :qty_tp1, :qty_tp2, :qty_runner,
-             :linked_candidate_id, :open_time)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
-    defaults = {
-        "status": "open", "environment": "paper", "ax_mode": "execute",
-        "trail_stop": None, "qty_tp1": None, "qty_tp2": None, "qty_runner": None,
-        "linked_candidate_id": None,
-        "open_time": datetime.now(timezone.utc).isoformat(),
-    }
+    params = (
+        t['symbol'], t['direction'], t.get('status', 'open'), t.get('environment', 'paper'), t.get('ax_mode', 'execute'),
+        t['entry'], t['sl'], t['tp1'], t['tp2'], t.get('trail_stop'),
+        t['qty'], t['qty_tp1'], t['qty_tp2'], t['qty_runner'],
+        t.get('linked_candidate_id'), t.get('open_time')
+    )
     with get_conn() as conn:
-        cur = conn.execute(sql, {**defaults, **t})
-        return cur.lastrowid
+        cursor = conn.execute(sql, params)
+        conn.commit()
+        return cursor.lastrowid
 
-def update_trade(trade_id: int, fields: dict):
-    if not fields:
-        return
-    sets = ", ".join(f"{k}=?" for k in fields)
-    vals = list(fields.values()) + [trade_id]
+def update_trade(trade_id: int, updates: dict):
+    """Bir trade'i günceller."""
+    fields = ", ".join([f"{k}=?" for k in updates.keys()])
+    values = list(updates.values()) + [trade_id]
+    sql = f"UPDATE trades SET {fields} WHERE id=?"
     with get_conn() as conn:
-        conn.execute(f"UPDATE trades SET {sets} WHERE id=?", vals)
+        conn.execute(sql, values)
+        conn.commit()
 
-def close_trade(trade_id: int, close_price: float, net_pnl: float,
-                reason: str, hold_minutes: float = 0):
-    now = datetime.now(timezone.utc).isoformat()
-    with get_conn() as conn:
-        conn.execute(
-            """UPDATE trades SET
-                status='closed', close_price=?, net_pnl=?, close_reason=?,
-                hold_minutes=?, close_time=?
-               WHERE id=?""",
-            (close_price, net_pnl, reason, hold_minutes, now, trade_id)
-        )
-
-def get_trade(trade_id: int) -> dict | None:
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
-        return dict(row) if row else None
-
-def get_open_trades() -> list:
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM trades WHERE status IN ('open','tp1_hit','runner') ORDER BY open_time"
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-def get_trades(limit: int = 100, status: str = None, symbol: str = None) -> list:
-    sql = "SELECT * FROM trades WHERE 1=1"
-    params = []
-    if status:
-        sql += " AND status=?"
-        params.append(status)
-    if symbol:
-        sql += " AND symbol=?"
-        params.append(symbol)
-    sql += " ORDER BY id DESC LIMIT ?"
-    params.append(limit)
-    with get_conn() as conn:
-        return [dict(r) for r in conn.execute(sql, params).fetchall()]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# POSTMORTEM
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_postmortem(data: dict):
-    sql = """
-        INSERT OR REPLACE INTO trade_postmortem
-            (trade_id, symbol, direction, mfe_r, mae_r, efficiency,
-             missed_gain, sl_tightness, hold_minutes, exit_quality, setup_quality, notes)
-        VALUES
-            (:trade_id, :symbol, :direction, :mfe_r, :mae_r, :efficiency,
-             :missed_gain, :sl_tightness, :hold_minutes, :exit_quality, :setup_quality, :notes)
-    """
-    defaults = {k: None for k in ["symbol","direction","mfe_r","mae_r","efficiency",
-                                   "missed_gain","sl_tightness","hold_minutes",
-                                   "exit_quality","setup_quality","notes"]}
-    with get_conn() as conn:
-        conn.execute(sql, {**defaults, **data})
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# COIN PROFILE
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_coin_profile(symbol: str) -> dict:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM coin_profile WHERE symbol=?", (symbol,)
-        ).fetchone()
-        return dict(row) if row else {}
-
-def upsert_coin_profile(symbol: str, fields: dict):
-    with get_conn() as conn:
-        existing = conn.execute(
-            "SELECT symbol FROM coin_profile WHERE symbol=?", (symbol,)
-        ).fetchone()
-        if existing:
-            sets = ", ".join(f"{k}=?" for k in fields) + ", updated_at=datetime('now')"
-            conn.execute(
-                f"UPDATE coin_profile SET {sets} WHERE symbol=?",
-                list(fields.values()) + [symbol]
-            )
-        else:
-            fields["symbol"] = symbol
-            cols = ", ".join(fields.keys())
-            vals = ", ".join("?" * len(fields))
-            conn.execute(
-                f"INSERT INTO coin_profile ({cols}) VALUES ({vals})",
-                list(fields.values())
-            )
-
-def save_coin_market_memory(symbol: str, session: str, regime: str,
-                             direction: str, result: str, r_multiple: float):
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO coin_market_memory
-               (symbol, session, regime, direction, result, r_multiple)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (symbol, session, regime, direction, result, r_multiple)
-        )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# COIN COOLDOWN
-# ─────────────────────────────────────────────────────────────────────────────
-
-def set_coin_cooldown(symbol: str, minutes: int, reason: str = ""):
-    until = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO coin_cooldown (symbol, reason, until) VALUES (?, ?, ?)",
-            (symbol, reason, until)
-        )
-
-def is_coin_in_cooldown(symbol: str) -> bool:
-    now = datetime.now(timezone.utc).isoformat()
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT until FROM coin_cooldown WHERE symbol=? AND until > ?",
-            (symbol, now)
-        ).fetchone()
-        return row is not None
-
-def clear_expired_cooldowns():
-    now = datetime.now(timezone.utc).isoformat()
-    with get_conn() as conn:
-        conn.execute("DELETE FROM coin_cooldown WHERE until <= ?", (now,))
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# DAILY / WEEKLY SUMMARY
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_daily_summary(data: dict):
-    sql = """
-        INSERT OR REPLACE INTO daily_summary
-            (date, trade_count, win_count, loss_count, win_rate,
-             gross_pnl, net_pnl, avg_r, max_drawdown, balance_eod)
-        VALUES
-            (:date, :trade_count, :win_count, :loss_count, :win_rate,
-             :gross_pnl, :net_pnl, :avg_r, :max_drawdown, :balance_eod)
-    """
-    defaults = {k: 0 for k in ["trade_count","win_count","loss_count","win_rate",
-                                "gross_pnl","net_pnl","avg_r","max_drawdown","balance_eod"]}
-    defaults["date"] = date.today().isoformat()
-    with get_conn() as conn:
-        conn.execute(sql, {**defaults, **data})
-
-def get_daily_summaries(days: int = 30) -> list:
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM daily_summary ORDER BY date DESC LIMIT ?", (days,)
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-def save_weekly_summary(data: dict):
-    sql = """
-        INSERT OR REPLACE INTO weekly_summary
-            (week_start, trade_count, win_count, loss_count, win_rate,
-             net_pnl, avg_r, best_day, worst_day)
-        VALUES
-            (:week_start, :trade_count, :win_count, :loss_count, :win_rate,
-             :net_pnl, :avg_r, :best_day, :worst_day)
-    """
-    defaults = {k: 0 for k in ["trade_count","win_count","loss_count","win_rate","net_pnl","avg_r"]}
-    defaults.update({"best_day": None, "worst_day": None})
-    with get_conn() as conn:
-        conn.execute(sql, {**defaults, **data})
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STATS
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_stats(hours: int = 48) -> dict:
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM trades WHERE status='closed' AND close_time >= ?", (cutoff,)
-        ).fetchall()
-
-    trades = [dict(r) for r in rows]
-    if not trades:
-        return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0,
-                "total_pnl": 0, "avg_win": 0, "avg_loss": 0,
-                "avg_r": 0, "profit_factor": 0, "max_drawdown": 0}
-
-    wins   = [t for t in trades if t["net_pnl"] > 0]
-    losses = [t for t in trades if t["net_pnl"] <= 0]
-    pnls   = [t["net_pnl"] for t in trades]
-
-    gross_win  = sum(t["net_pnl"] for t in wins)
-    gross_loss = abs(sum(t["net_pnl"] for t in losses))
-
-    cum, peak, max_dd = 0, 0, 0
-    for p in reversed(pnls):
-        cum += p
-        peak = max(peak, cum)
-        max_dd = max(max_dd, peak - cum)
-
-    return {
-        "total":         len(trades),
-        "wins":          len(wins),
-        "losses":        len(losses),
-        "win_rate":      len(wins) / len(trades),
-        "total_pnl":     sum(pnls),
-        "avg_win":       gross_win  / len(wins)   if wins   else 0,
-        "avg_loss":      gross_loss / len(losses) if losses else 0,
-        "avg_r":         sum((t.get("r_multiple") or 0) for t in trades) / len(trades),
-        "profit_factor": gross_win / gross_loss if gross_loss > 0 else 0,
-        "max_drawdown":  max_dd,
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SYSTEM STATE
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_state(key: str, default=None):
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT value FROM system_state WHERE key=?", (key,)
-        ).fetchone()
-        if row is None:
-            return default
-        try:
-            return json.loads(row["value"])
-        except Exception:
-            return row["value"]
-
-def set_state(key: str, value):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO system_state (key, value, updated_at) VALUES (?, ?, datetime('now'))",
-            (key, json.dumps(value))
-        )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AI LOGS
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_ai_log(event: str, symbol: str = None, decision: str = None,
-                score: float = None, confidence: float = None,
-                reason: str = None, data: dict = None):
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO ai_logs (event, symbol, decision, score, confidence, reason, data)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (event, symbol, decision, score, confidence, reason,
-             json.dumps(data) if data else None)
-        )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PARAMS
-# ─────────────────────────────────────────────────────────────────────────────
+def get_open_trades(symbol: str = None):
+    return get_trades(status='open', symbol=symbol, limit=1000)
 
 def get_current_params() -> dict:
+    """En son eklenen parametreleri döndürür."""
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT data FROM params ORDER BY id DESC LIMIT 1"
-        ).fetchone()
+        row = conn.execute("SELECT data FROM params ORDER BY id DESC LIMIT 1").fetchone()
         if row:
-            try:
-                return json.loads(row["data"])
-            except Exception:
-                pass
-    return {}
+            return json.loads(row["data"])
+        return {}
 
-def save_params(params: dict, reason: str = ""):
+def save_params(params: dict, reason: str):
+    """Yeni parametre setini kaydeder."""
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO params (data, reason) VALUES (?, ?)",
             (json.dumps(params), reason)
         )
+        conn.commit()
 
-def save_best_params(params: dict, win_rate: float, avg_r: float,
-                     pnl: float, trade_count: int):
+def get_last_ai_log():
+    with get_conn() as conn:
+        row = conn.execute("SELECT reason FROM ai_logs ORDER BY id DESC LIMIT 1").fetchone()
+        return row["reason"] if row else "Henüz AI kararı yok."
+
+def get_stats():
+    """Genel dashboard istatistiklerini zenginleştirilmiş olarak hesaplar."""
+    with get_conn() as conn:
+        # Genel Trade İstatistikleri
+        row = conn.execute("""
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN status='closed' THEN 1 ELSE 0 END) as total_closed,
+                SUM(CASE WHEN status='closed' THEN net_pnl ELSE 0 END) as total_pnl,
+                SUM(CASE WHEN status='closed' AND net_pnl > 0 THEN 1 ELSE 0 END) as wins,
+                SUM(CASE WHEN status='closed' AND net_pnl <= 0 THEN 1 ELSE 0 END) as losses,
+                SUM(CASE WHEN status='closed' THEN r_multiple ELSE 0 END) as total_r,
+                SUM(CASE WHEN status='closed' THEN hold_minutes ELSE 0 END) as total_duration
+            FROM trades
+        """).fetchone()
+
+        total = row['total'] or 0
+        total_closed = row['total_closed'] or 0
+        total_pnl = row['total_pnl'] or 0
+        wins = row['wins'] or 0
+        losses = row['losses'] or 0
+        total_r = row['total_r'] or 0
+        total_duration = row['total_duration'] or 0
+
+        # En iyi / en kötü tradeler
+        best_trade_row = conn.execute("SELECT * FROM trades WHERE status='closed' ORDER BY net_pnl DESC LIMIT 1").fetchone()
+        worst_trade_row = conn.execute("SELECT * FROM trades WHERE status='closed' ORDER BY net_pnl ASC LIMIT 1").fetchone()
+
+        # Açık trade sayısı
+        open_trades_row = conn.execute("SELECT COUNT(*) as count FROM trades WHERE status='open'").fetchone()
+
+        # Son AI logu
+        last_ai_log = get_last_ai_log()
+
+        # Tüm pozitif ve negatif PnL'leri topla (profit factor için)
+        all_closed_trades = get_trades(limit=10000, status="closed")
+        positive_pnl = sum(t['net_pnl'] for t in all_closed_trades if t['net_pnl'] > 0)
+        negative_pnl = abs(sum(t['net_pnl'] for t in all_closed_trades if t['net_pnl'] < 0))
+
+        stats = {
+            "total": total,
+            "total_closed": total_closed,
+            "total_pnl": round(total_pnl, 2),
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(wins * 100 / max(total_closed, 1), 1),
+            "avg_pnl": round(total_pnl / max(total_closed, 1), 2),
+            "avg_r": round(total_r / max(total_closed, 1), 2),
+            "avg_rr": round(total_r / max(total_closed, 1), 2), # avg_r ile aynı, frontend avg_rr bekliyor
+            "avg_dur": round(total_duration / max(total_closed, 1), 1),
+            "profit_factor": round(positive_pnl / max(negative_pnl, 1), 2),
+            "best_trade": dict(best_trade_row) if best_trade_row else None,
+            "worst_trade": dict(worst_trade_row) if worst_trade_row else None,
+            "open_count": open_trades_row['count'] or 0,
+            "last_ai": last_ai_log,
+            "params": get_current_params()
+        }
+        return stats
+
+def get_session_stats():
+    """Seans bazında (ASIA, LONDON, NEW_YORK) PnL ve trade sayılarını hesaplar."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                c.session,
+                COUNT(t.id) as trade_count,
+                SUM(t.net_pnl) as pnl
+            FROM trades t
+            JOIN signal_candidates c ON t.linked_candidate_id = c.id
+            WHERE t.status = 'closed'
+            GROUP BY c.session
+        """).fetchall()
+
+        # Frontend'in beklediği formatta bir dictionary oluştur
+        # NEW_YORK -> NEWYORK dönüşümü de burada yapılır
+        session_stats = {
+            "ASIA": {"pnl": 0, "count": 0},
+            "LONDON": {"pnl": 0, "count": 0},
+            "NEWYORK": {"pnl": 0, "count": 0},
+            "OFF": {"pnl": 0, "count": 0}
+        }
+        for row in rows:
+            session_name = row['session']
+            if session_name == 'NEW_YORK':
+                session_name = 'NEWYORK'
+
+            if session_name in session_stats:
+                session_stats[session_name]['pnl'] = round(row['pnl'] or 0, 2)
+                session_stats[session_name]['count'] = row['trade_count'] or 0
+
+        return session_stats
+
+def get_daily_summary(start_date: str = None, end_date: str = None):
+    """Günlük özet verilerini döndürür."""
+    with get_conn() as conn:
+        query = "SELECT * FROM daily_summary WHERE 1=1"
+        params = []
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+        query += " ORDER BY date ASC"
+        rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+def get_equity_curve():
+    """Equity Curve için kümülatif PnL verilerini döndürür."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                id,
+                open_time,
+                close_time,
+                net_pnl
+            FROM trades
+            WHERE status = 'closed'
+            ORDER BY close_time ASC
+        """).fetchall()
+
+        equity_curve_data = []
+        cumulative_pnl = 0
+        for row in rows:
+            cumulative_pnl += row['net_pnl']
+            equity_curve_data.append({
+                "trade_id": row['id'],
+                "date": row['close_time'],
+                "pnl": round(row['net_pnl'], 2),
+                "cumulative_pnl": round(cumulative_pnl, 2)
+            })
+        return equity_curve_data
+
+def get_coin_performance():
+    """Coin bazlı performans metriklerini döndürür."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                symbol,
+                COUNT(*) as trade_count,
+                SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) as wins,
+                SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END) as losses,
+                SUM(net_pnl) as total_pnl,
+                AVG(r_multiple) as avg_r
+            FROM trades
+            WHERE status = 'closed'
+            GROUP BY symbol
+            ORDER BY total_pnl DESC
+        """).fetchall()
+        return [dict(row) for row in rows]
+
+def get_veto_stats():
+    """Veto nedenlerinin dağılımını döndürür."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                veto_reason,
+                COUNT(*) as count
+            FROM signal_candidates
+            WHERE decision = 'VETOED'
+            GROUP BY veto_reason
+            ORDER BY count DESC
+        """).fetchall()
+        return [dict(row) for row in rows]
+
+def get_system_health():
+    """Sistem sağlığı kontrolü için gerekli bilgileri döndürür."""
+    with get_conn() as conn:
+        system_state = {}
+        rows = conn.execute("SELECT key, value FROM system_state").fetchall()
+        for row in rows:
+            system_state[row['key']] = row['value']
+
+        # Örnek olarak bazı varsayılan değerler
+        health_status = {
+            "bot_loop": system_state.get('bot_loop_status', 'UNKNOWN'),
+            "database": "OK", # DB'ye erişebildiğimize göre OK
+            "telegram": system_state.get('telegram_status', 'UNKNOWN'),
+            "dashboard": system_state.get('dashboard_status', 'UNKNOWN'),
+            "n8n": system_state.get('n8n_status', 'UNKNOWN'),
+            "last_update": datetime.now(timezone.utc).isoformat()
+        }
+        return health_status
+
+def get_all_params():
+    """Tüm kaydedilmiş parametre setlerini döndürür."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT id, data, reason, created_at FROM params ORDER BY created_at DESC").fetchall()
+        return [dict(row) for row in rows]
+
+def get_params_by_id(param_id: int):
+    """Belirli bir parametre setini ID'ye göre döndürür."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT data FROM params WHERE id=?", (param_id,)).fetchone()
+        return json.loads(row["data"]) if row else None
+
+def get_signal_candidates(limit=20, offset=0, decision=None, symbol=None):
+    """Sinyal adaylarını döndürür."""
+    with get_conn() as conn:
+        query = "SELECT * FROM signal_candidates WHERE 1=1"
+        params = []
+        if decision:
+            query += " AND decision=?"
+            params.append(decision)
+        if symbol:
+            query += " AND symbol=?"
+            params.append(symbol)
+        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.append(limit)
+        params.append(offset)
+        rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+def save_ai_log(event: str, symbol: str, decision: str, score: float, confidence: float, reason: str, data: dict):
+    """AI kararlarını loglar."""
     with get_conn() as conn:
         conn.execute(
-            """INSERT INTO best_params (data, win_rate, avg_r, pnl, trade_count)
-               VALUES (?, ?, ?, ?, ?)""",
-            (json.dumps(params), win_rate, avg_r, pnl, trade_count)
+            "INSERT INTO ai_logs (event, symbol, decision, score, confidence, reason, data) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (event, symbol, decision, score, confidence, reason, json.dumps(data))
         )
+        conn.commit()
 
+def get_ai_logs(limit=20, offset=0, symbol=None, decision=None):
+    """AI loglarını döndürür."""
+    with get_conn() as conn:
+        query = "SELECT * FROM ai_logs WHERE 1=1"
+        params = []
+        if symbol:
+            query += " AND symbol=?"
+            params.append(symbol)
+        if decision:
+            query += " AND decision=?"
+            params.append(decision)
+        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.append(limit)
+        params.append(offset)
+        rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DASHBOARD SNAPSHOT
-# ─────────────────────────────────────────────────────────────────────────────
+def get_paper_account_balance():
+    """Paper trading hesap bakiyesini döndürür."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+        return row["balance"] if row else 250.0
 
-def save_snapshot(note: str = "", balance: float = 0, data: dict = None):
+def update_paper_account_balance(new_balance: float):
+    """Paper trading hesap bakiyesini günceller."""
+    with get_conn() as conn:
+        conn.execute("UPDATE paper_account SET balance=?, updated_at=datetime('now') WHERE id=1", (new_balance,))
+        conn.commit()
+
+def get_trade_postmortem(trade_id: int):
+    """Bir trade'in post-mortem analizini döndürür."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM trade_postmortem WHERE trade_id=?", (trade_id,)).fetchone()
+        return dict(row) if row else None
+
+def save_trade_postmortem(pm: dict):
+    """Bir trade'in post-mortem analizini kaydeder."""
+    sql = """
+        INSERT INTO trade_postmortem
+            (trade_id, symbol, direction, mfe_r, mae_r, efficiency, missed_gain, sl_tightness, hold_minutes, exit_quality, setup_quality, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    params = (
+        pm['trade_id'], pm['symbol'], pm['direction'], pm['mfe_r'], pm['mae_r'], pm['efficiency'],
+        pm['missed_gain'], pm['sl_tightness'], pm['hold_minutes'], pm['exit_quality'], pm['setup_quality'], pm['notes']
+    )
+    with get_conn() as conn:
+        conn.execute(sql, params)
+        conn.commit()
+
+def get_coin_profile(symbol: str):
+    """Bir coinin profilini döndürür."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM coin_profile WHERE symbol=?", (symbol,)).fetchone()
+        return dict(row) if row else None
+
+def update_coin_profile(profile: dict):
+    """Bir coinin profilini günceller veya oluşturur."""
+    sql = """
+        INSERT INTO coin_profile (symbol, trade_count, win_count, loss_count, win_rate, avg_r, profit_factor, avg_mfe, avg_mae, best_session, preferred_direction, danger_score, fakeout_rate, volatility_profile)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(symbol) DO UPDATE SET
+            trade_count=excluded.trade_count,
+            win_count=excluded.win_count,
+            loss_count=excluded.loss_count,
+            win_rate=excluded.win_rate,
+            avg_r=excluded.avg_r,
+            profit_factor=excluded.profit_factor,
+            avg_mfe=excluded.avg_mfe,
+            avg_mae=excluded.avg_mae,
+            best_session=excluded.best_session,
+            preferred_direction=excluded.preferred_direction,
+            danger_score=excluded.danger_score,
+            fakeout_rate=excluded.fakeout_rate,
+            volatility_profile=excluded.volatility_profile,
+            updated_at=datetime('now')
+    """
+    params = (
+        profile['symbol'], profile['trade_count'], profile['win_count'], profile['loss_count'], profile['win_rate'],
+        profile['avg_r'], profile['profit_factor'], profile['avg_mfe'], profile['avg_mae'], profile['best_session'],
+        profile['preferred_direction'], profile['danger_score'], profile['fakeout_rate'], profile['volatility_profile']
+    )
+    with get_conn() as conn:
+        conn.execute(sql, params)
+        conn.commit()
+
+def get_coin_market_memory(symbol: str, session: str = None, regime: str = None):
+    """Coin piyasa hafızasını döndürür."""
+    with get_conn() as conn:
+        query = "SELECT * FROM coin_market_memory WHERE symbol=?"
+        params = [symbol]
+        if session:
+            query += " AND session=?"
+            params.append(session)
+        if regime:
+            query += " AND regime=?"
+            params.append(regime)
+        rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+def save_coin_market_memory(memory: dict):
+    """Coin piyasa hafızasını kaydeder."""
+    sql = """
+        INSERT INTO coin_market_memory (symbol, session, regime, direction, result, r_multiple)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """
+    params = (
+        memory['symbol'], memory['session'], memory['regime'], memory['direction'], memory['result'], memory['r_multiple']
+    )
+    with get_conn() as conn:
+        conn.execute(sql, params)
+        conn.commit()
+
+def get_coin_cooldown(symbol: str):
+    """Bir coinin cooldown durumunu döndürür."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM coin_cooldown WHERE symbol=?", (symbol,)).fetchone()
+        return dict(row) if row else None
+
+def set_coin_cooldown(symbol: str, reason: str, until: datetime):
+    """Bir coini cooldown'a alır."""
+    sql = """
+        INSERT INTO coin_cooldown (symbol, reason, until)
+        VALUES (?, ?, ?)
+        ON CONFLICT(symbol) DO UPDATE SET
+            reason=excluded.reason,
+            until=excluded.until,
+            created_at=datetime('now')
+    """
+    with get_conn() as conn:
+        conn.execute(sql, (symbol, reason, until.isoformat()))
+        conn.commit()
+
+def remove_coin_cooldown(symbol: str):
+    """Bir coini cooldown'dan çıkarır."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM coin_cooldown WHERE symbol=?", (symbol,))
+        conn.commit()
+
+def save_daily_summary(summary: dict):
+    """Günlük özeti kaydeder veya günceller."""
+    sql = """
+        INSERT INTO daily_summary (date, trade_count, win_count, loss_count, win_rate, gross_pnl, net_pnl, avg_r, max_drawdown, balance_eod)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date) DO UPDATE SET
+            trade_count=excluded.trade_count,
+            win_count=excluded.win_count,
+            loss_count=excluded.loss_count,
+            win_rate=excluded.win_rate,
+            gross_pnl=excluded.gross_pnl,
+            net_pnl=excluded.net_pnl,
+            avg_r=excluded.avg_r,
+            max_drawdown=excluded.max_drawdown,
+            balance_eod=excluded.balance_eod,
+            created_at=datetime('now')
+    """
+    params = (
+        summary['date'], summary['trade_count'], summary['win_count'], summary['loss_count'], summary['win_rate'],
+        summary['gross_pnl'], summary['net_pnl'], summary['avg_r'], summary['max_drawdown'], summary['balance_eod']
+    )
+    with get_conn() as conn:
+        conn.execute(sql, params)
+        conn.commit()
+
+def get_weekly_summary(week_start: str):
+    """Haftalık özeti döndürür."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM weekly_summary WHERE week_start=?", (week_start,)).fetchone()
+        return dict(row) if row else None
+
+def save_weekly_summary(summary: dict):
+    """Haftalık özeti kaydeder veya günceller."""
+    sql = """
+        INSERT INTO weekly_summary (week_start, trade_count, win_count, loss_count, win_rate, net_pnl, avg_r, best_day, worst_day)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(week_start) DO UPDATE SET
+            trade_count=excluded.trade_count,
+            win_count=excluded.win_count,
+            loss_count=excluded.loss_count,
+            win_rate=excluded.win_rate,
+            net_pnl=excluded.net_pnl,
+            avg_r=excluded.avg_r,
+            best_day=excluded.best_day,
+            worst_day=excluded.worst_day,
+            created_at=datetime('now')
+    """
+    params = (
+        summary['week_start'], summary['trade_count'], summary['win_count'], summary['loss_count'], summary['win_rate'],
+        summary['net_pnl'], summary['avg_r'], summary['best_day'], summary['worst_day']
+    )
+    with get_conn() as conn:
+        conn.execute(sql, params)
+        conn.commit()
+
+def save_dashboard_snapshot(note: str, balance: float, data: dict):
+    """Dashboard anlık görüntüsünü kaydeder."""
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO dashboard_snapshots (note, balance, data) VALUES (?, ?, ?)",
-            (note, balance, json.dumps(data or {}))
+            (note, balance, json.dumps(data))
         )
+        conn.commit()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PATTERN MEMORY
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_pattern(symbol: str, direction: str, session: str, result: str,
-                 net_pnl: float, hold_minutes: float = 0, partial_exit: int = 0):
+def get_dashboard_snapshots(limit=20, offset=0):
+    """Dashboard anlık görüntülerini döndürür."""
     with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO pattern_memory
-               (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
-        )
+        rows = conn.execute("SELECT * FROM dashboard_snapshots ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+        return [dict(row) for row in rows]
+
+def get_system_state_value(key: str):
+    """Sistem durumu anahtar değerini döndürür."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT value FROM system_state WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else None
+
+def set_system_state_value(key: str, value: str):
+    """Sistem durumu anahtar değerini ayarlar."""
+    sql = """
+        INSERT INTO system_state (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            value=excluded.value,
+            updated_at=datetime('now')
+    """
+    with get_conn() as conn:
+        conn.execute(sql, (key, value))
+        conn.commit()
+
+def get_pattern_memory(symbol: str = None, session: str = None, result: str = None):
+    """Pattern hafızasını döndürür."""
+    with get_conn() as conn:
+        query = "SELECT * FROM pattern_memory WHERE 1=1"
+        params = []
+        if symbol:
+            query += " AND symbol=?"
+            params.append(symbol)
+        if session:
+            query += " AND session=?"
+            params.append(session)
+        if result:
+            query += " AND result=?"
+            params.append(result)
+        query += " ORDER BY created_at DESC"
+        rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+def save_pattern_memory(memory: dict):
+    """Pattern hafızasını kaydeder."""
+    sql = """
+        INSERT INTO pattern_memory (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """
+    params = (
+        memory['symbol'], memory['direction'], memory['session'], memory['result'],
+        memory['net_pnl'], memory['hold_minutes'], memory['partial_exit']
+    )
+    with get_conn() as conn:
+        conn.execute(sql, params)
+        conn.commit()
