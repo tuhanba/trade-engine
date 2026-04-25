@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 
 from database import (
     get_conn, save_daily_summary, save_weekly_summary,
-    get_paper_balance,
+    get_paper_account_balance as get_paper_balance,
 )
 
 logger = logging.getLogger(__name__)
@@ -252,7 +252,7 @@ def get_weekly_data(weeks: int = 8) -> list[dict]:
 def get_ax_status() -> dict:
     """AX sistemi anlık durumu."""
     try:
-        from database import get_state, get_open_trades, get_paper_balance
+        from database import get_system_state_value as get_state, get_open_trades, get_paper_account_balance as get_paper_balance
 
         cb_until = get_state("circuit_breaker_until")
         cb_active = False
