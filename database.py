@@ -306,6 +306,17 @@ def _migrate(conn):
         # paper_account — eski şemada 'paper_balance', yeni şemada 'balance'
         ("paper_account", "balance",         "REAL DEFAULT 250.0"),
         ("paper_account", "initial_balance", "REAL DEFAULT 250.0"),
+        # coin_cooldown — eski şemada eksik kolonlar
+        ("coin_cooldown", "until",      "TEXT DEFAULT '2000-01-01T00:00:00'"),
+        ("coin_cooldown", "reason",     "TEXT"),
+        ("coin_cooldown", "created_at", "TEXT DEFAULT (datetime('now'))"),
+        # signal_candidates — yeni kolonlar
+        ("signal_candidates", "runner_target",  "REAL"),
+        ("signal_candidates", "expected_mfe_r", "REAL DEFAULT 0"),
+        ("signal_candidates", "market_regime",  "TEXT"),
+        ("signal_candidates", "ax_mode",        "TEXT DEFAULT 'execute'"),
+        ("signal_candidates", "execution_mode", "TEXT DEFAULT 'paper'"),
+        ("signal_candidates", "linked_trade_id","INTEGER"),
     ]
     for table, col, col_type in migrations:
         try:
