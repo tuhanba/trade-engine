@@ -268,7 +268,46 @@ def init_db():
         );
 
         """)
+
+    # ── Eski şemadan yeni kolonlara migration ─────────────────────────────────
+    _migrate(get_conn())
     logger.info("DB init tamamlandı.")
+
+
+def _migrate(conn):
+    """Eksik kolonları ekle — her çalıştırmada idempotent."""
+    migrations = [
+        # trades tablosu — yeni kolonlar
+        ("trades", "qty_tp1",            "REAL"),
+        ("trades", "qty_tp2",            "REAL"),
+        ("trades", "qty_runner",         "REAL"),
+        ("trades", "trail_stop",         "REAL"),
+        ("trades", "realized_pnl",       "REAL DEFAULT 0"),
+        ("trades", "r_multiple",         "REAL DEFAULT 0"),
+        ("trades", "tp1_hit",            "INTEGER DEFAULT 0"),
+        ("trades", "tp2_hit",            "INTEGER DEFAULT 0"),
+        ("trades", "linked_candidate_id","INTEGER"),
+        ("trades", "hold_minutes",       "REAL DEFAULT 0"),
+        ("trades", "ax_mode",            "TEXT DEFAULT 'execute'"),
+        ("trades", "environment",        "TEXT DEFAULT 'paper'"),
+        ("trades", "close_reason",       "TEXT"),
+        # coin_params tablosu — yeni kolonlar
+        ("coin_params", "volatility_profile", "TEXT DEFAULT 'normal'"),
+        ("coin_params", "sl_atr_mult",        "REAL DEFAULT 1.3"),
+        ("coin_params", "tp_atr_mult",        "REAL DEFAULT 2.0"),
+        ("coin_params", "risk_pct",           "REAL DEFAULT 1.0"),
+        ("coin_params", "max_leverage",       "INTEGER DEFAULT 15"),
+        ("coin_params", "min_adx",            "REAL DEFAULT 20"),
+        ("coin_params", "min_bb_width",       "REAL DEFAULT 1.3"),
+        ("coin_params", "min_volume_m",       "REAL DEFAULT 15.0"),
+        ("coin_params", "enabled",            "INTEGER DEFAULT 1"),
+        ("coin_params", "updated_at",         "TEXT DEFAULT (datetime('now'))"),
+    ]
+    for table, col, col_type in migrations:
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass  # Kolon zaten var
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -576,7 +615,7 @@ def get_stats(hours: int = 48) -> dict:
         "total_pnl":     sum(pnls),
         "avg_win":       gross_win  / len(wins)   if wins   else 0,
         "avg_loss":      gross_loss / len(losses) if losses else 0,
-        "avg_r":         sum(t["r_multiple"] for t in trades) / len(trades),
+        "avg_r":         sum((t.get("r_multiple") or 0) for t in trades) / len(trades),
         "profit_factor": gross_win / gross_loss if gross_loss > 0 else 0,
         "max_drawdown":  max_dd,
     }

@@ -17,6 +17,7 @@ scalp_bot.py — AX Ana Döngü
 import os
 import time
 import logging
+import logging.handlers
 import threading
 from datetime import datetime, timezone, timedelta
 
@@ -76,7 +77,7 @@ logging.basicConfig(
             maxBytes=LOG_MAX_MB * 1024 * 1024,
             backupCount=LOG_MAX_DAYS,
             encoding="utf-8",
-        ) if __import__("logging.handlers", fromlist=["handlers"]) else logging.StreamHandler(),
+        ),
     ]
 )
 logger = logging.getLogger("scalp_bot")
@@ -463,5 +464,4 @@ def main():
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import logging.handlers
     main()
