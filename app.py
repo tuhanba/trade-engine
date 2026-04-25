@@ -24,7 +24,7 @@ except ImportError:
 from config import DB_PATH, BINANCE_API_KEY, BINANCE_API_SECRET
 from database import (
     init_db, get_trades, get_stats, get_current_params,
-    get_open_trades, get_paper_balance, get_conn,
+    get_open_trades, get_paper_account_balance as get_paper_balance, get_conn,
 )
 from binance.client import Client
 import dashboard_service as dash_svc
