@@ -121,6 +121,8 @@ class TelegramManager:
         self._handlers  = {}   # komut → callable
         self._get_balance_fn = None
         self._get_open_trades_fn = None
+        self._run_ai_brain_fn = None
+        self._get_circuit_breaker_fn = None
 
     @property
     def is_paused(self):
@@ -145,12 +147,17 @@ class TelegramManager:
         """Komut handler kaydet. handler(args: str) şeklinde çağrılır."""
         self._handlers[command.lstrip("/")] = handler
 
-    def start(self, get_balance_fn=None, get_open_trades_fn=None):
+    def start(self, get_balance_fn=None, get_open_trades_fn=None,
+              run_ai_brain_fn=None, get_circuit_breaker_fn=None):
         """Polling thread'i başlat. Opsiyonel callback'ler kaydedilir."""
         if get_balance_fn:
             self._get_balance_fn = get_balance_fn
         if get_open_trades_fn:
             self._get_open_trades_fn = get_open_trades_fn
+        if run_ai_brain_fn:
+            self._run_ai_brain_fn = run_ai_brain_fn
+        if get_circuit_breaker_fn:
+            self._get_circuit_breaker_fn = get_circuit_breaker_fn
         if self._poll_thread and self._poll_thread.is_alive():
             return
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
@@ -239,8 +246,10 @@ class TelegramManager:
             self._cmd_balance()
         elif cmd in ("trades", "pozisyon"):
             self._cmd_trades()
-        elif cmd in ("ax", "rapor", "report"):
+        elif cmd in ("rapor", "report"):
             self._cmd_report()
+        elif cmd == "ax":
+            self._cmd_ax()
         elif cmd == "help":
             self._cmd_help()
         # kayıtlı dış handler'lar
@@ -307,9 +316,51 @@ class TelegramManager:
             self.send(f"Trade listesi alınamadı: {e}")
 
     def _cmd_report(self):
+        if not self._run_ai_brain_fn:
+            self.send("❌ AI Brain bağlı değil.")
+            return
         try:
-            from trade_engine.ai_brain import build_report
-            report = build_report()
-            self.send(report[:4000])
+            self.send("🧠 AI Brain analiz ediliyor, bekleyin...")
+            self._run_ai_brain_fn()
         except Exception as e:
             self.send(f"Rapor alınamadı: {e}")
+
+    def _cmd_ax(self):
+        mode  = "PAPER" if self.paper_mode else "LIVE"
+        if self.paused:
+            durum = "⏸ DURAKLATILDI"
+        elif self.finish_mode:
+            durum = "🏁 FİNİSH"
+        else:
+            durum = "RUNNING"
+
+        try:
+            bal = self._get_balance_fn() if self._get_balance_fn else 0
+        except Exception:
+            bal = 0
+
+        try:
+            trades = self._get_open_trades_fn() if self._get_open_trades_fn else []
+            trade_count = len(trades)
+        except Exception:
+            trade_count = 0
+
+        cb_line = ""
+        if self._get_circuit_breaker_fn:
+            try:
+                active, remaining = self._get_circuit_breaker_fn()
+                if active:
+                    cb_line = f"Circuit Breaker: 🔴 Aktif ({remaining}dk kaldı)\n"
+                else:
+                    cb_line = "Circuit Breaker: 🟢 Kapalı\n"
+            except Exception:
+                pass
+
+        self.send(
+            f"🤖 <b>AX Bot Durumu</b>\n\n"
+            f"Mod: <b>{mode}</b> | Durum: <b>{durum}</b>\n"
+            f"{cb_line}"
+            f"Açık trade: {trade_count}\n"
+            f"Bakiye: <b>${bal:.2f}</b>\n"
+            f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+        )

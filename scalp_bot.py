@@ -1634,6 +1634,8 @@ def main():
         tg_manager.start(
             get_balance_fn=get_balance,
             get_open_trades_fn=lambda: open_trades,
+            run_ai_brain_fn=run_ai_brain if AI_BRAIN_AVAILABLE else None,
+            get_circuit_breaker_fn=is_circuit_breaker_active,
         )
         tg_manager.send_startup(
             get_balance(), get_params(),

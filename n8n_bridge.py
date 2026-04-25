@@ -94,7 +94,7 @@ def _auth():
 def n8n_pause():
     if not _auth(): return jsonify({"ok": False, "error": "Unauthorized"}), 401
     tg = _bot_refs.get("tg_manager")
-    if tg: tg._paused = True
+    if tg: tg.paused = True
     logger.info("[n8n_bridge] Bot PAUSE edildi.")
     return jsonify({"ok": True, "status": "paused"})
 
@@ -102,7 +102,7 @@ def n8n_pause():
 def n8n_resume():
     if not _auth(): return jsonify({"ok": False, "error": "Unauthorized"}), 401
     tg = _bot_refs.get("tg_manager")
-    if tg: tg._paused = False
+    if tg: tg.paused = False
     logger.info("[n8n_bridge] Bot RESUME edildi.")
     return jsonify({"ok": True, "status": "running"})
 
@@ -110,7 +110,7 @@ def n8n_resume():
 def n8n_finish():
     if not _auth(): return jsonify({"ok": False, "error": "Unauthorized"}), 401
     tg = _bot_refs.get("tg_manager")
-    if tg: tg._finish_mode = True
+    if tg: tg.finish_mode = True
     logger.info("[n8n_bridge] Bot FINISH moduna alındı.")
     return jsonify({"ok": True, "status": "finish_mode"})
 
@@ -122,8 +122,8 @@ def n8n_status():
     trades_fn = _bot_refs.get("get_open_trades")
     return jsonify({
         "ok":          True,
-        "paused":      tg._paused       if tg else False,
-        "finish_mode": tg._finish_mode  if tg else False,
+        "paused":      tg.paused        if tg else False,
+        "finish_mode": tg.finish_mode   if tg else False,
         "balance":     bal_fn()         if bal_fn else 0,
         "open_trades": len(trades_fn()) if trades_fn else 0,
         "timestamp":   datetime.now(timezone.utc).isoformat(),
