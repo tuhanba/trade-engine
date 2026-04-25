@@ -270,7 +270,8 @@ def init_db():
         """)
 
     # ── Eski şemadan yeni kolonlara migration ─────────────────────────────────
-    _migrate(get_conn())
+    with get_conn() as conn:
+        _migrate(conn)
     logger.info("DB init tamamlandı.")
 
 

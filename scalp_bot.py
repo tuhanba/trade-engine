@@ -242,12 +242,30 @@ def main():
     # ── Başlatma ─────────────────────────────────────────────────────────────
     logger.info(f"AX Bot başlıyor | AX_MODE={AX_MODE} | EXECUTION={EXECUTION_MODE}")
 
-    init_db()
-    init_paper_account()
-    init_coin_library()
+    try:
+        init_db()
+    except Exception as e:
+        logger.critical(f"DB init hatası: {e}", exc_info=True)
+        raise
 
-    client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
-    ai_set_client(client)
+    try:
+        init_paper_account()
+    except Exception as e:
+        logger.critical(f"Paper account init hatası: {e}", exc_info=True)
+        raise
+
+    try:
+        init_coin_library()
+    except Exception as e:
+        logger.critical(f"Coin library init hatası: {e}", exc_info=True)
+        raise
+
+    try:
+        client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
+        ai_set_client(client)
+    except Exception as e:
+        logger.critical(f"Binance Client hatası: {e}", exc_info=True)
+        raise
 
     # Önceki circuit breaker durumunu yükle
     cb_str = get_state("circuit_breaker_until")
