@@ -19,11 +19,22 @@ scalp_bot.py entegrasyon:
 
 import sqlite3
 import json
+import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
-DB_PATH = "/root/trade_engine/trading.db"
+from config import (
+    DB_PATH, MIN_RR, MIN_EXPECTED_MFE_R,
+    MAX_OPEN_TRADES, DAILY_MAX_LOSS_PCT,
+    CIRCUIT_BREAKER_LOSSES,
+)
+from database import (
+    get_conn, save_postmortem, save_ai_log,
+    is_coin_in_cooldown, get_stats,
+)
+
+logger = logging.getLogger(__name__)
 
 PARAM_BOUNDS = {
     "sl_atr_mult":    (0.8,  2.5),
@@ -41,6 +52,141 @@ PARAM_BOUNDS = {
 
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
+
+
+# ═══════════════════════════════════════════════════════════
+# AX KARAR MOTORu — evaluate_signal()
+# ═══════════════════════════════════════════════════════════
+
+def evaluate_signal(signal: dict, open_trades: list, balance: float,
+                    consecutive_losses: int = 0,
+                    circuit_breaker_active: bool = False,
+                    session: str = "UNKNOWN",
+                    market_regime: str = "NEUTRAL") -> dict:
+    """
+    AX sinyal değerlendirmesi.
+
+    Returns:
+        decision    — ALLOW | VETO | WATCH
+        score       — 0-100 (signal_engine'den gelen + AX düzeltmesi)
+        confidence  — 0-1
+        veto_reason — Neden reddedildi (ALLOW ise None)
+        expected_mfe_r
+        expected_mae_r
+    """
+    symbol    = signal.get("symbol", "")
+    direction = signal.get("direction")
+    rr        = signal.get("rr", 0)
+    mfe_r     = signal.get("expected_mfe_r", 0)
+    score     = signal.get("score", 50)
+    conf      = signal.get("confidence", 0.5)
+
+    def veto(reason: str, score_adj: float = 0):
+        save_ai_log("veto", symbol=symbol, decision="VETO", score=max(0, score + score_adj),
+                    confidence=conf, reason=reason)
+        return {
+            "decision": "VETO", "score": max(0, score + score_adj),
+            "confidence": conf, "veto_reason": reason,
+            "expected_mfe_r": mfe_r, "expected_mae_r": 0,
+        }
+
+    def allow(score_adj: float = 0):
+        final_score = min(100, max(0, score + score_adj))
+        final_conf  = round(final_score / 100, 3)
+        save_ai_log("allow", symbol=symbol, decision="ALLOW", score=final_score,
+                    confidence=final_conf, reason=None)
+        return {
+            "decision": "ALLOW", "score": final_score,
+            "confidence": final_conf, "veto_reason": None,
+            "expected_mfe_r": mfe_r, "expected_mae_r": round(rr * 0.3, 2),
+        }
+
+    # ── Hard veto'lar ────────────────────────────────────────────────────────
+    if circuit_breaker_active:
+        return veto("circuit_breaker", -30)
+
+    if len(open_trades) >= MAX_OPEN_TRADES:
+        return veto("too_many_open_trades", -20)
+
+    if rr < MIN_RR:
+        return veto("bad_rr", -25)
+
+    if mfe_r < MIN_EXPECTED_MFE_R:
+        return veto("expected_mfe_low", -20)
+
+    if is_coin_in_cooldown(symbol):
+        return veto("coin_cooldown", -20)
+
+    # ── Günlük kayıp limiti ──────────────────────────────────────────────────
+    stats = get_stats(hours=24)
+    daily_loss = abs(min(stats.get("total_pnl", 0), 0))
+    daily_loss_limit = balance * DAILY_MAX_LOSS_PCT / 100
+    if daily_loss >= daily_loss_limit:
+        return veto("daily_loss_limit", -30)
+
+    # ── Skor düzeltmeleri (VETO değil, sadece skor) ──────────────────────────
+    score_adj = 0.0
+
+    # Ardışık kayıp
+    if consecutive_losses >= CIRCUIT_BREAKER_LOSSES - 1:
+        score_adj -= 10  # Son 1 kayıp öncesi uyarı
+    elif consecutive_losses >= 2:
+        score_adj -= 5
+
+    # Chop market
+    if market_regime == "CHOPPY":
+        score_adj -= 10
+        if score + score_adj < 45:
+            return veto("chop_market", score_adj)
+
+    # BTC zıt yön
+    btc_trend = signal.get("btc_trend", "NEUTRAL")
+    if direction == "LONG"  and btc_trend == "BEARISH":
+        score_adj -= 8
+    elif direction == "SHORT" and btc_trend == "BULLISH":
+        score_adj -= 8
+
+    # Asya seansında daha temkinli
+    if session == "ASIA":
+        score_adj -= 8
+
+    # Yüksek fakeout risk (coin profili)
+    from database import get_coin_profile
+    cp = get_coin_profile(symbol)
+    fakeout_rate = cp.get("fakeout_rate", 0)
+    danger_score = cp.get("danger_score", 0)
+
+    if fakeout_rate > 0.4:
+        score_adj -= 10
+        if fakeout_rate > 0.6:
+            return veto("fakeout_risk", score_adj)
+
+    if danger_score > 0.7:
+        score_adj -= 10
+
+    # Zayıf yapı — ADX çok düşük
+    adx15 = signal.get("adx15", 20)
+    if adx15 < 18:
+        return veto("weak_structure", score_adj - 15)
+
+    # ── Düşük volume ─────────────────────────────────────────────────────────
+    vol = signal.get("volume_m", 0)
+    if vol < 5.0:
+        return veto("low_volume", score_adj - 15)
+
+    final_score = score + score_adj
+
+    # WATCH: sinyal var ama güven düşük (sadece logla, execute etme)
+    if final_score < 40:
+        save_ai_log("watch", symbol=symbol, decision="WATCH", score=final_score,
+                    confidence=round(final_score / 100, 3), reason="low_score")
+        return {
+            "decision": "WATCH", "score": final_score,
+            "confidence": round(final_score / 100, 3), "veto_reason": "low_score",
+            "expected_mfe_r": mfe_r, "expected_mae_r": round(rr * 0.3, 2),
+        }
+
+    return allow(score_adj)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1066,7 +1212,10 @@ def post_trade_analysis(trade_id, client_ref=None, tg_fn=None):
             return
 
         extra  = max(int(dur_min * 1.5 / 5) + 10, 20)
-        klines = cli.get_klines(symbol=sym, interval="5m", limit=min(extra, 100))
+        try:
+            klines = cli.futures_klines(symbol=sym, interval="5m", limit=min(extra, 100))
+        except Exception:
+            klines = cli.get_klines(symbol=sym, interval="5m", limit=min(extra, 100))
 
         df = pd.DataFrame(klines, columns=[
             "time", "open", "high", "low", "close", "volume",
@@ -1116,10 +1265,27 @@ def post_trade_analysis(trade_id, client_ref=None, tg_fn=None):
             trade_id, sym, direction, entry, exit_p, sl, tp,
             mfe_price, mae_price, efficiency, sl_tight,
             opt_tp, missed, actual_pnl,
-            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         ))
         conn.commit()
         conn.close()
+
+        # Yeni database.py standardına da kaydet
+        sl_dist_r = abs(entry - sl) if sl else 1e-10
+        save_postmortem({
+            "trade_id":      trade_id,
+            "symbol":        sym,
+            "direction":     direction,
+            "mfe_r":         round(mfe_dist / sl_dist_r, 3) if sl_dist_r else 0,
+            "mae_r":         round(mae_dist / sl_dist_r, 3) if sl_dist_r else 0,
+            "efficiency":    round(efficiency, 2),
+            "missed_gain":   round(missed, 6),
+            "sl_tightness":  round(sl_tight, 2),
+            "hold_minutes":  dur_min,
+            "exit_quality":  round(efficiency / 100, 3),
+            "setup_quality": None,
+            "notes":         None,
+        })
 
         if not tg:
             return
