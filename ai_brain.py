@@ -255,32 +255,32 @@ def get_trades(conn, hours=48, limit=300, symbol=None):
     cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
     if symbol:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status!='OPEN' AND symbol=? "
+            "SELECT * FROM trades WHERE status='closed' AND symbol=? "
             "AND close_time>=? ORDER BY close_time DESC LIMIT ?",
             (symbol, cutoff, limit)).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status!='OPEN' AND close_time>=? "
+            "SELECT * FROM trades WHERE status='closed' AND close_time>=? "
             "ORDER BY close_time DESC LIMIT ?",
             (cutoff, limit)).fetchall()
     return [dict(r) for r in rows]
 
 def get_all_trades(conn, limit=800):
     rows = conn.execute(
-        "SELECT * FROM trades WHERE status!='OPEN' ORDER BY close_time DESC LIMIT ?",
+        "SELECT * FROM trades WHERE status='closed' ORDER BY close_time DESC LIMIT ?",
         (limit,)).fetchall()
     return [dict(r) for r in rows]
 
 def get_last_n_trades(conn, n=20):
     rows = conn.execute(
-        "SELECT * FROM trades WHERE status!='OPEN' ORDER BY close_time DESC LIMIT ?",
+        "SELECT * FROM trades WHERE status='closed' ORDER BY close_time DESC LIMIT ?",
         (n,)).fetchall()
     return [dict(r) for r in rows]
 
 def get_today_trades(conn):
     today = datetime.utcnow().strftime("%Y-%m-%d")
     rows  = conn.execute(
-        "SELECT * FROM trades WHERE status!='OPEN' AND close_time LIKE ? "
+        "SELECT * FROM trades WHERE status='closed' AND close_time LIKE ? "
         "ORDER BY close_time DESC", (f"{today}%",)).fetchall()
     return [dict(r) for r in rows]
 
