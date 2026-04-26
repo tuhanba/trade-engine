@@ -15,8 +15,8 @@ conn = sqlite3.connect(DB_PATH)
 conn.row_factory = sqlite3.Row
 c = conn.cursor()
 
-# Açık trade'leri bul
-c.execute("SELECT * FROM trades WHERE status = 'OPEN'")
+# Açık trade'leri bul (open, tp1_hit, runner)
+c.execute("SELECT * FROM trades WHERE status IN ('open', 'tp1_hit', 'runner')")
 open_trades = c.fetchall()
 
 if not open_trades:
@@ -57,10 +57,10 @@ for t in open_trades:
 
     c.execute("""
         UPDATE trades
-        SET status=?, close_price=?, close_time=?,
-            pnl_usdt=?, net_pnl=?, r_multiple=?, result=?
+        SET status='closed', close_reason='manual', close_price=?, close_time=?,
+            net_pnl=?, r_multiple=?
         WHERE id=?
-    """, (result, close_price, now, round(gross, 4), round(net_pnl, 4), r_multiple, result, trade_id))
+    """, (close_price, now, round(net_pnl, 4), r_multiple, trade_id))
 
     print(f"  ✓ {symbol} {direction} kapatıldı | PNL: {net_pnl:.3f}$ | {result}")
     closed += 1

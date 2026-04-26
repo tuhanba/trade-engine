@@ -946,23 +946,24 @@ def suggest_leverage(sym_stats, sym):
 # ═══════════════════════════════════════════════════════════
 
 def save_params(conn, p, reason, changes):
+    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     conn.execute("""
         INSERT INTO params (
             version, sl_atr_mult, tp_atr_mult,
             rsi5_min, rsi5_max, rsi1_min, rsi1_max,
             vol_ratio_min, min_volume_m, min_change_pct,
-            risk_pct, updated_at, ai_reason
+            risk_pct, updated_at, ai_reason, data, reason
         ) VALUES (
             (SELECT COALESCE(MAX(version), 0) + 1 FROM params),
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )""", (
         p.get("sl_atr_mult",   1.2), p.get("tp_atr_mult",   2.0),
         p.get("rsi5_min",       35), p.get("rsi5_max",       75),
         p.get("rsi1_min",       35), p.get("rsi1_max",       72),
         p.get("vol_ratio_min",  1.2), p.get("min_volume_m", 10.0),
         p.get("min_change_pct", 2.0), p.get("risk_pct",     1.5),
-        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        (reason or "AI Brain")[:500]
+        now_str, (reason or "AI Brain")[:500],
+        json.dumps(p), (reason or "")[:500]
     ))
     conn.commit()
 
