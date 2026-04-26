@@ -388,6 +388,19 @@ def _migrate(conn):
         ("coin_profile", "long_wr",          "REAL DEFAULT 0"),
         ("coin_profile", "short_wr",         "REAL DEFAULT 0"),
         ("coin_profile", "last_updated",     "TEXT"),
+        # coin_library.update_coin_stats() tarafından yazılan kolonlar
+        ("coin_profile", "trade_count",         "INTEGER DEFAULT 0"),
+        ("coin_profile", "win_count",           "INTEGER DEFAULT 0"),
+        ("coin_profile", "loss_count",          "INTEGER DEFAULT 0"),
+        ("coin_profile", "win_rate",            "REAL DEFAULT 0"),
+        ("coin_profile", "avg_r",               "REAL DEFAULT 0"),
+        ("coin_profile", "profit_factor",       "REAL DEFAULT 0"),
+        ("coin_profile", "avg_mfe",             "REAL DEFAULT 0"),
+        ("coin_profile", "avg_mae",             "REAL DEFAULT 0"),
+        ("coin_profile", "best_session",        "TEXT"),
+        ("coin_profile", "preferred_direction", "TEXT"),
+        ("coin_profile", "danger_score",        "REAL DEFAULT 0"),
+        ("coin_profile", "fakeout_rate",        "REAL DEFAULT 0"),
 
         # ── ai_brain uyumluluk — coin_cooldown eski şema sütunları ───────────
         ("coin_cooldown", "blacklisted_until", "TEXT"),
