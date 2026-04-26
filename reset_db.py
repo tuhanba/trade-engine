@@ -9,7 +9,7 @@ import sqlite3
 import os
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
-STARTING_BALANCE = 250.0
+STARTING_BALANCE = 200.0
 
 print(f"[reset] DB yolu: {DB_PATH}")
 
@@ -22,31 +22,28 @@ tables = [row[0] for row in c.fetchall()]
 print(f"[reset] Bulunan tablolar: {tables}")
 
 # Sadece trade verileri temizlenir — AI Brain verileri KORUNUR
+# KORUNANLAR: params, best_params, ai_logs, coin_profile, coin_params, coin_cooldown
+CLEAR_TABLES = [
+    "trades", "signal_candidates", "trade_postmortem",
+    "daily_summary", "weekly_summary", "pipeline_stats",
+    "coin_market_memory",
+    # eski şema isimleri (varsa)
+    "open_trades", "daily_stats", "trade_log",
+]
 cleared = []
 
-if "trades" in tables:
-    c.execute("DELETE FROM trades")
-    cleared.append("trades")
+for tbl in CLEAR_TABLES:
+    if tbl in tables:
+        c.execute(f"DELETE FROM {tbl}")
+        cleared.append(tbl)
 
-if "open_trades" in tables:
-    c.execute("DELETE FROM open_trades")
-    cleared.append("open_trades")
-
-if "daily_stats" in tables:
-    c.execute("DELETE FROM daily_stats")
-    cleared.append("daily_stats")
-
-if "trade_log" in tables:
-    c.execute("DELETE FROM trade_log")
-    cleared.append("trade_log")
-
-# Paper account sıfırla — 250 USDT
+# Paper account sıfırla
 if "paper_account" in tables:
     c.execute("DELETE FROM paper_account")
     c.execute(
-        "INSERT INTO paper_account (id, paper_balance, total_commission, updated_at) "
-        "VALUES (1, ?, 0.0, datetime('now'))",
-        (STARTING_BALANCE,)
+        "INSERT INTO paper_account (id, balance, initial_balance) "
+        "VALUES (1, ?, ?)",
+        (STARTING_BALANCE, STARTING_BALANCE)
     )
     cleared.append(f"paper_account → {STARTING_BALANCE} USDT")
 
