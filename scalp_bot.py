@@ -34,7 +34,7 @@ from config import (
 from database import (
     init_db, init_paper_account, get_paper_balance,
     save_signal_candidate, update_signal_decision,
-    get_open_trades, get_trades, get_stats,
+    get_open_trades, get_trades, get_stats, get_trade,
     set_state, get_state,
     save_daily_summary, save_coin_market_memory,
     set_coin_cooldown, save_pipeline_stats,
@@ -362,7 +362,6 @@ def main():
             # ── ADIM 8+9: MONITOR — her döngüde ─────────────────────────────
             newly_closed = exec_monitor(client)
             for trade_id in newly_closed:
-                from database import get_trade
                 t = get_trade(trade_id)
                 if t:
                     on_trade_closed(client, tg_manager, t)

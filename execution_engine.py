@@ -340,11 +340,17 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     except Exception:
         hold_min = 0
 
-    db_close_trade(trade_id, close_price, net_pnl, reason, hold_min)
+    entry = t.get("entry") or 0
+    sl    = t.get("sl")    or 0
+    qty   = t.get("qty")   or 0
+    risk  = abs(entry - sl) * qty
+    r_mult = round(net_pnl / risk, 3) if risk > 0 else 0
+
+    db_close_trade(trade_id, close_price, net_pnl, reason, hold_min, r_mult)
     update_paper_balance(net_pnl - (t.get("realized_pnl") or 0))
 
     result = "WIN" if net_pnl > 0 else "LOSS"
     logger.info(
         f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
-        f"{reason.upper()} pnl={net_pnl:+.3f}$ hold={hold_min:.0f}dk"
+        f"{reason.upper()} pnl={net_pnl:+.3f}$ R={r_mult:+.2f} hold={hold_min:.0f}dk"
     )

@@ -542,15 +542,15 @@ def update_trade(trade_id: int, fields: dict):
         conn.execute(f"UPDATE trades SET {sets} WHERE id=?", vals)
 
 def close_trade(trade_id: int, close_price: float, net_pnl: float,
-                reason: str, hold_minutes: float = 0):
+                reason: str, hold_minutes: float = 0, r_multiple: float = 0):
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         conn.execute(
             """UPDATE trades SET
                 status='closed', close_price=?, net_pnl=?, close_reason=?,
-                hold_minutes=?, close_time=?
+                hold_minutes=?, close_time=?, r_multiple=?
                WHERE id=?""",
-            (close_price, net_pnl, reason, hold_minutes, now, trade_id)
+            (close_price, net_pnl, reason, hold_minutes, now, r_multiple, trade_id)
         )
 
 def get_trade(trade_id: int) -> dict | None:
