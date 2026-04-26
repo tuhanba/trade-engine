@@ -49,7 +49,6 @@ def get_conn() -> sqlite3.Connection:
 
 def init_db():
     with get_conn() as conn:
-        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript("""
 
         -- ── trades ──────────────────────────────────────────────────────────
@@ -367,6 +366,12 @@ def _migrate(conn):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def init_paper_account(initial: float = 250.0):
+    # Read-only check first — no write lock needed if account exists
+    with get_conn() as conn:
+        existing = conn.execute("SELECT id FROM paper_account WHERE id=1").fetchone()
+        if existing:
+            return
+    # Only write on very first startup
     with get_conn() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
