@@ -24,6 +24,8 @@ import threading
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
+import pandas as pd
+
 from config import (
     DB_PATH, MIN_RR, MIN_EXPECTED_MFE_R,
     MAX_OPEN_TRADES, DAILY_MAX_LOSS_PCT,
@@ -483,8 +485,8 @@ def get_coin_profiles(conn, min_trades=3):
         (min_trades,)).fetchall()
     return [dict(r) for r in rows]
 
-def get_dangerous_coins(conn, danger_threshold=4):
-    """Tehlike skoru yüksek coinleri döndürür."""
+def get_dangerous_coins(conn, danger_threshold=0.5):
+    """Tehlike skoru yüksek coinleri döndürür (0.0-1.0 scale)."""
     rows = conn.execute(
         "SELECT symbol, danger_score, win_rate, avg_rr FROM coin_profile "
         "WHERE danger_score>=? AND trade_count>=3 ORDER BY danger_score DESC",
@@ -1390,7 +1392,7 @@ def analyze_and_adapt():
 
         # Coin kişilik profillerini güncelle
         update_coin_profiles(conn, all_t)
-        dangerous_coins = get_dangerous_coins(conn, danger_threshold=4)
+        dangerous_coins = get_dangerous_coins(conn, danger_threshold=0.5)
         best_coins      = get_best_coins(conn)
 
         # En iyi parametre setini kaydet
