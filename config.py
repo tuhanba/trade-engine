@@ -14,6 +14,9 @@ AX_MODE        = os.getenv("AX_MODE", "execute")      # execute | observe
 EXECUTION_MODE = os.getenv("EXECUTION_MODE", "paper") # paper | live
 PAPER_MODE     = EXECUTION_MODE == "paper"
 
+# DEBUG_SIGNAL_MODE: candidate eşiği gevşer, trade açma strict kalır
+DEBUG_SIGNAL_MODE = os.getenv("DEBUG_SIGNAL_MODE", "false").lower() == "true"
+
 # ── API ──────────────────────────────────────────────────────────────────────
 BINANCE_API_KEY    = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
@@ -21,6 +24,8 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 # ── Telegram ─────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
+# Heartbeat aralığı: varsayılan 6 saat (21600 saniye)
+HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL", "21600"))
 
 # ── Risk ─────────────────────────────────────────────────────────────────────
 RISK_PCT                = float(os.getenv("RISK_PCT", "1.0"))
@@ -29,10 +34,27 @@ DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "3.0"))
 CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "3"))
 CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "120"))
 
-# ── Sinyal ───────────────────────────────────────────────────────────────────
+# ── Sinyal (Execution — sıkı eşikler) ────────────────────────────────────────
 MIN_RR             = float(os.getenv("MIN_RR", "1.5"))
 SL_ATR_MULT        = float(os.getenv("SL_ATR_MULT", "1.3"))
 MIN_EXPECTED_MFE_R = float(os.getenv("MIN_EXPECTED_MFE_R", "1.0"))
+
+# ── Candidate filtresi (gevşek — AX öğrenimi için) ───────────────────────────
+# Bu eşikler candidate üretmek için kullanılır, trade açmak için DEĞİL.
+CAND_MIN_RR             = float(os.getenv("CAND_MIN_RR", "1.2"))
+CAND_MIN_EXPECTED_MFE_R = float(os.getenv("CAND_MIN_EXPECTED_MFE_R", "0.7"))
+CAND_MIN_VOLUME_M       = float(os.getenv("CAND_MIN_VOLUME_M", "2.0"))
+CAND_VOL_RATIO_MIN      = float(os.getenv("CAND_VOL_RATIO_MIN", "0.8"))
+CAND_MIN_CHANGE_PCT     = float(os.getenv("CAND_MIN_CHANGE_PCT", "0.5"))
+CAND_MIN_ADX            = float(os.getenv("CAND_MIN_ADX", "15.0"))
+CAND_MIN_BB_WIDTH       = float(os.getenv("CAND_MIN_BB_WIDTH", "0.8"))
+
+# ── Execution filtresi (sıkı — paper trade açma eşikleri) ────────────────────
+EXEC_MIN_RR             = float(os.getenv("EXEC_MIN_RR", str(MIN_RR)))
+EXEC_MIN_EXPECTED_MFE_R = float(os.getenv("EXEC_MIN_EXPECTED_MFE_R", str(MIN_EXPECTED_MFE_R)))
+EXEC_MIN_VOLUME_M       = float(os.getenv("EXEC_MIN_VOLUME_M", "3.0"))
+EXEC_CONFIDENCE_MIN     = float(os.getenv("EXEC_CONFIDENCE_MIN", "0.55"))
+EXEC_SCORE_MIN          = float(os.getenv("EXEC_SCORE_MIN", "60.0"))
 
 # ── TP ───────────────────────────────────────────────────────────────────────
 TP1_R            = float(os.getenv("TP1_R", "0.9"))

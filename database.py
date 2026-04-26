@@ -267,6 +267,45 @@ def init_db():
             created_at   TEXT DEFAULT (datetime('now'))
         );
 
+        -- ── pipeline_stats ───────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS pipeline_stats (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_time             TEXT DEFAULT (datetime('now')),
+            scanned_symbols       INTEGER DEFAULT 0,
+            passed_market_filter  INTEGER DEFAULT 0,
+            candidates_created    INTEGER DEFAULT 0,
+            ax_allow              INTEGER DEFAULT 0,
+            ax_veto               INTEGER DEFAULT 0,
+            ax_watch              INTEGER DEFAULT 0,
+            risk_rejected         INTEGER DEFAULT 0,
+            paper_trades_opened   INTEGER DEFAULT 0,
+            session               TEXT,
+            market_regime         TEXT,
+            last_veto_reason      TEXT,
+            last_allow_symbol     TEXT
+        );
+
+        -- ── candidate_outcome ────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS candidate_outcome (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id   INTEGER NOT NULL,
+            symbol         TEXT NOT NULL,
+            direction      TEXT,
+            decision       TEXT,
+            entry_price    REAL,
+            entry_time     TEXT DEFAULT (datetime('now')),
+            price_30m      REAL,
+            price_60m      REAL,
+            price_120m     REAL,
+            mfe_30m        REAL,
+            mae_30m        REAL,
+            mfe_60m        REAL,
+            mae_60m        REAL,
+            would_have_won INTEGER DEFAULT 0,
+            checked        INTEGER DEFAULT 0,
+            created_at     TEXT DEFAULT (datetime('now'))
+        );
+
         """)
 
     # ── Eski şemadan yeni kolonlara migration ─────────────────────────────────
@@ -731,3 +770,140 @@ def save_pattern(symbol: str, direction: str, session: str, result: str,
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PIPELINE STATS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_pipeline_stats(data: dict):
+    sql = """
+        INSERT INTO pipeline_stats
+            (scan_time, scanned_symbols, passed_market_filter, candidates_created,
+             ax_allow, ax_veto, ax_watch, risk_rejected, paper_trades_opened,
+             session, market_regime, last_veto_reason, last_allow_symbol)
+        VALUES
+            (datetime('now'), :scanned_symbols, :passed_market_filter, :candidates_created,
+             :ax_allow, :ax_veto, :ax_watch, :risk_rejected, :paper_trades_opened,
+             :session, :market_regime, :last_veto_reason, :last_allow_symbol)
+    """
+    defaults = {
+        "scanned_symbols": 0, "passed_market_filter": 0, "candidates_created": 0,
+        "ax_allow": 0, "ax_veto": 0, "ax_watch": 0,
+        "risk_rejected": 0, "paper_trades_opened": 0,
+        "session": None, "market_regime": None,
+        "last_veto_reason": None, "last_allow_symbol": None,
+    }
+    with get_conn() as conn:
+        conn.execute(sql, {**defaults, **data})
+
+def get_pipeline_stats(limit: int = 24) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM pipeline_stats ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+def get_pipeline_totals(hours: int = 24) -> dict:
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT
+                SUM(scanned_symbols) as scanned,
+                SUM(passed_market_filter) as passed,
+                SUM(candidates_created) as candidates,
+                SUM(ax_allow) as allow,
+                SUM(ax_veto) as veto,
+                SUM(ax_watch) as watch,
+                SUM(risk_rejected) as risk_rejected,
+                SUM(paper_trades_opened) as trades_opened,
+                COUNT(*) as scan_count,
+                MAX(scan_time) as last_scan
+            FROM pipeline_stats WHERE scan_time >= ?""",
+            (cutoff,)
+        ).fetchone()
+    if row:
+        return dict(row)
+    return {
+        "scanned": 0, "passed": 0, "candidates": 0, "allow": 0,
+        "veto": 0, "watch": 0, "risk_rejected": 0, "trades_opened": 0,
+        "scan_count": 0, "last_scan": None,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CANDIDATE OUTCOME (Pseudo-outcome tracking)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_candidate_outcome(candidate_id: int, symbol: str, direction: str,
+                            decision: str, entry_price: float):
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO candidate_outcome
+               (candidate_id, symbol, direction, decision, entry_price)
+               VALUES (?, ?, ?, ?, ?)""",
+            (candidate_id, symbol, direction, decision, entry_price)
+        )
+
+def get_pending_outcomes(max_age_hours: int = 3) -> list:
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM candidate_outcome
+               WHERE checked=0 AND created_at >= ?
+               ORDER BY created_at ASC LIMIT 50""",
+            (cutoff,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+def update_candidate_outcome(outcome_id: int, fields: dict):
+    if not fields:
+        return
+    sets = ", ".join(f"{k}=?" for k in fields)
+    vals = list(fields.values()) + [outcome_id]
+    with get_conn() as conn:
+        conn.execute(f"UPDATE candidate_outcome SET {sets} WHERE id=?", vals)
+
+def get_veto_stats(days: int = 7) -> dict:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT decision, veto_reason, COUNT(*) as cnt
+               FROM signal_candidates
+               WHERE created_at >= ?
+               GROUP BY decision, veto_reason
+               ORDER BY cnt DESC""",
+            (cutoff,)
+        ).fetchall()
+        stats = {"ALLOW": 0, "VETO": 0, "WATCH": 0, "PENDING": 0, "total": 0}
+        top_veto_reasons = []
+        for r in rows:
+            d = r["decision"] or "PENDING"
+            if d in stats:
+                stats[d] += r["cnt"]
+            stats["total"] += r["cnt"]
+            if d == "VETO" and r["veto_reason"]:
+                top_veto_reasons.append({"reason": r["veto_reason"], "count": r["cnt"]})
+
+        # Veto edilen candidate'ların avg outcome (eğer takip ediliyorsa)
+        outcome_row = conn.execute(
+            """SELECT
+                AVG(CASE WHEN co.direction='LONG' AND co.price_60m IS NOT NULL
+                         THEN (co.price_60m - co.entry_price) / NULLIF(co.entry_price, 0) * 100
+                         WHEN co.direction='SHORT' AND co.price_60m IS NOT NULL
+                         THEN (co.entry_price - co.price_60m) / NULLIF(co.entry_price, 0) * 100
+                         ELSE NULL END) as avg_veto_outcome_pct,
+                COUNT(co.id) as tracked_count
+            FROM candidate_outcome co
+            JOIN signal_candidates sc ON co.candidate_id = sc.id
+            WHERE sc.decision='VETO' AND co.price_60m IS NOT NULL
+              AND co.created_at >= ?""",
+            (cutoff,)
+        ).fetchone()
+
+        return {
+            **stats,
+            "top_veto_reasons": top_veto_reasons[:5],
+            "avg_veto_outcome_pct": round(outcome_row["avg_veto_outcome_pct"] or 0, 2),
+            "tracked_veto_outcomes": outcome_row["tracked_count"] or 0,
+        }

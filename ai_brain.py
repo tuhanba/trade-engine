@@ -246,8 +246,21 @@ def db():
 # ═══════════════════════════════════════════════════════════
 
 def get_current_params(conn):
-    r = conn.execute("SELECT * FROM params ORDER BY id DESC LIMIT 1").fetchone()
-    return dict(r) if r else {}
+    r = conn.execute("SELECT data FROM params ORDER BY id DESC LIMIT 1").fetchone()
+    if r:
+        try:
+            import json as _json
+            return _json.loads(r["data"])
+        except Exception:
+            pass
+    # Varsayılan başlangıç parametreleri
+    return {
+        "sl_atr_mult": 1.3, "tp_atr_mult": 2.0,
+        "rsi5_min": 35, "rsi5_max": 75,
+        "rsi1_min": 32, "rsi1_max": 75,
+        "vol_ratio_min": 1.0, "min_volume_m": 3.0,
+        "min_change_pct": 0.5, "risk_pct": 1.0,
+    }
 
 def get_trades(conn, hours=48, limit=300, symbol=None):
     cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
@@ -770,13 +783,22 @@ def save_best_params_if_better(conn, current_params, stats):
     if wr < 0.40 or pf < 1.0:
         return
     best = conn.execute(
-        "SELECT * FROM best_params ORDER BY profit_factor DESC LIMIT 1").fetchone()
-    if best is None or (pf > best["profit_factor"] and wr > best["win_rate"]):
-        conn.execute("""INSERT INTO best_params
-            (params_json, win_rate, profit_factor, total_pnl, saved_at)
-            VALUES (?, ?, ?, ?, ?)""", (
-            json.dumps(current_params), wr, pf, stats["total_pnl"],
-            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+        "SELECT * FROM best_params ORDER BY id DESC LIMIT 1").fetchone()
+    best_pf = 0
+    best_wr = 0
+    if best:
+        try:
+            best_data = json.loads(best["data"]) if "data" in best.keys() else {}
+            best_pf = best_data.get("profit_factor", 0) if best_data else 0
+            best_wr = best_data.get("win_rate", 0) if best_data else 0
+        except Exception:
+            best_pf = 0
+    if best is None or (pf > best_pf and wr > best_wr):
+        conn.execute(
+            "INSERT INTO best_params (data, win_rate, avg_r, pnl, trade_count) VALUES (?, ?, ?, ?, ?)",
+            (json.dumps({**current_params, "win_rate": wr, "profit_factor": pf}),
+             wr, stats.get("avg_rr", 0), stats["total_pnl"], stats["total"])
+        )
         conn.commit()
 
 def try_rollback_to_best(conn, last20_stats):
@@ -785,12 +807,16 @@ def try_rollback_to_best(conn, last20_stats):
     if last20_stats["win_rate"] >= 0.30:
         return False, None
     best = conn.execute(
-        "SELECT * FROM best_params ORDER BY profit_factor DESC LIMIT 1").fetchone()
+        "SELECT * FROM best_params ORDER BY id DESC LIMIT 1").fetchone()
     if not best:
         return False, None
-    best_p = json.loads(best["params_json"])
+    try:
+        best_p = json.loads(best["data"])
+    except Exception:
+        return False, None
+    pf = best_p.get("profit_factor", 0)
     reason = (f"ROLLBACK: Win rate {last20_stats['win_rate']:.0%} "
-              f"en iyi parametrelere geri donuldu (PF:{best['profit_factor']:.2f})")
+              f"en iyi parametrelere geri donuldu (PF:{pf:.2f})")
     save_params(conn, best_p, reason, [reason])
     return True, best_p
 
@@ -924,37 +950,33 @@ def suggest_leverage(sym_stats, sym):
 # ═══════════════════════════════════════════════════════════
 
 def save_params(conn, p, reason, changes):
-    conn.execute("""
-        INSERT INTO params (
-            version, sl_atr_mult, tp_atr_mult,
-            rsi5_min, rsi5_max, rsi1_min, rsi1_max,
-            vol_ratio_min, min_volume_m, min_change_pct,
-            risk_pct, updated_at, ai_reason
-        ) VALUES (
-            (SELECT COALESCE(MAX(version), 0) + 1 FROM params),
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        )""", (
-        p.get("sl_atr_mult",   1.2), p.get("tp_atr_mult",   2.0),
-        p.get("rsi5_min",       35), p.get("rsi5_max",       75),
-        p.get("rsi1_min",       35), p.get("rsi1_max",       72),
-        p.get("vol_ratio_min",  1.2), p.get("min_volume_m", 10.0),
-        p.get("min_change_pct", 2.0), p.get("risk_pct",     1.5),
-        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        (reason or "AI Brain")[:500]
-    ))
+    import json as _json
+    conn.execute(
+        "INSERT INTO params (data, reason) VALUES (?, ?)",
+        (_json.dumps(p), (reason or "AI Brain")[:500])
+    )
     conn.commit()
 
 def log_analysis(conn, stats, insight, changes):
     if not stats:
         return
-    conn.execute("""INSERT INTO ai_logs
-        (created_at, trades_analyzed, win_rate, avg_rr, insight, changes)
-        VALUES (?, ?, ?, ?, ?, ?)""", (
-        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        stats.get("total", 0), stats.get("win_rate", 0),
-        stats.get("avg_rr",   0), insight[:1000],
-        json.dumps(changes, ensure_ascii=False)
-    ))
+    conn.execute(
+        """INSERT INTO ai_logs (event, decision, score, confidence, reason, data)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            "ai_brain_report",
+            "analyze",
+            stats.get("win_rate", 0),
+            stats.get("profit_factor", 0),
+            insight[:500],
+            json.dumps({
+                "trades": stats.get("total", 0),
+                "win_rate": stats.get("win_rate", 0),
+                "avg_rr": stats.get("avg_rr", 0) if "avg_rr" in stats else stats.get("avg_r", 0),
+                "changes": changes,
+            }, ensure_ascii=False)
+        )
+    )
     conn.commit()
 
 
@@ -1342,9 +1364,6 @@ def analyze_and_adapt():
     try:
         conn    = db()
         current = get_current_params(conn)
-        if not current:
-            conn.close()
-            return "Parametre bulunamadı."
 
         recent        = get_trades(conn, hours=48, limit=300)
         all_t         = get_all_trades(conn, limit=800)

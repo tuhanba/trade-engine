@@ -8,9 +8,12 @@ except ImportError:
     N8N_AVAILABLE = False
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
+from config import DB_PATH
 from database import (
     init_db, get_trades, get_stats, get_current_params,
     get_open_trades, get_paper_balance, get_conn,
+    get_pipeline_stats, get_pipeline_totals, get_veto_stats,
+    get_daily_summaries,
 )
 from binance.client import Client
 import dashboard_service as dash_svc
@@ -25,8 +28,6 @@ client = Client(os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_API_SECRET"
 
 init_db()
 dash_svc.start()
-
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
 
 
 def _fmt_duration(open_time_str, close_time_str=None):
@@ -345,16 +346,13 @@ def api_logs():
 def api_coin_library():
     """Coin Library: tüm coin profilleri ve istatistikleri"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        c = conn.cursor()
-        # coin_params tablosu yoksa boş dön
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='coin_params'")
-        if not c.fetchone():
-            conn.close()
-            return jsonify({"ok": True, "data": [], "note": "coin_params tablosu henüz oluşturulmadı"})
-        with get_conn() as conn2:
-            rows2 = conn2.execute("""
+        with get_conn() as conn:
+            tbl = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='coin_params'"
+            ).fetchone()
+            if not tbl:
+                return jsonify({"ok": True, "data": [], "note": "coin_params tablosu henüz oluşturulmadı"})
+            rows = conn.execute("""
                 SELECT symbol,
                        COALESCE(volatility_profile, 'normal') as profile,
                        sl_atr_mult, tp_atr_mult, risk_pct, max_leverage,
@@ -362,8 +360,7 @@ def api_coin_library():
                 FROM coin_params
                 ORDER BY symbol ASC
             """).fetchall()
-        conn.close()
-        return jsonify({"ok": True, "data": [dict(r) for r in rows2], "total": len(rows2)})
+        return jsonify({"ok": True, "data": [dict(r) for r in rows], "total": len(rows)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -427,22 +424,19 @@ def api_ax_status():
 def api_coin_profiles():
     """Tüm coin öğrenme profilleri (coin_profile tablosu)."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
-            SELECT symbol, trade_count, win_count, loss_count,
-                   ROUND(win_rate*100,1) as win_rate_pct,
-                   avg_r, profit_factor, danger_score, fakeout_rate,
-                   volatility_profile, preferred_direction, best_session,
-                   updated_at
-            FROM coin_profile
-            ORDER BY trade_count DESC, danger_score DESC
-            """
-        ).fetchall()
-        conn.close()
-        result = [dict(r) for r in rows]
-        return jsonify({"ok": True, "data": result})
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT symbol, trade_count, win_count, loss_count,
+                       ROUND(win_rate*100,1) as win_rate_pct,
+                       avg_r, profit_factor, danger_score, fakeout_rate,
+                       volatility_profile, preferred_direction, best_session,
+                       updated_at
+                FROM coin_profile
+                ORDER BY trade_count DESC, danger_score DESC
+                """
+            ).fetchall()
+        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -453,25 +447,525 @@ def api_signal_stats():
     """Bugünkü sinyal istatistikleri: ALLOW/VETO/WATCH dağılımı."""
     try:
         days = int(request.args.get("days", 1))
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute(
-            """
-            SELECT ax_decision, COUNT(*) as cnt
-            FROM signal_candidates
-            WHERE created_at >= datetime('now', ?)
-            GROUP BY ax_decision
-            """,
-            (f"-{days} days",),
-        ).fetchall()
-        conn.close()
-        stats = {"ALLOW": 0, "VETO": 0, "WATCH": 0, "total": 0}
-        for dec, cnt in rows:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT decision, COUNT(*) as cnt
+                FROM signal_candidates
+                WHERE created_at >= datetime('now', ?)
+                GROUP BY decision
+                """,
+                (f"-{days} days",),
+            ).fetchall()
+        stats = {"ALLOW": 0, "VETO": 0, "WATCH": 0, "PENDING": 0, "total": 0}
+        for r in rows:
+            dec = r["decision"] or "PENDING"
             if dec in stats:
-                stats[dec] = cnt
-            stats["total"] += cnt
+                stats[dec] = r["cnt"]
+            stats["total"] += r["cnt"]
         return jsonify({"ok": True, "data": stats})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/status ───────────────────────────────────────────────────────────────
+@app.route("/api/status")
+def api_status():
+    """Bot genel durumu — dashboard üst kartlar için."""
+    try:
+        data = dash_svc.get_ax_status()
+        bal  = get_paper_balance()
+        st   = get_stats(hours=24)
+        return jsonify({"ok": True, "data": {
+            **data,
+            "balance":       round(bal, 4),
+            "today_pnl":     data.get("today_pnl", 0),
+            "open_trades":   data.get("open_trades", 0),
+            "today_signals": data.get("today_signals", 0),
+            "win_rate":      st.get("win_rate", 0),
+            "total_trades":  st.get("total", 0),
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
+
+
+# ── /api/summary ──────────────────────────────────────────────────────────────
+@app.route("/api/summary")
+def api_summary():
+    """Kümülatif PnL + performans özeti."""
+    try:
+        st48 = get_stats(hours=48)
+        st7d = get_stats(hours=168)
+        bal  = get_paper_balance()
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT initial_balance FROM paper_account WHERE id=1"
+            ).fetchone()
+            initial = float(row["initial_balance"]) if row else 250.0
+            closed = conn.execute(
+                "SELECT SUM(net_pnl) as total FROM trades WHERE status='closed'"
+            ).fetchone()
+            cum_pnl = round(float(closed["total"] or 0), 4)
+        return jsonify({"ok": True, "data": {
+            "cumulative_pnl":  cum_pnl,
+            "balance":         round(bal, 4),
+            "initial_balance": initial,
+            "total_return_pct": round((bal - initial) / initial * 100, 2) if initial else 0,
+            "stats_48h": st48,
+            "stats_7d":  st7d,
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
+
+
+# ── /api/trades/open ─────────────────────────────────────────────────────────
+@app.route("/api/trades/open")
+def api_trades_open():
+    """Açık pozisyonlar."""
+    try:
+        open_trades = get_open_trades()
+        if not open_trades:
+            return jsonify({"ok": True, "data": [], "status": "Henüz açık trade yok"})
+        result = []
+        for t in open_trades:
+            dur_str, dur_min = _fmt_duration(t.get("open_time"))
+            result.append({**t, "duration_str": dur_str, "duration_min": dur_min})
+        return jsonify({"ok": True, "data": result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/trades/recent ───────────────────────────────────────────────────────
+@app.route("/api/trades/recent")
+def api_trades_recent():
+    """Son N kapanmış trade."""
+    try:
+        limit  = int(request.args.get("limit", 20))
+        trades = get_trades(limit=limit, status="closed")
+        if not trades:
+            return jsonify({"ok": True, "data": [], "status": "Henüz kapanmış trade yok"})
+        result = []
+        for t in trades:
+            dur_str, dur_min = _fmt_duration(t.get("open_time"), t.get("close_time"))
+            result.append({**t, "duration_str": dur_str, "duration_min": dur_min})
+        return jsonify({"ok": True, "data": result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/signals/recent ───────────────────────────────────────────────────────
+@app.route("/api/signals/recent")
+def api_signals_recent():
+    """Son N signal_candidate."""
+    try:
+        limit = int(request.args.get("limit", 20))
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM signal_candidates ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        if not rows:
+            return jsonify({"ok": True, "data": [],
+                            "status": "Henüz sinyal üretilmedi — bot tarıyor veya filtreler çok sıkı"})
+        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/pipeline-stats ──────────────────────────────────────────────────────
+@app.route("/api/pipeline-stats")
+def api_pipeline_stats():
+    """Son 24 saatlik pipeline istatistikleri."""
+    try:
+        hours  = int(request.args.get("hours", 24))
+        totals = get_pipeline_totals(hours=hours)
+        recent = get_pipeline_stats(limit=10)
+
+        # Durum mesajı üret
+        status_msg = "—"
+        candidates = totals.get("candidates") or 0
+        allow      = totals.get("allow") or 0
+        veto       = totals.get("veto") or 0
+        trades     = totals.get("trades_opened") or 0
+        scanned    = totals.get("scanned") or 0
+
+        if scanned == 0:
+            status_msg = "Bot henüz scan yapmadı"
+        elif candidates == 0:
+            status_msg = "Bot scan ediyor ama signal üretmiyor — filtreler çok sıkı olabilir"
+        elif allow == 0 and veto > 0:
+            status_msg = "Candidate var ama ALLOW yok — AX hepsini veto ediyor"
+        elif allow > 0 and trades == 0:
+            status_msg = "ALLOW sinyali var ama trade açılmadı — execution eşiği veya MAX_OPEN_TRADES"
+        elif trades > 0:
+            status_msg = f"{trades} paper trade açıldı"
+        else:
+            status_msg = "Sistem çalışıyor"
+
+        return jsonify({"ok": True, "data": {
+            "totals":     totals,
+            "recent":     recent,
+            "status_msg": status_msg,
+            "hours":      hours,
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
+
+
+# ── /api/ai/params ────────────────────────────────────────────────────────────
+@app.route("/api/ai/params")
+def api_ai_params():
+    """AX'in mevcut parametreleri."""
+    try:
+        p = get_current_params()
+        if not p:
+            p = {
+                "sl_atr_mult": 1.3, "tp_atr_mult": 2.0,
+                "rsi5_min": 35, "rsi5_max": 75,
+                "rsi1_min": 32, "rsi1_max": 75,
+                "vol_ratio_min": 1.0, "min_volume_m": 3.0,
+                "min_change_pct": 0.5, "risk_pct": 1.0,
+            }
+        with get_conn() as conn:
+            log = conn.execute(
+                "SELECT reason, created_at FROM params ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        last_reason = log["reason"] if log else "Henüz AI Brain çalışmadı"
+        last_update = log["created_at"] if log else None
+        return jsonify({"ok": True, "data": {
+            "params":      p,
+            "last_reason": last_reason,
+            "last_update": last_update,
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
+
+
+# ── /api/performance ─────────────────────────────────────────────────────────
+@app.route("/api/performance")
+def api_performance():
+    """Performans metrikleri."""
+    try:
+        st = get_stats(hours=720)  # 30 gün
+        if st.get("total", 0) == 0:
+            return jsonify({"ok": True, "data": None,
+                            "status": "Henüz kapanmış trade yok — performans verisi oluşacak"})
+        return jsonify({"ok": True, "data": st})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": None}), 500
+
+
+# ── /api/session-performance ─────────────────────────────────────────────────
+@app.route("/api/session-performance")
+def api_session_performance():
+    """Seans bazlı performans."""
+    try:
+        with get_conn() as conn:
+            # Önce candidate bazlı veri (trade olmasa bile)
+            cand_rows = conn.execute(
+                """SELECT session,
+                          COUNT(*) as total_candidates,
+                          SUM(CASE WHEN decision='ALLOW' THEN 1 ELSE 0 END) as allow_count,
+                          SUM(CASE WHEN decision='VETO'  THEN 1 ELSE 0 END) as veto_count,
+                          SUM(CASE WHEN decision='WATCH' THEN 1 ELSE 0 END) as watch_count
+                   FROM signal_candidates
+                   WHERE session IS NOT NULL
+                   GROUP BY session"""
+            ).fetchall()
+
+            trade_rows = conn.execute(
+                """SELECT
+                     c.session,
+                     COUNT(t.id)  as trade_count,
+                     SUM(CASE WHEN t.net_pnl > 0 THEN 1 ELSE 0 END) as win_count,
+                     SUM(t.net_pnl) as net_pnl
+                   FROM trades t
+                   JOIN signal_candidates c ON t.linked_candidate_id = c.id
+                   WHERE t.status='closed' AND c.session IS NOT NULL
+                   GROUP BY c.session"""
+            ).fetchall()
+
+        sessions = {}
+        for r in cand_rows:
+            s = r["session"] or "UNKNOWN"
+            sessions[s] = {
+                "session":          s,
+                "total_candidates": r["total_candidates"],
+                "allow_count":      r["allow_count"],
+                "veto_count":       r["veto_count"],
+                "watch_count":      r["watch_count"],
+                "trade_count": 0, "win_count": 0,
+                "win_rate": 0, "net_pnl": 0,
+            }
+        for r in trade_rows:
+            s = r["session"] or "UNKNOWN"
+            if s not in sessions:
+                sessions[s] = {"session": s, "total_candidates": 0,
+                                "allow_count": 0, "veto_count": 0, "watch_count": 0}
+            tc = r["trade_count"] or 0
+            wc = r["win_count"] or 0
+            sessions[s].update({
+                "trade_count": tc,
+                "win_count":   wc,
+                "win_rate":    round(wc / tc * 100, 1) if tc else 0,
+                "net_pnl":     round(r["net_pnl"] or 0, 4),
+            })
+
+        if not sessions:
+            return jsonify({"ok": True, "data": [],
+                            "status": "Henüz seans verisi yok — bot taramaya devam ediyor"})
+        return jsonify({"ok": True, "data": list(sessions.values())})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/calendar-pnl ────────────────────────────────────────────────────────
+@app.route("/api/calendar-pnl")
+def api_calendar_pnl():
+    """Aylık PnL takvim verisi."""
+    try:
+        days = int(request.args.get("days", 35))
+        data = dash_svc.get_calendar_data(days)
+        if not data:
+            return jsonify({"ok": True, "data": [],
+                            "status": "Henüz trade yok — takvim verisi oluşacak"})
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/weekly-pnl ──────────────────────────────────────────────────────────
+@app.route("/api/weekly-pnl")
+def api_weekly_pnl():
+    """Haftalık PnL özeti."""
+    try:
+        weeks = int(request.args.get("weeks", 8))
+        data  = dash_svc.get_weekly_data(weeks)
+        if not data:
+            return jsonify({"ok": True, "data": [],
+                            "status": "Henüz haftalık veri yok"})
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/equity-curve ────────────────────────────────────────────────────────
+@app.route("/api/equity-curve")
+def api_equity_curve():
+    """Equity curve — kümülatif PnL noktaları."""
+    try:
+        trades = get_trades(limit=500, status="closed")
+        if not trades:
+            return jsonify({"ok": True, "data": [],
+                            "status": "Henüz trade yok — equity curve oluşacak"})
+        cumulative = 0
+        points = []
+        for t in reversed(trades):
+            pnl = t.get("net_pnl") or 0
+            cumulative += pnl
+            points.append({
+                "x":          t.get("close_time", ""),
+                "y":          round(cumulative, 4),
+                "pnl":        round(pnl, 4),
+                "symbol":     t.get("symbol", ""),
+                "direction":  t.get("direction", ""),
+            })
+        return jsonify({"ok": True, "data": points})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/winrate-rr ───────────────────────────────────────────────────────────
+@app.route("/api/winrate-rr")
+def api_winrate_rr():
+    """Winrate / RR / Expectancy grafiği için veri."""
+    try:
+        st = get_stats(hours=720)
+        from config import EXEC_MIN_RR, EXEC_SCORE_MIN
+        has_data = st.get("total", 0) > 0
+        return jsonify({"ok": True, "data": {
+            "current": {
+                "win_rate":   round(st.get("win_rate", 0) * 100, 1) if has_data else None,
+                "avg_rr":     round(st.get("avg_r", 0), 3) if has_data else None,
+                "expectancy": round(
+                    st.get("win_rate", 0) * st.get("avg_r", 0)
+                    - (1 - st.get("win_rate", 0)), 3
+                ) if has_data else None,
+                "profit_factor": round(st.get("profit_factor", 0), 2) if has_data else None,
+            },
+            "targets": {
+                "win_rate_min": 45,
+                "win_rate_max": 55,
+                "rr_target":    EXEC_MIN_RR,
+                "break_even_wr": round(100 / (1 + EXEC_MIN_RR), 1),
+            },
+            "has_data": has_data,
+            "status": "Henüz trade yok — hedef bölge gösteriliyor" if not has_data else "OK",
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
+
+
+# ── /api/coin-performance ────────────────────────────────────────────────────
+@app.route("/api/coin-performance")
+def api_coin_performance():
+    """Coin bazlı performans — trade + candidate birleşik."""
+    try:
+        with get_conn() as conn:
+            # Candidate bazlı (trade olmasa bile veri göster)
+            cand = conn.execute(
+                """SELECT symbol,
+                          COUNT(*) as scanned_count,
+                          COUNT(*) as candidate_count,
+                          SUM(CASE WHEN decision='ALLOW' THEN 1 ELSE 0 END) as allow_count,
+                          SUM(CASE WHEN decision='VETO'  THEN 1 ELSE 0 END) as veto_count
+                   FROM signal_candidates
+                   GROUP BY symbol
+                   ORDER BY candidate_count DESC"""
+            ).fetchall()
+
+            # Trade bazlı
+            trade = conn.execute(
+                """SELECT symbol,
+                          COUNT(*) as trade_count,
+                          SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) as win_count,
+                          SUM(net_pnl) as net_pnl,
+                          AVG(r_multiple) as avg_r
+                   FROM trades
+                   WHERE status='closed'
+                   GROUP BY symbol"""
+            ).fetchall()
+
+            # Coin profili
+            prof = conn.execute(
+                "SELECT symbol, danger_score, avg_mfe, volatility_profile FROM coin_profile"
+            ).fetchall()
+
+        by_sym: dict = {}
+        for r in cand:
+            s = r["symbol"]
+            by_sym[s] = {
+                "symbol":          s,
+                "candidate_count": r["candidate_count"],
+                "allow_count":     r["allow_count"],
+                "veto_count":      r["veto_count"],
+                "trade_count": 0, "win_count": 0,
+                "net_pnl": 0, "win_rate": 0, "avg_r": 0,
+                "danger_score": 0, "avg_mfe": 0,
+            }
+        for r in trade:
+            s = r["symbol"]
+            if s not in by_sym:
+                by_sym[s] = {
+                    "symbol": s, "candidate_count": 0,
+                    "allow_count": 0, "veto_count": 0,
+                }
+            tc = r["trade_count"] or 0
+            wc = r["win_count"] or 0
+            by_sym[s].update({
+                "trade_count": tc,
+                "win_count":   wc,
+                "net_pnl":     round(r["net_pnl"] or 0, 4),
+                "win_rate":    round(wc / tc * 100, 1) if tc else 0,
+                "avg_r":       round(r["avg_r"] or 0, 3),
+            })
+        for r in prof:
+            s = r["symbol"]
+            if s in by_sym:
+                by_sym[s]["danger_score"] = r["danger_score"]
+                by_sym[s]["avg_mfe"]      = r["avg_mfe"]
+
+        data = sorted(by_sym.values(),
+                      key=lambda x: x.get("candidate_count", 0), reverse=True)
+        if not data:
+            return jsonify({"ok": True, "data": [],
+                            "status": "Henüz coin bazlı veri yok"})
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/veto-stats ───────────────────────────────────────────────────────────
+@app.route("/api/veto-stats")
+def api_veto_stats():
+    """Veto istatistikleri ve öğrenme verisi."""
+    try:
+        days = int(request.args.get("days", 7))
+        data = get_veto_stats(days=days)
+
+        total = data.get("total", 0)
+        allow = data.get("ALLOW", 0)
+        veto  = data.get("VETO", 0)
+        watch = data.get("WATCH", 0)
+
+        # AX çok sert mi / çok gevşek mi?
+        diagnosis = "Veri yok"
+        if total > 0:
+            veto_rate = veto / total
+            if veto_rate > 0.85:
+                diagnosis = "AX çok sert veto ediyor — filtreler gevşetilebilir"
+            elif veto_rate > 0.70:
+                diagnosis = "Veto oranı yüksek — normal ama dikkat"
+            elif veto_rate < 0.30:
+                diagnosis = "Veto oranı düşük — AX çok gevşek olabilir"
+            else:
+                diagnosis = "Veto/Allow dengesi normal"
+
+        return jsonify({"ok": True, "data": {
+            **data,
+            "allow_rate":  round(allow / total * 100, 1) if total else 0,
+            "veto_rate":   round(veto  / total * 100, 1) if total else 0,
+            "watch_rate":  round(watch / total * 100, 1) if total else 0,
+            "diagnosis":   diagnosis,
+            "days":        days,
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
+
+
+# ── /api/health ───────────────────────────────────────────────────────────────
+@app.route("/api/health")
+def api_health():
+    """Sistem sağlık durumu."""
+    try:
+        db_ok = False
+        db_msg = ""
+        try:
+            with get_conn() as conn:
+                conn.execute("SELECT 1").fetchone()
+            db_ok = True
+        except Exception as e:
+            db_msg = str(e)
+
+        # Son scan zamanı
+        pipeline_rows = get_pipeline_stats(limit=1)
+        last_scan    = pipeline_rows[0]["scan_time"] if pipeline_rows else None
+        last_cand_row = None
+        last_trade_row = None
+        try:
+            with get_conn() as conn:
+                r = conn.execute(
+                    "SELECT created_at FROM signal_candidates ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                last_cand_row = r["created_at"] if r else None
+                r2 = conn.execute(
+                    "SELECT open_time FROM trades ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                last_trade_row = r2["open_time"] if r2 else None
+        except Exception:
+            pass
+
+        return jsonify({"ok": True, "data": {
+            "db_ok":            db_ok,
+            "db_path":          DB_PATH,
+            "db_error":         db_msg,
+            "dashboard_ok":     True,
+            "last_scan_time":   last_scan,
+            "last_candidate_time": last_cand_row,
+            "last_trade_time":  last_trade_row,
+            "uptime":           "running",
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
 
 
 if __name__ == "__main__":

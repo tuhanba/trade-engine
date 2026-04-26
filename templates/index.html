@@ -293,6 +293,25 @@ body::before{
 .sig-stat-val{font-family:var(--mono);font-size:22px;font-weight:700}
 .sig-stat-lbl{font-family:var(--orb);font-size:7px;letter-spacing:0.18em;text-transform:uppercase;color:var(--text-muted);margin-top:2px}
 .sig-allow{color:var(--green-br)}.sig-veto{color:var(--red-br)}.sig-watch{color:#F59E0B}
+
+/* PIPELINE PANEL */
+.pipe-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px}
+@media(max-width:860px){.pipe-grid{grid-template-columns:repeat(2,1fr)}}
+.pg{background:var(--surface);border:1px solid var(--border);padding:11px 13px;border-radius:var(--r);transition:all var(--t)}
+.pg:hover{border-color:var(--gold-line);transform:translateY(-1px)}
+.pg-label{font-family:var(--orb);font-size:7px;letter-spacing:0.20em;text-transform:uppercase;color:var(--text-muted);margin-bottom:5px}
+.pg-val{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--gold-br);line-height:1}
+.pg-val.allow{color:var(--green-br)}.pg-val.veto{color:var(--red-br)}.pg-val.watch{color:#F59E0B}.pg-val.neutral{color:var(--text-muted)}
+.pg-sub{font-family:var(--raj);font-size:10px;color:var(--text-muted);margin-top:3px}
+
+/* VETO LEARNING */
+.veto-reason{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:5px;font-family:var(--mono);font-size:10px;transition:all var(--t)}
+.veto-reason:hover{border-color:rgba(239,68,68,0.30)}
+.veto-reason-name{color:var(--text-sec);flex:1}
+.veto-reason-count{color:var(--red-br);font-weight:700;min-width:30px;text-align:right}
+.veto-bar-bg{height:3px;background:rgba(239,68,68,0.08);border-radius:2px;margin-top:4px;overflow:hidden}
+.veto-bar-f{height:100%;background:linear-gradient(90deg,var(--red),var(--red-br));border-radius:2px;transition:width .8s ease}
+.outcome-box{background:linear-gradient(135deg,rgba(239,68,68,0.07),rgba(239,68,68,0.03));border:1px solid rgba(239,68,68,0.20);border-left:3px solid var(--red-br);padding:12px 15px;font-family:var(--mono);font-size:11px;color:var(--text-sec);border-radius:0 var(--r) var(--r) 0;margin-top:10px}
 </style>
 </head>
 <body>
@@ -470,6 +489,82 @@ body::before{
       <div style="flex:1;min-width:120px;display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:11px">
         <div><span style="color:var(--text-muted);font-size:9px;font-family:var(--orb);letter-spacing:0.14em">MOD</span><br><span id="axMode" style="color:var(--gold-br);font-weight:700;letter-spacing:0.08em">—</span></div>
         <div><span style="color:var(--text-muted);font-size:9px;font-family:var(--orb);letter-spacing:0.14em">DURUM</span><br><span id="axPaused" style="font-weight:700">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PIPELINE / SİNYAL AKIŞI -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-hdr">
+      <div class="card-title">Pipeline / Sinyal Akisi</div>
+      <div class="card-meta" id="pipeMeta">yukleniyor...</div>
+    </div>
+    <div class="pipe-grid">
+      <div class="pg"><div class="pg-label">Taranan Coin</div><div class="pg-val" id="pipeScanned">—</div><div class="pg-sub">COIN_UNIVERSE</div></div>
+      <div class="pg"><div class="pg-label">Filtre Gecen</div><div class="pg-val" id="pipePassed">—</div><div class="pg-sub">hacim + hareket</div></div>
+      <div class="pg"><div class="pg-label">Candidate</div><div class="pg-val" id="pipeCand">—</div><div class="pg-sub">sinyal uretildi</div></div>
+      <div class="pg"><div class="pg-label">AX Allow</div><div class="pg-val allow" id="pipeAllow">—</div><div class="pg-sub">onaylandi</div></div>
+      <div class="pg"><div class="pg-label">AX Veto</div><div class="pg-val veto" id="pipeVeto">—</div><div class="pg-sub">reddedildi</div></div>
+      <div class="pg"><div class="pg-label">AX Watch</div><div class="pg-val watch" id="pipeWatch">—</div><div class="pg-sub">izlemede</div></div>
+      <div class="pg"><div class="pg-label">Risk Red</div><div class="pg-val neutral" id="pipeRisk">—</div><div class="pg-sub">risk filtresi</div></div>
+      <div class="pg"><div class="pg-label">Trade Acildi</div><div class="pg-val" id="pipeTrade">—</div><div class="pg-sub">paper pozisyon</div></div>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;padding:8px 2px 0">
+      <div style="flex:1;min-width:140px"><span style="color:var(--text-muted);font-family:var(--orb);font-size:7px;letter-spacing:.16em;text-transform:uppercase">Son Veto</span><br><span id="pipeLastVeto" style="color:var(--red-br)">—</span></div>
+      <div style="flex:1;min-width:140px"><span style="color:var(--text-muted);font-family:var(--orb);font-size:7px;letter-spacing:.16em;text-transform:uppercase">Son Allow</span><br><span id="pipeLastAllow" style="color:var(--green-br)">—</span></div>
+      <div style="flex:1;min-width:120px"><span style="color:var(--text-muted);font-family:var(--orb);font-size:7px;letter-spacing:.16em;text-transform:uppercase">Seans</span><br><span id="pipeSess" style="color:var(--gold-br)">—</span></div>
+      <div style="flex:1;min-width:120px"><span style="color:var(--text-muted);font-family:var(--orb);font-size:7px;letter-spacing:.16em;text-transform:uppercase">Rejim</span><br><span id="pipeRegime" style="color:var(--gold-br)">—</span></div>
+      <div style="flex:2;min-width:180px;display:flex;align-items:flex-end"><span id="pipeDiag" style="color:var(--text-muted);font-size:9px;font-style:italic;font-family:var(--raj)"></span></div>
+    </div>
+  </div>
+
+  <!-- VETO OGRENME -->
+  <div class="g2b" style="margin-bottom:12px">
+    <div class="card">
+      <div class="card-hdr">
+        <div class="card-title">Veto Ogrenme Analizi</div>
+        <div class="card-meta" id="vetoMeta">son 7 gun</div>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:14px">
+        <div style="flex:1;text-align:center;background:var(--surface);border:1px solid var(--border);padding:12px 8px;border-radius:var(--r)">
+          <div style="font-family:var(--mono);font-size:26px;font-weight:700;color:var(--green-br)" id="vetoAllowPct">—</div>
+          <div style="font-family:var(--orb);font-size:7px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-muted);margin-top:3px">ALLOW</div>
+        </div>
+        <div style="flex:1;text-align:center;background:var(--surface);border:1px solid var(--border);padding:12px 8px;border-radius:var(--r)">
+          <div style="font-family:var(--mono);font-size:26px;font-weight:700;color:var(--red-br)" id="vetoVetoPct">—</div>
+          <div style="font-family:var(--orb);font-size:7px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-muted);margin-top:3px">VETO</div>
+        </div>
+        <div style="flex:1;text-align:center;background:var(--surface);border:1px solid var(--border);padding:12px 8px;border-radius:var(--r)">
+          <div style="font-family:var(--mono);font-size:26px;font-weight:700;color:#F59E0B" id="vetoWatchPct">—</div>
+          <div style="font-family:var(--orb);font-size:7px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-muted);margin-top:3px">WATCH</div>
+        </div>
+      </div>
+      <div style="font-family:var(--orb);font-size:7px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">En Sik Veto Nedenleri</div>
+      <div id="vetoReasons"><div class="empty">Veto verisi bekleniyor...</div></div>
+    </div>
+    <div class="card">
+      <div class="card-hdr">
+        <div class="card-title">Veto Sonrasi Sonuclar</div>
+        <div class="card-meta" id="vetoOutcomeMeta">30/60/120dk</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+        <div style="text-align:center;background:var(--surface);border:1px solid var(--border);padding:11px 8px;border-radius:var(--r)">
+          <div style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--gold)" id="vetoMfe30">—</div>
+          <div style="font-family:var(--orb);font-size:7px;letter-spacing:.14em;color:var(--text-muted);margin-top:3px">30dk MFE</div>
+        </div>
+        <div style="text-align:center;background:var(--surface);border:1px solid var(--border);padding:11px 8px;border-radius:var(--r)">
+          <div style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--gold)" id="vetoMfe60">—</div>
+          <div style="font-family:var(--orb);font-size:7px;letter-spacing:.14em;color:var(--text-muted);margin-top:3px">60dk MFE</div>
+        </div>
+        <div style="text-align:center;background:var(--surface);border:1px solid var(--border);padding:11px 8px;border-radius:var(--r)">
+          <div style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--gold)" id="vetoMfe120">—</div>
+          <div style="font-family:var(--orb);font-size:7px;letter-spacing:.14em;color:var(--text-muted);margin-top:3px">120dk MFE</div>
+        </div>
+      </div>
+      <div style="font-family:var(--orb);font-size:7px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Kazanilabilir Firsatlar</div>
+      <div id="vetoOutcomeBox" class="outcome-box">Veto edilen sinyaller izleniyor. Sonuclar birikiyor...</div>
+      <div style="margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--text-muted)">
+        <span id="vetoWouldWin" style="color:var(--green-br);font-weight:700">—</span>&nbsp;kazanilabilirdi&nbsp;/&nbsp;<span id="vetoChecked">—</span>&nbsp;kontrol edildi
       </div>
     </div>
   </div>
@@ -894,11 +989,85 @@ async function loadCoinProfiles(){
   }catch(e){console.error("coinProfiles",e)}
 }
 
-async function init(){await Promise.all([loadStats(),loadChart(),loadPositions(),loadHistory(curPage),loadAxStatus(),loadCalendar(),loadWeekly(),loadCoinProfiles()])}
+// ── PIPELINE STATS ─────────────────────────────────────────────────────────
+async function loadPipelineStats(){
+  try{
+    const j=await fetch(BASE+"/api/pipeline-stats").then(r=>r.json());
+    if(!j.ok){
+      document.getElementById("pipeMeta").textContent=(j.data&&j.data.status_msg)||"Veri yok";
+      return;
+    }
+    const d=j.data||{};
+    const t=d.totals||{};
+    const last=(d.recent&&d.recent[0])||{};
+    document.getElementById("pipeScanned").textContent=t.scanned||0;
+    document.getElementById("pipePassed").textContent=t.passed||0;
+    document.getElementById("pipeCand").textContent=t.candidates||0;
+    document.getElementById("pipeAllow").textContent=t.allow||0;
+    document.getElementById("pipeVeto").textContent=t.veto||0;
+    document.getElementById("pipeWatch").textContent=t.watch||0;
+    document.getElementById("pipeRisk").textContent=t.risk_rejected||0;
+    document.getElementById("pipeTrade").textContent=t.trades_opened||0;
+    document.getElementById("pipeLastVeto").textContent=last.last_veto_reason||"—";
+    document.getElementById("pipeLastAllow").textContent=last.last_allow_symbol||"—";
+    document.getElementById("pipeSess").textContent=last.session||"—";
+    document.getElementById("pipeRegime").textContent=last.market_regime||"—";
+    document.getElementById("pipeDiag").textContent=d.status_msg||"";
+    const ts=t.last_scan?new Date(t.last_scan).toLocaleTimeString("tr-TR",{timeZone:"UTC"})+" UTC":"—";
+    document.getElementById("pipeMeta").textContent="Son 24s · son scan: "+ts;
+  }catch(e){console.error("pipeline",e)}
+}
+
+// ── VETO STATS ─────────────────────────────────────────────────────────────
+async function loadVetoStats(){
+  try{
+    const j=await fetch(BASE+"/api/veto-stats").then(r=>r.json());
+    if(!j.ok){
+      document.getElementById("vetoMeta").textContent="Veri yok";
+      return;
+    }
+    const d=j.data||{};
+    // d.ALLOW, d.VETO, d.WATCH, d.total, d.allow_rate, d.veto_rate, d.watch_rate
+    document.getElementById("vetoAllowPct").textContent=(d.allow_rate||0).toFixed(0)+"%";
+    document.getElementById("vetoVetoPct").textContent=(d.veto_rate||0).toFixed(0)+"%";
+    document.getElementById("vetoWatchPct").textContent=(d.watch_rate||0).toFixed(0)+"%";
+    document.getElementById("vetoMeta").textContent="son "+(d.days||7)+" gun · "+(d.total||0)+" karar";
+    const reasons=d.top_veto_reasons||[];
+    const rb=document.getElementById("vetoReasons");
+    if(!reasons.length){rb.innerHTML='<div class="empty">Veto nedeni kaydi yok</div>';}
+    else{
+      const maxCnt=reasons[0].count||1;
+      rb.innerHTML=reasons.map(r=>
+        '<div class="veto-reason">'
+        +'<div style="flex:1"><div class="veto-reason-name">'+r.reason+'</div>'
+        +'<div class="veto-bar-bg"><div class="veto-bar-f" style="width:'+Math.round(r.count/maxCnt*100)+'%"></div></div></div>'
+        +'<div class="veto-reason-count">'+r.count+'</div>'
+        +'</div>'
+      ).join("");
+    }
+    // Outcomes: avg_veto_outcome_pct is avg 60m move pct, tracked_veto_outcomes = count
+    const tracked=d.tracked_veto_outcomes||0;
+    const avgPct=d.avg_veto_outcome_pct||0;
+    document.getElementById("vetoMfe30").textContent="—";
+    document.getElementById("vetoMfe60").textContent=tracked>0?(avgPct>=0?"+":"")+avgPct.toFixed(2)+"%":"—";
+    document.getElementById("vetoMfe120").textContent="—";
+    document.getElementById("vetoChecked").textContent=tracked;
+    document.getElementById("vetoWouldWin").textContent="—";
+    if(tracked>0){
+      document.getElementById("vetoOutcomeBox").textContent=
+        tracked+" veto izlendi · 60dk ort. hareket: "+(avgPct>=0?"+":"")+avgPct.toFixed(2)+"% · "+d.diagnosis;
+    } else {
+      document.getElementById("vetoOutcomeBox").textContent="Veto edilen sinyaller izleniyor. "+d.diagnosis;
+    }
+    document.getElementById("vetoOutcomeMeta").textContent=tracked>0?"60dk izleme · "+tracked+" kayit":"bekleniyor";
+  }catch(e){console.error("vetoStats",e)}
+}
+
+async function init(){await Promise.all([loadStats(),loadChart(),loadPositions(),loadHistory(curPage),loadAxStatus(),loadPipelineStats(),loadVetoStats(),loadCalendar(),loadWeekly(),loadCoinProfiles()])}
 init();
-setInterval(()=>{loadStats();loadPositions();loadAxStatus()},8000);
+setInterval(()=>{loadStats();loadPositions();loadAxStatus();loadPipelineStats()},8000);
 setInterval(()=>{loadChart();loadHistory(curPage)},15000);
-setInterval(()=>{loadCalendar();loadWeekly();loadCoinProfiles()},120000);
+setInterval(()=>{loadCalendar();loadWeekly();loadCoinProfiles();loadVetoStats()},120000);
 </script>
 </body>
 </html>

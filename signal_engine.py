@@ -23,6 +23,8 @@ import pandas as pd
 from config import (
     SL_ATR_MULT, TP1_R, TP2_R, TRAIL_ATR_MULT,
     MIN_RR, MIN_EXPECTED_MFE_R,
+    CAND_MIN_RR, CAND_MIN_EXPECTED_MFE_R, CAND_MIN_ADX, CAND_MIN_BB_WIDTH,
+    DEBUG_SIGNAL_MODE,
 )
 from coin_library import get_coin_params
 
@@ -329,6 +331,14 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     NULL = {"symbol": symbol, "direction": None}
     coin_p = get_coin_params(symbol)
 
+    # ── Candidate vs Execution eşikleri ──────────────────────────────────────
+    # Candidate modu: daha gevşek → daha fazla sinyal → AX öğrenir
+    # Execution modu: scalp_bot içinde ayrıca kontrol edilir
+    eff_min_adx   = CAND_MIN_ADX   if DEBUG_SIGNAL_MODE else coin_p.get("min_adx", 20)
+    eff_min_bb    = CAND_MIN_BB_WIDTH if DEBUG_SIGNAL_MODE else coin_p.get("min_bb_width", 1.3)
+    eff_min_rr    = CAND_MIN_RR
+    eff_min_mfe_r = CAND_MIN_EXPECTED_MFE_R
+
     # ── 15m Ana Trend ────────────────────────────────────────────────────────
     df15 = get_candles(client, symbol, "15m", 100)
     if df15.empty or len(df15) < 50:
@@ -340,25 +350,29 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     bb_w   = bollinger_width(df15)
     bb_chg = bb_width_change(df15)
 
-    # Coin profiline göre filtre eşikleri
-    min_bb  = coin_p.get("min_bb_width", 1.3)
-    min_adx = coin_p.get("min_adx", 20)
+    min_bb  = coin_p.get("min_bb_width", eff_min_bb)
+    min_adx = coin_p.get("min_adx", eff_min_adx)
 
-    if bb_w < min_bb:
+    if bb_w < eff_min_bb:
         return NULL
 
-    trend_up15 = (
-        e9_15.iloc[-1] > e21_15.iloc[-1] > e50_15.iloc[-1]
-        and c15 > e21_15.iloc[-1]
-        and adx15 > min_adx
-        and pdi15 > mdi15
-    )
-    trend_dn15 = (
-        e9_15.iloc[-1] < e21_15.iloc[-1] < e50_15.iloc[-1]
-        and c15 < e21_15.iloc[-1]
-        and adx15 > min_adx
-        and mdi15 > pdi15
-    )
+    # Candidate modunda sadece EMA9 > EMA21 yeterli (EMA50 koşulu esnetildi)
+    if DEBUG_SIGNAL_MODE:
+        trend_up15 = e9_15.iloc[-1] > e21_15.iloc[-1] and adx15 > eff_min_adx and pdi15 > mdi15
+        trend_dn15 = e9_15.iloc[-1] < e21_15.iloc[-1] and adx15 > eff_min_adx and mdi15 > pdi15
+    else:
+        trend_up15 = (
+            e9_15.iloc[-1] > e21_15.iloc[-1] > e50_15.iloc[-1]
+            and c15 > e21_15.iloc[-1]
+            and adx15 > min_adx
+            and pdi15 > mdi15
+        )
+        trend_dn15 = (
+            e9_15.iloc[-1] < e21_15.iloc[-1] < e50_15.iloc[-1]
+            and c15 < e21_15.iloc[-1]
+            and adx15 > min_adx
+            and mdi15 > pdi15
+        )
 
     if not trend_up15 and not trend_dn15:
         return NULL
@@ -373,11 +387,16 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     c5     = df5["close"].iloc[-1]
     atr5   = atr(df5, 14)
 
-    if (atr5 / (c5 + 1e-10) * 100) < 0.03:
+    if (atr5 / (c5 + 1e-10) * 100) < 0.02:
         return NULL
 
-    bull5 = trend_up15 and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5 < 75
-    bear5 = trend_dn15 and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5 < 65
+    # Candidate modunda RSI aralığı daha geniş
+    if DEBUG_SIGNAL_MODE:
+        bull5 = trend_up15 and e9_5.iloc[-1] > e21_5.iloc[-1] and 25 < rsi5 < 82
+        bear5 = trend_dn15 and e9_5.iloc[-1] < e21_5.iloc[-1] and 18 < rsi5 < 75
+    else:
+        bull5 = trend_up15 and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5 < 75
+        bear5 = trend_dn15 and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5 < 65
 
     if not bull5 and not bear5:
         return NULL
@@ -394,11 +413,17 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     rv     = relative_volume(df1, 20)
     mom3c  = momentum_3c(df1)
 
-    # RSI 1m giriş onayı
-    if bull5 and not (32 < rsi1 < 75):
-        return NULL
-    if bear5 and not (25 < rsi1 < 68):
-        return NULL
+    # RSI 1m giriş onayı (candidate modunda daha geniş)
+    if DEBUG_SIGNAL_MODE:
+        if bull5 and not (20 < rsi1 < 85):
+            return NULL
+        if bear5 and not (15 < rsi1 < 80):
+            return NULL
+    else:
+        if bull5 and not (32 < rsi1 < 75):
+            return NULL
+        if bear5 and not (25 < rsi1 < 68):
+            return NULL
 
     # ── Yön Belirle ─────────────────────────────────────────────────────────
     if bull5:
@@ -410,9 +435,9 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
 
     # ── Funding Rate ─────────────────────────────────────────────────────────
     funding = get_funding_rate(client, symbol)
-    if direction == "LONG"  and funding >  0.001:
-        return NULL   # Longs ağır, olumsuz funding
-    if direction == "SHORT" and funding < -0.001:
+    if direction == "LONG"  and funding >  0.002:
+        return NULL
+    if direction == "SHORT" and funding < -0.002:
         return NULL
 
     # ── BTC Trend (bilgi amaçlı, ENGELLEME YOK) ─────────────────────────────
@@ -423,12 +448,12 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     entry  = c1
     levels = _calc_levels(direction, entry, atr1, coin_p)
 
-    if levels["rr"] < MIN_RR:
+    if levels["rr"] < eff_min_rr:
         return NULL
 
     # ── MFE Tahmini ─────────────────────────────────────────────────────────
     expected_mfe_r = _estimate_mfe_r(bb_w, adx15, mom3c, direction, coin_p)
-    if expected_mfe_r < MIN_EXPECTED_MFE_R:
+    if expected_mfe_r < eff_min_mfe_r:
         return NULL
 
     # ── Skor Hesapla ─────────────────────────────────────────────────────────
