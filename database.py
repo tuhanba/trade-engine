@@ -344,6 +344,43 @@ def _migrate(conn):
         ("signal_candidates", "outcome_checked", "INTEGER DEFAULT 0"),
         ("signal_candidates", "pseudo_mfe_r",    "REAL"),
         ("signal_candidates", "pseudo_mae_r",    "REAL"),
+
+        # ── ai_brain uyumluluk — trade_postmortem eski şema sütunları ────────
+        # ai_brain.py kendi INSERT formatını kullanıyor, her iki şema aynı
+        # tabloda yaşamalı. Bu sütunlar ai_brain tarafından dolduruluyor.
+        ("trade_postmortem", "entry",       "REAL"),
+        ("trade_postmortem", "exit_price",  "REAL"),
+        ("trade_postmortem", "sl",          "REAL"),
+        ("trade_postmortem", "tp",          "REAL"),
+        ("trade_postmortem", "mfe",         "REAL"),
+        ("trade_postmortem", "mae",         "REAL"),
+        ("trade_postmortem", "opt_tp",      "REAL"),
+        ("trade_postmortem", "actual_pnl",  "REAL"),
+
+        # ── ai_brain uyumluluk — daily_summary eski şema sütunları ──────────
+        ("daily_summary", "total",       "INTEGER DEFAULT 0"),
+        ("daily_summary", "wins",        "INTEGER DEFAULT 0"),
+        ("daily_summary", "losses",      "INTEGER DEFAULT 0"),
+        ("daily_summary", "pnl",         "REAL DEFAULT 0"),
+        ("daily_summary", "best_coin",   "TEXT"),
+        ("daily_summary", "worst_coin",  "TEXT"),
+        ("daily_summary", "sent",        "INTEGER DEFAULT 0"),
+
+        # ── ai_brain uyumluluk — coin_profile eski şema sütunları ────────────
+        ("coin_profile", "avg_rr",           "REAL DEFAULT 0"),
+        ("coin_profile", "avg_efficiency",   "REAL DEFAULT 0"),
+        ("coin_profile", "avg_hold_min",     "REAL DEFAULT 0"),
+        ("coin_profile", "best_rsi_min",     "REAL DEFAULT 30"),
+        ("coin_profile", "best_rsi_max",     "REAL DEFAULT 70"),
+        ("coin_profile", "best_rv_min",      "REAL DEFAULT 1.2"),
+        ("coin_profile", "sl_tight_rate",    "REAL DEFAULT 0"),
+        ("coin_profile", "long_wr",          "REAL DEFAULT 0"),
+        ("coin_profile", "short_wr",         "REAL DEFAULT 0"),
+        ("coin_profile", "last_updated",     "TEXT"),
+
+        # ── ai_brain uyumluluk — coin_cooldown eski şema sütunları ───────────
+        ("coin_cooldown", "blacklisted_until", "TEXT"),
+        ("coin_cooldown", "consec_losses",     "INTEGER DEFAULT 0"),
     ]
     for table, col, col_type in migrations:
         try:
