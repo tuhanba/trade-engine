@@ -40,7 +40,7 @@ from database import (
     set_coin_cooldown, save_pipeline_stats,
     get_unchecked_candidates, update_pseudo_outcome,
 )
-from coin_library import init_coin_library, update_coin_stats, get_coin_params
+from coin_library import init_coin_library, update_coin_stats
 from market_scan import scan, get_current_session, get_market_regime
 from signal_engine import generate_signal
 from ai_brain import evaluate_signal, analyze_and_adapt, post_trade_analysis, set_client as ai_set_client
@@ -168,10 +168,8 @@ def on_trade_closed(client, tg_manager, trade: dict):
     save_coin_market_memory(symbol, session, regime, direction, result, r_mult)
 
     # Cooldown: ardışık kayıpta coin'i geçici olarak beklet
-    if result == "LOSS":
-        coin_p = get_coin_params(symbol)
-        if coin_p.get("loss_count", 0) % 3 == 0:  # Her 3 kayıpta cooldown
-            set_coin_cooldown(symbol, minutes=120, reason="consecutive_loss")
+    if result == "LOSS" and consecutive_losses > 0 and consecutive_losses % 3 == 0:
+        set_coin_cooldown(symbol, minutes=120, reason="consecutive_loss")
 
     # Circuit breaker
     if consecutive_losses >= CIRCUIT_BREAKER_LOSSES:
