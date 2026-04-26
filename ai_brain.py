@@ -438,24 +438,41 @@ def update_coin_profiles(conn, all_trades):
         except Exception:
             avg_eff = 50.0
 
-        # Tehlike skoru: düşük WR + yüksek SL sıkılığı + düşük RR
-        danger = 0
-        if wr < 0.35:      danger += 3
-        elif wr < 0.45:    danger += 1
-        if sl_tight_rate > 0.6: danger += 2
-        if avg_rr < 0.7:   danger += 2
-        if avg_eff < 40:   danger += 1
+        # Tehlike skoru: 0-8 → normalize to 0.0-1.0 (coin_library ile tutarlı)
+        danger_raw = 0
+        if wr < 0.35:           danger_raw += 3
+        elif wr < 0.45:         danger_raw += 1
+        if sl_tight_rate > 0.6: danger_raw += 2
+        if avg_rr < 0.7:        danger_raw += 2
+        if avg_eff < 40:        danger_raw += 1
+        danger = round(min(danger_raw / 8.0, 1.0), 3)
 
-        conn.execute("""INSERT OR REPLACE INTO coin_profile
-            (symbol, trade_count, win_rate, avg_rr, avg_efficiency, avg_hold_min,
-             best_rsi_min, best_rsi_max, best_rv_min, danger_score,
-             sl_tight_rate, long_wr, short_wr, preferred_direction, last_updated)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-            sym, len(trades), wr, avg_rr, avg_eff, avg_dur,
-            best_rsi_min, best_rsi_max, best_rv_min, danger,
-            sl_tight_rate, long_wr, short_wr, preferred,
-            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        ))
+        exists = conn.execute(
+            "SELECT symbol FROM coin_profile WHERE symbol=?", (sym,)
+        ).fetchone()
+        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        if exists:
+            conn.execute("""UPDATE coin_profile SET
+                avg_rr=?, avg_efficiency=?, avg_hold_min=?,
+                best_rsi_min=?, best_rsi_max=?, best_rv_min=?,
+                sl_tight_rate=?, long_wr=?, short_wr=?,
+                preferred_direction=?, last_updated=?
+                WHERE symbol=?""", (
+                avg_rr, avg_eff, avg_dur,
+                best_rsi_min, best_rsi_max, best_rv_min,
+                sl_tight_rate, long_wr, short_wr,
+                preferred, now_str, sym
+            ))
+        else:
+            conn.execute("""INSERT INTO coin_profile
+                (symbol, trade_count, win_rate, avg_rr, avg_efficiency, avg_hold_min,
+                 best_rsi_min, best_rsi_max, best_rv_min,
+                 sl_tight_rate, long_wr, short_wr, preferred_direction, last_updated)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                sym, len(trades), wr, avg_rr, avg_eff, avg_dur,
+                best_rsi_min, best_rsi_max, best_rv_min,
+                sl_tight_rate, long_wr, short_wr, preferred, now_str
+            ))
 
     conn.commit()
 
