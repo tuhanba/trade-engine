@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -304,7 +304,8 @@ def init_db():
         """)
 
     # ── Eski şemadan yeni kolonlara migration ─────────────────────────────────
-    _migrate(get_conn())
+    with get_conn() as _mc:
+        _migrate(_mc)
     logger.info("DB init tamamlandı.")
 
 
