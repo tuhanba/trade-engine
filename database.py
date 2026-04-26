@@ -98,6 +98,7 @@ def init_db():
             runner_target    REAL,
             rr               REAL,
             expected_mfe_r   REAL,
+            expected_mae_r   REAL,
             score            REAL DEFAULT 0,
             confidence       REAL DEFAULT 0,
             decision         TEXT DEFAULT 'PENDING',
@@ -107,7 +108,10 @@ def init_db():
             ax_mode          TEXT DEFAULT 'execute',
             execution_mode   TEXT DEFAULT 'paper',
             linked_trade_id  INTEGER,
-            created_at       TEXT DEFAULT (datetime('now'))
+            created_at       TEXT DEFAULT (datetime('now')),
+            outcome_checked  INTEGER DEFAULT 0,
+            pseudo_mfe_r     REAL,
+            pseudo_mae_r     REAL
         );
 
         -- ── paper_account ────────────────────────────────────────────────────
@@ -267,6 +271,36 @@ def init_db():
             created_at   TEXT DEFAULT (datetime('now'))
         );
 
+        -- ── coin_params ──────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS coin_params (
+            symbol             TEXT PRIMARY KEY,
+            volatility_profile TEXT DEFAULT 'normal',
+            sl_atr_mult        REAL DEFAULT 1.3,
+            tp_atr_mult        REAL DEFAULT 2.0,
+            risk_pct           REAL DEFAULT 1.0,
+            max_leverage       INTEGER DEFAULT 15,
+            min_adx            REAL DEFAULT 20,
+            min_bb_width       REAL DEFAULT 1.3,
+            min_volume_m       REAL DEFAULT 10.0,
+            enabled            INTEGER DEFAULT 1,
+            updated_at         TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── pipeline_stats ───────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS pipeline_stats (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_time            TEXT DEFAULT (datetime('now')),
+            scanned_symbols      INTEGER DEFAULT 0,
+            passed_market_filter INTEGER DEFAULT 0,
+            candidates_created   INTEGER DEFAULT 0,
+            ax_allow             INTEGER DEFAULT 0,
+            ax_veto              INTEGER DEFAULT 0,
+            ax_watch             INTEGER DEFAULT 0,
+            risk_rejected        INTEGER DEFAULT 0,
+            paper_trades_opened  INTEGER DEFAULT 0,
+            last_error           TEXT
+        );
+
         """)
 
     # ── Eski şemadan yeni kolonlara migration ─────────────────────────────────
@@ -299,12 +333,17 @@ def _migrate(conn):
         ("coin_params", "max_leverage",       "INTEGER DEFAULT 15"),
         ("coin_params", "min_adx",            "REAL DEFAULT 20"),
         ("coin_params", "min_bb_width",       "REAL DEFAULT 1.3"),
-        ("coin_params", "min_volume_m",       "REAL DEFAULT 15.0"),
+        ("coin_params", "min_volume_m",       "REAL DEFAULT 10.0"),
         ("coin_params", "enabled",            "INTEGER DEFAULT 1"),
         ("coin_params", "updated_at",         "TEXT DEFAULT (datetime('now'))"),
         # paper_account — eski şemada 'paper_balance', yeni şemada 'balance'
         ("paper_account", "balance",         "REAL DEFAULT 250.0"),
         ("paper_account", "initial_balance", "REAL DEFAULT 250.0"),
+        # signal_candidates — yeni alanlar
+        ("signal_candidates", "expected_mae_r",  "REAL"),
+        ("signal_candidates", "outcome_checked", "INTEGER DEFAULT 0"),
+        ("signal_candidates", "pseudo_mfe_r",    "REAL"),
+        ("signal_candidates", "pseudo_mae_r",    "REAL"),
     ]
     for table, col, col_type in migrations:
         try:
@@ -731,3 +770,105 @@ def save_pattern(symbol: str, direction: str, session: str, result: str,
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PIPELINE STATS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_pipeline_stats(stats: dict):
+    """Bir tarama döngüsünün istatistiklerini kaydet."""
+    sql = """
+        INSERT INTO pipeline_stats
+            (scan_time, scanned_symbols, passed_market_filter, candidates_created,
+             ax_allow, ax_veto, ax_watch, risk_rejected, paper_trades_opened, last_error)
+        VALUES
+            (:scan_time, :scanned_symbols, :passed_market_filter, :candidates_created,
+             :ax_allow, :ax_veto, :ax_watch, :risk_rejected, :paper_trades_opened, :last_error)
+    """
+    defaults = {
+        "scan_time": datetime.now(timezone.utc).isoformat(),
+        "scanned_symbols": 0, "passed_market_filter": 0, "candidates_created": 0,
+        "ax_allow": 0, "ax_veto": 0, "ax_watch": 0,
+        "risk_rejected": 0, "paper_trades_opened": 0, "last_error": None,
+    }
+    with get_conn() as conn:
+        conn.execute(sql, {**defaults, **stats})
+
+
+def get_pipeline_stats(limit: int = 50) -> list:
+    """Son N tarama döngüsünün istatistiklerini döndür."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM pipeline_stats ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_pipeline_summary(hours: int = 24) -> dict:
+    """Son N saatin birleşik pipeline özeti."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT
+                COUNT(*) as scan_count,
+                SUM(scanned_symbols) as scanned,
+                SUM(passed_market_filter) as passed,
+                SUM(candidates_created) as candidates,
+                SUM(ax_allow) as ax_allow,
+                SUM(ax_veto) as ax_veto,
+                SUM(ax_watch) as ax_watch,
+                SUM(risk_rejected) as risk_rejected,
+                SUM(paper_trades_opened) as paper_trades,
+                MAX(scan_time) as last_scan_time
+               FROM pipeline_stats WHERE scan_time >= ?""",
+            (cutoff,)
+        ).fetchone()
+    if not row or not row[0]:
+        return {
+            "scan_count": 0, "scanned": 0, "passed": 0, "candidates": 0,
+            "ax_allow": 0, "ax_veto": 0, "ax_watch": 0,
+            "risk_rejected": 0, "paper_trades": 0, "last_scan_time": None,
+        }
+    return {
+        "scan_count":   row[0] or 0,
+        "scanned":      row[1] or 0,
+        "passed":       row[2] or 0,
+        "candidates":   row[3] or 0,
+        "ax_allow":     row[4] or 0,
+        "ax_veto":      row[5] or 0,
+        "ax_watch":     row[6] or 0,
+        "risk_rejected":row[7] or 0,
+        "paper_trades": row[8] or 0,
+        "last_scan_time": row[9],
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIGNAL CANDIDATES — QUERY
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_recent_candidates(limit: int = 50, hours: int = 24) -> list:
+    """Son N saatin signal candidate'lerini döndür."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM signal_candidates
+               WHERE created_at >= ? ORDER BY id DESC LIMIT ?""",
+            (cutoff, limit)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_veto_stats(hours: int = 24) -> list:
+    """Veto sebeplerini say (son N saat)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT veto_reason, COUNT(*) as cnt
+               FROM signal_candidates
+               WHERE decision='VETO' AND created_at >= ?
+               GROUP BY veto_reason ORDER BY cnt DESC""",
+            (cutoff,)
+        ).fetchall()
+        return [{"reason": r[0] or "unknown", "count": r[1]} for r in rows]

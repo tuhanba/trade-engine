@@ -270,7 +270,7 @@ def get_ax_status() -> dict:
             today_signals = row2[0] or 0
 
             row3 = conn.execute(
-                "SELECT COUNT(*) FROM signal_candidates WHERE DATE(created_at)=? AND ax_decision='ALLOW'",
+                "SELECT COUNT(*) FROM signal_candidates WHERE DATE(created_at)=? AND decision='ALLOW'",
                 (today,),
             ).fetchone()
             today_allowed = row3[0] or 0

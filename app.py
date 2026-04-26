@@ -8,9 +8,12 @@ except ImportError:
     N8N_AVAILABLE = False
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
+from config import DB_PATH, AX_MODE, EXECUTION_MODE, PAPER_MODE
 from database import (
     init_db, get_trades, get_stats, get_current_params,
     get_open_trades, get_paper_balance, get_conn,
+    get_pipeline_summary, get_pipeline_stats,
+    get_recent_candidates, get_veto_stats,
 )
 from binance.client import Client
 import dashboard_service as dash_svc
@@ -25,8 +28,6 @@ client = Client(os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_API_SECRET"
 
 init_db()
 dash_svc.start()
-
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
 
 
 def _fmt_duration(open_time_str, close_time_str=None):
@@ -345,16 +346,8 @@ def api_logs():
 def api_coin_library():
     """Coin Library: tüm coin profilleri ve istatistikleri"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        c = conn.cursor()
-        # coin_params tablosu yoksa boş dön
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='coin_params'")
-        if not c.fetchone():
-            conn.close()
-            return jsonify({"ok": True, "data": [], "note": "coin_params tablosu henüz oluşturulmadı"})
-        with get_conn() as conn2:
-            rows2 = conn2.execute("""
+        with get_conn() as conn:
+            rows = conn.execute("""
                 SELECT symbol,
                        COALESCE(volatility_profile, 'normal') as profile,
                        sl_atr_mult, tp_atr_mult, risk_pct, max_leverage,
@@ -362,10 +355,9 @@ def api_coin_library():
                 FROM coin_params
                 ORDER BY symbol ASC
             """).fetchall()
-        conn.close()
-        return jsonify({"ok": True, "data": [dict(r) for r in rows2], "total": len(rows2)})
+        return jsonify({"ok": True, "data": [dict(r) for r in rows], "total": len(rows)})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": True, "data": [], "note": str(e)})
 
 
 @app.route("/api/coin_library/<symbol>", methods=["POST"])
@@ -427,22 +419,19 @@ def api_ax_status():
 def api_coin_profiles():
     """Tüm coin öğrenme profilleri (coin_profile tablosu)."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
-            SELECT symbol, trade_count, win_count, loss_count,
-                   ROUND(win_rate*100,1) as win_rate_pct,
-                   avg_r, profit_factor, danger_score, fakeout_rate,
-                   volatility_profile, preferred_direction, best_session,
-                   updated_at
-            FROM coin_profile
-            ORDER BY trade_count DESC, danger_score DESC
-            """
-        ).fetchall()
-        conn.close()
-        result = [dict(r) for r in rows]
-        return jsonify({"ok": True, "data": result})
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT symbol, trade_count, win_count, loss_count,
+                       ROUND(win_rate*100,1) as win_rate_pct,
+                       avg_r, profit_factor, danger_score, fakeout_rate,
+                       volatility_profile, preferred_direction, best_session,
+                       updated_at
+                FROM coin_profile
+                ORDER BY trade_count DESC, danger_score DESC
+                """
+            ).fetchall()
+        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -453,25 +442,262 @@ def api_signal_stats():
     """Bugünkü sinyal istatistikleri: ALLOW/VETO/WATCH dağılımı."""
     try:
         days = int(request.args.get("days", 1))
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute(
-            """
-            SELECT ax_decision, COUNT(*) as cnt
-            FROM signal_candidates
-            WHERE created_at >= datetime('now', ?)
-            GROUP BY ax_decision
-            """,
-            (f"-{days} days",),
-        ).fetchall()
-        conn.close()
-        stats = {"ALLOW": 0, "VETO": 0, "WATCH": 0, "total": 0}
-        for dec, cnt in rows:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT decision, COUNT(*) as cnt
+                FROM signal_candidates
+                WHERE created_at >= datetime('now', ?)
+                GROUP BY decision
+                """,
+                (f"-{days} days",),
+            ).fetchall()
+        stats = {"ALLOW": 0, "VETO": 0, "WATCH": 0, "PENDING": 0, "total": 0}
+        for row in rows:
+            dec = row["decision"] or "PENDING"
             if dec in stats:
-                stats[dec] = cnt
-            stats["total"] += cnt
+                stats[dec] = row["cnt"]
+            stats["total"] += row["cnt"]
         return jsonify({"ok": True, "data": stats})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/status ───────────────────────────────────────────────────────────────
+@app.route("/api/status")
+def api_status():
+    """Sistem anlık durumu — dashboard status panel için."""
+    try:
+        data = dash_svc.get_ax_status()
+        data.update({
+            "ax_mode":        AX_MODE,
+            "execution_mode": EXECUTION_MODE,
+            "paper_mode":     PAPER_MODE,
+        })
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/summary ──────────────────────────────────────────────────────────────
+@app.route("/api/summary")
+def api_summary():
+    """Özet istatistikler + pipeline + sinyal dağılımı."""
+    try:
+        stats    = get_stats(hours=24)
+        pipeline = get_pipeline_summary(hours=24)
+        with get_conn() as conn:
+            sig_rows = conn.execute(
+                """SELECT decision, COUNT(*) as cnt FROM signal_candidates
+                   WHERE created_at >= datetime('now','-1 day') GROUP BY decision"""
+            ).fetchall()
+        signals = {"ALLOW": 0, "VETO": 0, "WATCH": 0, "total": 0}
+        for r in sig_rows:
+            dec = r["decision"] or "PENDING"
+            if dec in signals:
+                signals[dec] = r["cnt"]
+            signals["total"] += r["cnt"]
+        return jsonify({"ok": True, "data": {
+            "stats": stats, "pipeline": pipeline, "signals": signals,
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/trades/open ──────────────────────────────────────────────────────────
+@app.route("/api/trades/open")
+def api_trades_open():
+    return api_live()
+
+
+# ── /api/trades/recent ───────────────────────────────────────────────────────
+@app.route("/api/trades/recent")
+def api_trades_recent():
+    return api_trades()
+
+
+# ── /api/signals/recent ──────────────────────────────────────────────────────
+@app.route("/api/signals/recent")
+def api_signals_recent():
+    """Son N saatin signal candidate'leri."""
+    try:
+        hours = int(request.args.get("hours", 24))
+        limit = int(request.args.get("limit", 50))
+        data  = get_recent_candidates(limit=limit, hours=hours)
+        return jsonify({"ok": True, "data": data, "total": len(data)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/pipeline-stats ───────────────────────────────────────────────────────
+@app.route("/api/pipeline-stats")
+def api_pipeline_stats():
+    """Pipeline istatistikleri — kaç coin tarandı, kaç candidate üretildi, vb."""
+    try:
+        hours   = int(request.args.get("hours", 24))
+        summary = get_pipeline_summary(hours=hours)
+        recent  = get_pipeline_stats(limit=20)
+        return jsonify({"ok": True, "data": {
+            "summary": summary,
+            "recent":  recent,
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/ai/params ────────────────────────────────────────────────────────────
+@app.route("/api/ai/params")
+def api_ai_params():
+    return api_params()
+
+
+# ── /api/performance ─────────────────────────────────────────────────────────
+@app.route("/api/performance")
+def api_performance():
+    try:
+        hours = int(request.args.get("hours", 168))
+        stats = get_stats(hours=hours)
+        bal   = get_paper_balance()
+        stats["balance"] = round(bal, 4)
+        return jsonify({"ok": True, "data": stats})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/session-performance ──────────────────────────────────────────────────
+@app.route("/api/session-performance")
+def api_session_performance():
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT session,
+                          COUNT(*) as total,
+                          SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins,
+                          SUM(r_multiple) as total_r
+                   FROM coin_market_memory
+                   GROUP BY session"""
+            ).fetchall()
+        data = []
+        for r in rows:
+            total = r["total"] or 0
+            wins  = r["wins"] or 0
+            data.append({
+                "session":   r["session"] or "UNKNOWN",
+                "total":     total,
+                "wins":      wins,
+                "losses":    total - wins,
+                "win_rate":  round(wins / max(total, 1) * 100, 1),
+                "total_r":   round(r["total_r"] or 0, 2),
+            })
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/calendar-pnl ────────────────────────────────────────────────────────
+@app.route("/api/calendar-pnl")
+def api_calendar_pnl():
+    return api_daily_pnl()
+
+
+# ── /api/weekly-pnl ──────────────────────────────────────────────────────────
+@app.route("/api/weekly-pnl")
+def api_weekly_pnl():
+    return api_weekly()
+
+
+# ── /api/equity-curve ────────────────────────────────────────────────────────
+@app.route("/api/equity-curve")
+def api_equity_curve():
+    return api_pnl_chart()
+
+
+# ── /api/winrate-rr ──────────────────────────────────────────────────────────
+@app.route("/api/winrate-rr")
+def api_winrate_rr():
+    """Win rate vs RR grafiği için veri. Expectancy = WR*avgWin - (1-WR)*avgLoss."""
+    try:
+        stats = get_stats(hours=720)
+        win_rate = stats.get("win_rate", 0)
+        avg_win  = stats.get("avg_r", 0)
+        avg_loss = 1.0
+        expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
+        return jsonify({"ok": True, "data": {
+            "win_rate":   round(win_rate * 100, 1),
+            "avg_rr":     round(stats.get("avg_r", 0), 2),
+            "expectancy": round(expectancy, 3),
+            "trade_count":stats.get("total", 0),
+            "break_even_line": [
+                {"wr": w, "rr": round(w / max(100 - w, 1), 2)}
+                for w in range(30, 75, 5)
+            ],
+            "target_zone": {"wr_min": 45, "wr_max": 55, "rr_min": 1.5, "rr_max": 2.5},
+            "has_data": stats.get("total", 0) > 0,
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/coin-performance ────────────────────────────────────────────────────
+@app.route("/api/coin-performance")
+def api_coin_performance():
+    return api_coin_stats()
+
+
+# ── /api/veto-stats ──────────────────────────────────────────────────────────
+@app.route("/api/veto-stats")
+def api_veto_stats():
+    """Veto sebeplerinin dağılımı."""
+    try:
+        hours = int(request.args.get("hours", 24))
+        data  = get_veto_stats(hours=hours)
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/health ───────────────────────────────────────────────────────────────
+@app.route("/api/health")
+def api_health():
+    """Sistem sağlık kontrolü."""
+    import time
+    health = {
+        "status":      "ok",
+        "timestamp":   datetime.now(timezone.utc).isoformat(),
+        "checks":      {},
+    }
+    # DB kontrolü
+    try:
+        with get_conn() as conn:
+            conn.execute("SELECT 1").fetchone()
+        health["checks"]["db"] = "ok"
+    except Exception as e:
+        health["checks"]["db"] = f"error: {e}"
+        health["status"] = "degraded"
+
+    # Son tarama zamanı
+    try:
+        pipeline = get_pipeline_summary(hours=1)
+        last_scan = pipeline.get("last_scan_time")
+        health["checks"]["last_scan"] = last_scan or "no_scan_yet"
+    except Exception:
+        health["checks"]["last_scan"] = "unknown"
+
+    # Bakiye
+    try:
+        bal = get_paper_balance()
+        health["checks"]["balance"] = round(bal, 2)
+    except Exception:
+        health["checks"]["balance"] = "error"
+
+    # Açık trade sayısı
+    try:
+        ot = get_open_trades()
+        health["checks"]["open_trades"] = len(ot)
+    except Exception:
+        health["checks"]["open_trades"] = "error"
+
+    return jsonify({"ok": True, "data": health})
 
 
 if __name__ == "__main__":

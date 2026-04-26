@@ -29,6 +29,7 @@ from config import (
     CIRCUIT_BREAKER_LOSSES, CIRCUIT_BREAKER_MINUTES,
     PAPER_MODE, AX_MODE, EXECUTION_MODE, COIN_UNIVERSE,
     LOG_DIR, LOG_MAX_DAYS, LOG_MAX_MB,
+    TELEGRAM_ALIVE_INTERVAL_HOURS,
 )
 from database import (
     init_db, init_paper_account, get_paper_balance,
@@ -36,7 +37,7 @@ from database import (
     get_open_trades, get_trades, get_stats,
     set_state, get_state,
     save_daily_summary, save_coin_market_memory,
-    set_coin_cooldown,
+    set_coin_cooldown, save_pipeline_stats,
 )
 from coin_library import init_coin_library, update_coin_stats, get_coin_params
 from market_scan import scan, get_current_session, get_market_regime
@@ -314,8 +315,9 @@ def main():
                         f"Bakiye: ${get_paper_balance():.2f}"
                     )
 
-            # ── HEARTBEAT saatlik ─────────────────────────────────────────────
-            if now - last_hb >= 3600:
+            # ── HEARTBEAT (config ile ayarlanabilir, default 6 saat) ──────────
+            hb_interval = TELEGRAM_ALIVE_INTERVAL_HOURS * 3600
+            if now - last_hb >= hb_interval:
                 last_hb = now
                 tg_send(tg_manager,
                     f"💓 <b>BOT AKTİF</b> | "
@@ -362,7 +364,22 @@ def main():
             regime  = get_market_regime(client)
 
             candidates = scan(client, open_symbols=open_symbols)
+
+            # Pipeline stats: bu döngü için sayaçlar
+            _pipe = {
+                "scanned_symbols":      len(COIN_UNIVERSE),
+                "passed_market_filter": len(candidates),
+                "candidates_created":   0,
+                "ax_allow":             0,
+                "ax_veto":              0,
+                "ax_watch":             0,
+                "risk_rejected":        0,
+                "paper_trades_opened":  0,
+                "last_error":           None,
+            }
+
             if not candidates:
+                save_pipeline_stats(_pipe)
                 time.sleep(5)
                 continue
 
@@ -387,6 +404,7 @@ def main():
                     "execution_mode": EXECUTION_MODE,
                 })
                 signal["candidate_id"] = candidate_id
+                _pipe["candidates_created"] += 1
 
                 # ADIM 4: AX karar
                 ax = evaluate_signal(
@@ -407,24 +425,37 @@ def main():
                     ax.get("veto_reason"),
                 )
 
-                if decision != "ALLOW":
+                if decision == "VETO":
+                    _pipe["ax_veto"] += 1
                     logger.info(
-                        f"[{decision}] {symbol} {signal['direction']} "
+                        f"[VETO] {symbol} {signal['direction']} "
                         f"| {ax.get('veto_reason','')} "
                         f"| score={ax['score']:.0f}"
                     )
                     continue
+                elif decision == "WATCH":
+                    _pipe["ax_watch"] += 1
+                    logger.info(
+                        f"[WATCH] {symbol} {signal['direction']} "
+                        f"| score={ax['score']:.0f}"
+                    )
+                    continue
+
+                _pipe["ax_allow"] += 1
 
                 # ADIM 6: Risk kontrolü — son kez
                 if AX_MODE != "execute":
+                    _pipe["risk_rejected"] += 1
                     logger.info(f"[OBSERVE] {symbol} — AX_MODE=observe, açılmıyor")
                     continue
 
                 # ADIM 7: Aç
                 trade_id = open_trade(client, signal, ax)
                 if not trade_id:
+                    _pipe["risk_rejected"] += 1
                     continue
 
+                _pipe["paper_trades_opened"] += 1
                 update_signal_decision(candidate_id, "ALLOW",
                                        ax["score"], ax["confidence"],
                                        linked_trade_id=trade_id)
@@ -451,11 +482,25 @@ def main():
                     f"score={ax['score']:.0f} rr={signal['rr']:.2f}"
                 )
 
+            # Her scan döngüsü sonunda pipeline stats kaydet
+            save_pipeline_stats(_pipe)
+            logger.info(
+                f"[Pipeline] scan={_pipe['scanned_symbols']} "
+                f"passed={_pipe['passed_market_filter']} "
+                f"cand={_pipe['candidates_created']} "
+                f"allow={_pipe['ax_allow']} veto={_pipe['ax_veto']} "
+                f"watch={_pipe['ax_watch']} opened={_pipe['paper_trades_opened']}"
+            )
+
         except KeyboardInterrupt:
             logger.info("Bot durduruldu (KeyboardInterrupt).")
             break
         except Exception as e:
             logger.error(f"Ana döngü hatası: {e}", exc_info=True)
+            try:
+                save_pipeline_stats({"last_error": str(e)[:500]})
+            except Exception:
+                pass
             time.sleep(10)
 
 
