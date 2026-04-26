@@ -35,9 +35,8 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
@@ -49,6 +48,7 @@ def get_conn() -> sqlite3.Connection:
 
 def init_db():
     with get_conn() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript("""
 
         -- ── trades ──────────────────────────────────────────────────────────
