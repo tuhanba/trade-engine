@@ -302,7 +302,7 @@ def _migrate(conn):
     # coin_cooldown kolonları
     _add_column(conn, "coin_cooldown", "until",      "TEXT DEFAULT '2000-01-01T00:00:00'")
     _add_column(conn, "coin_cooldown", "reason",     "TEXT DEFAULT ''")
-    _add_column(conn, "coin_cooldown", "created_at", "TEXT DEFAULT (datetime('now'))")
+    _add_column(conn, "coin_cooldown", "created_at", "TEXT DEFAULT '2000-01-01T00:00:00'")
     # signal_candidates ek kolonlar
     _add_column(conn, "signal_candidates", "decision",       "TEXT DEFAULT 'WATCH'")
     _add_column(conn, "signal_candidates", "runner_target",  "REAL DEFAULT 0")
