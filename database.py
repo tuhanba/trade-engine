@@ -312,20 +312,30 @@ def init_db():
 def _migrate(conn):
     """Eksik kolonları ekle — her çalıştırmada idempotent."""
     migrations = [
-        # trades tablosu — yeni kolonlar
+        # trades tablosu — tüm olası eksik kolonlar
+        ("trades", "status",             "TEXT DEFAULT 'open'"),
+        ("trades", "environment",        "TEXT DEFAULT 'paper'"),
+        ("trades", "ax_mode",            "TEXT DEFAULT 'execute'"),
+        ("trades", "entry",              "REAL"),
+        ("trades", "sl",                 "REAL"),
+        ("trades", "tp1",                "REAL"),
+        ("trades", "tp2",                "REAL"),
+        ("trades", "trail_stop",         "REAL"),
+        ("trades", "qty",                "REAL"),
         ("trades", "qty_tp1",            "REAL"),
         ("trades", "qty_tp2",            "REAL"),
         ("trades", "qty_runner",         "REAL"),
-        ("trades", "trail_stop",         "REAL"),
         ("trades", "realized_pnl",       "REAL DEFAULT 0"),
+        ("trades", "net_pnl",            "REAL DEFAULT 0"),
         ("trades", "r_multiple",         "REAL DEFAULT 0"),
         ("trades", "tp1_hit",            "INTEGER DEFAULT 0"),
         ("trades", "tp2_hit",            "INTEGER DEFAULT 0"),
         ("trades", "linked_candidate_id","INTEGER"),
-        ("trades", "hold_minutes",       "REAL DEFAULT 0"),
-        ("trades", "ax_mode",            "TEXT DEFAULT 'execute'"),
-        ("trades", "environment",        "TEXT DEFAULT 'paper'"),
+        ("trades", "open_time",          "TEXT"),
+        ("trades", "close_time",         "TEXT"),
+        ("trades", "close_price",        "REAL"),
         ("trades", "close_reason",       "TEXT"),
+        ("trades", "hold_minutes",       "REAL DEFAULT 0"),
         # coin_params tablosu — yeni kolonlar
         ("coin_params", "volatility_profile", "TEXT DEFAULT 'normal'"),
         ("coin_params", "sl_atr_mult",        "REAL DEFAULT 1.3"),
