@@ -284,7 +284,7 @@ def calc_stats(trades):
         else:
             cur_cl = 0
 
-    sl_hits  = len([t for t in trades if (t.get("status", "") or "").upper() in ("LOSS", "SL")])
+    sl_hits  = len([t for t in trades if (t.get("close_reason") or "").lower() == "sl"])
     longs    = [t for t in trades if t.get("direction", "").upper() == "LONG"]
     shorts   = [t for t in trades if t.get("direction", "").upper() == "SHORT"]
     long_wr  = len([t for t in longs  if t.get("net_pnl", 0) > 0]) / len(longs)  if longs  else 0
@@ -1093,7 +1093,7 @@ def build_report(stats, sym_stats, changes, drought, loss_streak, win_streak,
         for c in dangerous_coins[:4]:
             lines.append(
                 f"  ⛔ <b>{c['symbol']}</b>: WR:{c['win_rate']:.0%} | "
-                f"RR:{c['avg_rr']:.2f} | Tehlike:{c['danger_score']:.0f}/8")
+                f"RR:{c['avg_rr']:.2f} | Tehlike:{c['danger_score']:.2f}")
 
     # En iyi coinler
     if best_coins:
