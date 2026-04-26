@@ -434,7 +434,7 @@ def _migrate(conn):
 # PAPER ACCOUNT
 # ─────────────────────────────────────────────────────────────────────────────
 
-def init_paper_account(initial: float = 250.0):
+def init_paper_account(initial: float = 200.0):
     with get_conn() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
