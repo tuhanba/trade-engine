@@ -950,9 +950,10 @@ def check_eod_summary(conn, today_trades):
     today = datetime.utcnow().strftime("%Y-%m-%d")
     if datetime.utcnow().hour not in (21, 22, 23):
         return None
+    sent_key = f"eod_sent_{today}"
     already = conn.execute(
-        "SELECT sent FROM daily_summary WHERE date=?", (today,)).fetchone()
-    if already and already["sent"]:
+        "SELECT value FROM system_state WHERE key=?", (sent_key,)).fetchone()
+    if already and already["value"] == "1":
         return None
     if not today_trades:
         return None
@@ -973,6 +974,9 @@ def check_eod_summary(conn, today_trades):
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (today, s["total"], s["wins"], s["losses"], s["total_pnl"],
          s["win_rate"], s["total_pnl"], s["avg_rr"], s["max_drawdown"]))
+    conn.execute(
+        "INSERT OR REPLACE INTO system_state (key, value, updated_at) VALUES (?, '1', datetime('now'))",
+        (sent_key,))
     conn.commit()
 
     mood = ("🏆 Harika gün!" if s["total_pnl"] > 5  else
