@@ -417,22 +417,24 @@ def update_coin_profiles(conn, all_trades):
                 avg_rr=?, avg_efficiency=?, avg_hold_min=?,
                 best_rsi_min=?, best_rsi_max=?, best_rv_min=?,
                 sl_tight_rate=?, long_wr=?, short_wr=?,
-                preferred_direction=?, last_updated=?
+                preferred_direction=?, danger_score=?, last_updated=?
                 WHERE symbol=?""", (
                 avg_rr, avg_eff, avg_dur,
                 best_rsi_min, best_rsi_max, best_rv_min,
                 sl_tight_rate, long_wr, short_wr,
-                preferred, now_str, sym
+                preferred, danger, now_str, sym
             ))
         else:
             conn.execute("""INSERT INTO coin_profile
                 (symbol, trade_count, win_rate, avg_rr, avg_efficiency, avg_hold_min,
                  best_rsi_min, best_rsi_max, best_rv_min,
-                 sl_tight_rate, long_wr, short_wr, preferred_direction, last_updated)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                 sl_tight_rate, long_wr, short_wr, preferred_direction,
+                 danger_score, last_updated)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
                 sym, len(trades), wr, avg_rr, avg_eff, avg_dur,
                 best_rsi_min, best_rsi_max, best_rv_min,
-                sl_tight_rate, long_wr, short_wr, preferred, now_str
+                sl_tight_rate, long_wr, short_wr, preferred,
+                danger, now_str
             ))
 
     conn.commit()
@@ -456,7 +458,7 @@ def get_best_coins(conn):
     """Win rate ve RR bazında en iyi coinleri döndürür."""
     rows = conn.execute(
         "SELECT symbol, win_rate, avg_rr, preferred_direction FROM coin_profile "
-        "WHERE trade_count>=3 AND danger_score<=2 AND win_rate>=0.5 "
+        "WHERE trade_count>=3 AND danger_score<=0.35 AND win_rate>=0.5 "
         "ORDER BY win_rate DESC, avg_rr DESC LIMIT 5").fetchall()
     return [dict(r) for r in rows]
 
