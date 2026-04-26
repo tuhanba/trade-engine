@@ -254,15 +254,6 @@ def api_coin_stats():
 
 
 # ── /api/ml_status ────────────────────────────────────────────────────────────────────────────────
-@app.route("/api/ml_status")
-def api_ml_status():
-    try:
-        from ml_signal_scorer import get_scorer
-        status = get_scorer().get_status()
-        return jsonify({"ok": True, "data": status})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
 
 # ── /api/logs ─────────────────────────────────────────────────────────────────────────────────────────
 @app.route("/api/logs")
