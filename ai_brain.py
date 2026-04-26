@@ -198,7 +198,7 @@ def db():
     conn.row_factory = sqlite3.Row
     conn.execute("""CREATE TABLE IF NOT EXISTS coin_cooldown (
         symbol TEXT PRIMARY KEY,
-        blacklisted_until TEXT,
+        until TEXT,
         reason TEXT,
         consec_losses INTEGER DEFAULT 0)""")
     conn.execute("""CREATE TABLE IF NOT EXISTS daily_summary (
@@ -553,10 +553,10 @@ def update_coin_cooldowns(conn, sym_stats):
         if s.get("recent_consec_loss", 0) >= 3:
             until = (now + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
             conn.execute("""INSERT OR REPLACE INTO coin_cooldown
-                (symbol, blacklisted_until, reason, consec_losses)
+                (symbol, until, reason, consec_losses)
                 VALUES (?, ?, ?, ?)""",
                 (sym, until, "3+ ardisik kayip", s["recent_consec_loss"]))
-    conn.execute("DELETE FROM coin_cooldown WHERE blacklisted_until < ?",
+    conn.execute("DELETE FROM coin_cooldown WHERE until < ?",
                  (now.strftime("%Y-%m-%d %H:%M:%S"),))
     conn.commit()
     rows = conn.execute(
