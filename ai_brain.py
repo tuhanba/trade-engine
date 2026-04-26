@@ -931,13 +931,21 @@ def save_params(conn, p, reason, changes):
 def log_analysis(conn, stats, insight, changes):
     if not stats:
         return
+    payload = {
+        "trades_analyzed": stats.get("total", 0),
+        "win_rate":        round(stats.get("win_rate", 0), 4),
+        "avg_rr":          round(stats.get("avg_rr", 0), 4),
+        "changes":         changes,
+    }
     conn.execute("""INSERT INTO ai_logs
-        (created_at, trades_analyzed, win_rate, avg_rr, insight, changes)
-        VALUES (?, ?, ?, ?, ?, ?)""", (
+        (event, decision, score, confidence, reason, data, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)""", (
+        "analysis", "AI_BRAIN",
+        round(stats.get("win_rate", 0) * 100, 1),
+        round(stats.get("win_rate", 0), 4),
+        insight[:1000],
+        json.dumps(payload, ensure_ascii=False),
         datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        stats.get("total", 0), stats.get("win_rate", 0),
-        stats.get("avg_rr",   0), insight[:1000],
-        json.dumps(changes, ensure_ascii=False)
     ))
     conn.commit()
 
