@@ -280,8 +280,37 @@ def init_db():
 
 def _migrate(conn):
     """Veritabanı şema değişikliklerini uygular."""
-    # Örnek: _add_column(conn, 'trades', 'new_col', 'TEXT')
-    pass
+    # daily_summary kolonları
+    _add_column(conn, "daily_summary", "trade_count",  "INTEGER DEFAULT 0")
+    _add_column(conn, "daily_summary", "win_count",    "INTEGER DEFAULT 0")
+    _add_column(conn, "daily_summary", "loss_count",   "INTEGER DEFAULT 0")
+    _add_column(conn, "daily_summary", "win_rate",     "REAL DEFAULT 0")
+    _add_column(conn, "daily_summary", "gross_pnl",    "REAL DEFAULT 0")
+    _add_column(conn, "daily_summary", "net_pnl",      "REAL DEFAULT 0")
+    _add_column(conn, "daily_summary", "avg_r",        "REAL DEFAULT 0")
+    _add_column(conn, "daily_summary", "max_drawdown", "REAL DEFAULT 0")
+    _add_column(conn, "daily_summary", "balance_eod",  "REAL DEFAULT 0")
+    # weekly_summary kolonları
+    _add_column(conn, "weekly_summary", "trade_count", "INTEGER DEFAULT 0")
+    _add_column(conn, "weekly_summary", "win_count",   "INTEGER DEFAULT 0")
+    _add_column(conn, "weekly_summary", "loss_count",  "INTEGER DEFAULT 0")
+    _add_column(conn, "weekly_summary", "win_rate",    "REAL DEFAULT 0")
+    _add_column(conn, "weekly_summary", "net_pnl",     "REAL DEFAULT 0")
+    _add_column(conn, "weekly_summary", "avg_r",       "REAL DEFAULT 0")
+    _add_column(conn, "weekly_summary", "best_day",    "TEXT")
+    _add_column(conn, "weekly_summary", "worst_day",   "TEXT")
+    # coin_cooldown kolonları
+    _add_column(conn, "coin_cooldown", "until",      "TEXT DEFAULT '2000-01-01T00:00:00'")
+    _add_column(conn, "coin_cooldown", "reason",     "TEXT DEFAULT ''")
+    _add_column(conn, "coin_cooldown", "created_at", "TEXT DEFAULT (datetime('now'))")
+    # signal_candidates ek kolonlar
+    _add_column(conn, "signal_candidates", "decision",       "TEXT DEFAULT 'WATCH'")
+    _add_column(conn, "signal_candidates", "runner_target",  "REAL DEFAULT 0")
+    _add_column(conn, "signal_candidates", "expected_mfe_r", "REAL DEFAULT 0")
+    _add_column(conn, "signal_candidates", "market_regime",  "TEXT DEFAULT ''")
+    _add_column(conn, "signal_candidates", "ax_mode",        "TEXT DEFAULT ''")
+    _add_column(conn, "signal_candidates", "execution_mode", "TEXT DEFAULT ''")
+    _add_column(conn, "signal_candidates", "linked_trade_id","INTEGER DEFAULT 0")
 
 def _table_has_column(conn, table_name, column_name):
     cursor = conn.execute(f"PRAGMA table_info({table_name})")
