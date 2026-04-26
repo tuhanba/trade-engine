@@ -370,22 +370,30 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     min_adx = coin_p.get("min_adx", 20)
 
     if bb_w < min_bb:
+        logger.debug(f"[Signal] {symbol} NULL: bb_w={bb_w:.2f} < min_bb={min_bb}")
         return NULL
 
+    # 15m trend: e21>e50 yeterli (triple stack çok sert) + ADX onayı
+    e21_15v, e50_15v = e21_15.iloc[-1], e50_15.iloc[-1]
     trend_up15 = (
-        e9_15.iloc[-1] > e21_15.iloc[-1] > e50_15.iloc[-1]
-        and c15 > e21_15.iloc[-1]
-        and adx15 > min_adx
+        e21_15v > e50_15v
+        and c15 > e21_15v
+        and adx15 > min_adx * 0.8
         and pdi15 > mdi15
     )
     trend_dn15 = (
-        e9_15.iloc[-1] < e21_15.iloc[-1] < e50_15.iloc[-1]
-        and c15 < e21_15.iloc[-1]
-        and adx15 > min_adx
+        e21_15v < e50_15v
+        and c15 < e21_15v
+        and adx15 > min_adx * 0.8
         and mdi15 > pdi15
     )
 
     if not trend_up15 and not trend_dn15:
+        logger.debug(
+            f"[Signal] {symbol} NULL: 15m no trend "
+            f"e21={e21_15v:.4f} e50={e50_15v:.4f} c={c15:.4f} "
+            f"adx={adx15:.1f} pdi={pdi15:.1f} mdi={mdi15:.1f}"
+        )
         return NULL
 
     # ── 5m Giriş Sinyali ────────────────────────────────────────────────────
@@ -405,6 +413,10 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     bear5 = trend_dn15 and e9_5.iloc[-1] < e21_5.iloc[-1] and 25 < rsi5 < 65
 
     if not bull5 and not bear5:
+        logger.debug(
+            f"[Signal] {symbol} NULL: 5m no entry "
+            f"e9={e9_5.iloc[-1]:.4f} e21={e21_5.iloc[-1]:.4f} rsi5={rsi5:.1f}"
+        )
         return NULL
 
     # ── 1m Kesin Giriş ──────────────────────────────────────────────────────
@@ -421,8 +433,10 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
 
     # RSI 1m giriş onayı
     if bull5 and not (32 < rsi1 < 75):
+        logger.debug(f"[Signal] {symbol} NULL: 1m RSI={rsi1:.1f} out of range (bull)")
         return NULL
     if bear5 and not (25 < rsi1 < 68):
+        logger.debug(f"[Signal] {symbol} NULL: 1m RSI={rsi1:.1f} out of range (bear)")
         return NULL
 
     # ── Yön Belirle ─────────────────────────────────────────────────────────
