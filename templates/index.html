@@ -474,6 +474,25 @@ body::before{
     </div>
   </div>
 
+  <!-- PIPELINE STATS -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-hdr">
+      <div class="card-title">Pipeline (24s)</div>
+      <div class="card-meta" id="pipelineMeta">yukleniyor...</div>
+    </div>
+    <div class="ax-status-grid" id="pipelineGrid">
+      <div class="axs"><div class="axs-label">Taranan</div><div class="axs-val" id="pipeScanned">—</div><div class="axs-sub">coin</div></div>
+      <div class="axs"><div class="axs-label">Filtre Gecti</div><div class="axs-val" id="pipePassed">—</div><div class="axs-sub">coin</div></div>
+      <div class="axs"><div class="axs-label">Candidate</div><div class="axs-val" id="pipeCand">—</div><div class="axs-sub">sinyal</div></div>
+      <div class="axs"><div class="axs-label">ALLOW</div><div class="axs-val sig-allow" id="pipeAllow">—</div><div class="axs-sub">AX onayladi</div></div>
+      <div class="axs"><div class="axs-label">VETO</div><div class="axs-val sig-veto" id="pipeVeto">—</div><div class="axs-sub">reddedildi</div></div>
+      <div class="axs"><div class="axs-label">WATCH</div><div class="axs-val sig-watch" id="pipeWatch">—</div><div class="axs-sub">izleniyor</div></div>
+      <div class="axs"><div class="axs-label">Paper Trade</div><div class="axs-val" id="pipeTrades" style="color:var(--gold-br)">—</div><div class="axs-sub">acildi</div></div>
+      <div class="axs"><div class="axs-label">Dongu</div><div class="axs-val" id="pipeScans">—</div><div class="axs-sub">tarama</div></div>
+    </div>
+    <div id="pipelineNote" style="font-family:var(--mono);font-size:10px;color:var(--text-muted);margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.04)"></div>
+  </div>
+
   <!-- CALENDAR + WEEKLY -->
   <div class="g2b" style="margin-bottom:12px">
     <div class="card">
@@ -894,9 +913,37 @@ async function loadCoinProfiles(){
   }catch(e){console.error("coinProfiles",e)}
 }
 
-async function init(){await Promise.all([loadStats(),loadChart(),loadPositions(),loadHistory(curPage),loadAxStatus(),loadCalendar(),loadWeekly(),loadCoinProfiles()])}
+async function loadPipeline(){
+  try{
+    const r=await fetch('/api/pipeline-stats?hours=24');
+    const j=await r.json();
+    if(!j.ok)return;
+    const s=j.data.summary||{};
+    const sDef=v=>v===undefined||v===null?'—':v;
+    document.getElementById('pipeScanned').textContent=sDef(s.scanned);
+    document.getElementById('pipePassed').textContent=sDef(s.passed);
+    document.getElementById('pipeCand').textContent=sDef(s.candidates);
+    document.getElementById('pipeAllow').textContent=sDef(s.ax_allow);
+    document.getElementById('pipeVeto').textContent=sDef(s.ax_veto);
+    document.getElementById('pipeWatch').textContent=sDef(s.ax_watch);
+    document.getElementById('pipeTrades').textContent=sDef(s.paper_trades);
+    document.getElementById('pipeScans').textContent=sDef(s.scan_count);
+    const lastScan=s.last_scan_time?new Date(s.last_scan_time).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'}):'—';
+    document.getElementById('pipelineMeta').textContent='Son tarama: '+lastScan;
+    // Uyari notu
+    const noteEl=document.getElementById('pipelineNote');
+    const cand=s.candidates||0;const allow=s.ax_allow||0;const trades=s.paper_trades||0;
+    let notes=[];
+    if(cand===0)notes.push('⚠️ 24 saatte 0 candidate — filtreler cok sert olabilir');
+    else if(allow===0)notes.push('⚠️ AX hicbir sinyal ALLOW etmedi — AX esikleri kontrol edin');
+    else if(trades===0)notes.push('ℹ️ ALLOW var ama paper trade acilmadi — risk gate veya exec_ready kontrol edin');
+    noteEl.textContent=notes.join(' | ');
+  }catch(e){console.error('pipeline',e)}
+}
+
+async function init(){await Promise.all([loadStats(),loadChart(),loadPositions(),loadHistory(curPage),loadAxStatus(),loadCalendar(),loadWeekly(),loadCoinProfiles(),loadPipeline()])}
 init();
-setInterval(()=>{loadStats();loadPositions();loadAxStatus()},8000);
+setInterval(()=>{loadStats();loadPositions();loadAxStatus();loadPipeline()},8000);
 setInterval(()=>{loadChart();loadHistory(curPage)},15000);
 setInterval(()=>{loadCalendar();loadWeekly();loadCoinProfiles()},120000);
 </script>
