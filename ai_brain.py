@@ -198,48 +198,7 @@ def evaluate_signal(signal: dict, open_trades: list, balance: float,
 def db():
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
-    conn.execute("""CREATE TABLE IF NOT EXISTS coin_cooldown (
-        symbol TEXT PRIMARY KEY,
-        until TEXT,
-        reason TEXT,
-        consec_losses INTEGER DEFAULT 0)""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS daily_summary (
-        date TEXT PRIMARY KEY,
-        total INTEGER, wins INTEGER, losses INTEGER,
-        pnl REAL, win_rate REAL,
-        best_coin TEXT, worst_coin TEXT,
-        sent INTEGER DEFAULT 0)""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS trade_postmortem (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        trade_id INTEGER UNIQUE,
-        symbol TEXT, direction TEXT,
-        entry REAL, exit_price REAL, sl REAL, tp REAL,
-        mfe REAL, mae REAL,
-        efficiency REAL, sl_tightness REAL,
-        opt_tp REAL, missed_gain REAL, actual_pnl REAL,
-        created_at TEXT)""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS best_params (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        params_json TEXT,
-        win_rate REAL, profit_factor REAL, total_pnl REAL,
-        saved_at TEXT)""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS coin_profile (
-        symbol TEXT PRIMARY KEY,
-        trade_count INTEGER DEFAULT 0,
-        win_rate REAL DEFAULT 0,
-        avg_rr REAL DEFAULT 0,
-        avg_efficiency REAL DEFAULT 0,
-        avg_hold_min REAL DEFAULT 0,
-        best_rsi_min REAL DEFAULT 30,
-        best_rsi_max REAL DEFAULT 70,
-        best_rv_min REAL DEFAULT 1.2,
-        danger_score REAL DEFAULT 0,
-        sl_tight_rate REAL DEFAULT 0,
-        long_wr REAL DEFAULT 0,
-        short_wr REAL DEFAULT 0,
-        preferred_direction TEXT DEFAULT 'BOTH',
-        last_updated TEXT)""")
-    conn.commit()
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -572,14 +531,14 @@ def update_coin_cooldowns(conn, sym_stats):
         if s.get("recent_consec_loss", 0) >= 3:
             until = (now + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
             conn.execute("""INSERT OR REPLACE INTO coin_cooldown
-                (symbol, until, reason, consec_losses)
-                VALUES (?, ?, ?, ?)""",
-                (sym, until, "3+ ardisik kayip", s["recent_consec_loss"]))
+                (symbol, until, reason)
+                VALUES (?, ?, ?)""",
+                (sym, until, "3+ ardisik kayip"))
     conn.execute("DELETE FROM coin_cooldown WHERE until < ?",
                  (now.strftime("%Y-%m-%d %H:%M:%S"),))
     conn.commit()
     rows = conn.execute(
-        "SELECT symbol, consec_losses FROM coin_cooldown").fetchall()
+        "SELECT symbol, reason FROM coin_cooldown").fetchall()
     return [dict(r) for r in rows]
 
 
@@ -1007,10 +966,11 @@ def check_eod_summary(conn, today_trades):
     worst_sym = min(sym_pnl, key=sym_pnl.get) if sym_pnl else "—"
 
     conn.execute("""INSERT OR REPLACE INTO daily_summary
-        (date, total, wins, losses, pnl, win_rate, best_coin, worst_coin, sent)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+        (date, trade_count, win_count, loss_count, net_pnl, win_rate,
+         gross_pnl, avg_r, max_drawdown)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (today, s["total"], s["wins"], s["losses"], s["total_pnl"],
-         s["win_rate"], best_sym, worst_sym))
+         s["win_rate"], s["total_pnl"], s["avg_rr"], s["max_drawdown"]))
     conn.commit()
 
     mood = ("🏆 Harika gün!" if s["total_pnl"] > 5  else
