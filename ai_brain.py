@@ -302,7 +302,7 @@ def calc_stats(trades):
     pf      = gwin / gloss if gloss > 0 else 0
     rrs     = [t.get("r_multiple", 0) for t in trades if t.get("r_multiple")]
     avg_rr  = sum(rrs) / len(rrs) if rrs else 0
-    durs    = [t.get("duration_min", 0) for t in trades if t.get("duration_min")]
+    durs    = [t.get("hold_minutes", 0) for t in trades if t.get("hold_minutes")]
     avg_dur = sum(durs) / len(durs) if durs else 0
     avg_win  = gwin / len(wins)     if wins   else 0
     avg_loss = -gloss / len(losses) if losses else 0
@@ -426,7 +426,7 @@ def update_coin_profiles(conn, all_trades):
 
         # RR ve süre
         rrs  = [t.get("r_multiple", 0) for t in trades if t.get("r_multiple")]
-        durs = [t.get("duration_min", 0) for t in trades if t.get("duration_min")]
+        durs = [t.get("hold_minutes", 0) for t in trades if t.get("hold_minutes")]
         avg_rr  = sum(rrs)  / len(rrs)  if rrs  else 0
         avg_dur = sum(durs) / len(durs) if durs else 0
 
@@ -1225,8 +1225,8 @@ def post_trade_analysis(trade_id, client_ref=None, tg_fn=None):
         actual_pnl = t.get("net_pnl",     0) or 0
         open_t     = t.get("open_time",   "")
         close_t    = t.get("close_time",  "")
-        dur_min    = t.get("duration_min", 0) or 0
-        exit_p     = t.get("exit_price",   0) or 0
+        dur_min    = t.get("hold_minutes", 0) or 0
+        exit_p     = t.get("close_price",  0) or t.get("exit_price", 0) or 0
         status     = (t.get("status",     "") or "").upper()
         leverage   = t.get("leverage",    20) or 20
 
