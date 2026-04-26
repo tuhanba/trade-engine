@@ -38,6 +38,7 @@ from database import (
     set_state, get_state,
     save_daily_summary, save_coin_market_memory,
     set_coin_cooldown, save_pipeline_stats,
+    get_unchecked_candidates, update_pseudo_outcome,
 )
 from coin_library import init_coin_library, update_coin_stats, get_coin_params
 from market_scan import scan, get_current_session, get_market_regime
@@ -208,6 +209,60 @@ def _run_ai_brain(tg_manager):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PSEUDO OUTCOME TRACKER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _check_pseudo_outcomes(client):
+    """
+    VETO/WATCH edilen candidate'lerin ~30 dakika sonraki fiyat hareketini kontrol et.
+    AX'in hangi kararlarının doğru olduğunu öğrenmesini sağlar.
+    """
+    try:
+        candidates = get_unchecked_candidates(minutes_ago=35)
+        if not candidates:
+            return
+
+        for cand in candidates:
+            symbol    = cand["symbol"]
+            direction = cand["direction"]
+            entry     = cand.get("entry") or 0
+            sl        = cand.get("sl") or 0
+
+            if not entry or not sl or not direction:
+                update_pseudo_outcome(cand["id"], 0, 0)
+                continue
+
+            try:
+                ticker = client.futures_ticker(symbol=symbol)
+                current = float(ticker["lastPrice"])
+            except Exception:
+                continue
+
+            sl_dist = abs(entry - sl)
+            if sl_dist <= 0:
+                update_pseudo_outcome(cand["id"], 0, 0)
+                continue
+
+            if direction == "LONG":
+                move = current - entry
+            else:
+                move = entry - current
+
+            r_move = move / sl_dist
+
+            pseudo_mfe_r = round(max(r_move, 0), 3)
+            pseudo_mae_r = round(max(-r_move, 0), 3)
+
+            update_pseudo_outcome(cand["id"], pseudo_mfe_r, pseudo_mae_r)
+            logger.debug(
+                f"[Pseudo] {symbol} {direction} "
+                f"mfe={pseudo_mfe_r:.2f}R mae={pseudo_mae_r:.2f}R"
+            )
+    except Exception as e:
+        logger.error(f"Pseudo outcome hata: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # GÜNLÜK ÖZET
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -298,6 +353,11 @@ def main():
     while True:
         try:
             now = time.time()
+
+            # ── PSEUDO OUTCOME KONTROLÜ (arka planda) ────────────────────────
+            threading.Thread(
+                target=_check_pseudo_outcomes, args=(client,), daemon=True
+            ).start()
 
             # ── ADIM 8+9: MONITOR — her döngüde ─────────────────────────────
             newly_closed = exec_monitor(client)
@@ -447,6 +507,12 @@ def main():
                 if AX_MODE != "execute":
                     _pipe["risk_rejected"] += 1
                     logger.info(f"[OBSERVE] {symbol} — AX_MODE=observe, açılmıyor")
+                    continue
+
+                # Execution kalitesi — scan'den gelen exec_ready flag
+                if not coin_info.get("exec_ready", True):
+                    _pipe["risk_rejected"] += 1
+                    logger.info(f"[QUALITY] {symbol} exec_ready=False, açılmıyor")
                     continue
 
                 # ADIM 7: Aç

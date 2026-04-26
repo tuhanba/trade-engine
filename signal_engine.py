@@ -249,30 +249,55 @@ def _estimate_mfe_r(bb_w: float, adx_v: float, mom3c: float,
     profile = coin_p.get("volatility_profile", "normal")
     base = {"stable": 1.2, "normal": 1.4, "volatile": 1.6, "dangerous": 1.2}.get(profile, 1.4)
 
-    # ADX katkısı
     if adx_v > 30:
         base += 0.3
     elif adx_v > 25:
         base += 0.15
 
-    # BB genişliği katkısı
     if bb_w > 3.0:
         base += 0.2
     elif bb_w > 2.0:
         base += 0.1
 
-    # Momentum uyumu
     if direction == "LONG" and mom3c > 1.5:
         base += 0.15
     elif direction == "SHORT" and mom3c < -1.5:
         base += 0.15
 
-    # Coin geçmişinden avg_mfe varsa blend et
     hist_mfe = coin_p.get("avg_mfe", 0)
     if hist_mfe and hist_mfe > 0:
         base = base * 0.6 + hist_mfe * 0.4
 
     return round(base, 2)
+
+
+def _estimate_mae_r(bb_w: float, adx_v: float, coin_p: dict) -> float:
+    """
+    Beklenen MAE tahmini (R cinsinden).
+    Düşük ADX + dar BB = daha fazla geri çekilme riski.
+    """
+    profile = coin_p.get("volatility_profile", "normal")
+    base = {"stable": 0.3, "normal": 0.45, "volatile": 0.6, "dangerous": 0.8}.get(profile, 0.45)
+
+    # Zayıf trend → daha fazla geri çekilme
+    if adx_v < 20:
+        base += 0.2
+    elif adx_v < 25:
+        base += 0.1
+
+    # Dar BB → chop riski
+    if bb_w < 1.5:
+        base += 0.15
+
+    # Yüksek fakeout riski
+    fakeout_rate = coin_p.get("fakeout_rate", 0)
+    base += fakeout_rate * 0.3
+
+    hist_mae = coin_p.get("avg_mae", 0)
+    if hist_mae and hist_mae > 0:
+        base = base * 0.6 + hist_mae * 0.4
+
+    return round(min(base, 1.5), 2)
 
 def _calc_score(adx_v: float, bb_w: float, bb_chg: float, rv: float,
                 mom3c: float, direction: str, rsi5: float, rsi1: float) -> tuple:
@@ -426,8 +451,10 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     if levels["rr"] < MIN_RR:
         return NULL
 
-    # ── MFE Tahmini ─────────────────────────────────────────────────────────
+    # ── MFE / MAE Tahmini ────────────────────────────────────────────────────
     expected_mfe_r = _estimate_mfe_r(bb_w, adx15, mom3c, direction, coin_p)
+    expected_mae_r = _estimate_mae_r(bb_w, adx15, coin_p)
+
     if expected_mfe_r < MIN_EXPECTED_MFE_R:
         return NULL
 
@@ -444,6 +471,7 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
         "runner_target":   levels["runner_target"],
         "rr":              levels["rr"],
         "expected_mfe_r":  expected_mfe_r,
+        "expected_mae_r":  expected_mae_r,
         "score":           score,
         "confidence":      confidence,
         # debug / loglama

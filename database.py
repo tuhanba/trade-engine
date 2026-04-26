@@ -872,3 +872,37 @@ def get_veto_stats(hours: int = 24) -> list:
             (cutoff,)
         ).fetchall()
         return [{"reason": r[0] or "unknown", "count": r[1]} for r in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PSEUDO OUTCOME — VETO/WATCH SONUÇ TAKİBİ
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_unchecked_candidates(minutes_ago: int = 35) -> list:
+    """
+    Şu andan N dakika önce oluşturulmuş, henüz outcome_checked=0 olan
+    VETO veya WATCH kararları. Pseudo MFE/MAE için kontrol edilecekler.
+    """
+    cutoff_start = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago + 5)).isoformat()
+    cutoff_end   = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago - 5)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, symbol, direction, entry, sl, tp1, tp2
+               FROM signal_candidates
+               WHERE decision IN ('VETO','WATCH')
+                 AND outcome_checked = 0
+                 AND created_at BETWEEN ? AND ?""",
+            (cutoff_start, cutoff_end)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_pseudo_outcome(candidate_id: int, pseudo_mfe_r: float, pseudo_mae_r: float):
+    """VETO/WATCH candidate'in pseudo MFE/MAE sonucunu kaydet."""
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE signal_candidates
+               SET pseudo_mfe_r=?, pseudo_mae_r=?, outcome_checked=1
+               WHERE id=?""",
+            (pseudo_mfe_r, pseudo_mae_r, candidate_id)
+        )

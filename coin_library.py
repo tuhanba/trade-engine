@@ -69,32 +69,13 @@ _COIN_PARAMS: dict[str, dict] = {
     "LTCUSDT":  {**_TEMPLATES["normal"],    "volatility_profile": "normal"},
 }
 
-# coin_params tablosu — trading parametreleri için
-_CREATE_TABLE = """
-CREATE TABLE IF NOT EXISTS coin_params (
-    symbol          TEXT PRIMARY KEY,
-    volatility_profile TEXT DEFAULT 'normal',
-    sl_atr_mult     REAL DEFAULT 1.3,
-    tp_atr_mult     REAL DEFAULT 2.0,
-    risk_pct        REAL DEFAULT 1.0,
-    max_leverage    INTEGER DEFAULT 15,
-    min_adx         REAL DEFAULT 20,
-    min_bb_width    REAL DEFAULT 1.3,
-    min_volume_m    REAL DEFAULT 15.0,
-    enabled         INTEGER DEFAULT 1,
-    updated_at      TEXT DEFAULT (datetime('now'))
-)
-"""
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # INIT
 # ─────────────────────────────────────────────────────────────────────────────
 
 def init_coin_library():
-    """coin_params tablosunu oluştur, COIN_UNIVERSE'i yükle."""
+    """COIN_UNIVERSE coin_params tablosuna yükle (tablo database.py'de oluşturulur)."""
     with get_conn() as conn:
-        conn.execute(_CREATE_TABLE)
         for symbol in COIN_UNIVERSE:
             p = _COIN_PARAMS.get(symbol, _TEMPLATES["normal"])
             conn.execute(

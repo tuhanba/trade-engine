@@ -26,11 +26,16 @@ from coin_library import get_coin_params, is_coin_enabled
 
 logger = logging.getLogger(__name__)
 
-# Tarama filtre sabitleri
-MIN_VOLUME_M      = 10.0    # Milyon $ minimum 24s hacim
-MAX_SPREAD_PCT    = 0.10    # % maksimum spread
-MIN_CHANGE_ABS    = 0.3     # % minimum mutlak fiyat değişimi (hareket var mı)
-MAX_CHANGE_ABS    = 25.0    # % maksimum fiyat değişimi (pump/dump engellemek)
+# ── Candidate (loose) filtreler — DB'ye yaz, AX öğrensin ────────────────────
+CAND_MIN_VOLUME_M  = 2.0    # Milyon $
+CAND_MIN_CHANGE    = 0.3    # %
+CAND_MAX_CHANGE    = 25.0   # %
+CAND_MAX_SPREAD    = 0.15   # %
+
+# ── Execution (strict) filtreler — paper trade açılacaksa ────────────────────
+EXEC_MIN_VOLUME_M  = 10.0   # Milyon $
+EXEC_MIN_CHANGE    = 0.5    # %
+EXEC_MAX_SPREAD    = 0.10   # %
 
 # Ticker cache — Binance API'ye gereksiz çarpma önler
 _ticker_cache: dict = {}
@@ -61,13 +66,17 @@ def _get_open_symbols() -> set:
         return set()
 
 
-def scan(client, open_symbols: set = None) -> list:
+def scan(client, open_symbols: set = None, mode: str = "execute") -> list:
     """
-    COIN_UNIVERSE'i tara, trade edilebilir coinleri döndür.
+    COIN_UNIVERSE'i tara, iki katmanlı filtre uygula.
+
+    mode="candidate" → loose filtreler, daha fazla coin geçer (öğrenme)
+    mode="execute"   → strict filtreler, sadece kaliteli adaylar
 
     Returns:
-        list of dicts: [{"symbol", "volume", "change_pct", "spread_pct", "score"}]
-        Skor sırasına göre azalan.
+        list of dicts: [{"symbol", "volume", "change_pct", "spread_pct",
+                         "score", "exec_ready"}]
+        exec_ready=True → strict filtreden de geçiyor
     """
     if open_symbols is None:
         open_symbols = _get_open_symbols()
@@ -79,59 +88,60 @@ def scan(client, open_symbols: set = None) -> list:
     results = []
 
     for symbol in COIN_UNIVERSE:
-        # ── Temel filtreler ──────────────────────────────────────────────────
+        # ── Sabit filtreler (her iki modda da geçmesi lazım) ─────────────────
         if symbol in open_symbols:
-            continue  # Zaten açık trade var
-
+            continue
         if not is_coin_enabled(symbol):
-            continue  # Devre dışı
-
+            continue
         if is_coin_in_cooldown(symbol):
-            continue  # Cooldown'da
+            continue
 
         ticker = tickers.get(symbol)
         if not ticker:
-            continue  # Futures'da yok
+            continue
 
-        # ── Hacim filtresi ───────────────────────────────────────────────────
+        # ── Hacim ────────────────────────────────────────────────────────────
         try:
             volume_m = float(ticker["quoteVolume"]) / 1_000_000
         except (KeyError, ValueError):
             continue
 
-        coin_p = get_coin_params(symbol)
-        min_vol = coin_p.get("min_volume_m", MIN_VOLUME_M)
-        if volume_m < min_vol:
-            continue
+        if volume_m < CAND_MIN_VOLUME_M:
+            continue  # Loose eşiğin bile altı — atla
 
-        # ── Hareket filtresi ─────────────────────────────────────────────────
+        # ── Hareket ──────────────────────────────────────────────────────────
         try:
             change_pct = abs(float(ticker["priceChangePercent"]))
         except (KeyError, ValueError):
             continue
 
-        if change_pct < MIN_CHANGE_ABS or change_pct > MAX_CHANGE_ABS:
+        if change_pct < CAND_MIN_CHANGE or change_pct > CAND_MAX_CHANGE:
             continue
 
-        # ── Spread filtresi ──────────────────────────────────────────────────
+        # ── Spread ───────────────────────────────────────────────────────────
         try:
             bid = float(ticker.get("bidPrice", 0))
             ask = float(ticker.get("askPrice", 0))
-            if bid <= 0 or ask <= 0:
-                spread_pct = 0
-            else:
-                spread_pct = (ask - bid) / bid * 100
+            spread_pct = (ask - bid) / bid * 100 if bid > 0 and ask > 0 else 0
         except (KeyError, ValueError):
             spread_pct = 0
 
-        if spread_pct > MAX_SPREAD_PCT:
+        if spread_pct > CAND_MAX_SPREAD:
             continue
 
-        # ── Skor hesapla ─────────────────────────────────────────────────────
-        # Yüksek hacim + orta hareket = iyi fırsat
-        vol_score    = min(volume_m / 500, 1.0) * 40        # max 40 puan
-        move_score   = min(change_pct / 5.0, 1.0) * 40     # max 40 puan
-        spread_score = max(0, (MAX_SPREAD_PCT - spread_pct) / MAX_SPREAD_PCT) * 20  # max 20 puan
+        # ── Execution kalitesi kontrolü (strict) ─────────────────────────────
+        coin_p = get_coin_params(symbol)
+        coin_min_vol = coin_p.get("min_volume_m", EXEC_MIN_VOLUME_M)
+        exec_ready = (
+            volume_m >= max(coin_min_vol, EXEC_MIN_VOLUME_M)
+            and change_pct >= EXEC_MIN_CHANGE
+            and spread_pct <= EXEC_MAX_SPREAD
+        )
+
+        # ── Skor ─────────────────────────────────────────────────────────────
+        vol_score    = min(volume_m / 500, 1.0) * 40
+        move_score   = min(change_pct / 5.0, 1.0) * 40
+        spread_score = max(0, (CAND_MAX_SPREAD - spread_pct) / CAND_MAX_SPREAD) * 20
         score = vol_score + move_score + spread_score
 
         results.append({
@@ -141,10 +151,15 @@ def scan(client, open_symbols: set = None) -> list:
             "spread_pct": round(spread_pct, 4),
             "price":      float(ticker.get("lastPrice", 0)),
             "score":      round(score, 2),
+            "exec_ready": exec_ready,
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)
-    logger.info(f"[MarketScan] {len(results)}/{len(COIN_UNIVERSE)} coin geçti.")
+    exec_count = sum(1 for r in results if r["exec_ready"])
+    logger.info(
+        f"[MarketScan] {len(results)}/{len(COIN_UNIVERSE)} coin geçti "
+        f"(exec_ready={exec_count})"
+    )
     return results
 
 
