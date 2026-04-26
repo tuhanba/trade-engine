@@ -668,12 +668,12 @@ def calc_markov_matrix(trades, symbol=None):
         ("LOSS", "LOSS"): 0,
     }
 
+    def _outcome(t):
+        return "WIN" if (t.get("net_pnl") or 0) > 0 else "LOSS"
+
     for i in range(1, len(sorted_t)):
-        prev_r = (sorted_t[i-1].get("result") or sorted_t[i-1].get("status") or "").upper()
-        curr_r = (sorted_t[i].get("result")   or sorted_t[i].get("status")   or "").upper()
-        # Sadece WIN ve LOSS say
-        if prev_r not in ("WIN", "LOSS") or curr_r not in ("WIN", "LOSS"):
-            continue
+        prev_r = _outcome(sorted_t[i-1])
+        curr_r = _outcome(sorted_t[i])
         key = (prev_r, curr_r)
         if key in transitions:
             transitions[key] += 1
@@ -688,7 +688,7 @@ def calc_markov_matrix(trades, symbol=None):
 
     # Son 3 trade
     last3 = sorted_t[-3:]
-    last3_results = [(t.get("result") or t.get("status") or "").upper() for t in last3]
+    last3_results = [_outcome(t) for t in last3]
     hot_streak  = all(r == "WIN"  for r in last3_results) and len(last3_results) == 3
     cold_streak = all(r == "LOSS" for r in last3_results) and len(last3_results) == 3
 
