@@ -426,6 +426,11 @@ def _migrate(conn):
         ("ai_logs", "avg_rr",           "REAL DEFAULT 0"),
         ("ai_logs", "insight",          "TEXT"),
         ("ai_logs", "changes",          "TEXT"),
+        # ── best_params — ai_brain şema kolonları ────────────────────────────
+        ("best_params", "params_json",   "TEXT"),
+        ("best_params", "profit_factor", "REAL DEFAULT 0"),
+        ("best_params", "total_pnl",     "REAL DEFAULT 0"),
+        ("best_params", "saved_at",      "TEXT"),
     ]
     for table, col, col_type in migrations:
         try:

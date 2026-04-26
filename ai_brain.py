@@ -805,7 +805,10 @@ def try_rollback_to_best(conn, last20_stats):
         "SELECT * FROM best_params ORDER BY profit_factor DESC LIMIT 1").fetchone()
     if not best:
         return False, None
-    best_p = json.loads(best["params_json"])
+    raw = best["params_json"] or best["data"] if "data" in best.keys() else best["params_json"]
+    if not raw:
+        return False, None
+    best_p = json.loads(raw)
     reason = (f"ROLLBACK: Win rate {last20_stats['win_rate']:.0%} "
               f"en iyi parametrelere geri donuldu (PF:{best['profit_factor']:.2f})")
     save_params(conn, best_p, reason, [reason])
