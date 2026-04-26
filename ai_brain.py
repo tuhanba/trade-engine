@@ -1243,20 +1243,8 @@ def post_trade_analysis(trade_id, client_ref=None, tg_fn=None):
         efficiency = (abs(exit_p - entry) / mfe_dist * 100) if mfe_dist > 0 else 0
         sl_tight   = (mae_dist / sl_dist * 100)              if sl_dist  > 0 else 0
 
-        conn.execute("""INSERT OR IGNORE INTO trade_postmortem
-            (trade_id, symbol, direction, entry, exit_price, sl, tp,
-             mfe, mae, efficiency, sl_tightness, opt_tp, missed_gain,
-             actual_pnl, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
-            trade_id, sym, direction, entry, exit_p, sl, tp,
-            mfe_price, mae_price, efficiency, sl_tight,
-            opt_tp, missed, actual_pnl,
-            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        ))
-        conn.commit()
         conn.close()
 
-        # Yeni database.py standardına da kaydet
         sl_dist_r = abs(entry - sl) if sl else 1e-10
         save_postmortem({
             "trade_id":      trade_id,
