@@ -354,6 +354,7 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     min_adx = coin_p.get("min_adx", eff_min_adx)
 
     if bb_w < eff_min_bb:
+        logger.debug(f"[SignalEngine] {symbol} BB_WIDTH_LOW bb={bb_w:.2f}<{eff_min_bb}")
         return NULL
 
     # Candidate modunda sadece EMA9 > EMA21 yeterli (EMA50 koşulu esnetildi)
@@ -375,6 +376,7 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
         )
 
     if not trend_up15 and not trend_dn15:
+        logger.debug(f"[SignalEngine] {symbol} NO_TREND15 adx={adx15:.1f} pdi={pdi15:.1f} mdi={mdi15:.1f}")
         return NULL
 
     # ── 5m Giriş Sinyali ────────────────────────────────────────────────────
@@ -399,6 +401,7 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
         bear5 = trend_dn15 and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5 < 65
 
     if not bull5 and not bear5:
+        logger.debug(f"[SignalEngine] {symbol} NO_SETUP5 rsi5={rsi5:.1f}")
         return NULL
 
     # ── 1m Kesin Giriş ──────────────────────────────────────────────────────
@@ -449,11 +452,13 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     levels = _calc_levels(direction, entry, atr1, coin_p)
 
     if levels["rr"] < eff_min_rr:
+        logger.debug(f"[SignalEngine] {symbol} LOW_RR rr={levels['rr']:.2f}<{eff_min_rr}")
         return NULL
 
     # ── MFE Tahmini ─────────────────────────────────────────────────────────
     expected_mfe_r = _estimate_mfe_r(bb_w, adx15, mom3c, direction, coin_p)
     if expected_mfe_r < eff_min_mfe_r:
+        logger.debug(f"[SignalEngine] {symbol} LOW_MFE mfe={expected_mfe_r:.2f}<{eff_min_mfe_r}")
         return NULL
 
     # ── Skor Hesapla ─────────────────────────────────────────────────────────
