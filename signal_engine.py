@@ -24,6 +24,7 @@ from config import (
     SL_ATR_MULT, TP1_R, TP2_R, TRAIL_ATR_MULT,
 )
 from coin_library import get_coin_params
+from database import get_coin_profile
 
 logger = logging.getLogger(__name__)
 
@@ -350,7 +351,7 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
         dict — direction None ise veri yetersiz (teknik hesap imkansız)
     """
     NULL = {"symbol": symbol, "direction": None}
-    coin_p = get_coin_params(symbol)
+    coin_p = {**get_coin_params(symbol), **get_coin_profile(symbol)}
 
     # ── 15m Ana Grafik ──────────────────────────────────────────────────────
     df15 = get_candles(client, symbol, "15m", 100)
