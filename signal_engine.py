@@ -401,8 +401,8 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     if (atr5 / (c5 + 1e-10) * 100) < 0.03:
         return NULL
 
-    bull5 = trend_up15 and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5 < 75
-    bear5 = trend_dn15 and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5 < 65
+    bull5 = trend_up15 and e9_5.iloc[-1] > e21_5.iloc[-1] and 35 < rsi5 < 75
+    bear5 = trend_dn15 and e9_5.iloc[-1] < e21_5.iloc[-1] and 25 < rsi5 < 65
 
     if not bull5 and not bear5:
         return NULL
@@ -435,9 +435,9 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
 
     # ── Funding Rate ─────────────────────────────────────────────────────────
     funding = get_funding_rate(client, symbol)
-    if direction == "LONG"  and funding >  0.001:
-        return NULL   # Longs ağır, olumsuz funding
-    if direction == "SHORT" and funding < -0.001:
+    if direction == "LONG"  and funding >  0.003:
+        return NULL   # Longs ağır, olumsuz funding (>0.3%)
+    if direction == "SHORT" and funding < -0.003:
         return NULL
 
     # ── BTC Trend (bilgi amaçlı, ENGELLEME YOK) ─────────────────────────────
