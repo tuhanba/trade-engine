@@ -592,7 +592,10 @@ def is_overtrading(conn, limit=8):
 
 def postmortem_insights(conn, limit=200):
     rows = conn.execute(
-        "SELECT * FROM trade_postmortem ORDER BY created_at DESC LIMIT ?",
+        """SELECT pm.*, t.net_pnl as actual_pnl
+           FROM trade_postmortem pm
+           LEFT JOIN trades t ON pm.trade_id = t.id
+           ORDER BY pm.created_at DESC LIMIT ?""",
         (limit,)).fetchall()
     if not rows or len(rows) < 5:
         return None
@@ -607,7 +610,7 @@ def postmortem_insights(conn, limit=200):
     avg_missed   = sum(missed_gains)   / len(missed_gains)   if missed_gains   else 0.0
 
     early_exit_rate = len([e for e in efficiencies if e < 50]) / len(efficiencies) if efficiencies else 0.0
-    tight_sl_losses = [r for r in data if (r["sl_tightness"] or 0) > 80 and (r["actual_pnl"] or 0) < 0]
+    tight_sl_losses = [r for r in data if (r.get("sl_tightness") or 0) > 80 and (r.get("actual_pnl") or 0) < 0]
     tight_sl_rate   = len(tight_sl_losses) / len(data)
 
     tp_mult_adj = +0.25 if avg_eff < 45 else +0.12 if avg_eff < 55 else (-0.05 if avg_eff > 80 else 0.0)
