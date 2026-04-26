@@ -383,6 +383,11 @@ def _migrate(conn):
         ("coin_cooldown", "blacklisted_until", "TEXT"),
         ("coin_cooldown", "consec_losses",     "INTEGER DEFAULT 0"),
 
+        # ── pipeline_stats — eski tablo eksik kolonlar ───────────────────────
+        ("pipeline_stats", "risk_rejected",       "INTEGER DEFAULT 0"),
+        ("pipeline_stats", "paper_trades_opened", "INTEGER DEFAULT 0"),
+        ("pipeline_stats", "last_error",          "TEXT"),
+
         # ── ai_logs — eski şema sadece analytics kolonları taşıyor ───────────
         # Yeni kod event/symbol/decision/score/confidence/reason/data yazıyor
         ("ai_logs", "event",            "TEXT"),
