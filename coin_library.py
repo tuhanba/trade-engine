@@ -93,6 +93,16 @@ CREATE TABLE IF NOT EXISTS coin_params (
 
 def init_coin_library():
     """coin_params tablosunu oluştur, COIN_UNIVERSE'i yükle."""
+    # Read-only check: already initialized?
+    with get_conn() as conn:
+        try:
+            existing = conn.execute("SELECT COUNT(*) FROM coin_params").fetchone()[0]
+            if existing >= len(COIN_UNIVERSE):
+                logger.info(f"[CoinLibrary] {existing} coin zaten yüklü, atlanıyor.")
+                return
+        except Exception:
+            pass  # Table may not exist yet — proceed with write
+
     with get_conn() as conn:
         conn.execute(_CREATE_TABLE)
         for symbol in COIN_UNIVERSE:
