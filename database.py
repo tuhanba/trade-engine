@@ -381,6 +381,22 @@ def _migrate(conn):
         # ── ai_brain uyumluluk — coin_cooldown eski şema sütunları ───────────
         ("coin_cooldown", "blacklisted_until", "TEXT"),
         ("coin_cooldown", "consec_losses",     "INTEGER DEFAULT 0"),
+
+        # ── ai_logs — eski şema sadece analytics kolonları taşıyor ───────────
+        # Yeni kod event/symbol/decision/score/confidence/reason/data yazıyor
+        ("ai_logs", "event",            "TEXT"),
+        ("ai_logs", "symbol",           "TEXT"),
+        ("ai_logs", "decision",         "TEXT"),
+        ("ai_logs", "score",            "REAL"),
+        ("ai_logs", "confidence",       "REAL"),
+        ("ai_logs", "reason",           "TEXT"),
+        ("ai_logs", "data",             "TEXT"),
+        # Eski ai_brain analytics kolonları (zaten var ama idempotent)
+        ("ai_logs", "trades_analyzed",  "INTEGER DEFAULT 0"),
+        ("ai_logs", "win_rate",         "REAL DEFAULT 0"),
+        ("ai_logs", "avg_rr",           "REAL DEFAULT 0"),
+        ("ai_logs", "insight",          "TEXT"),
+        ("ai_logs", "changes",          "TEXT"),
     ]
     for table, col, col_type in migrations:
         try:

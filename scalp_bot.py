@@ -452,7 +452,23 @@ def main():
 
                 # ADIM 2: Sinyal üret
                 signal = generate_signal(client, symbol, coin_info)
+
                 if not signal["direction"]:
+                    # Teknik filtre geçemedi — öğrenme için kaydet (no_signal VETO)
+                    save_signal_candidate({
+                        "symbol":         symbol,
+                        "direction":      None,
+                        "session":        session,
+                        "market_regime":  regime,
+                        "ax_mode":        AX_MODE,
+                        "execution_mode": EXECUTION_MODE,
+                        "decision":       "VETO",
+                        "veto_reason":    "no_signal",
+                        "score":          0,
+                        "confidence":     0,
+                    })
+                    _pipe["candidates_created"] += 1
+                    _pipe["ax_veto"] += 1
                     continue
 
                 # ADIM 3: DB'ye kaydet
