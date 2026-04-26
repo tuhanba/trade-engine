@@ -331,7 +331,13 @@ def main():
     logger.info(f"AX Bot başlıyor | AX_MODE={AX_MODE} | EXECUTION={EXECUTION_MODE}")
 
     init_db()
-    init_paper_account()
+    for _attempt in range(10):
+        try:
+            init_paper_account()
+            break
+        except Exception as _e:
+            logger.warning(f"init_paper_account bekleniyor ({_attempt+1}/10): {_e}")
+            time.sleep(3)
     init_coin_library()
 
     client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
