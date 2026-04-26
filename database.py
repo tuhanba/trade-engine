@@ -431,6 +431,20 @@ def _migrate(conn):
         ("best_params", "profit_factor", "REAL DEFAULT 0"),
         ("best_params", "total_pnl",     "REAL DEFAULT 0"),
         ("best_params", "saved_at",      "TEXT"),
+        # ── params — ai_brain optimize şema kolonları ─────────────────────────
+        ("params", "version",        "INTEGER DEFAULT 1"),
+        ("params", "sl_atr_mult",    "REAL DEFAULT 1.3"),
+        ("params", "tp_atr_mult",    "REAL DEFAULT 2.0"),
+        ("params", "rsi5_min",       "REAL DEFAULT 35"),
+        ("params", "rsi5_max",       "REAL DEFAULT 75"),
+        ("params", "rsi1_min",       "REAL DEFAULT 35"),
+        ("params", "rsi1_max",       "REAL DEFAULT 72"),
+        ("params", "vol_ratio_min",  "REAL DEFAULT 1.2"),
+        ("params", "min_volume_m",   "REAL DEFAULT 10.0"),
+        ("params", "min_change_pct", "REAL DEFAULT 2.0"),
+        ("params", "risk_pct",       "REAL DEFAULT 1.5"),
+        ("params", "updated_at",     "TEXT"),
+        ("params", "ai_reason",      "TEXT"),
     ]
     for table, col, col_type in migrations:
         try:
@@ -444,6 +458,21 @@ def _migrate(conn):
             "UPDATE paper_account SET balance = paper_balance "
             "WHERE balance IS NULL OR balance = 250.0"
         )
+    except Exception:
+        pass
+
+    # params: satır yoksa varsayılan değerlerle başlat (AI brain için)
+    try:
+        row = conn.execute("SELECT id FROM params LIMIT 1").fetchone()
+        if not row:
+            conn.execute("""INSERT INTO params
+                (version, sl_atr_mult, tp_atr_mult,
+                 rsi5_min, rsi5_max, rsi1_min, rsi1_max,
+                 vol_ratio_min, min_volume_m, min_change_pct,
+                 risk_pct, updated_at, ai_reason, data, reason)
+                VALUES (1, 1.3, 2.0, 35, 75, 35, 72, 1.2, 10.0, 2.0, 1.5,
+                        datetime('now'), 'Başlangıç değerleri',
+                        '{}', 'init')""")
     except Exception:
         pass
 
