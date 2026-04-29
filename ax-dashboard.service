@@ -1,0 +1,17 @@
+[Unit]
+Description=AX Dashboard (Flask + SocketIO)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/trade_engine
+ExecStart=/root/trade_engine/venv/bin/python3 /root/trade_engine/app.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ax-dashboard
+
+[Install]
+WantedBy=multi-user.target

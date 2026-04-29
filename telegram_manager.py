@@ -200,6 +200,11 @@ class TelegramManager:
             "weekly":   self._cmd_weekly,
             "haftalik": self._cmd_weekly,
             "signal":   self._cmd_signal_stats,
+            "signals":  self._cmd_signal_stats,
+            "scan":     self._cmd_scan,
+            "pipeline": self._cmd_pipeline,
+            "veto":     self._cmd_veto,
+            "debug":    self._cmd_debug,
             "coin":     lambda: self._cmd_coin(args),
             "mode":     self._cmd_mode,
         }
@@ -252,6 +257,10 @@ class TelegramManager:
             "/calendar — Günlük PnL takvimi\n"
             "/weekly — Haftalık özet\n"
             "/signal — Sinyal istatistikleri\n"
+            "/pipeline — Pipeline özeti\n"
+            "/veto — Veto sebepleri\n"
+            "/scan — Son tarama özeti\n"
+            "/debug — Sistem sağlık durumu\n"
             "/coin BTCUSDT — Coin detayı"
         )
 
@@ -396,6 +405,100 @@ class TelegramManager:
             self.send("\n".join(lines))
         except Exception as e:
             self.send(f"Sinyal istatistiği alınamadı: {e}")
+
+    def _cmd_scan(self):
+        """Son tarama özetini göster."""
+        try:
+            from database import get_pipeline_summary
+            p = get_pipeline_summary(hours=1)
+            self.send(
+                f"📡 <b>Son Tarama Özeti (1s)</b>\n\n"
+                f"Taranan: {p.get('scanned', 0)}\n"
+                f"Geçen: {p.get('passed', 0)}\n"
+                f"Candidate: {p.get('candidates', 0)}\n"
+                f"ALLOW: {p.get('ax_allow', 0)} | "
+                f"VETO: {p.get('ax_veto', 0)} | "
+                f"WATCH: {p.get('ax_watch', 0)}\n"
+                f"Açılan trade: {p.get('paper_trades', 0)}\n"
+                f"Son tarama: {p.get('last_scan_time', '—')}"
+            )
+        except Exception as e:
+            self.send(f"Tarama verisi alınamadı: {e}")
+
+    def _cmd_pipeline(self):
+        """24 saatlik pipeline özetini göster."""
+        try:
+            from database import get_pipeline_summary
+            p = get_pipeline_summary(hours=24)
+            total_cand = p.get('candidates', 0)
+            allow      = p.get('ax_allow', 0)
+            veto       = p.get('ax_veto', 0)
+            allow_rate = round(allow / max(total_cand, 1) * 100, 1)
+            self.send(
+                f"🔀 <b>Pipeline Özeti (24s)</b>\n\n"
+                f"Döngü sayısı: {p.get('scan_count', 0)}\n"
+                f"Taranan coin: {p.get('scanned', 0)}\n"
+                f"Filter geçen: {p.get('passed', 0)}\n"
+                f"Candidate: {total_cand}\n"
+                f"ALLOW: {allow} ({allow_rate}%)\n"
+                f"VETO: {veto}\n"
+                f"WATCH: {p.get('ax_watch', 0)}\n"
+                f"Risk reject: {p.get('risk_rejected', 0)}\n"
+                f"Paper trade: {p.get('paper_trades', 0)}"
+            )
+        except Exception as e:
+            self.send(f"Pipeline verisi alınamadı: {e}")
+
+    def _cmd_veto(self):
+        """Veto sebeplerini listele."""
+        try:
+            from database import get_veto_stats
+            stats = get_veto_stats(hours=24)
+            if not stats:
+                self.send("❌ Son 24 saatte veto kaydı yok.")
+                return
+            lines = ["❌ <b>Veto Sebepleri (24s)</b>\n"]
+            for s in stats[:10]:
+                lines.append(f"• {s['reason']}: {s['count']}")
+            self.send("\n".join(lines))
+        except Exception as e:
+            self.send(f"Veto verisi alınamadı: {e}")
+
+    def _cmd_debug(self):
+        """Sistem sağlık durumunu göster."""
+        try:
+            from database import get_paper_balance, get_open_trades, get_pipeline_summary, get_conn
+            bal    = get_paper_balance()
+            trades = get_open_trades()
+            pipe   = get_pipeline_summary(hours=1)
+            last_scan = pipe.get("last_scan_time", "—")
+
+            # DB kontrol
+            try:
+                with get_conn() as conn:
+                    conn.execute("SELECT 1")
+                db_ok = "✅"
+            except Exception:
+                db_ok = "❌"
+
+            state = ("⏸ DURAKLATILDI" if self.paused
+                     else "🏁 FİNİSH" if self.finish_mode
+                     else "✅ AKTİF")
+
+            self.send(
+                f"🔧 <b>Debug / Sağlık</b>\n\n"
+                f"Bot: {state}\n"
+                f"DB: {db_ok}\n"
+                f"Bakiye: ${bal:.2f}\n"
+                f"Açık trade: {len(trades)}\n"
+                f"Son tarama: {last_scan}\n"
+                f"Son 1s candidate: {pipe.get('candidates', 0)}\n"
+                f"Son 1s ALLOW: {pipe.get('ax_allow', 0)}\n"
+                f"Son 1s paper trade: {pipe.get('paper_trades', 0)}\n"
+                f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+            )
+        except Exception as e:
+            self.send(f"Debug verisi alınamadı: {e}")
 
     def _cmd_coin(self, symbol: str):
         symbol = symbol.strip().upper()

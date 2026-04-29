@@ -29,16 +29,18 @@ from config import (
     CIRCUIT_BREAKER_LOSSES, CIRCUIT_BREAKER_MINUTES,
     PAPER_MODE, AX_MODE, EXECUTION_MODE, COIN_UNIVERSE,
     LOG_DIR, LOG_MAX_DAYS, LOG_MAX_MB,
+    TELEGRAM_ALIVE_INTERVAL_HOURS,
 )
 from database import (
     init_db, init_paper_account, get_paper_balance,
     save_signal_candidate, update_signal_decision,
-    get_open_trades, get_trades, get_stats,
+    get_open_trades, get_trades, get_stats, get_trade,
     set_state, get_state,
     save_daily_summary, save_coin_market_memory,
-    set_coin_cooldown,
+    set_coin_cooldown, save_pipeline_stats,
+    get_unchecked_candidates, update_pseudo_outcome,
 )
-from coin_library import init_coin_library, update_coin_stats, get_coin_params
+from coin_library import init_coin_library, update_coin_stats
 from market_scan import scan, get_current_session, get_market_regime
 from signal_engine import generate_signal
 from ai_brain import evaluate_signal, analyze_and_adapt, post_trade_analysis, set_client as ai_set_client
@@ -166,10 +168,8 @@ def on_trade_closed(client, tg_manager, trade: dict):
     save_coin_market_memory(symbol, session, regime, direction, result, r_mult)
 
     # Cooldown: ardışık kayıpta coin'i geçici olarak beklet
-    if result == "LOSS":
-        coin_p = get_coin_params(symbol)
-        if coin_p.get("loss_count", 0) % 3 == 0:  # Her 3 kayıpta cooldown
-            set_coin_cooldown(symbol, minutes=120, reason="consecutive_loss")
+    if result == "LOSS" and consecutive_losses > 0 and consecutive_losses % 3 == 0:
+        set_coin_cooldown(symbol, minutes=120, reason="consecutive_loss")
 
     # Circuit breaker
     if consecutive_losses >= CIRCUIT_BREAKER_LOSSES:
@@ -204,6 +204,60 @@ def _run_ai_brain(tg_manager):
             tg_manager.send(f"🧠 <b>AI Brain Raporu</b>\n\n{str(insight)[:800]}")
     except Exception as e:
         logger.error(f"AI Brain hata: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PSEUDO OUTCOME TRACKER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _check_pseudo_outcomes(client):
+    """
+    VETO/WATCH edilen candidate'lerin ~30 dakika sonraki fiyat hareketini kontrol et.
+    AX'in hangi kararlarının doğru olduğunu öğrenmesini sağlar.
+    """
+    try:
+        candidates = get_unchecked_candidates(minutes_ago=35)
+        if not candidates:
+            return
+
+        for cand in candidates:
+            symbol    = cand["symbol"]
+            direction = cand["direction"]
+            entry     = cand.get("entry") or 0
+            sl        = cand.get("sl") or 0
+
+            if not entry or not sl or not direction:
+                update_pseudo_outcome(cand["id"], 0, 0)
+                continue
+
+            try:
+                ticker = client.futures_ticker(symbol=symbol)
+                current = float(ticker["lastPrice"])
+            except Exception:
+                continue
+
+            sl_dist = abs(entry - sl)
+            if sl_dist <= 0:
+                update_pseudo_outcome(cand["id"], 0, 0)
+                continue
+
+            if direction == "LONG":
+                move = current - entry
+            else:
+                move = entry - current
+
+            r_move = move / sl_dist
+
+            pseudo_mfe_r = round(max(r_move, 0), 3)
+            pseudo_mae_r = round(max(-r_move, 0), 3)
+
+            update_pseudo_outcome(cand["id"], pseudo_mfe_r, pseudo_mae_r)
+            logger.debug(
+                f"[Pseudo] {symbol} {direction} "
+                f"mfe={pseudo_mfe_r:.2f}R mae={pseudo_mae_r:.2f}R"
+            )
+    except Exception as e:
+        logger.error(f"Pseudo outcome hata: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -290,18 +344,24 @@ def main():
             f"⛔ CB: {CIRCUIT_BREAKER_LOSSES} kayıp = {CIRCUIT_BREAKER_MINUTES}dk"
         )
 
-    last_scan    = 0
-    last_hb      = time.time()
-    prev_open_ids = {t["id"] for t in get_open_trades()}
+    last_scan         = 0
+    last_hb           = time.time()
+    last_pseudo_check = 0
 
     while True:
         try:
             now = time.time()
 
+            # ── PSEUDO OUTCOME KONTROLÜ — her 5 dakikada bir ─────────────────
+            if now - last_pseudo_check >= 300:
+                last_pseudo_check = now
+                threading.Thread(
+                    target=_check_pseudo_outcomes, args=(client,), daemon=True
+                ).start()
+
             # ── ADIM 8+9: MONITOR — her döngüde ─────────────────────────────
             newly_closed = exec_monitor(client)
             for trade_id in newly_closed:
-                from database import get_trade
                 t = get_trade(trade_id)
                 if t:
                     on_trade_closed(client, tg_manager, t)
@@ -314,8 +374,9 @@ def main():
                         f"Bakiye: ${get_paper_balance():.2f}"
                     )
 
-            # ── HEARTBEAT saatlik ─────────────────────────────────────────────
-            if now - last_hb >= 3600:
+            # ── HEARTBEAT (config ile ayarlanabilir, default 6 saat) ──────────
+            hb_interval = TELEGRAM_ALIVE_INTERVAL_HOURS * 3600
+            if now - last_hb >= hb_interval:
                 last_hb = now
                 tg_send(tg_manager,
                     f"💓 <b>BOT AKTİF</b> | "
@@ -362,7 +423,22 @@ def main():
             regime  = get_market_regime(client)
 
             candidates = scan(client, open_symbols=open_symbols)
+
+            # Pipeline stats: bu döngü için sayaçlar
+            _pipe = {
+                "scanned_symbols":      len(COIN_UNIVERSE),
+                "passed_market_filter": len(candidates),
+                "candidates_created":   0,
+                "ax_allow":             0,
+                "ax_veto":              0,
+                "ax_watch":             0,
+                "risk_rejected":        0,
+                "paper_trades_opened":  0,
+                "last_error":           None,
+            }
+
             if not candidates:
+                save_pipeline_stats(_pipe)
                 time.sleep(5)
                 continue
 
@@ -375,7 +451,23 @@ def main():
 
                 # ADIM 2: Sinyal üret
                 signal = generate_signal(client, symbol, coin_info)
+
                 if not signal["direction"]:
+                    # Teknik filtre geçemedi — öğrenme için kaydet (no_signal VETO)
+                    save_signal_candidate({
+                        "symbol":         symbol,
+                        "direction":      None,
+                        "session":        session,
+                        "market_regime":  regime,
+                        "ax_mode":        AX_MODE,
+                        "execution_mode": EXECUTION_MODE,
+                        "decision":       "VETO",
+                        "veto_reason":    "no_signal",
+                        "score":          0,
+                        "confidence":     0,
+                    })
+                    _pipe["candidates_created"] += 1
+                    _pipe["ax_veto"] += 1
                     continue
 
                 # ADIM 3: DB'ye kaydet
@@ -387,6 +479,7 @@ def main():
                     "execution_mode": EXECUTION_MODE,
                 })
                 signal["candidate_id"] = candidate_id
+                _pipe["candidates_created"] += 1
 
                 # ADIM 4: AX karar
                 ax = evaluate_signal(
@@ -407,24 +500,43 @@ def main():
                     ax.get("veto_reason"),
                 )
 
-                if decision != "ALLOW":
+                if decision == "VETO":
+                    _pipe["ax_veto"] += 1
                     logger.info(
-                        f"[{decision}] {symbol} {signal['direction']} "
+                        f"[VETO] {symbol} {signal['direction']} "
                         f"| {ax.get('veto_reason','')} "
                         f"| score={ax['score']:.0f}"
                     )
                     continue
+                elif decision == "WATCH":
+                    _pipe["ax_watch"] += 1
+                    logger.info(
+                        f"[WATCH] {symbol} {signal['direction']} "
+                        f"| score={ax['score']:.0f}"
+                    )
+                    continue
+
+                _pipe["ax_allow"] += 1
 
                 # ADIM 6: Risk kontrolü — son kez
                 if AX_MODE != "execute":
+                    _pipe["risk_rejected"] += 1
                     logger.info(f"[OBSERVE] {symbol} — AX_MODE=observe, açılmıyor")
+                    continue
+
+                # Execution kalitesi — scan'den gelen exec_ready flag
+                if not coin_info.get("exec_ready", True):
+                    _pipe["risk_rejected"] += 1
+                    logger.info(f"[QUALITY] {symbol} exec_ready=False, açılmıyor")
                     continue
 
                 # ADIM 7: Aç
                 trade_id = open_trade(client, signal, ax)
                 if not trade_id:
+                    _pipe["risk_rejected"] += 1
                     continue
 
+                _pipe["paper_trades_opened"] += 1
                 update_signal_decision(candidate_id, "ALLOW",
                                        ax["score"], ax["confidence"],
                                        linked_trade_id=trade_id)
@@ -451,11 +563,25 @@ def main():
                     f"score={ax['score']:.0f} rr={signal['rr']:.2f}"
                 )
 
+            # Her scan döngüsü sonunda pipeline stats kaydet
+            save_pipeline_stats(_pipe)
+            logger.info(
+                f"[Pipeline] scan={_pipe['scanned_symbols']} "
+                f"passed={_pipe['passed_market_filter']} "
+                f"cand={_pipe['candidates_created']} "
+                f"allow={_pipe['ax_allow']} veto={_pipe['ax_veto']} "
+                f"watch={_pipe['ax_watch']} opened={_pipe['paper_trades_opened']}"
+            )
+
         except KeyboardInterrupt:
             logger.info("Bot durduruldu (KeyboardInterrupt).")
             break
         except Exception as e:
             logger.error(f"Ana döngü hatası: {e}", exc_info=True)
+            try:
+                save_pipeline_stats({"last_error": str(e)[:500]})
+            except Exception:
+                pass
             time.sleep(10)
 
 

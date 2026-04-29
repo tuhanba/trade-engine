@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -98,6 +98,7 @@ def init_db():
             runner_target    REAL,
             rr               REAL,
             expected_mfe_r   REAL,
+            expected_mae_r   REAL,
             score            REAL DEFAULT 0,
             confidence       REAL DEFAULT 0,
             decision         TEXT DEFAULT 'PENDING',
@@ -107,7 +108,10 @@ def init_db():
             ax_mode          TEXT DEFAULT 'execute',
             execution_mode   TEXT DEFAULT 'paper',
             linked_trade_id  INTEGER,
-            created_at       TEXT DEFAULT (datetime('now'))
+            created_at       TEXT DEFAULT (datetime('now')),
+            outcome_checked  INTEGER DEFAULT 0,
+            pseudo_mfe_r     REAL,
+            pseudo_mae_r     REAL
         );
 
         -- ── paper_account ────────────────────────────────────────────────────
@@ -267,30 +271,71 @@ def init_db():
             created_at   TEXT DEFAULT (datetime('now'))
         );
 
+        -- ── coin_params ──────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS coin_params (
+            symbol             TEXT PRIMARY KEY,
+            volatility_profile TEXT DEFAULT 'normal',
+            sl_atr_mult        REAL DEFAULT 1.3,
+            tp_atr_mult        REAL DEFAULT 2.0,
+            risk_pct           REAL DEFAULT 1.0,
+            max_leverage       INTEGER DEFAULT 15,
+            min_adx            REAL DEFAULT 20,
+            min_bb_width       REAL DEFAULT 1.3,
+            min_volume_m       REAL DEFAULT 10.0,
+            enabled            INTEGER DEFAULT 1,
+            updated_at         TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── pipeline_stats ───────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS pipeline_stats (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_time            TEXT DEFAULT (datetime('now')),
+            scanned_symbols      INTEGER DEFAULT 0,
+            passed_market_filter INTEGER DEFAULT 0,
+            candidates_created   INTEGER DEFAULT 0,
+            ax_allow             INTEGER DEFAULT 0,
+            ax_veto              INTEGER DEFAULT 0,
+            ax_watch             INTEGER DEFAULT 0,
+            risk_rejected        INTEGER DEFAULT 0,
+            paper_trades_opened  INTEGER DEFAULT 0,
+            last_error           TEXT
+        );
+
         """)
 
     # ── Eski şemadan yeni kolonlara migration ─────────────────────────────────
-    _migrate(get_conn())
+    with get_conn() as _mc:
+        _migrate(_mc)
     logger.info("DB init tamamlandı.")
 
 
 def _migrate(conn):
     """Eksik kolonları ekle — her çalıştırmada idempotent."""
     migrations = [
-        # trades tablosu — yeni kolonlar
+        # trades tablosu — tüm olası eksik kolonlar
+        ("trades", "status",             "TEXT DEFAULT 'open'"),
+        ("trades", "environment",        "TEXT DEFAULT 'paper'"),
+        ("trades", "ax_mode",            "TEXT DEFAULT 'execute'"),
+        ("trades", "entry",              "REAL"),
+        ("trades", "sl",                 "REAL"),
+        ("trades", "tp1",                "REAL"),
+        ("trades", "tp2",                "REAL"),
+        ("trades", "trail_stop",         "REAL"),
+        ("trades", "qty",                "REAL"),
         ("trades", "qty_tp1",            "REAL"),
         ("trades", "qty_tp2",            "REAL"),
         ("trades", "qty_runner",         "REAL"),
-        ("trades", "trail_stop",         "REAL"),
         ("trades", "realized_pnl",       "REAL DEFAULT 0"),
+        ("trades", "net_pnl",            "REAL DEFAULT 0"),
         ("trades", "r_multiple",         "REAL DEFAULT 0"),
         ("trades", "tp1_hit",            "INTEGER DEFAULT 0"),
         ("trades", "tp2_hit",            "INTEGER DEFAULT 0"),
         ("trades", "linked_candidate_id","INTEGER"),
-        ("trades", "hold_minutes",       "REAL DEFAULT 0"),
-        ("trades", "ax_mode",            "TEXT DEFAULT 'execute'"),
-        ("trades", "environment",        "TEXT DEFAULT 'paper'"),
+        ("trades", "open_time",          "TEXT"),
+        ("trades", "close_time",         "TEXT"),
+        ("trades", "close_price",        "REAL"),
         ("trades", "close_reason",       "TEXT"),
+        ("trades", "hold_minutes",       "REAL DEFAULT 0"),
         # coin_params tablosu — yeni kolonlar
         ("coin_params", "volatility_profile", "TEXT DEFAULT 'normal'"),
         ("coin_params", "sl_atr_mult",        "REAL DEFAULT 1.3"),
@@ -299,12 +344,107 @@ def _migrate(conn):
         ("coin_params", "max_leverage",       "INTEGER DEFAULT 15"),
         ("coin_params", "min_adx",            "REAL DEFAULT 20"),
         ("coin_params", "min_bb_width",       "REAL DEFAULT 1.3"),
-        ("coin_params", "min_volume_m",       "REAL DEFAULT 15.0"),
+        ("coin_params", "min_volume_m",       "REAL DEFAULT 10.0"),
         ("coin_params", "enabled",            "INTEGER DEFAULT 1"),
         ("coin_params", "updated_at",         "TEXT DEFAULT (datetime('now'))"),
         # paper_account — eski şemada 'paper_balance', yeni şemada 'balance'
         ("paper_account", "balance",         "REAL DEFAULT 250.0"),
         ("paper_account", "initial_balance", "REAL DEFAULT 250.0"),
+        # signal_candidates — yeni alanlar
+        ("signal_candidates", "expected_mae_r",  "REAL"),
+        ("signal_candidates", "outcome_checked", "INTEGER DEFAULT 0"),
+        ("signal_candidates", "pseudo_mfe_r",    "REAL"),
+        ("signal_candidates", "pseudo_mae_r",    "REAL"),
+
+        # ── ai_brain uyumluluk — trade_postmortem eski şema sütunları ────────
+        # ai_brain.py kendi INSERT formatını kullanıyor, her iki şema aynı
+        # tabloda yaşamalı. Bu sütunlar ai_brain tarafından dolduruluyor.
+        ("trade_postmortem", "entry",       "REAL"),
+        ("trade_postmortem", "exit_price",  "REAL"),
+        ("trade_postmortem", "sl",          "REAL"),
+        ("trade_postmortem", "tp",          "REAL"),
+        ("trade_postmortem", "mfe",         "REAL"),
+        ("trade_postmortem", "mae",         "REAL"),
+        ("trade_postmortem", "opt_tp",      "REAL"),
+        ("trade_postmortem", "actual_pnl",  "REAL"),
+
+        # ── ai_brain uyumluluk — daily_summary eski şema sütunları ──────────
+        ("daily_summary", "total",       "INTEGER DEFAULT 0"),
+        ("daily_summary", "wins",        "INTEGER DEFAULT 0"),
+        ("daily_summary", "losses",      "INTEGER DEFAULT 0"),
+        ("daily_summary", "pnl",         "REAL DEFAULT 0"),
+        ("daily_summary", "best_coin",   "TEXT"),
+        ("daily_summary", "worst_coin",  "TEXT"),
+        ("daily_summary", "sent",        "INTEGER DEFAULT 0"),
+
+        # ── ai_brain uyumluluk — coin_profile eski şema sütunları ────────────
+        ("coin_profile", "avg_rr",           "REAL DEFAULT 0"),
+        ("coin_profile", "avg_efficiency",   "REAL DEFAULT 0"),
+        ("coin_profile", "avg_hold_min",     "REAL DEFAULT 0"),
+        ("coin_profile", "best_rsi_min",     "REAL DEFAULT 30"),
+        ("coin_profile", "best_rsi_max",     "REAL DEFAULT 70"),
+        ("coin_profile", "best_rv_min",      "REAL DEFAULT 1.2"),
+        ("coin_profile", "sl_tight_rate",    "REAL DEFAULT 0"),
+        ("coin_profile", "long_wr",          "REAL DEFAULT 0"),
+        ("coin_profile", "short_wr",         "REAL DEFAULT 0"),
+        ("coin_profile", "last_updated",     "TEXT"),
+        # coin_library.update_coin_stats() tarafından yazılan kolonlar
+        ("coin_profile", "trade_count",         "INTEGER DEFAULT 0"),
+        ("coin_profile", "win_count",           "INTEGER DEFAULT 0"),
+        ("coin_profile", "loss_count",          "INTEGER DEFAULT 0"),
+        ("coin_profile", "win_rate",            "REAL DEFAULT 0"),
+        ("coin_profile", "avg_r",               "REAL DEFAULT 0"),
+        ("coin_profile", "profit_factor",       "REAL DEFAULT 0"),
+        ("coin_profile", "avg_mfe",             "REAL DEFAULT 0"),
+        ("coin_profile", "avg_mae",             "REAL DEFAULT 0"),
+        ("coin_profile", "best_session",        "TEXT"),
+        ("coin_profile", "preferred_direction", "TEXT"),
+        ("coin_profile", "danger_score",        "REAL DEFAULT 0"),
+        ("coin_profile", "fakeout_rate",        "REAL DEFAULT 0"),
+
+        # ── ai_brain uyumluluk — coin_cooldown eski şema sütunları ───────────
+        ("coin_cooldown", "blacklisted_until", "TEXT"),
+        ("coin_cooldown", "consec_losses",     "INTEGER DEFAULT 0"),
+
+        # ── pipeline_stats — eski tablo eksik kolonlar ───────────────────────
+        ("pipeline_stats", "risk_rejected",       "INTEGER DEFAULT 0"),
+        ("pipeline_stats", "paper_trades_opened", "INTEGER DEFAULT 0"),
+        ("pipeline_stats", "last_error",          "TEXT"),
+
+        # ── ai_logs — eski şema sadece analytics kolonları taşıyor ───────────
+        # Yeni kod event/symbol/decision/score/confidence/reason/data yazıyor
+        ("ai_logs", "event",            "TEXT"),
+        ("ai_logs", "symbol",           "TEXT"),
+        ("ai_logs", "decision",         "TEXT"),
+        ("ai_logs", "score",            "REAL"),
+        ("ai_logs", "confidence",       "REAL"),
+        ("ai_logs", "reason",           "TEXT"),
+        ("ai_logs", "data",             "TEXT"),
+        # Eski ai_brain analytics kolonları (zaten var ama idempotent)
+        ("ai_logs", "trades_analyzed",  "INTEGER DEFAULT 0"),
+        ("ai_logs", "win_rate",         "REAL DEFAULT 0"),
+        ("ai_logs", "avg_rr",           "REAL DEFAULT 0"),
+        ("ai_logs", "insight",          "TEXT"),
+        ("ai_logs", "changes",          "TEXT"),
+        # ── best_params — ai_brain şema kolonları ────────────────────────────
+        ("best_params", "params_json",   "TEXT"),
+        ("best_params", "profit_factor", "REAL DEFAULT 0"),
+        ("best_params", "total_pnl",     "REAL DEFAULT 0"),
+        ("best_params", "saved_at",      "TEXT"),
+        # ── params — ai_brain optimize şema kolonları ─────────────────────────
+        ("params", "version",        "INTEGER DEFAULT 1"),
+        ("params", "sl_atr_mult",    "REAL DEFAULT 1.3"),
+        ("params", "tp_atr_mult",    "REAL DEFAULT 2.0"),
+        ("params", "rsi5_min",       "REAL DEFAULT 35"),
+        ("params", "rsi5_max",       "REAL DEFAULT 75"),
+        ("params", "rsi1_min",       "REAL DEFAULT 35"),
+        ("params", "rsi1_max",       "REAL DEFAULT 72"),
+        ("params", "vol_ratio_min",  "REAL DEFAULT 1.2"),
+        ("params", "min_volume_m",   "REAL DEFAULT 10.0"),
+        ("params", "min_change_pct", "REAL DEFAULT 2.0"),
+        ("params", "risk_pct",       "REAL DEFAULT 1.5"),
+        ("params", "updated_at",     "TEXT"),
+        ("params", "ai_reason",      "TEXT"),
     ]
     for table, col, col_type in migrations:
         try:
@@ -320,6 +460,26 @@ def _migrate(conn):
         )
     except Exception:
         pass
+
+    # params: satır yoksa varsayılan değerlerle başlat (AI brain için)
+    row = conn.execute("SELECT id FROM params LIMIT 1").fetchone()
+    if not row:
+        default_params = json.dumps({
+            "sl_atr_mult":    1.3,
+            "tp_atr_mult":    2.0,
+            "rsi5_min":       35,
+            "rsi5_max":       75,
+            "rsi1_min":       35,
+            "rsi1_max":       72,
+            "vol_ratio_min":  1.2,
+            "min_volume_m":   10.0,
+            "min_change_pct": 2.0,
+            "risk_pct":       1.5,
+        })
+        conn.execute(
+            "INSERT INTO params (data, reason) VALUES (?, ?)",
+            (default_params, "init")
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -421,15 +581,15 @@ def update_trade(trade_id: int, fields: dict):
         conn.execute(f"UPDATE trades SET {sets} WHERE id=?", vals)
 
 def close_trade(trade_id: int, close_price: float, net_pnl: float,
-                reason: str, hold_minutes: float = 0):
+                reason: str, hold_minutes: float = 0, r_multiple: float = 0):
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         conn.execute(
             """UPDATE trades SET
                 status='closed', close_price=?, net_pnl=?, close_reason=?,
-                hold_minutes=?, close_time=?
+                hold_minutes=?, close_time=?, r_multiple=?
                WHERE id=?""",
-            (close_price, net_pnl, reason, hold_minutes, now, trade_id)
+            (close_price, net_pnl, reason, hold_minutes, now, r_multiple, trade_id)
         )
 
 def get_trade(trade_id: int) -> dict | None:
@@ -730,4 +890,140 @@ def save_pattern(symbol: str, direction: str, session: str, result: str,
                (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PIPELINE STATS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_pipeline_stats(stats: dict):
+    """Bir tarama döngüsünün istatistiklerini kaydet."""
+    sql = """
+        INSERT INTO pipeline_stats
+            (scan_time, scanned_symbols, passed_market_filter, candidates_created,
+             ax_allow, ax_veto, ax_watch, risk_rejected, paper_trades_opened, last_error)
+        VALUES
+            (:scan_time, :scanned_symbols, :passed_market_filter, :candidates_created,
+             :ax_allow, :ax_veto, :ax_watch, :risk_rejected, :paper_trades_opened, :last_error)
+    """
+    defaults = {
+        "scan_time": datetime.now(timezone.utc).isoformat(),
+        "scanned_symbols": 0, "passed_market_filter": 0, "candidates_created": 0,
+        "ax_allow": 0, "ax_veto": 0, "ax_watch": 0,
+        "risk_rejected": 0, "paper_trades_opened": 0, "last_error": None,
+    }
+    with get_conn() as conn:
+        conn.execute(sql, {**defaults, **stats})
+
+
+def get_pipeline_stats(limit: int = 50) -> list:
+    """Son N tarama döngüsünün istatistiklerini döndür."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM pipeline_stats ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_pipeline_summary(hours: int = 24) -> dict:
+    """Son N saatin birleşik pipeline özeti."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT
+                COUNT(*) as scan_count,
+                SUM(scanned_symbols) as scanned,
+                SUM(passed_market_filter) as passed,
+                SUM(candidates_created) as candidates,
+                SUM(ax_allow) as ax_allow,
+                SUM(ax_veto) as ax_veto,
+                SUM(ax_watch) as ax_watch,
+                SUM(risk_rejected) as risk_rejected,
+                SUM(paper_trades_opened) as paper_trades,
+                MAX(scan_time) as last_scan_time
+               FROM pipeline_stats WHERE scan_time >= ?""",
+            (cutoff,)
+        ).fetchone()
+    if not row or not row[0]:
+        return {
+            "scan_count": 0, "scanned": 0, "passed": 0, "candidates": 0,
+            "ax_allow": 0, "ax_veto": 0, "ax_watch": 0,
+            "risk_rejected": 0, "paper_trades": 0, "last_scan_time": None,
+        }
+    return {
+        "scan_count":   row[0] or 0,
+        "scanned":      row[1] or 0,
+        "passed":       row[2] or 0,
+        "candidates":   row[3] or 0,
+        "ax_allow":     row[4] or 0,
+        "ax_veto":      row[5] or 0,
+        "ax_watch":     row[6] or 0,
+        "risk_rejected":row[7] or 0,
+        "paper_trades": row[8] or 0,
+        "last_scan_time": row[9],
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIGNAL CANDIDATES — QUERY
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_recent_candidates(limit: int = 50, hours: int = 24) -> list:
+    """Son N saatin signal candidate'lerini döndür."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM signal_candidates
+               WHERE created_at >= ? ORDER BY id DESC LIMIT ?""",
+            (cutoff, limit)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_veto_stats(hours: int = 24) -> list:
+    """Veto sebeplerini say (son N saat)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT veto_reason, COUNT(*) as cnt
+               FROM signal_candidates
+               WHERE decision='VETO' AND created_at >= ?
+               GROUP BY veto_reason ORDER BY cnt DESC""",
+            (cutoff,)
+        ).fetchall()
+        return [{"reason": r[0] or "unknown", "count": r[1]} for r in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PSEUDO OUTCOME — VETO/WATCH SONUÇ TAKİBİ
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_unchecked_candidates(minutes_ago: int = 35) -> list:
+    """
+    Şu andan N dakika önce oluşturulmuş, henüz outcome_checked=0 olan
+    VETO veya WATCH kararları. Pseudo MFE/MAE için kontrol edilecekler.
+    """
+    cutoff_start = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago + 5)).isoformat()
+    cutoff_end   = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago - 5)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, symbol, direction, entry, sl, tp1, tp2
+               FROM signal_candidates
+               WHERE decision IN ('VETO','WATCH')
+                 AND outcome_checked = 0
+                 AND created_at BETWEEN ? AND ?""",
+            (cutoff_start, cutoff_end)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_pseudo_outcome(candidate_id: int, pseudo_mfe_r: float, pseudo_mae_r: float):
+    """VETO/WATCH candidate'in pseudo MFE/MAE sonucunu kaydet."""
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE signal_candidates
+               SET pseudo_mfe_r=?, pseudo_mae_r=?, outcome_checked=1
+               WHERE id=?""",
+            (pseudo_mfe_r, pseudo_mae_r, candidate_id)
         )

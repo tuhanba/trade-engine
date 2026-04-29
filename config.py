@@ -56,6 +56,26 @@ COIN_UNIVERSE = [
     "RNDRUSDT", "WIFUSDT",  "PEPEUSDT", "SEIUSDT",  "LTCUSDT",
 ]
 
+# ── AI Eşikleri ──────────────────────────────────────────────────────────────
+CONFIDENCE_MIN = float(os.getenv("CONFIDENCE_MIN", "0.55"))
+SCORE_MIN      = float(os.getenv("SCORE_MIN", "60"))
+
+# ── Candidate Eşikleri (daha gevşek — öğrenme için) ──────────────────────────
+CANDIDATE_MIN_VOLUME_M      = float(os.getenv("CANDIDATE_MIN_VOLUME_M", "2.0"))
+CANDIDATE_VOL_RATIO_MIN     = float(os.getenv("CANDIDATE_VOL_RATIO_MIN", "0.8"))
+CANDIDATE_MIN_CHANGE_PCT    = float(os.getenv("CANDIDATE_MIN_CHANGE_PCT", "0.5"))
+CANDIDATE_MIN_RR            = float(os.getenv("CANDIDATE_MIN_RR", "1.2"))
+CANDIDATE_MIN_EXPECTED_MFE_R= float(os.getenv("CANDIDATE_MIN_EXPECTED_MFE_R", "0.7"))
+
+# ── Debug ─────────────────────────────────────────────────────────────────────
+DEBUG_SIGNAL_MODE = os.getenv("DEBUG_SIGNAL_MODE", "false").lower() == "true"
+
+# ── Telegram ─────────────────────────────────────────────────────────────────
+TELEGRAM_ALIVE_INTERVAL_HOURS = int(os.getenv("TELEGRAM_ALIVE_INTERVAL_HOURS", "6"))
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+DASHBOARD_REFRESH_SECONDS = int(os.getenv("DASHBOARD_REFRESH_SECONDS", "10"))
+
 # ── Log ──────────────────────────────────────────────────────────────────────
 LOG_DIR      = os.getenv("LOG_DIR", "/root/trade_engine/logs")
 LOG_MAX_DAYS = int(os.getenv("LOG_MAX_DAYS", "7"))

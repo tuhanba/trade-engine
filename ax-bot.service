@@ -1,0 +1,17 @@
+[Unit]
+Description=AX Scalp Bot (Paper Trading Engine)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/trade_engine
+ExecStart=/root/trade_engine/venv/bin/python3 /root/trade_engine/scalp_bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ax-bot
+
+[Install]
+WantedBy=multi-user.target

@@ -20,6 +20,9 @@ from config import (
     RISK_PCT, TP1_CLOSE_PCT, TP2_CLOSE_PCT, RUNNER_CLOSE_PCT,
     TRAIL_ATR_MULT, EXECUTION_MODE,
 )
+
+# Binance Futures taker fee (her iki taraf: açılış + kapanış)
+TAKER_FEE_RATE = 0.0004  # %0.04 per side → %0.08 round-trip
 from database import (
     save_trade, update_trade, close_trade as db_close_trade,
     get_open_trades, update_paper_balance, get_paper_balance, save_postmortem,
@@ -286,13 +289,24 @@ def _check_trade(client, t: dict) -> bool:
 # YARDIMCILAR
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _calc_pnl(direction: str, entry: float, exit_price: float, qty: float) -> float:
-    """Paper trade PnL hesabı (USD, kaldıraçsız)."""
+def _calc_pnl(direction: str, entry: float, exit_price: float, qty: float,
+              include_fee: bool = True) -> float:
+    """
+    Paper trade PnL hesabı (USD, kaldıraçsız).
+    Fee: Binance Futures taker %0.04 açılışta + %0.04 kapanışta.
+    """
     if direction == "LONG":
-        pnl = (exit_price - entry) * qty
+        gross = (exit_price - entry) * qty
     else:
-        pnl = (entry - exit_price) * qty
-    return round(pnl, 4)
+        gross = (entry - exit_price) * qty
+
+    if include_fee:
+        fee = (entry * qty + exit_price * qty) * TAKER_FEE_RATE
+        net = gross - fee
+    else:
+        net = gross
+
+    return round(net, 4)
 
 
 def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> float:
@@ -326,11 +340,17 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     except Exception:
         hold_min = 0
 
-    db_close_trade(trade_id, close_price, net_pnl, reason, hold_min)
+    entry = t.get("entry") or 0
+    sl    = t.get("sl")    or 0
+    qty   = t.get("qty")   or 0
+    risk  = abs(entry - sl) * qty
+    r_mult = round(net_pnl / risk, 3) if risk > 0 else 0
+
+    db_close_trade(trade_id, close_price, net_pnl, reason, hold_min, r_mult)
     update_paper_balance(net_pnl - (t.get("realized_pnl") or 0))
 
     result = "WIN" if net_pnl > 0 else "LOSS"
     logger.info(
         f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
-        f"{reason.upper()} pnl={net_pnl:+.3f}$ hold={hold_min:.0f}dk"
+        f"{reason.upper()} pnl={net_pnl:+.3f}$ R={r_mult:+.2f} hold={hold_min:.0f}dk"
     )
