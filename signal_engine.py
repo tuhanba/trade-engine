@@ -24,7 +24,7 @@ from config import (
     SL_ATR_MULT, TP1_R, TP2_R, TRAIL_ATR_MULT,
 )
 from coin_library import get_coin_params
-from database import get_coin_profile
+from database import get_coin_profile, get_current_params
 
 logger = logging.getLogger(__name__)
 
@@ -221,16 +221,26 @@ def _calc_levels(direction: str, entry: float, atr_val: float,
     sl_mult = coin_p.get("sl_atr_mult", SL_ATR_MULT)
     sl_dist = atr_val * sl_mult
 
+    # tp_atr_mult varsa TP mesafesini ATR üzerinden hesapla,
+    # yoksa klasik sl_dist * TP_R yöntemi kullan
+    tp_mult = coin_p.get("tp_atr_mult")
+    if tp_mult:
+        tp2_dist = atr_val * tp_mult
+        tp1_dist = tp2_dist * (TP1_R / TP2_R)
+    else:
+        tp1_dist = sl_dist * TP1_R
+        tp2_dist = sl_dist * TP2_R
+
     if direction == "LONG":
         sl  = entry - sl_dist
-        tp1 = entry + sl_dist * TP1_R
-        tp2 = entry + sl_dist * TP2_R
-        runner = tp2 + sl_dist * 0.5
+        tp1 = entry + tp1_dist
+        tp2 = entry + tp2_dist
+        runner = tp2 + tp2_dist * 0.33
     else:
         sl  = entry + sl_dist
-        tp1 = entry - sl_dist * TP1_R
-        tp2 = entry - sl_dist * TP2_R
-        runner = tp2 - sl_dist * 0.5
+        tp1 = entry - tp1_dist
+        tp2 = entry - tp2_dist
+        runner = tp2 - tp2_dist * 0.33
 
     rr = abs(tp2 - entry) / (sl_dist + 1e-10)
 
@@ -351,7 +361,9 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
         dict — direction None ise veri yetersiz (teknik hesap imkansız)
     """
     NULL = {"symbol": symbol, "direction": None}
-    coin_p = {**get_coin_params(symbol), **get_coin_profile(symbol)}
+    # Öncelik: coin_profile > coin_params > AI global params > config defaults
+    ai_p   = get_current_params()
+    coin_p = {**ai_p, **get_coin_params(symbol), **get_coin_profile(symbol)}
 
     # ── 15m Ana Grafik ──────────────────────────────────────────────────────
     df15 = get_candles(client, symbol, "15m", 100)
