@@ -55,6 +55,49 @@ def api_stats():
     try:
         stats = get_stats()
 
+        # win_rate: get_stats returns 0-1, dashboard expects 0-100
+        stats["win_rate"] = round((stats.get("win_rate") or 0) * 100, 1)
+
+        # avg_rr alias (JS looks for avg_rr, get_stats returns avg_r)
+        stats["avg_rr"] = stats.get("avg_r", 0)
+
+        # avg_pnl per trade
+        total = stats.get("total") or 0
+        stats["avg_pnl"] = round(stats.get("total_pnl", 0) / total, 4) if total else 0
+
+        # best / worst single trade
+        with get_conn() as conn:
+            best_row  = conn.execute(
+                "SELECT MAX(net_pnl) FROM trades WHERE status='closed'").fetchone()
+            worst_row = conn.execute(
+                "SELECT MIN(net_pnl) FROM trades WHERE status='closed'").fetchone()
+            dur_row   = conn.execute(
+                "SELECT AVG(hold_minutes) FROM trades WHERE status='closed'").fetchone()
+            open_count = conn.execute(
+                "SELECT COUNT(*) FROM trades WHERE status IN ('open','tp1_hit','runner')"
+            ).fetchone()[0]
+
+        stats["best_trade"]  = round(best_row[0]  or 0, 4)
+        stats["worst_trade"] = round(worst_row[0] or 0, 4)
+        stats["avg_dur"]     = round(dur_row[0]   or 0, 1)
+        stats["open_count"]  = open_count
+
+        # current AI params for param panel
+        params = get_current_params()
+        params["version"] = params.get("version", 1)
+        stats["params"] = params
+
+        # last AI brain log
+        try:
+            with get_conn() as conn:
+                la = conn.execute(
+                    "SELECT reason, created_at FROM ai_logs "
+                    "WHERE event='analysis' ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                stats["last_ai"] = {"insight": la["reason"] if la else ""} if la else {}
+        except Exception:
+            stats["last_ai"] = {}
+
         # Seans istatistikleri — coin_market_memory tablosundan
         try:
             with get_conn() as conn:
@@ -69,11 +112,14 @@ def api_stats():
                     ).fetchone()
                     total_s = row[0] or 0
                     wins_s  = row[1] or 0
-                    sess_stats[sess] = {
+                    # JS uses key without underscore for NEW_YORK
+                    js_key = sess.replace("_", "")
+                    sess_stats[js_key] = {
                         "total":    total_s,
                         "wins":     wins_s,
                         "losses":   total_s - wins_s,
                         "win_rate": round(wins_s / max(total_s, 1) * 100, 1),
+                        "pnl":      round((row[2] or 0) - (row[3] or 0), 3),
                     }
                 stats["session_stats"] = sess_stats
         except Exception:
