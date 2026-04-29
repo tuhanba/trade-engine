@@ -83,6 +83,20 @@ def evaluate_signal(signal: dict, open_trades: list, balance: float,
     score     = signal.get("score", 50)
     conf      = signal.get("confidence", 0.5)
 
+    # Load AI-optimized params (fall back to safe defaults if DB unavailable)
+    try:
+        _conn = db()
+        _p = get_current_params(_conn)
+        _conn.close()
+    except Exception:
+        _p = {}
+    rsi5_min      = _p.get("rsi5_min",      35)
+    rsi5_max      = _p.get("rsi5_max",      75)
+    rsi1_min      = _p.get("rsi1_min",      35)
+    rsi1_max      = _p.get("rsi1_max",      72)
+    vol_ratio_min = _p.get("vol_ratio_min",  1.2)
+    min_volume_m  = _p.get("min_volume_m",   5.0)
+
     def veto(reason: str, score_adj: float = 0):
         save_ai_log("veto", symbol=symbol, decision="VETO", score=max(0, score + score_adj),
                     confidence=conf, reason=reason)
@@ -171,9 +185,26 @@ def evaluate_signal(signal: dict, open_trades: list, balance: float,
     if adx15 < 18:
         return veto("weak_structure", score_adj - 15)
 
+    # ── RSI filtresi (AI-optimize edilmiş parametreler) ──────────────────────
+    rsi5 = signal.get("rsi5")
+    rsi1 = signal.get("rsi1")
+    if rsi5 is not None and not (rsi5_min <= rsi5 <= rsi5_max):
+        score_adj -= 12
+        if score + score_adj < 40:
+            return veto("rsi5_out_of_range", score_adj)
+    if rsi1 is not None and not (rsi1_min <= rsi1 <= rsi1_max):
+        score_adj -= 10
+        if score + score_adj < 40:
+            return veto("rsi1_out_of_range", score_adj)
+
+    # ── Relative volume filtresi ──────────────────────────────────────────────
+    rv = signal.get("rv", 0)
+    if rv > 0 and rv < vol_ratio_min:
+        score_adj -= 8
+
     # ── Düşük volume ─────────────────────────────────────────────────────────
     vol = signal.get("volume_m", 0)
-    if vol < 5.0:
+    if vol < min_volume_m:
         return veto("low_volume", score_adj - 15)
 
     final_score = score + score_adj
@@ -207,8 +238,13 @@ def db():
 # ═══════════════════════════════════════════════════════════
 
 def get_current_params(conn):
-    r = conn.execute("SELECT * FROM params ORDER BY id DESC LIMIT 1").fetchone()
-    return dict(r) if r else {}
+    r = conn.execute("SELECT data FROM params ORDER BY id DESC LIMIT 1").fetchone()
+    if r and r["data"]:
+        try:
+            return json.loads(r["data"])
+        except Exception:
+            pass
+    return {}
 
 def get_trades(conn, hours=48, limit=300, symbol=None):
     cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
@@ -753,13 +789,12 @@ def save_best_params_if_better(conn, current_params, stats):
     if wr < 0.40 or pf < 1.0:
         return
     best = conn.execute(
-        "SELECT * FROM best_params ORDER BY profit_factor DESC LIMIT 1").fetchone()
-    if best is None or (pf > best["profit_factor"] and wr > best["win_rate"]):
+        "SELECT * FROM best_params ORDER BY avg_r DESC LIMIT 1").fetchone()
+    if best is None or (pf > (best["avg_r"] or 0) and wr > (best["win_rate"] or 0)):
         conn.execute("""INSERT INTO best_params
-            (params_json, win_rate, profit_factor, total_pnl, saved_at)
+            (data, win_rate, avg_r, pnl, trade_count)
             VALUES (?, ?, ?, ?, ?)""", (
-            json.dumps(current_params), wr, pf, stats["total_pnl"],
-            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+            json.dumps(current_params), wr, pf, stats["total_pnl"], stats["total"]))
         conn.commit()
 
 def try_rollback_to_best(conn, last20_stats):
@@ -768,15 +803,15 @@ def try_rollback_to_best(conn, last20_stats):
     if last20_stats["win_rate"] >= 0.30:
         return False, None
     best = conn.execute(
-        "SELECT * FROM best_params ORDER BY profit_factor DESC LIMIT 1").fetchone()
+        "SELECT * FROM best_params ORDER BY avg_r DESC LIMIT 1").fetchone()
     if not best:
         return False, None
-    raw = best["params_json"] or best["data"] if "data" in best.keys() else best["params_json"]
+    raw = best["data"]
     if not raw:
         return False, None
     best_p = json.loads(raw)
     reason = (f"ROLLBACK: Win rate {last20_stats['win_rate']:.0%} "
-              f"en iyi parametrelere geri donuldu (PF:{best['profit_factor']:.2f})")
+              f"en iyi parametrelere geri donuldu (PF:{best['avg_r']:.2f})")
     save_params(conn, best_p, reason, [reason])
     return True, best_p
 
@@ -910,25 +945,10 @@ def suggest_leverage(sym_stats, sym):
 # ═══════════════════════════════════════════════════════════
 
 def save_params(conn, p, reason, changes):
-    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    conn.execute("""
-        INSERT INTO params (
-            version, sl_atr_mult, tp_atr_mult,
-            rsi5_min, rsi5_max, rsi1_min, rsi1_max,
-            vol_ratio_min, min_volume_m, min_change_pct,
-            risk_pct, updated_at, ai_reason, data, reason
-        ) VALUES (
-            (SELECT COALESCE(MAX(version), 0) + 1 FROM params),
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        )""", (
-        p.get("sl_atr_mult",   1.2), p.get("tp_atr_mult",   2.0),
-        p.get("rsi5_min",       35), p.get("rsi5_max",       75),
-        p.get("rsi1_min",       35), p.get("rsi1_max",       72),
-        p.get("vol_ratio_min",  1.2), p.get("min_volume_m", 10.0),
-        p.get("min_change_pct", 2.0), p.get("risk_pct",     1.5),
-        now_str, (reason or "AI Brain")[:500],
-        json.dumps(p), (reason or "")[:500]
-    ))
+    conn.execute(
+        "INSERT INTO params (data, reason) VALUES (?, ?)",
+        (json.dumps(p), (reason or "")[:500])
+    )
     conn.commit()
 
 def log_analysis(conn, stats, insight, changes):
