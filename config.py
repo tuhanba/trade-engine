@@ -50,10 +50,27 @@ DB_PATH = os.getenv("DB_PATH", "/root/trade_engine/trading.db")
 
 # ── Coin Evreni ──────────────────────────────────────────────────────────────
 COIN_UNIVERSE = [
+    # Büyük cap — yüksek likidite
     "BTCUSDT",  "ETHUSDT",  "SOLUSDT",  "BNBUSDT",  "XRPUSDT",
-    "DOGEUSDT", "ADAUSDT",  "AVAXUSDT", "LINKUSDT", "NEARUSDT",
-    "OPUSDT",   "ARBUSDT",  "INJUSDT",  "SUIUSDT",  "FETUSDT",
-    "RNDRUSDT", "WIFUSDT",  "PEPEUSDT", "SEIUSDT",  "LTCUSDT",
+    "DOGEUSDT", "ADAUSDT",  "AVAXUSDT", "TRXUSDT",  "XLMUSDT",
+    "DOTUSDT",  "LTCUSDT",  "ATOMUSDT", "HBARUSDT", "ICPUSDT",
+
+    # DeFi & Layer2
+    "LINKUSDT", "UNIUSDT",  "AAVEUSDT", "LDOUSDT",  "CRVUSDT",
+    "ARBUSDT",  "OPUSDT",   "POLUSDT",  "STXUSDT",  "RUNEUSDT",
+
+    # Yüksek volatilite / trend
+    "NEARUSDT", "APTUSDT",  "SUIUSDT",  "INJUSDT",  "SEIUSDT",
+    "TAOUSDT",  "ENAUSDT",  "TIAUSDT",  "EIGENUSDT","ONDOUSDT",
+
+    # Meme & hype
+    "PEPEUSDT", "WIFUSDT",  "FLOKIUSDT","BONKUSDT", "SHIBUSDT",
+
+    # AI & infra
+    "FETUSDT",  "RNDRUSDT", "WLDUSDT",  "JUPUSDT",  "ORDIUSDT",
+
+    # Diğer likit
+    "FTMUSDT",  "SANDUSDT", "GALAUSDT", "MNTUSDT",  "MKRUSDT",
 ]
 
 # ── AI Eşikleri ──────────────────────────────────────────────────────────────
