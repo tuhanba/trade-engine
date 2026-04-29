@@ -462,26 +462,31 @@ def _migrate(conn):
         pass
 
     # params: satır yoksa varsayılan değerlerle başlat (AI brain için)
-    try:
-        row = conn.execute("SELECT id FROM params LIMIT 1").fetchone()
-        if not row:
-            conn.execute("""INSERT INTO params
-                (version, sl_atr_mult, tp_atr_mult,
-                 rsi5_min, rsi5_max, rsi1_min, rsi1_max,
-                 vol_ratio_min, min_volume_m, min_change_pct,
-                 risk_pct, updated_at, ai_reason, data, reason)
-                VALUES (1, 1.3, 2.0, 35, 75, 35, 72, 1.2, 10.0, 2.0, 1.5,
-                        datetime('now'), 'Başlangıç değerleri',
-                        '{}', 'init')""")
-    except Exception:
-        pass
+    row = conn.execute("SELECT id FROM params LIMIT 1").fetchone()
+    if not row:
+        default_params = json.dumps({
+            "sl_atr_mult":    1.3,
+            "tp_atr_mult":    2.0,
+            "rsi5_min":       35,
+            "rsi5_max":       75,
+            "rsi1_min":       35,
+            "rsi1_max":       72,
+            "vol_ratio_min":  1.2,
+            "min_volume_m":   10.0,
+            "min_change_pct": 2.0,
+            "risk_pct":       1.5,
+        })
+        conn.execute(
+            "INSERT INTO params (data, reason) VALUES (?, ?)",
+            (default_params, "init")
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PAPER ACCOUNT
 # ─────────────────────────────────────────────────────────────────────────────
 
-def init_paper_account(initial: float = 200.0):
+def init_paper_account(initial: float = 250.0):
     with get_conn() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
