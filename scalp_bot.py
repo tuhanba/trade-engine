@@ -344,18 +344,20 @@ def main():
             f"⛔ CB: {CIRCUIT_BREAKER_LOSSES} kayıp = {CIRCUIT_BREAKER_MINUTES}dk"
         )
 
-    last_scan    = 0
-    last_hb      = time.time()
-    prev_open_ids = {t["id"] for t in get_open_trades()}
+    last_scan         = 0
+    last_hb           = time.time()
+    last_pseudo_check = 0
 
     while True:
         try:
             now = time.time()
 
-            # ── PSEUDO OUTCOME KONTROLÜ (arka planda) ────────────────────────
-            threading.Thread(
-                target=_check_pseudo_outcomes, args=(client,), daemon=True
-            ).start()
+            # ── PSEUDO OUTCOME KONTROLÜ — her 5 dakikada bir ─────────────────
+            if now - last_pseudo_check >= 300:
+                last_pseudo_check = now
+                threading.Thread(
+                    target=_check_pseudo_outcomes, args=(client,), daemon=True
+                ).start()
 
             # ── ADIM 8+9: MONITOR — her döngüde ─────────────────────────────
             newly_closed = exec_monitor(client)
