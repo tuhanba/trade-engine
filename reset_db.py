@@ -9,7 +9,7 @@ import sqlite3
 import os
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
-STARTING_BALANCE = 200.0
+STARTING_BALANCE = 250.0
 
 print(f"[reset] DB yolu: {DB_PATH}")
 
