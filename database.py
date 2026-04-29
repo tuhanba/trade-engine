@@ -593,25 +593,27 @@ def save_weekly_summary(data: dict):
 # STATS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_stats(hours: int = 48) -> dict:
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+def get_stats() -> dict:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status='closed' AND close_time >= ?", (cutoff,)
+            "SELECT * FROM trades WHERE status='closed'"
         ).fetchall()
 
     trades = [dict(r) for r in rows]
     if not trades:
         return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0,
-                "total_pnl": 0, "avg_win": 0, "avg_loss": 0,
-                "avg_r": 0, "profit_factor": 0, "max_drawdown": 0}
+                "total_pnl": 0, "avg_pnl": 0, "avg_win": 0, "avg_loss": 0,
+                "avg_r": 0, "avg_rr": 0, "profit_factor": 0, "max_drawdown": 0,
+                "best_trade": 0, "worst_trade": 0, "avg_dur": 0}
 
-    wins   = [t for t in trades if t["net_pnl"] > 0]
-    losses = [t for t in trades if t["net_pnl"] <= 0]
-    pnls   = [t["net_pnl"] for t in trades]
+    wins   = [t for t in trades if (t["net_pnl"] or 0) > 0]
+    losses = [t for t in trades if (t["net_pnl"] or 0) <= 0]
+    pnls   = [t["net_pnl"] or 0 for t in trades]
 
-    gross_win  = sum(t["net_pnl"] for t in wins)
-    gross_loss = abs(sum(t["net_pnl"] for t in losses))
+    gross_win  = sum(t["net_pnl"] or 0 for t in wins)
+    gross_loss = abs(sum(t["net_pnl"] or 0 for t in losses))
+    total_pnl  = sum(pnls)
+    avg_r      = sum((t.get("r_multiple") or 0) for t in trades) / len(trades)
 
     cum, peak, max_dd = 0, 0, 0
     for p in reversed(pnls):
@@ -619,17 +621,25 @@ def get_stats(hours: int = 48) -> dict:
         peak = max(peak, cum)
         max_dd = max(max_dd, peak - cum)
 
+    durations = [t.get("hold_minutes") or 0 for t in trades]
+    avg_dur = sum(durations) / len(durations) if durations else 0
+
     return {
         "total":         len(trades),
         "wins":          len(wins),
         "losses":        len(losses),
-        "win_rate":      len(wins) / len(trades),
-        "total_pnl":     sum(pnls),
-        "avg_win":       gross_win  / len(wins)   if wins   else 0,
-        "avg_loss":      gross_loss / len(losses) if losses else 0,
-        "avg_r":         sum((t.get("r_multiple") or 0) for t in trades) / len(trades),
-        "profit_factor": gross_win / gross_loss if gross_loss > 0 else 0,
-        "max_drawdown":  max_dd,
+        "win_rate":      round(len(wins) / len(trades) * 100, 1),
+        "total_pnl":     round(total_pnl, 4),
+        "avg_pnl":       round(total_pnl / len(trades), 4),
+        "avg_win":       round(gross_win  / len(wins),   4) if wins   else 0,
+        "avg_loss":      round(gross_loss / len(losses), 4) if losses else 0,
+        "avg_r":         round(avg_r, 3),
+        "avg_rr":        round(avg_r, 3),
+        "profit_factor": round(gross_win / gross_loss, 3) if gross_loss > 0 else 0,
+        "max_drawdown":  round(max_dd, 4),
+        "best_trade":    round(max(pnls), 4),
+        "worst_trade":   round(min(pnls), 4),
+        "avg_dur":       round(avg_dur, 1),
     }
 
 

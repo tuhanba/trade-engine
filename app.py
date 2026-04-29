@@ -54,6 +54,12 @@ def api_stats():
     try:
         stats = get_stats()
 
+        # Açık trade sayısı
+        try:
+            stats["open_count"] = len(get_open_trades())
+        except Exception:
+            stats["open_count"] = 0
+
         # Seans istatistikleri — coin_market_memory tablosundan
         try:
             with get_conn() as conn:
@@ -62,17 +68,20 @@ def api_stats():
                     row = conn.execute(
                         "SELECT COUNT(*), "
                         "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END), "
-                        "SUM(CASE WHEN result='WIN' THEN r_multiple ELSE 0 END), "
-                        "SUM(CASE WHEN result='LOSS' THEN r_multiple ELSE 0 END) "
+                        "SUM(CASE WHEN result='WIN' THEN COALESCE(r_multiple,0) ELSE 0 END), "
+                        "SUM(CASE WHEN result='LOSS' THEN ABS(COALESCE(r_multiple,0)) ELSE 0 END) "
                         "FROM coin_market_memory WHERE session=?", (sess,)
                     ).fetchone()
                     total_s = row[0] or 0
                     wins_s  = row[1] or 0
+                    win_r   = row[2] or 0
+                    loss_r  = row[3] or 0
                     sess_stats[sess] = {
                         "total":    total_s,
                         "wins":     wins_s,
                         "losses":   total_s - wins_s,
                         "win_rate": round(wins_s / max(total_s, 1) * 100, 1),
+                        "pnl":      round(win_r - loss_r, 2),
                     }
                 stats["session_stats"] = sess_stats
         except Exception:
