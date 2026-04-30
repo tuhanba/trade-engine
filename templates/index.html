@@ -10,20 +10,20 @@
 
 /* ══ TOKENS ══════════════════════════════════════════════════ */
 :root{
-  --bg:     #03030d;
-  --s1:     #07071a;
-  --s2:     #0b0b22;
-  --s3:     #0f0f2a;
-  --bdr:    #13133a;
-  --bdr2:   #1c1c4a;
+  --bg:    #03080f;
+  --s1:    #060d18;
+  --s2:    #091322;
+  --s3:    #0c1830;
+  --bdr:   #0e2038;
+  --bdr2:  #163050;
 
-  --blue:   #00c8ff;
-  --blue2:  #007acc;
-  --blue3:  #004d99;
-  --bd:     rgba(0,200,255,.07);
-  --bd2:    rgba(0,200,255,.14);
-  --bg2:    rgba(0,200,255,.26);
-  --bglow:  0 0 18px rgba(0,200,255,.45);
+  --blue:  #00d4ff;
+  --blue2: #0095d4;
+  --blue3: #0060a0;
+  --bd:    rgba(0,212,255,.07);
+  --bd2:   rgba(0,212,255,.14);
+  --bg2:   rgba(0,212,255,.26);
+  --bglow: 0 0 20px rgba(0,212,255,.55);
 
   --green:  #00e676;
   --gd:     rgba(0,230,118,.07);
@@ -32,11 +32,11 @@
   --yellow: #ffd740;
   --yd:     rgba(255,215,64,.07);
 
-  --txt:    #d0ddf5;
-  --txt2:   #8090b8;
-  --dim:    #1a1a44;
-  --r:      12px;
-  --rs:     7px;
+  --txt:   #ccd8f0;
+  --txt2:  #3d5878;
+  --dim:   #0a1e34;
+  --r:     12px;
+  --rs:    7px;
 }
 
 /* ══ BASE ════════════════════════════════════════════════════ */
@@ -586,12 +586,12 @@ function buildCharts(calData){
   chartCum=new Chart($('chart-cumulative'),{
     type:'line',
     data:{labels:cumLbls,datasets:[{
-      data:cumData, borderColor:'#00c8ff', borderWidth:2,
-      pointBackgroundColor:'#00c8ff', pointRadius:2, pointHoverRadius:5,
+      data:cumData, borderColor:'#00d4ff', borderWidth:2,
+      pointBackgroundColor:'#00d4ff', pointRadius:2, pointHoverRadius:5,
       fill:true, tension:.4,
       backgroundColor:ctx=>{
         const g=ctx.chart.ctx.createLinearGradient(0,0,0,140);
-        g.addColorStop(0,'rgba(0,200,255,.2)'); g.addColorStop(1,'rgba(0,200,255,.01)');
+        g.addColorStop(0,'rgba(0,212,255,.22)'); g.addColorStop(1,'rgba(0,212,255,.01)');
         return g;
       }
     }]},

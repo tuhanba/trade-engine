@@ -34,14 +34,14 @@ VETO_LOW_VOLUME         = "low_volume"
 _SESSION_SCORE = {
     "LONDON":  15,
     "NY":      15,
-    "OVERLAP": 10,
-    "ASIA":     5,
-    "OFF":      0,
+    "OVERLAP": 12,
+    "ASIA":     8,
+    "OFF":      3,
 }
 
 # --- Score eşikleri ---
-_ALLOW_THRESHOLD = 60
-_WATCH_THRESHOLD = 40
+_ALLOW_THRESHOLD = 52
+_WATCH_THRESHOLD = 32
 
 
 # ---------- DB yardımcıları ----------
@@ -67,7 +67,10 @@ def _get_system_state() -> dict:
 def _open_trade_count() -> int:
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM trades WHERE status='OPEN'")
+    c.execute("""
+        SELECT COUNT(*) FROM trades
+        WHERE status IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
+    """)
     count = c.fetchone()[0]
     conn.close()
     return count
@@ -195,10 +198,8 @@ def evaluate(candidate: dict) -> dict:
         return _veto(VETO_COIN_COOLDOWN, 10,
                      f"{symbol} cooldown'da")
 
-    # Bad session
-    if session == "OFF":
-        return _veto(VETO_BAD_SESSION, 15,
-                     "Piyasa kapalı session")
+    # Bad session — sadece tamamen OFF ise veto, düşük skor ver
+    # (OFF artık _SESSION_SCORE'da 3 puan alıyor, tam veto yok)
 
     # RR yetersiz
     if rr < config.MIN_RR:
@@ -210,15 +211,15 @@ def evaluate(candidate: dict) -> dict:
         return _veto(VETO_MFE_LOW, 20,
                      f"MFE={mfe_r} < MIN={config.MIN_EXPECTED_MFE_R}")
 
-    # Yüksek fakeout riski
-    if profile.get("fakeout_rate", 0) >= 0.5:
+    # Yüksek fakeout riski — eşik yükseltildi
+    if profile.get("fakeout_rate", 0) >= 0.6:
         return _veto(VETO_FAKEOUT, 25,
                      f"{symbol} fakeout_rate={profile['fakeout_rate']:.0%}")
 
-    # Chop — düşük MFE + zayıf setup birlikte
-    if mfe_r < 1.2 and setup not in ("BREAKOUT",):
+    # Chop — daha gevşek filtre
+    if mfe_r < 1.0 and setup not in ("BREAKOUT", "PULLBACK"):
         return _veto(VETO_CHOP, 22,
-                     "Düşük MFE + zayıf setup → chop şüphesi")
+                     "Düşük MFE + bilinmeyen setup → chop şüphesi")
 
     # ── Skorlama ─────────────────────────────────────────────────────────────
 

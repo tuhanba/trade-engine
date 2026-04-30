@@ -24,25 +24,25 @@ EXECUTION_MODE = _str("EXECUTION_MODE", "paper")   # paper | live
 
 # --- Risk ---
 RISK_PCT             = _float("RISK_PCT", 1.0)
-MAX_OPEN_TRADES      = _int("MAX_OPEN_TRADES", 2)
-DAILY_MAX_LOSS_PCT   = _float("DAILY_MAX_LOSS_PCT", 3.0)
+MAX_OPEN_TRADES      = _int("MAX_OPEN_TRADES", 5)
+DAILY_MAX_LOSS_PCT   = _float("DAILY_MAX_LOSS_PCT", 4.0)
 
 # --- Circuit Breaker ---
-CIRCUIT_BREAKER_LOSSES  = _int("CIRCUIT_BREAKER_LOSSES", 3)
-CIRCUIT_BREAKER_MINUTES = _int("CIRCUIT_BREAKER_MINUTES", 120)
+CIRCUIT_BREAKER_LOSSES  = _int("CIRCUIT_BREAKER_LOSSES", 4)
+CIRCUIT_BREAKER_MINUTES = _int("CIRCUIT_BREAKER_MINUTES", 90)
 
 # --- Signal / RR ---
-MIN_RR              = _float("MIN_RR", 1.5)
-SL_ATR_MULT         = _float("SL_ATR_MULT", 1.3)
-MIN_EXPECTED_MFE_R  = _float("MIN_EXPECTED_MFE_R", 1.0)
+MIN_RR              = _float("MIN_RR", 1.4)
+SL_ATR_MULT         = _float("SL_ATR_MULT", 1.2)
+MIN_EXPECTED_MFE_R  = _float("MIN_EXPECTED_MFE_R", 0.9)
 
 # --- Partial Exit ---
-TP1_R            = _float("TP1_R", 0.9)
-TP1_CLOSE_PCT    = _float("TP1_CLOSE_PCT", 40.0)   # % of position closed at TP1
-TP2_R            = _float("TP2_R", 1.5)
-TP2_CLOSE_PCT    = _float("TP2_CLOSE_PCT", 30.0)   # % of position closed at TP2
-RUNNER_CLOSE_PCT = _float("RUNNER_CLOSE_PCT", 30.0) # % remaining as runner
-TRAIL_ATR_MULT   = _float("TRAIL_ATR_MULT", 1.0)
+TP1_R            = _float("TP1_R", 1.1)
+TP1_CLOSE_PCT    = _float("TP1_CLOSE_PCT", 35.0)
+TP2_R            = _float("TP2_R", 2.0)
+TP2_CLOSE_PCT    = _float("TP2_CLOSE_PCT", 35.0)
+RUNNER_CLOSE_PCT = _float("RUNNER_CLOSE_PCT", 30.0)
+TRAIL_ATR_MULT   = _float("TRAIL_ATR_MULT", 1.2)
 
 # --- Paths ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
