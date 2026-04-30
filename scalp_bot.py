@@ -305,12 +305,26 @@ def _scan_and_signal():
         cid = _write_candidate(candidate, decision)
         candidate["linked_candidate_id"] = cid
 
+        if decision["decision"] == "WATCH":
+            if _TG:
+                try:
+                    _tg.notify_signal_alert(candidate, decision)
+                except Exception:
+                    pass
+            continue
+
         if decision["decision"] != "ALLOW":
             logger.debug(
                 f"[Bot] {candidate['symbol']} "
                 f"{decision['decision']} — {decision.get('veto_reason')}"
             )
             continue
+
+        if _TG:
+            try:
+                _tg.notify_signal_alert(candidate, decision)
+            except Exception:
+                pass
 
         tid = open_trade(candidate)
         if tid:

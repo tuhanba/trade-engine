@@ -131,14 +131,22 @@ def _find_setup(klines: list) -> Optional[dict]:
     if price < prev_low and trend_down and 25 <= rsi <= 55 and vol_ok:
         return {"setup_type": "BREAKOUT", "direction": "SHORT"}
 
-    # PULLBACK LONG: trend yukarı, fiyat EMA20'ye yakın, aşırı satılmamış
+    # PULLBACK LONG: trend yukarı, fiyat EMA20'ye yakın (%1.5 içinde), RSI nötr
     ema20_dist = abs(price - ema20) / ema20 * 100
-    if trend_up and ema20_dist <= 0.5 and 40 <= rsi <= 60:
+    if trend_up and ema20_dist <= 1.5 and price >= ema20 * 0.988 and 33 <= rsi <= 58:
         return {"setup_type": "PULLBACK", "direction": "LONG"}
 
-    # PULLBACK SHORT: trend aşağı, fiyat EMA20'ye yakın, aşırı alınmamış
-    if trend_down and ema20_dist <= 0.5 and 40 <= rsi <= 60:
+    # PULLBACK SHORT: trend aşağı, fiyat EMA20'ye yakın, RSI nötr
+    if trend_down and ema20_dist <= 1.5 and price <= ema20 * 1.012 and 42 <= rsi <= 67:
         return {"setup_type": "PULLBACK", "direction": "SHORT"}
+
+    # MOMENTUM LONG: güçlü yukarı trend, RSI ivmeli ama aşırı değil, hacim var
+    if trend_up and 55 <= rsi <= 70 and vol_ok and price > ema20 * 1.002:
+        return {"setup_type": "MOMENTUM", "direction": "LONG"}
+
+    # MOMENTUM SHORT: güçlü aşağı trend, RSI ivmeli ama aşırı değil, hacim var
+    if trend_down and 30 <= rsi <= 45 and vol_ok and price < ema20 * 0.998:
+        return {"setup_type": "MOMENTUM", "direction": "SHORT"}
 
     return None
 
@@ -202,14 +210,13 @@ def analyze_symbol(symbol: str) -> Optional[dict]:
     # --- RR ve expected MFE ---
     rr = sl_dist * config.TP2_R / sl_dist   # = TP2_R (sabit oran)
 
-    # expected_mfe_r: son 10 mumun max hareket / sl_dist ortalaması
-    recent_moves = []
-    for i in range(-10, 0):
-        k = klines[i]
-        move = float(k[_H]) - float(k[_L])
-        recent_moves.append(move)
+    # expected_mfe_r: son 20 mumun max hareket / sl_dist — setup tipine göre çarpan
+    recent_moves = [float(k[_H]) - float(k[_L]) for k in klines[-20:]]
     avg_candle_range = sum(recent_moves) / len(recent_moves) if recent_moves else atr
-    expected_mfe_r = round(avg_candle_range * 3 / sl_dist, 2)
+    mfe_mult = {"BREAKOUT": 3.5, "MOMENTUM": 3.0, "PULLBACK": 2.5}.get(
+        setup["setup_type"], 2.5
+    )
+    expected_mfe_r = round(avg_candle_range * mfe_mult / sl_dist, 2)
 
     # --- Filtreler ---
     if rr < config.MIN_RR:

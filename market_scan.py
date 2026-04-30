@@ -176,6 +176,41 @@ def scan_market() -> list[dict]:
             "min_notional": filters["min_notional"],
         })
 
-    result.sort(key=lambda x: x["volume_m"], reverse=True)
+    # Hacim + momentum skoru ile sırala, en iyi 50 coin'i al
+    for r in result:
+        r["_score"] = _discovery_score(r["volume_m"], r["change_24h"])
+    result.sort(key=lambda x: x["_score"], reverse=True)
+    result = result[:50]
+    for r in result:
+        r.pop("_score", None)
+
     logger.info(f"[MarketScan] {len(result)} temiz coin bulundu.")
     return result
+
+
+def _discovery_score(volume_m: float, change_24h: float) -> float:
+    """Coin tarama öncelik skoru (yüksek = daha iyi setup potansiyeli)."""
+    # Hacim skoru — 20M-500M arası ideal (çok yüksek = slippage düşük ama sinyal az)
+    if volume_m >= 500:
+        vol_score = 38
+    elif volume_m >= 200:
+        vol_score = 45
+    elif volume_m >= 80:
+        vol_score = 40
+    elif volume_m >= 40:
+        vol_score = 28
+    else:
+        vol_score = 14
+
+    # Momentum skoru — %1.5-8 arası hareket ideal için scalp
+    abs_ch = abs(change_24h)
+    if 2.0 <= abs_ch <= 7.0:
+        mom_score = 35
+    elif 1.0 <= abs_ch <= 10.0:
+        mom_score = 22
+    elif abs_ch > 10.0:
+        mom_score = 8   # aşırı hareket = yüksek risk
+    else:
+        mom_score = 5
+
+    return vol_score + mom_score

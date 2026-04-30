@@ -120,7 +120,7 @@ def _score_mfe(mfe_r: float) -> int:
 
 
 def _score_setup(setup_type: str) -> int:
-    return {"BREAKOUT": 20, "PULLBACK": 15}.get(setup_type, 8)
+    return {"BREAKOUT": 20, "MOMENTUM": 18, "PULLBACK": 15}.get(setup_type, 8)
 
 
 def _score_coin(profile: dict) -> int:

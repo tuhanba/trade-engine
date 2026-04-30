@@ -79,7 +79,11 @@ def api_stats():
                 SUM(CASE WHEN result='LOSS' THEN 1 ELSE 0 END) losses,
                 ROUND(SUM(net_pnl), 4) total_pnl,
                 ROUND(AVG(r_multiple), 4) avg_r,
-                ROUND(AVG(duration_min), 1) avg_dur
+                ROUND(AVG(duration_min), 1) avg_dur,
+                ROUND(AVG(CASE WHEN result='WIN' THEN net_pnl END), 4) avg_win,
+                ROUND(AVG(CASE WHEN result='LOSS' THEN net_pnl END), 4) avg_loss,
+                ROUND(MAX(net_pnl), 4) best_trade,
+                ROUND(MIN(net_pnl), 4) worst_trade
             FROM trades
             WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
         """)
@@ -187,6 +191,10 @@ def api_stats():
             "best_coin":       best_coin_row[0] if best_coin_row else None,
             "worst_coin":      worst_coin_row[0] if worst_coin_row else None,
             "top_veto":        veto_row[0] if veto_row else None,
+            "avg_win":         row.get("avg_win") or 0,
+            "avg_loss":        row.get("avg_loss") or 0,
+            "best_trade":      row.get("best_trade") or 0,
+            "worst_trade":     row.get("worst_trade") or 0,
         })
     except Exception as e:
         return _err(e)

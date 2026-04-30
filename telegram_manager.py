@@ -415,6 +415,30 @@ def _get_balance() -> float:
         return 0.0
 
 
+def notify_signal_alert(candidate: dict, decision: dict):
+    """Kaliteli sinyal bulunduğunda kısa özet gönder (ALLOW + WATCH)."""
+    sym    = candidate.get("symbol", "?")
+    direc  = candidate.get("direction", "?")
+    score  = decision.get("score", 0)
+    score10 = round(score / 10, 1)
+    rr     = candidate.get("rr", 0)
+    risk   = decision.get("risk_flag", "MEDIUM")
+    status = decision.get("decision", "WATCH")
+    setup  = candidate.get("setup_type", "?")
+    session = candidate.get("session", "?")
+
+    status_map = {"ALLOW": "✅ Ready", "WATCH": "👀 Watch", "VETO": "❌ Avoid"}
+    risk_map   = {"LOW": "🟢 Low", "MEDIUM": "🟡 Medium", "HIGH": "🔴 High"}
+    dir_icon   = "🟢" if direc == "LONG" else "🔴"
+
+    send(
+        f"🔥 <b>TOP SCALP SETUP</b>\n"
+        f"Coin: <b>{sym}</b>  {dir_icon} <b>{direc}</b>  Skor: <b>{score10}/10</b>\n"
+        f"Risk: {risk_map.get(risk, risk)}  |  RR: <b>{rr:.1f}</b>  |  {status_map.get(status, status)}\n"
+        f"Setup: {setup}  |  Seans: {session}"
+    )
+
+
 def notify_trade_open(trade: dict, candidate: dict = None):
     env    = (trade.get("environment") or "paper").upper()
     sym    = trade.get("symbol", "?")
