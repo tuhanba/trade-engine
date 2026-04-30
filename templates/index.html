@@ -105,7 +105,13 @@ a{color:inherit;text-decoration:none}
 .sc-wr-bar{height:100%;border-radius:2px;background:var(--green);transition:width .6s ease}
 
 /* ══ UTIL COLORS ════════════════════════════════════════════ */
-.cb{color:var(--blue)}.cg{color:var(--green)}.cr{color:var(--red)}.cy{color:var(--yellow)}.cm{color:var(--txt2)}
+.cb{color:var(--blue)}.cg{color:var(--green)}.cr{color:var(--red)}.cy{color:var(--yellow)}.cm{color:var(--txt2)}.cp{color:var(--purple)}
+
+/* ══ SKELETON LOADING ════════════════════════════════════════ */
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+.skel{background:linear-gradient(90deg,var(--s2) 25%,var(--s3) 50%,var(--s2) 75%);background-size:200% 100%;animation:shimmer 1.4s infinite;border-radius:4px;display:inline-block}
+.skel-val{width:70px;height:22px}
+.skel-sub{width:50px;height:10px;margin-top:5px}
 
 /* ══ LAYOUT ═════════════════════════════════════════════════ */
 .main{display:grid;grid-template-columns:1fr 290px;gap:14px;padding:14px 20px;max-width:1700px;margin:0 auto}
@@ -251,6 +257,7 @@ tbody tr:last-child td{border-bottom:none}
     <div class="sc-lbl">Toplam PnL</div>
     <div class="sc-val" id="s-tpnl">—</div>
     <div class="sc-sub" id="s-dpnl">bugün: —</div>
+    <div class="sc-sub" id="s-avgwl" style="margin-top:2px">W:— / L:—</div>
   </div>
   <div class="sc">
     <div class="sc-bar"></div>
@@ -275,11 +282,11 @@ tbody tr:last-child td{border-bottom:none}
     <div class="sc-sub" id="s-trades">toplam — trade</div>
   </div>
   <div class="sc">
-    <div class="sc-bar"></div>
-    <div class="sc-icon">🔴</div>
-    <div class="sc-lbl">Açık Pozisyon</div>
-    <div class="sc-val cb" id="s-open">0</div>
-    <div class="sc-sub" id="s-veto">top veto: —</div>
+    <div class="sc-bar" style="background:linear-gradient(90deg,var(--purple),var(--blue))"></div>
+    <div class="sc-icon">📡</div>
+    <div class="sc-lbl">Açık / En İyi Trade</div>
+    <div class="sc-val cp" id="s-open">0</div>
+    <div class="sc-sub" id="s-best-trade">en iyi: —</div>
   </div>
 </div>
 <div class="main">
@@ -374,7 +381,7 @@ tbody tr:last-child td{border-bottom:none}
     <div class="tab-panel" id="tab-signals">
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>Sembol</th><th>Yön</th><th>RR</th><th>MFE</th><th>Skor</th><th>Karar</th><th>Veto</th><th>Zaman</th></tr></thead>
+          <thead><tr><th>Sembol</th><th>Yön</th><th>Setup</th><th>RR</th><th>MFE</th><th>Skor</th><th>Karar</th><th>Veto</th><th>Zaman</th></tr></thead>
           <tbody id="tb-signals"></tbody>
         </table>
       </div>
@@ -406,6 +413,8 @@ tbody tr:last-child td{border-bottom:none}
       <div class="row"><span class="row-l">Bot Durumu</span><span class="row-r" id="ax-bot">—</span></div>
       <div class="row"><span class="row-l">Ardışık Kayıp</span><span class="row-r cr" id="ax-losses">0</span></div>
       <div class="row"><span class="row-l">Circuit Breaker</span><span class="row-r" id="ax-cb">—</span></div>
+      <div class="row"><span class="row-l">Avg Kazanç</span><span class="row-r cg" id="ax-avgwin">—</span></div>
+      <div class="row"><span class="row-l">Avg Kayıp</span><span class="row-r cr" id="ax-avgloss">—</span></div>
       <div class="row"><span class="row-l">En İyi Coin</span><span class="row-r cg" id="ax-best">—</span></div>
       <div class="row"><span class="row-l">En Kötü Coin</span><span class="row-r cr" id="ax-worst">—</span></div>
     </div>
@@ -517,7 +526,9 @@ async function loadStats(){
   $('s-wr').innerHTML=`<span class="${wr>=50?'cg':'cr'}">${wr}%</span>`;
   $('s-wl').textContent=`${s.wins||0} W / ${s.losses||0} L`;
   $('s-wr-bar').style.width=Math.min(100,wr)+'%';
-  $('s-wr-bar').style.background=wr>=50?'var(--green)':'var(--red)';
+  $('s-wr-bar').style.background=wr>=60
+    ?'linear-gradient(90deg,var(--green),var(--blue))'
+    :wr>=50?'var(--green)':'var(--red)';
 
   // PF & AvgR
   $('s-pf').textContent=pf(s.profit_factor,2)||'—';
@@ -527,9 +538,14 @@ async function loadStats(){
   $('s-dd').textContent=fv(s.max_drawdown)+'$';
   $('s-trades').textContent=(s.total_trades||0)+' toplam trade';
 
-  // Open
+  // Open + best trade
   $('s-open').textContent=s.open_trades||0;
-  $('s-veto').textContent='veto: '+(s.top_veto||'—');
+  const bt=pf(s.best_trade,2);
+  $('s-best-trade').innerHTML=`en iyi: <span class="cg">${bt>0?'+'+bt.toFixed(2)+'$':'—'}</span>`;
+
+  // avg win/loss
+  const aw=pf(s.avg_win,2), al=pf(s.avg_loss,2);
+  $('s-avgwl').innerHTML=`<span class="cg">W:${aw>0?'+'+aw.toFixed(2):'—'}$</span> / <span class="cr">L:${al<0?al.toFixed(2):'—'}$</span>`;
 
   // Header badges
   const mE=$('bdg-mode');
@@ -549,6 +565,8 @@ async function loadStats(){
   $('ax-bot').textContent=s.bot_status||'—';
   $('ax-losses').textContent=s.consecutive_losses||0;
   $('ax-cb').innerHTML=s.circuit_breaker?'<span class="cr">⛔ AKTİF</span>':'<span class="cg">Kapalı</span>';
+  $('ax-avgwin').textContent=pf(s.avg_win,2)>0?'+'+pf(s.avg_win,2)+'$':'—';
+  $('ax-avgloss').textContent=pf(s.avg_loss,2)<0?pf(s.avg_loss,2)+'$':'—';
   $('ax-best').textContent=s.best_coin||'—';
   $('ax-worst').textContent=s.worst_coin||'—';
   $('hdr-time').textContent=new Date().toLocaleTimeString('tr-TR');
@@ -679,7 +697,7 @@ async function loadTrades(dir=0){
   total=d.total||0;
   const b=$('tb-trades'); b.innerHTML='';
   if(!d.data.length){
-    b.innerHTML='<tr><td colspan="9"><div class="empty">Henüz kapalı trade yok</div></td></tr>';
+    b.innerHTML='<tr><td colspan="9"><div class="empty">📭 Henüz kapalı trade yok — bot aktif, sinyaller bekleniyor</div></td></tr>';
   } else {
     d.data.forEach(t=>{
       const pnl=pf(t.net_pnl);
@@ -707,7 +725,7 @@ async function loadLive(){
   const d=await api('/api/live'); if(!d.ok) return;
   const b=$('tb-live'); b.innerHTML='';
   if(!d.data.length){
-    b.innerHTML='<tr><td colspan="9"><div class="empty">Açık pozisyon yok</div></td></tr>'; return;
+    b.innerHTML='<tr><td colspan="9"><div class="empty">📭 Şu an açık pozisyon yok</div></td></tr>'; return;
   }
   d.data.forEach(t=>{
     b.innerHTML+=`<tr>
@@ -729,16 +747,19 @@ async function loadSignals(){
   const d=await api('/api/signals?limit=50'); if(!d.ok) return;
   const b=$('tb-signals'); b.innerHTML='';
   if(!d.data.length){
-    b.innerHTML='<tr><td colspan="8"><div class="empty">Sinyal yok</div></td></tr>'; return;
+    b.innerHTML='<tr><td colspan="9"><div class="empty">📡 Henüz sinyal üretilmedi</div></td></tr>'; return;
   }
+  const setupColor={'BREAKOUT':'var(--blue)','MOMENTUM':'var(--purple)','PULLBACK':'var(--yellow)'};
   d.data.forEach(s=>{
     const t=(s.created_at||'').slice(11,16);
+    const st=s.setup_type||'?';
     b.innerHTML+=`<tr>
       <td style="font-weight:700;font-family:Inter">${s.symbol}</td>
       <td class="${s.direction==='LONG'?'dl':'ds'}">${s.direction}</td>
+      <td><span style="color:${setupColor[st]||'var(--txt2)'};font-size:10px;font-weight:700">${st}</span></td>
       <td>${fv(s.rr,2)}</td>
       <td>${fv(s.expected_mfe_r,2)}</td>
-      <td><span class="cb">${s.score||0}</span></td>
+      <td><span class="${s.score>=52?'cg':s.score>=32?'cy':'cr'}" style="font-weight:700">${s.score||0}</span></td>
       <td class="${dcls(s.decision)}">${s.decision||'?'}</td>
       <td class="cm" style="font-size:9px">${esc(s.veto_reason||'')}</td>
       <td class="cm">${t}</td>
@@ -759,13 +780,31 @@ async function loadCoins(){
   const d=await api('/api/coins'); if(!d.ok) return;
   const el=$('coin-rows'); el.innerHTML='';
   if(!d.data.length){el.innerHTML='<div class="empty">Henüz coin profili yok</div>';return;}
-  d.data.slice(0,25).forEach(c=>{
+  const top = d.data.filter(c=>(c.trade_count||0)>0).slice(0,20);
+  if(!top.length){el.innerHTML='<div class="empty">Henüz trade edilmiş coin yok</div>';return;}
+  top.forEach(c=>{
     const wr=Math.round((c.win_rate||0)*100);
-    const barColor=wr>=50?'var(--green)':'var(--red)';
-    el.innerHTML+=`<div class="coin-row">
-      <span class="coin-sym">${c.symbol}</span>
-      <div class="coin-wr-wrap"><div class="coin-wr-bar" style="width:${wr}%;background:${barColor}"></div></div>
-      <span class="coin-meta"><span class="${wr>=50?'cg':'cr'}">${wr}%</span> <span>${c.trade_count||0}T</span></span>
+    const avgR=pf(c.avg_r||0,2);
+    const pf2=pf(c.profit_factor||0,2);
+    const danger=pf(c.danger_score||0,1);
+    const barColor=wr>=55?'var(--green)':wr>=40?'var(--yellow)':'var(--red)';
+    const dangerColor=danger<=2?'var(--green)':danger<=5?'var(--yellow)':'var(--red)';
+    el.innerHTML+=`<div class="coin-row" style="flex-direction:column;align-items:stretch;padding:7px 0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <span class="coin-sym">${c.symbol.replace('USDT','')}<span style="color:var(--txt2);font-weight:400;font-size:9px">USDT</span></span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:9px;color:${dangerColor}" title="Danger">⚡${danger}</span>
+          <span style="font-size:10px;font-family:JetBrains Mono;color:${barColor};font-weight:700">${wr}%</span>
+          <span style="font-size:9px;color:var(--txt2)">${c.trade_count||0}T</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:4px;align-items:center">
+        <div class="coin-wr-wrap" style="margin:0;flex:1"><div class="coin-wr-bar" style="width:${Math.min(wr,100)}%;background:${barColor}"></div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:3px">
+        <span style="font-size:9px;color:var(--txt2)">Avg R <span class="${avgR>=0?'cg':'cr'}">${avgR>=0?'+':''}${avgR}</span></span>
+        <span style="font-size:9px;color:var(--txt2)">PF <span class="${pf2>=1?'cg':'cr'}">${pf2||'—'}</span></span>
+      </div>
     </div>`;
   });
 }
