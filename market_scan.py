@@ -107,10 +107,14 @@ def check_min_notional(symbol: str, qty: float, price: float) -> bool:
 
 
 def _has_open_trade(symbol: str) -> bool:
-    """Bu coin için zaten açık trade var mı?"""
+    """Bu coin için aktif trade var mı? (tüm açık durumlar)"""
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT id FROM trades WHERE symbol=? AND status='OPEN' LIMIT 1", (symbol,))
+    c.execute("""
+        SELECT id FROM trades
+        WHERE symbol=? AND status IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
+        LIMIT 1
+    """, (symbol,))
     row = c.fetchone()
     conn.close()
     return row is not None

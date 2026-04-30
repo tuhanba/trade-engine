@@ -163,6 +163,58 @@ def _current_atr(symbol: str) -> float:
         return 0.0
 
 
+# ---------- Yardımcı ----------
+
+def _session_now() -> str:
+    h = datetime.now(timezone.utc).hour
+    for name, start, end in [("ASIA",0,8),("LONDON",8,13),("NY",13,17),("OVERLAP",17,21)]:
+        if start <= h < end:
+            return name
+    return "OFF"
+
+
+def _update_daily_summary():
+    """Bugünkü kapanmış trade'lerden daily_summary güncelle."""
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT COUNT(*) total,
+                   SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) wins,
+                   SUM(CASE WHEN result='LOSS' THEN 1 ELSE 0 END) losses,
+                   ROUND(SUM(net_pnl),4) pnl,
+                   ROUND(AVG(r_multiple),4) avg_r,
+                   ROUND(AVG(CASE WHEN result='WIN' THEN net_pnl END)/
+                         ABS(AVG(CASE WHEN result='LOSS' THEN net_pnl END)+1e-10),3) pf
+            FROM trades
+            WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
+              AND close_time >= ?
+        """, (today,))
+        row = dict(c.fetchone() or {})
+        total = row.get("total") or 0
+        if total == 0:
+            conn.close()
+            return
+        wins = row.get("wins") or 0
+        wr   = round(wins / total, 4) if total else 0
+        conn.execute("""
+            INSERT INTO daily_summary
+                (date, total_trades, wins, losses, win_rate, total_pnl, avg_r, profit_factor)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(date) DO UPDATE SET
+                total_trades=excluded.total_trades, wins=excluded.wins,
+                losses=excluded.losses, win_rate=excluded.win_rate,
+                total_pnl=excluded.total_pnl, avg_r=excluded.avg_r,
+                profit_factor=excluded.profit_factor
+        """, (today, total, wins, row.get("losses") or 0, wr,
+              row.get("pnl") or 0, row.get("avg_r") or 0, row.get("pf") or 0))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"[Bot] daily_summary hata: {e}")
+
+
 # ---------- Circuit breaker ----------
 
 def _check_circuit_breaker():
@@ -204,7 +256,8 @@ def _record_result(result: str):
 
 # ---------- Post-trade ----------
 
-def _run_postmortem(trade: dict):
+def _run_postmortem(trade: dict) -> tuple[float, float]:
+    """Postmortem hesapla, DB'ye kaydet. (mfe_r, mae_r) döndür."""
     try:
         entry     = trade.get("entry", 0) or 0
         exit_p    = trade.get("exit_price") or entry
@@ -216,12 +269,13 @@ def _run_postmortem(trade: dict):
 
         if direction == "LONG":
             mfe = max(0, exit_p - entry)
-            mae = max(0, entry - sl)
+            mae = max(0, entry - exit_p)
         else:
             mfe = max(0, entry - exit_p)
             mae = max(0, exit_p - entry)
 
         mfe_r      = round(mfe / sl_dist, 4)
+        mae_r      = round(mae / sl_dist, 4)
         best_tp    = round(abs(tp2 - entry) / sl_dist, 4)
         efficiency = round(mfe_r / best_tp, 4) if best_tp else 0
         missed     = round(best_tp - mfe_r, 4)
@@ -248,32 +302,35 @@ def _run_postmortem(trade: dict):
         ))
         conn.commit()
         conn.close()
+        return mfe_r, mae_r
     except Exception as e:
         logger.error(f"[Bot] postmortem hata: {e}")
+        return 0.0, 0.0
 
 
 def _after_close(trade: dict):
     result = trade.get("result", "LOSS")
     _record_result(result)
-    _run_postmortem(trade)
+    mfe_r, mae_r = _run_postmortem(trade)
 
     update_coin_profile(trade["symbol"], {
         "result":     result,
         "r_multiple": trade.get("r_multiple", 0),
-        "mfe":        0,
-        "mae":        0,
+        "mfe":        mfe_r,
+        "mae":        mae_r,
         "direction":  trade.get("direction"),
     })
     log_coin_memory(
         symbol=trade["symbol"],
-        session="UNKNOWN",
+        session=_session_now(),
         market_regime="UNKNOWN",
         direction=trade.get("direction", ""),
         result=result,
         r_multiple=trade.get("r_multiple", 0),
-        mfe=0,
-        mae=0,
+        mfe=mfe_r,
+        mae=mae_r,
     )
+    _update_daily_summary()
     if _TG:
         try:
             _tg.notify_trade_close(trade)

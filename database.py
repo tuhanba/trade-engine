@@ -165,12 +165,15 @@ def init_db():
         best_session TEXT,
         worst_session TEXT,
         preferred_direction TEXT,
+        long_count INTEGER DEFAULT 0,
+        short_count INTEGER DEFAULT 0,
         best_rr_zone TEXT,
-        danger_score REAL DEFAULT 0.0,
+        danger_score REAL DEFAULT 2.5,
         cooldown_status INTEGER DEFAULT 0,
-        volatility_profile TEXT,
-        spread_quality TEXT,
+        volatility_profile TEXT DEFAULT 'normal',
+        spread_quality TEXT DEFAULT 'good',
         fakeout_rate REAL DEFAULT 0.0,
+        total_pnl REAL DEFAULT 0.0,
         updated_at TEXT DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS coin_market_memory (
@@ -257,6 +260,22 @@ def init_db():
     VALUES (1, datetime('now'), 'Initial params');
     """)
     conn.commit()
+
+    # ── Kolon migration: mevcut DB'ye eksik kolonları ekle ──────────────────
+    _migrations = [
+        ("coin_profile", "long_count",  "INTEGER DEFAULT 0"),
+        ("coin_profile", "short_count", "INTEGER DEFAULT 0"),
+        ("coin_profile", "total_pnl",   "REAL DEFAULT 0.0"),
+        ("coin_profile", "volatility_profile", "TEXT DEFAULT 'normal'"),
+        ("coin_profile", "spread_quality",     "TEXT DEFAULT 'good'"),
+    ]
+    for table, col, coldef in _migrations:
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coldef}")
+            conn.commit()
+        except Exception:
+            pass  # kolon zaten varsa hata verir, yoksay
+
     conn.close()
 
 def save_trade(trade: dict) -> int:
@@ -323,7 +342,7 @@ def get_trades(limit=100, status=None):
         c.execute("SELECT * FROM trades WHERE status=? ORDER BY id DESC LIMIT ?", ("OPEN", limit))
     elif status:
         c.execute("""SELECT * FROM trades
-                     WHERE status IN ('WIN','LOSS','MANUAL','CLOSED')
+                     WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
                      ORDER BY id DESC LIMIT ?""", (limit,))
     else:
         c.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,))
@@ -344,7 +363,7 @@ def get_stats():
            ROUND(SUM(net_pnl), 4) total_pnl,
            ROUND(AVG(r_multiple), 4) avg_rr,
            ROUND(AVG(duration_min), 1) avg_dur
-    FROM trades WHERE status IN ('WIN','LOSS','MANUAL','CLOSED')
+    FROM trades WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
     """)
     row  = c.fetchone()
     cols = [d[0] for d in c.description]
@@ -372,7 +391,7 @@ def get_stats():
     c.execute("""
     SELECT ROUND(SUM(CASE WHEN status='WIN' THEN net_pnl ELSE 0 END), 4),
            ROUND(ABS(SUM(CASE WHEN status='LOSS' THEN net_pnl ELSE 0 END)), 4)
-    FROM trades WHERE status IN ('WIN','LOSS','MANUAL','CLOSED')
+    FROM trades WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
     """)
     pf_row       = c.fetchone()
     gross_profit = pf_row[0] or 0
@@ -389,7 +408,7 @@ def get_stats():
     SELECT MAX(net_pnl), MIN(net_pnl),
            AVG(CASE WHEN status='WIN' THEN net_pnl END),
            AVG(CASE WHEN status='LOSS' THEN net_pnl END)
-    FROM trades WHERE status IN ('WIN','LOSS','MANUAL','CLOSED')
+    FROM trades WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
     """)
     perf_row = c.fetchone()
     stats["best_trade"]       = round(perf_row[0] or 0, 4)
@@ -399,7 +418,7 @@ def get_stats():
     stats["avg_duration_min"] = stats.get("avg_dur", 0)
 
     # Max drawdown
-    c.execute("SELECT net_pnl FROM trades WHERE status IN ('WIN','LOSS','MANUAL','CLOSED') ORDER BY id")
+    c.execute("SELECT net_pnl FROM trades WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE') ORDER BY id")
     pnls = [r[0] or 0 for r in c.fetchall()]
     cum = 0; peak = 0; max_dd = 0
     for p in pnls:
@@ -409,8 +428,11 @@ def get_stats():
         if dd < max_dd: max_dd = dd
     stats["max_drawdown"] = round(max_dd, 4)
 
-    # Açık trade sayısı
-    c.execute("SELECT COUNT(*) FROM trades WHERE status='OPEN'")
+    # Açık trade sayısı (tüm aktif durumlar)
+    c.execute("""
+        SELECT COUNT(*) FROM trades
+        WHERE status IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
+    """)
     stats["open_count"] = c.fetchone()[0]
 
     # Bakiye
@@ -446,7 +468,7 @@ def save_snapshot(note: str = "manual_reset"):
            MAX(paper_balance)
     FROM trades
     LEFT JOIN paper_account ON paper_account.id = 1
-    WHERE status IN ('WIN','LOSS','MANUAL','CLOSED')
+    WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
     """)
     row = c.fetchone()
     total = row[0] or 0

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import config
 from database import get_conn
-from coin_library import get_coin_profile
+from coin_library import get_coin_profile, is_in_cooldown
 
 logger = logging.getLogger(__name__)
 
@@ -125,18 +125,24 @@ def _score_setup(setup_type: str) -> int:
 
 def _score_coin(profile: dict) -> int:
     score = 0
+
     wr = profile.get("win_rate", 0.0)
-    if wr >= 0.55:   score += 10
-    elif wr >= 0.45: score += 7
-    elif wr >= 0.35: score += 3
+    if wr >= 0.55:   score += 8
+    elif wr >= 0.45: score += 5
+    elif wr >= 0.35: score += 2
+
+    pf = profile.get("profit_factor", 0.0)
+    if pf >= 1.5:   score += 5
+    elif pf >= 1.0: score += 3
+    elif pf > 0:    score += 1
 
     fakeout = profile.get("fakeout_rate", 0.0)
-    if fakeout < 0.2:    score += 5
+    if fakeout < 0.2:    score += 4
     elif fakeout < 0.35: score += 2
 
     danger = profile.get("danger_score", 5.0)
-    if danger <= 2:   score += 5
-    elif danger <= 5: score += 3
+    if danger <= 2:   score += 3
+    elif danger <= 5: score += 1
 
     return min(score, 20)
 
@@ -193,8 +199,8 @@ def evaluate(candidate: dict) -> dict:
         return _veto(VETO_TOO_MANY_TRADES, 10,
                      f"Açık trade: {open_cnt}/{config.MAX_OPEN_TRADES}")
 
-    # Coin cooldown
-    if profile.get("cooldown_status"):
+    # Coin cooldown — stale cache yerine live sorgu
+    if is_in_cooldown(symbol):
         return _veto(VETO_COIN_COOLDOWN, 10,
                      f"{symbol} cooldown'da")
 
