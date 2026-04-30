@@ -325,7 +325,7 @@ def _scan_and_signal():
                 try:
                     t = _get_trade(tid)
                     if t:
-                        _tg.notify_trade_open(t)
+                        _tg.notify_trade_open(t, candidate)
                 except Exception:
                     pass
 
@@ -347,6 +347,27 @@ def _track_open_trades():
             "CLOSED_WIN", "CLOSED_LOSS",
             "CLOSED_MANUAL", "CLOSED_TRAIL",
         }
+
+        # TP1 hit bildirimi
+        if _TG and new_status == "TP1_HIT" and old_status == "OPEN":
+            fresh = _get_trade(trade["id"])
+            if fresh:
+                try:
+                    partial = float(fresh.get("realized_pnl") or 0)
+                    _tg.notify_tp_hit(trade["id"], "TP1", price, partial)
+                except Exception:
+                    pass
+
+        # TP2 hit bildirimi
+        elif _TG and new_status == "TP2_HIT" and old_status == "TP1_HIT":
+            fresh = _get_trade(trade["id"])
+            if fresh:
+                try:
+                    partial = float(fresh.get("realized_pnl") or 0)
+                    _tg.notify_tp_hit(trade["id"], "TP2", price, partial)
+                except Exception:
+                    pass
+
         if new_status in closed and old_status not in closed:
             fresh = _get_trade(trade["id"])
             if fresh:

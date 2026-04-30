@@ -402,30 +402,95 @@ def _cmd_help():
 # BÖLÜM 3 — BİLDİRİM FONKSİYONLARI (spam filtreli)
 # ═══════════════════════════════════════════════════════════
 
-def notify_trade_open(trade: dict):
+def _get_balance() -> float:
+    try:
+        from database import get_conn
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute("SELECT paper_balance FROM paper_account WHERE id=1")
+        row = c.fetchone()
+        conn.close()
+        return float(row[0]) if row else 0.0
+    except Exception:
+        return 0.0
+
+
+def notify_trade_open(trade: dict, candidate: dict = None):
+    env    = (trade.get("environment") or "paper").upper()
+    sym    = trade.get("symbol", "?")
+    direc  = trade.get("direction", "?")
+    entry  = float(trade.get("entry") or 0)
+    sl     = float(trade.get("sl") or 0)
+    tp1    = float(trade.get("tp1") or 0)
+    tp2    = float(trade.get("tp2") or 0)
+    bal    = _get_balance()
+    icon   = "🟢" if direc == "LONG" else "🔴"
+
+    rr_str    = ""
+    score_str = ""
+    if candidate:
+        rr    = candidate.get("rr") or 0
+        score = candidate.get("score") or 0
+        rr_str    = f"\n📐 RR: <b>{rr:.2f}</b> | Skor: <b>{score}</b>"
+        score_str = f" | Skor: {score}"
+
     send(
-        f"📥 <b>Trade Açıldı</b>\n"
-        f"{trade['symbol']} {trade['direction']}\n"
-        f"Entry: {trade['entry']} | SL: {trade['sl']}\n"
-        f"TP1: {trade.get('tp1')} | TP2: {trade.get('tp2')}\n"
-        f"Qty: {trade.get('qty')} | ENV: {trade.get('environment','paper').upper()}"
+        f"✏️ [{env}] {icon} <b>{sym} {direc} AÇILDI</b>\n"
+        f"\n"
+        f"📍 Giriş: <code>{entry:.5g}</code>\n"
+        f"🛡 SL: <code>{sl:.5g}</code>  🎯 TP1: <code>{tp1:.5g}</code>\n"
+        f"🎯 TP2: <code>{tp2:.5g}</code>"
+        f"{rr_str}\n"
+        f"💰 Bakiye: <b>${bal:.2f}</b>"
     )
 
 
-def notify_tp_hit(trade_id: int, level: str, price: float, pnl: float):
+def notify_tp_hit(trade_id: int, level: str, price: float, partial_pnl: float):
+    bal = _get_balance()
+    icon = "🎯" if level == "TP1" else "🏆"
     send(
-        f"🎯 <b>{level} Hit</b> — #{trade_id}\n"
-        f"Fiyat: {price} | Kısmi PnL: ${pnl:+.4f}"
+        f"{icon} <b>{level} HİT</b> — #{trade_id}\n"
+        f"Fiyat: <code>{price:.5g}</code>\n"
+        f"Kısmi PnL: <b>${partial_pnl:+.4f}</b>\n"
+        f"💰 Bakiye: <b>${bal:.2f}</b>"
     )
 
 
 def notify_trade_close(trade: dict):
-    emoji = "✅" if (trade.get("net_pnl") or 0) >= 0 else "❌"
+    pnl    = float(trade.get("net_pnl") or 0)
+    r      = float(trade.get("r_multiple") or 0)
+    dur    = float(trade.get("duration_min") or 0)
+    status = trade.get("status", "?")
+    sym    = trade.get("symbol", "?")
+    direc  = trade.get("direction", "?")
+    entry  = float(trade.get("entry") or 0)
+    exit_p = float(trade.get("exit_price") or 0)
+    bal    = _get_balance()
+
+    h, m = divmod(int(dur), 60)
+    dur_str = f"{h}s {m}dk" if h else f"{m}dk"
+
+    if pnl > 0:
+        emoji  = "✅"
+        result = "WIN"
+    else:
+        emoji  = "❌"
+        result = "LOSS"
+
+    reason_map = {
+        "CLOSED_TRAIL": "🏃 Trailing stop",
+        "CLOSED_LOSS":  "🛡 SL",
+        "CLOSED_MANUAL":"🖐 Manuel",
+    }
+    close_reason = reason_map.get(status, status)
+
     send(
-        f"{emoji} <b>Trade Kapandı</b> #{trade.get('id')}\n"
-        f"{trade.get('symbol')} {trade.get('direction')}\n"
-        f"Net PnL: ${trade.get('net_pnl',0):+.4f} | R: {trade.get('r_multiple',0)}\n"
-        f"Durum: {trade.get('status')}"
+        f"{emoji} <b>{result}</b> — {sym} {direc} #{trade.get('id')}\n"
+        f"\n"
+        f"📍 <code>{entry:.5g}</code> → <code>{exit_p:.5g}</code>\n"
+        f"💵 Net PnL: <b>${pnl:+.4f}</b>  R: <b>{r:+.3f}</b>\n"
+        f"⏱ Süre: {dur_str}  |  {close_reason}\n"
+        f"💰 Bakiye: <b>${bal:.2f}</b>"
     )
 
 

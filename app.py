@@ -415,6 +415,31 @@ def api_balance():
         return _err(e)
 
 
+# ── /api/telegram ────────────────────────────────────────────────────────────
+
+@app.route("/api/telegram")
+def api_telegram():
+    try:
+        import requests as _req
+        token = config.TELEGRAM_TOKEN
+        chat  = config.TELEGRAM_CHAT_ID
+        if not token or not chat:
+            return _ok({"configured": False, "ok": False, "error": "token/chat eksik"})
+        r = _req.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
+        data = r.json()
+        if data.get("ok"):
+            bot = data["result"]
+            return _ok({
+                "configured": True, "ok": True,
+                "bot_name": bot.get("first_name"),
+                "username": bot.get("username"),
+                "chat_id": chat,
+            })
+        return _ok({"configured": True, "ok": False, "error": data.get("description")})
+    except Exception as e:
+        return _ok({"configured": False, "ok": False, "error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
