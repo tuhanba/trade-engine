@@ -6,219 +6,287 @@
 <title>AURVEX.Ai — Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-:root {
-  --bg:        #04040e;
-  --s1:        #080816;
-  --s2:        #0c0c20;
-  --s3:        #101028;
-  --bdr:       #141438;
-  --bdr2:      #1e1e52;
-  --blue:      #00c8ff;
-  --blue2:     #0088dd;
-  --blue3:     #0055aa;
-  --blu-d:     rgba(0,200,255,.06);
-  --blu-d2:    rgba(0,200,255,.12);
-  --blu-g:     rgba(0,200,255,.28);
-  --blu-glow:  rgba(0,200,255,.5);
-  --green:     #00ff88;
-  --grn-d:     rgba(0,255,136,.07);
-  --red:       #ff3355;
-  --red-d:     rgba(255,51,85,.07);
-  --yellow:    #ffd600;
-  --yel-d:     rgba(255,214,0,.07);
-  --txt:       #ccd8f0;
-  --muted:     #3a4060;
-  --dim:       #181840;
-  --r:         10px;
-  --r-sm:      6px;
+/* ══ TOKENS ══════════════════════════════════════════════════ */
+:root{
+  --bg:     #03030d;
+  --s1:     #07071a;
+  --s2:     #0b0b22;
+  --s3:     #0f0f2a;
+  --bdr:    #13133a;
+  --bdr2:   #1c1c4a;
+
+  --blue:   #00c8ff;
+  --blue2:  #007acc;
+  --blue3:  #004d99;
+  --bd:     rgba(0,200,255,.07);
+  --bd2:    rgba(0,200,255,.14);
+  --bg2:    rgba(0,200,255,.26);
+  --bglow:  0 0 18px rgba(0,200,255,.45);
+
+  --green:  #00e676;
+  --gd:     rgba(0,230,118,.07);
+  --red:    #ff3d57;
+  --rd:     rgba(255,61,87,.07);
+  --yellow: #ffd740;
+  --yd:     rgba(255,215,64,.07);
+
+  --txt:    #d0ddf5;
+  --txt2:   #8090b8;
+  --dim:    #1a1a44;
+  --r:      12px;
+  --rs:     7px;
 }
 
+/* ══ BASE ════════════════════════════════════════════════════ */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
 body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--txt);font-size:13px;line-height:1.5;min-height:100vh;overflow-x:hidden}
 a{color:inherit;text-decoration:none}
-::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--dim);border-radius:3px}
+::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px}
 
-/* ── HEADER ── */
-.hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:var(--s1);border-bottom:1px solid var(--bdr);position:sticky;top:0;z-index:200;backdrop-filter:blur(24px)}
+/* ══ HEADER ══════════════════════════════════════════════════ */
+.hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 24px;height:54px;
+  background:rgba(7,7,26,.9);
+  border-bottom:1px solid var(--bdr);
+  position:sticky;top:0;z-index:200;
+  backdrop-filter:blur(20px);
+}
 .hdr-brand{display:flex;align-items:center;gap:12px}
-.hdr-logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--blue),var(--blue2));display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 0 22px var(--blu-glow)}
-.hdr-title h1{font-size:16px;font-weight:900;letter-spacing:2px;background:linear-gradient(90deg,var(--blue) 0%,var(--blue2) 60%,#006aff 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.hdr-title p{font-size:9px;letter-spacing:3px;color:var(--muted);font-weight:500;margin-top:1px}
-.hdr-right{display:flex;align-items:center;gap:8px}
-.bdg{padding:3px 11px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.5px}
-.bdg-paper  {background:var(--blu-d);color:var(--blue);border:1px solid var(--blu-g)}
-.bdg-live   {background:var(--red-d);color:var(--red);border:1px solid rgba(255,51,102,.3)}
-.bdg-run    {background:var(--grn-d);color:var(--green);border:1px solid rgba(0,255,136,.3)}
-.bdg-pause  {background:var(--yel-d);color:var(--yellow);border:1px solid rgba(255,214,0,.3)}
-.bdg-cb     {background:var(--red-d);color:var(--red);border:1px solid rgba(255,51,102,.4);animation:blink .8s infinite}
-.hdr-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse-g 2s infinite}
-.rbar{width:70px;height:2px;background:var(--dim);border-radius:2px;overflow:hidden}
-.rbar-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--blue2));border-radius:2px}
-.hdr-time{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+.hdr-logo{
+  width:36px;height:36px;border-radius:9px;
+  background:linear-gradient(135deg,var(--blue) 0%,var(--blue2) 100%);
+  display:flex;align-items:center;justify-content:center;
+  font-size:17px;box-shadow:var(--bglow);
+  flex-shrink:0;
+}
+.hdr-name{font-size:15px;font-weight:900;letter-spacing:1.5px;
+  background:linear-gradient(90deg,var(--blue),var(--blue2));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hdr-sub{font-size:9px;letter-spacing:2.5px;color:var(--txt2);font-weight:500;margin-top:1px;text-transform:uppercase}
+.hdr-right{display:flex;align-items:center;gap:10px}
+.bdg{padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.4px;white-space:nowrap}
+.bdg-paper{background:var(--bd);color:var(--blue);border:1px solid var(--bg2)}
+.bdg-live {background:var(--rd);color:var(--red);border:1px solid rgba(255,61,87,.3)}
+.bdg-run  {background:var(--gd);color:var(--green);border:1px solid rgba(0,230,118,.3)}
+.bdg-pause{background:var(--yd);color:var(--yellow);border:1px solid rgba(255,215,64,.3)}
+.bdg-cb   {background:var(--rd);color:var(--red);border:1px solid rgba(255,61,87,.4);animation:blink .8s infinite}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 7px var(--green);animation:pulse-dot 2.2s infinite;flex-shrink:0}
+.rbar{width:60px;height:2px;background:var(--dim);border-radius:2px;overflow:hidden;flex-shrink:0}
+.rbar-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--blue2));transition:width .9s linear}
+.hdr-time{font-size:10px;color:var(--txt2);font-family:'JetBrains Mono',monospace;letter-spacing:.5px}
 
-/* ── STATS ── */
-.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;padding:14px 20px;border-bottom:1px solid var(--bdr)}
-.sc{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);padding:13px 15px;position:relative;overflow:hidden;transition:border-color .2s,transform .15s;cursor:default}
-.sc:hover{border-color:var(--bdr2);transform:translateY(-1px)}
-.sc::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--blu-d),var(--blu-d2));opacity:0;transition:opacity .2s}
-.sc:hover::after{opacity:1}
-.sc-line{position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--blue),var(--blue2));opacity:0;transition:opacity .2s}
-.sc:hover .sc-line{opacity:1}
-.sc-lbl{font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
-.sc-val{font-size:20px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums;position:relative;z-index:1}
-.sc-sub{font-size:10px;color:var(--muted);margin-top:2px;position:relative;z-index:1}
-.cb{color:var(--blue)}.cg{color:var(--green)}.cr{color:var(--red)}.cy{color:var(--yellow)}.cp{color:var(--blue)}.cm{color:var(--muted)}
+/* ══ STATS BAND ═════════════════════════════════════════════ */
+.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;padding:12px 20px;border-bottom:1px solid var(--bdr)}
+.sc{
+  background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);
+  padding:14px 16px;position:relative;overflow:hidden;
+  cursor:default;transition:border-color .25s,box-shadow .25s,transform .15s;
+}
+.sc:hover{border-color:var(--bdr2);transform:translateY(-2px);box-shadow:0 6px 24px rgba(0,0,0,.4)}
+.sc-bar{position:absolute;top:0;left:0;right:0;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--blue),var(--blue2));opacity:.7}
+.sc-icon{font-size:16px;margin-bottom:6px;line-height:1}
+.sc-lbl{font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--txt2)}
+.sc-val{font-size:22px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums;letter-spacing:-0.5px;line-height:1}
+.sc-sub{font-size:10px;color:var(--txt2);margin-top:4px;font-family:'JetBrains Mono',monospace}
+.sc-wr-wrap{margin-top:6px;height:3px;background:var(--dim);border-radius:2px;overflow:hidden}
+.sc-wr-bar{height:100%;border-radius:2px;background:var(--green);transition:width .6s ease}
 
-/* ── MAIN LAYOUT ── */
-.main{display:grid;grid-template-columns:1fr 280px;gap:14px;padding:14px 20px;max-width:1600px;margin:0 auto}
-.sec-title{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:8px}
-.sec-title::after{content:'';flex:1;height:1px;background:var(--bdr)}
+/* ══ UTIL COLORS ════════════════════════════════════════════ */
+.cb{color:var(--blue)}.cg{color:var(--green)}.cr{color:var(--red)}.cy{color:var(--yellow)}.cm{color:var(--txt2)}
+
+/* ══ LAYOUT ═════════════════════════════════════════════════ */
+.main{display:grid;grid-template-columns:1fr 290px;gap:14px;padding:14px 20px;max-width:1700px;margin:0 auto}
+.sec-ttl{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--txt2);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sec-ttl::after{content:'';flex:1;height:1px;background:var(--bdr)}
 .panel{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);padding:14px}
 
-/* ── CHART ── */
-.chart-wrap{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);margin-bottom:14px;overflow:hidden}
-.chart-hdr{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--bdr)}
-.chart-hdr span{font-size:11px;font-weight:600;color:var(--muted)}
-.sym-select{background:var(--s2);border:1px solid var(--bdr);color:var(--txt);padding:4px 8px;border-radius:var(--r-sm);font-size:11px;font-family:'Inter',sans-serif;cursor:pointer;outline:none}
-.tf-btns{display:flex;gap:4px}
-.tf-btn{padding:3px 9px;border-radius:var(--r-sm);font-size:10px;font-weight:600;background:var(--s2);border:1px solid var(--bdr);color:var(--muted);cursor:pointer;transition:all .15s}
-.tf-btn:hover,.tf-btn.active{background:var(--blu-d);color:var(--blue);border-color:var(--blu-g)}
-#tv-chart{height:320px;width:100%}
+/* ══ TRADINGVIEW ═════════════════════════════════════════════ */
+.tv-wrap{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);margin-bottom:14px;overflow:hidden}
+.tv-hdr{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--bdr);flex-wrap:wrap;gap:6px}
+.tv-hdr-lbl{font-size:10px;font-weight:700;letter-spacing:.5px;color:var(--txt2)}
+.sym-sel{background:var(--s2);border:1px solid var(--bdr);color:var(--txt);padding:4px 10px;border-radius:var(--rs);font-size:11px;font-family:'Inter',sans-serif;cursor:pointer;outline:none;transition:border-color .15s}
+.sym-sel:focus{border-color:var(--blue)}
+.tf-btns{display:flex;gap:3px;margin-left:auto}
+.tf-btn{padding:3px 9px;border-radius:var(--rs);font-size:10px;font-weight:600;background:var(--s2);border:1px solid var(--bdr);color:var(--txt2);cursor:pointer;transition:all .15s}
+.tf-btn:hover,.tf-btn.active{background:var(--bd2);color:var(--blue);border-color:var(--bg2)}
+#tv-chart{height:300px;width:100%}
 
-/* ── PNL CHARTS ── */
+/* ══ PNL CHARTS ══════════════════════════════════════════════ */
 .charts-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-.chart-card{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);padding:14px 16px}
-.chart-card-hdr{font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:6px}
-.chart-card-hdr span{color:var(--blue)}
-.chart-canvas-wrap{position:relative;height:120px}
-@media(max-width:768px){.charts-row{grid-template-columns:1fr}}
+.ccard{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);padding:14px 16px}
+.ccard-hdr{display:flex;align-items:baseline;gap:6px;margin-bottom:12px}
+.ccard-ttl{font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--txt2)}
+.ccard-val{font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;margin-left:auto}
+.ccard-canvas{position:relative;height:140px}
 
-/* ── CALENDAR ── */
-.cal-day-headers{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:4px}
-.cal-day-hdr{font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);text-align:center;padding:2px 0}
-.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:14px}
-.cal-day{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:7px;min-height:58px;transition:border-color .2s,background .2s}
-.cal-day.win {border-color:rgba(0,255,136,.35);background:rgba(0,255,136,.05)}
-.cal-day.loss{border-color:rgba(255,51,85,.35);background:rgba(255,51,85,.05)}
-.cal-day.empty{background:transparent;border-color:transparent;pointer-events:none}
-.cal-day.today{border-color:var(--blu-g);box-shadow:0 0 8px rgba(0,200,255,.1)}
-.cd-date{font-size:9px;color:var(--muted);font-weight:600}
-.cd-pnl {font-size:11px;font-weight:800;margin-top:3px;font-family:'JetBrains Mono',monospace}
-.cd-meta{font-size:9px;color:var(--muted);margin-top:1px}
+/* ══ CALENDAR ════════════════════════════════════════════════ */
+.cal-hdrs{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px}
+.cal-hdr-d{font-size:8px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--txt2);text-align:center;padding:3px 0}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:14px}
+.cd{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--rs);padding:6px 7px;min-height:56px;transition:border-color .2s,background .2s,box-shadow .2s;position:relative}
+.cd.win {border-color:rgba(0,230,118,.4);background:rgba(0,230,118,.05)}
+.cd.loss{border-color:rgba(255,61,87,.4);background:rgba(255,61,87,.05)}
+.cd.empty{background:transparent;border-color:transparent;pointer-events:none}
+.cd.today{border-color:rgba(0,200,255,.5);box-shadow:0 0 10px rgba(0,200,255,.1)}
+.cd-n{font-size:9px;color:var(--txt2);font-weight:600}
+.cd-p{font-size:10px;font-weight:800;margin-top:4px;font-family:'JetBrains Mono',monospace;line-height:1}
+.cd-m{font-size:8px;color:var(--txt2);margin-top:3px}
 
-/* ── RIGHT PANEL ── */
+/* ══ RIGHT PANEL ═════════════════════════════════════════════ */
 .right{display:flex;flex-direction:column;gap:12px}
-.pr{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bdr)}
-.pr:last-child{border-bottom:none}
-.pr-l{font-size:11px;color:var(--muted)}
-.pr-r{font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
-.tg-row{display:flex;align-items:center;gap:8px;padding:4px 0}
-.tg-led{width:7px;height:7px;border-radius:50%;background:var(--muted);flex-shrink:0}
-.tg-led.ok{background:var(--green);box-shadow:0 0 7px var(--green)}
+.row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--bdr)}
+.row:last-child{border-bottom:none}
+.row-l{font-size:11px;color:var(--txt2)}
+.row-r{font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.tg-row{display:flex;align-items:center;gap:9px;padding:6px 0}
+.tg-led{width:8px;height:8px;border-radius:50%;background:var(--txt2);flex-shrink:0}
+.tg-led.ok{background:var(--green);box-shadow:0 0 8px var(--green)}
 .tg-led.err{background:var(--red)}
-.tg-txt{font-size:11px}
+.tg-txt{font-size:11px;color:var(--txt2)}
+.coin-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bdr)}
+.coin-row:last-child{border-bottom:none}
+.coin-sym{font-size:11px;font-weight:700;font-family:'Inter',sans-serif}
+.coin-wr-wrap{flex:1;height:3px;background:var(--dim);border-radius:2px;margin:0 10px;overflow:hidden}
+.coin-wr-bar{height:100%;border-radius:2px}
+.coin-meta{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--txt2)}
 
-/* ── TABS ── */
-.tabs{display:flex;gap:4px;margin-bottom:12px}
-.tab{padding:6px 14px;border-radius:var(--r-sm);cursor:pointer;font-size:11px;font-weight:600;background:var(--s2);color:var(--muted);border:1px solid var(--bdr);transition:all .2s;user-select:none}
+/* ══ TABS ════════════════════════════════════════════════════ */
+.tabs{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap}
+.tab{padding:6px 14px;border-radius:var(--rs);cursor:pointer;font-size:11px;font-weight:600;background:var(--s2);color:var(--txt2);border:1px solid var(--bdr);transition:all .2s;user-select:none}
 .tab:hover{color:var(--txt);border-color:var(--bdr2)}
-.tab.act{background:var(--blu-d);color:var(--blue);border-color:var(--blu-g)}
+.tab.act{background:var(--bd2);color:var(--blue);border-color:var(--bg2)}
 .tab-panel{display:none}
 .tab-panel.show{display:block;animation:fadein .2s ease}
 
-/* ── TABLES ── */
-.tbl-wrap{overflow-x:auto;border-radius:var(--r-sm);border:1px solid var(--bdr)}
-table{width:100%;border-collapse:collapse;min-width:520px}
+/* ══ TABLES ══════════════════════════════════════════════════ */
+.tbl-wrap{overflow-x:auto;border-radius:var(--rs);border:1px solid var(--bdr)}
+table{width:100%;border-collapse:collapse;min-width:500px}
 thead tr{background:var(--s2)}
-th{font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:9px 10px;text-align:left;border-bottom:1px solid var(--bdr);white-space:nowrap}
-td{padding:8px 10px;border-bottom:1px solid var(--bdr);font-size:11px;font-family:'JetBrains Mono',monospace;vertical-align:middle}
-tbody tr{transition:background .12s}
+th{font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--txt2);padding:9px 11px;text-align:left;border-bottom:1px solid var(--bdr);white-space:nowrap}
+td{padding:8px 11px;border-bottom:1px solid var(--bdr);font-size:11px;font-family:'JetBrains Mono',monospace;vertical-align:middle}
 tbody tr:hover td{background:var(--s2)}
 tbody tr:last-child td{border-bottom:none}
 .dl{color:var(--green);font-weight:700;font-family:'Inter',sans-serif}
 .ds{color:var(--red);font-weight:700;font-family:'Inter',sans-serif}
 .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:9px;font-weight:700;font-family:'Inter',sans-serif;letter-spacing:.3px}
-.pw{background:var(--grn-d);color:var(--green);border:1px solid rgba(0,255,136,.2)}
-.pl{background:var(--red-d);color:var(--red);border:1px solid rgba(255,51,102,.2)}
-.po{background:var(--blu-d);color:var(--blue);border:1px solid var(--blu-g)}
-.pt{background:var(--blu-d);color:var(--blue2);border:1px solid var(--blu-g)}
+.pw{background:var(--gd);color:var(--green);border:1px solid rgba(0,230,118,.25)}
+.pl{background:var(--rd);color:var(--red);border:1px solid rgba(255,61,87,.25)}
+.po{background:var(--bd);color:var(--blue);border:1px solid var(--bg2)}
+.pt{background:var(--bd);color:var(--blue2);border:1px solid var(--bg2)}
 .da{color:var(--green);font-weight:700}
 .dv{color:var(--red);font-weight:700}
 .dw{color:var(--yellow);font-weight:700}
 .pgn{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--bdr)}
-.btn{background:var(--s2);border:1px solid var(--bdr);color:var(--txt);padding:5px 12px;border-radius:var(--r-sm);cursor:pointer;font-size:11px;font-family:'Inter',sans-serif;transition:all .15s}
+.btn{background:var(--s2);border:1px solid var(--bdr);color:var(--txt);padding:5px 12px;border-radius:var(--rs);cursor:pointer;font-size:11px;font-family:'Inter',sans-serif;transition:all .15s}
 .btn:hover{border-color:var(--blue);color:var(--blue)}
-.btn:disabled{opacity:.3;cursor:default}
-.pg-info{font-size:10px;color:var(--muted)}
+.btn:disabled{opacity:.25;cursor:default}
+.pg-info{font-size:10px;color:var(--txt2)}
 
-/* ── LOG ── */
-.log-box{background:#020208;border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;height:280px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.7}
-.lI{color:var(--muted)}.lW{color:var(--yellow)}.lE{color:var(--red)}.lD{color:var(--dim)}
+/* ══ LOG ═════════════════════════════════════════════════════ */
+.log-box{background:#010109;border:1px solid var(--bdr);border-radius:var(--rs);padding:10px 12px;height:280px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.8}
+.lI{color:var(--txt2)}.lW{color:var(--yellow)}.lE{color:var(--red)}.lD{color:var(--dim)}
 
-/* ── EMPTY ── */
-.empty{text-align:center;padding:28px;color:var(--muted);font-size:11px}
-
-/* ── ANIMATIONS ── */
-@keyframes pulse-g{0%,100%{box-shadow:0 0 8px var(--green)}50%{box-shadow:0 0 18px var(--green),0 0 32px rgba(0,255,136,.3)}}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
-@keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
-@keyframes shimmer{0%{background-position:-600px 0}100%{background-position:600px 0}}
-.skel{background:linear-gradient(90deg,var(--s1) 25%,var(--s2) 50%,var(--s1) 75%);background-size:600px;animation:shimmer 1.5s infinite;border-radius:4px;height:14px}
-
-/* ── TOAST ── */
+/* ══ MISC ════════════════════════════════════════════════════ */
+.empty{text-align:center;padding:30px;color:var(--txt2);font-size:11px}
 .toast-wrap{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:9999}
-.toast{background:var(--s2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 14px;font-size:11px;max-width:280px;animation:fadein .2s ease}
-.toast.err{border-color:rgba(255,51,102,.5);color:var(--red)}
-.toast.ok{border-color:rgba(0,255,136,.4);color:var(--green)}
+.toast{background:var(--s2);border:1px solid var(--bdr);border-radius:var(--rs);padding:10px 14px;font-size:11px;max-width:280px;animation:fadein .25s ease}
+.toast.err{border-color:rgba(255,61,87,.5);color:var(--red)}
+.toast.ok {border-color:rgba(0,230,118,.4);color:var(--green)}
 
-/* ── RESPONSIVE ── */
-@media(max-width:1024px){.stats{grid-template-columns:repeat(3,1fr)}.main{grid-template-columns:1fr}}
-@media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}.cal-grid{grid-template-columns:repeat(4,1fr)}.hdr-title p{display:none}}
+/* ══ ANIMATIONS ══════════════════════════════════════════════ */
+@keyframes pulse-dot{0%,100%{box-shadow:0 0 6px var(--green)}50%{box-shadow:0 0 14px var(--green),0 0 28px rgba(0,230,118,.25)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+
+/* ══ RESPONSIVE ══════════════════════════════════════════════ */
+@media(max-width:1100px){.main{grid-template-columns:1fr}}
+@media(max-width:900px){.stats{grid-template-columns:repeat(3,1fr)}.charts-row{grid-template-columns:1fr}}
+@media(max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}.hdr-sub{display:none}.tf-btns{display:none}}
 </style>
 </head>
 <body>
 <header class="hdr">
   <div class="hdr-brand">
     <div class="hdr-logo">⚡</div>
-    <div class="hdr-title">
-      <h1>AURVEX.Ai</h1>
-      <p>ELITE TRADING · INTELLIGENCE · FUTURES</p>
+    <div>
+      <div class="hdr-name">AURVEX.Ai</div>
+      <div class="hdr-sub">Elite Futures Intelligence</div>
     </div>
   </div>
   <div class="hdr-right">
-    <div class="hdr-dot" id="bot-dot"></div>
+    <div class="dot" id="bot-dot"></div>
     <span id="bdg-mode" class="bdg bdg-paper">PAPER</span>
     <span id="bdg-status" class="bdg bdg-run">RUNNING</span>
     <span id="bdg-cb" class="bdg bdg-cb" style="display:none">⛔ CB</span>
-    <div class="rbar" title="Otomatik yenileme"><div class="rbar-fill" id="rbar" style="width:100%"></div></div>
+    <div class="rbar" title="Yenileme"><div class="rbar-fill" id="rbar" style="width:100%"></div></div>
     <span class="hdr-time" id="hdr-time">—</span>
   </div>
 </header>
+
 <div class="stats">
-  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Bakiye</div><div class="sc-val cb" id="s-bal">—</div><div class="sc-sub" id="s-mode">paper</div></div>
-  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Toplam PnL</div><div class="sc-val" id="s-tpnl">—</div><div class="sc-sub" id="s-dpnl">bugün: —</div></div>
-  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Kazanma Oranı</div><div class="sc-val" id="s-wr">—</div><div class="sc-sub" id="s-wl">—W / —L</div></div>
-  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Profit Factor</div><div class="sc-val cp" id="s-pf">—</div><div class="sc-sub" id="s-avgr">avg RR —</div></div>
-  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Max Drawdown</div><div class="sc-val cr" id="s-dd">—</div><div class="sc-sub">kümülatif</div></div>
-  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Açık Pozisyon</div><div class="sc-val cb" id="s-open">0</div><div class="sc-sub" id="s-veto">veto: —</div></div>
+  <div class="sc">
+    <div class="sc-bar"></div>
+    <div class="sc-icon">💰</div>
+    <div class="sc-lbl">Bakiye</div>
+    <div class="sc-val cb" id="s-bal">—</div>
+    <div class="sc-sub" id="s-mode">paper</div>
+  </div>
+  <div class="sc">
+    <div class="sc-bar"></div>
+    <div class="sc-icon">📈</div>
+    <div class="sc-lbl">Toplam PnL</div>
+    <div class="sc-val" id="s-tpnl">—</div>
+    <div class="sc-sub" id="s-dpnl">bugün: —</div>
+  </div>
+  <div class="sc">
+    <div class="sc-bar"></div>
+    <div class="sc-icon">🎯</div>
+    <div class="sc-lbl">Kazanma Oranı</div>
+    <div class="sc-val" id="s-wr">—</div>
+    <div class="sc-sub" id="s-wl">— W / — L</div>
+    <div class="sc-wr-wrap"><div class="sc-wr-bar" id="s-wr-bar" style="width:0%"></div></div>
+  </div>
+  <div class="sc">
+    <div class="sc-bar"></div>
+    <div class="sc-icon">⚡</div>
+    <div class="sc-lbl">Profit Factor</div>
+    <div class="sc-val cb" id="s-pf">—</div>
+    <div class="sc-sub" id="s-avgr">avg R —</div>
+  </div>
+  <div class="sc">
+    <div class="sc-bar"></div>
+    <div class="sc-icon">📉</div>
+    <div class="sc-lbl">Max Drawdown</div>
+    <div class="sc-val cr" id="s-dd">—</div>
+    <div class="sc-sub" id="s-trades">toplam — trade</div>
+  </div>
+  <div class="sc">
+    <div class="sc-bar"></div>
+    <div class="sc-icon">🔴</div>
+    <div class="sc-lbl">Açık Pozisyon</div>
+    <div class="sc-val cb" id="s-open">0</div>
+    <div class="sc-sub" id="s-veto">top veto: —</div>
+  </div>
 </div>
 <div class="main">
   <!-- SOL KOLON -->
   <div>
 
-    <!-- TradingView Chart -->
-    <div class="chart-wrap">
-      <div class="chart-hdr">
-        <span>📈 CANLI MUM GRAFİĞİ</span>
-        <select class="sym-select" id="tv-sym" onchange="updateChart()">
+    <!-- TradingView -->
+    <div class="tv-wrap">
+      <div class="tv-hdr">
+        <span class="tv-hdr-lbl">CANLI MUM</span>
+        <select class="sym-sel" id="tv-sym" onchange="updateChart()">
           <option>BTC/USDT</option><option>ETH/USDT</option>
           <option>SOL/USDT</option><option>BNB/USDT</option>
           <option>DOGE/USDT</option><option>XRP/USDT</option>
+          <option>ADA/USDT</option><option>AVAX/USDT</option>
         </select>
         <div class="tf-btns">
           <div class="tf-btn" data-tf="1">1m</div>
@@ -233,26 +301,31 @@ tbody tr:last-child td{border-bottom:none}
 
     <!-- PnL Charts -->
     <div class="charts-row">
-      <div class="chart-card">
-        <div class="chart-card-hdr">📈 <span>Kümülatif PnL</span> (son 30 gün)</div>
-        <div class="chart-canvas-wrap"><canvas id="chart-cumulative"></canvas></div>
+      <div class="ccard">
+        <div class="ccard-hdr">
+          <span class="ccard-ttl">Kümülatif PnL</span>
+          <span class="ccard-val cm" style="font-size:9px">son 30 gün</span>
+          <span class="ccard-val" id="cum-total">—</span>
+        </div>
+        <div class="ccard-canvas"><canvas id="chart-cumulative"></canvas></div>
       </div>
-      <div class="chart-card">
-        <div class="chart-card-hdr">📊 <span>Günlük PnL</span> (son 14 gün)</div>
-        <div class="chart-canvas-wrap"><canvas id="chart-daily"></canvas></div>
+      <div class="ccard">
+        <div class="ccard-hdr">
+          <span class="ccard-ttl">Günlük PnL</span>
+          <span class="ccard-val cm" style="font-size:9px">son 14 gün</span>
+          <span class="ccard-val" id="daily-avg">—</span>
+        </div>
+        <div class="ccard-canvas"><canvas id="chart-daily"></canvas></div>
       </div>
     </div>
 
     <!-- Calendar -->
-    <div class="sec-title">📅 PnL Takvimi</div>
-    <div class="cal-day-headers">
-      <div class="cal-day-hdr">Pzt</div>
-      <div class="cal-day-hdr">Sal</div>
-      <div class="cal-day-hdr">Çar</div>
-      <div class="cal-day-hdr">Per</div>
-      <div class="cal-day-hdr">Cum</div>
-      <div class="cal-day-hdr">Cmt</div>
-      <div class="cal-day-hdr">Paz</div>
+    <div class="sec-ttl">📅 PnL Takvimi — <span id="cal-month" style="color:var(--blue);font-style:normal"></span></div>
+    <div class="cal-hdrs">
+      <div class="cal-hdr-d">Pzt</div><div class="cal-hdr-d">Sal</div>
+      <div class="cal-hdr-d">Çar</div><div class="cal-hdr-d">Per</div>
+      <div class="cal-hdr-d">Cum</div><div class="cal-hdr-d">Cmt</div>
+      <div class="cal-hdr-d">Paz</div>
     </div>
     <div class="cal-grid" id="cal-grid"></div>
 
@@ -268,7 +341,7 @@ tbody tr:last-child td{border-bottom:none}
     <div class="tab-panel show" id="tab-trades">
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>#</th><th>Sembol</th><th>Yön</th><th>Entry</th><th>SL</th><th>Net PnL</th><th>R</th><th>Süre</th><th>Durum</th></tr></thead>
+          <thead><tr><th>#</th><th>Sembol</th><th>Yön</th><th>Entry</th><th>Exit</th><th>Net PnL</th><th>R</th><th>Süre</th><th>Durum</th></tr></thead>
           <tbody id="tb-trades"></tbody>
         </table>
       </div>
@@ -283,7 +356,7 @@ tbody tr:last-child td{border-bottom:none}
     <div class="tab-panel" id="tab-live">
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>#</th><th>Sembol</th><th>Yön</th><th>Entry</th><th>SL</th><th>TP1</th><th>Süre</th><th>Durum</th></tr></thead>
+          <thead><tr><th>#</th><th>Sembol</th><th>Yön</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>Süre</th><th>Durum</th></tr></thead>
           <tbody id="tb-live"></tbody>
         </table>
       </div>
@@ -310,386 +383,431 @@ tbody tr:last-child td{border-bottom:none}
   <div class="right">
 
     <div class="panel">
-      <div class="sec-title">📊 Haftalık Özet</div>
+      <div class="sec-ttl">📊 Haftalık Özet</div>
       <div id="weekly-rows"></div>
-      <div class="pr" style="margin-top:4px">
-        <span class="pr-l">Aylık Toplam</span>
-        <span class="pr-r" id="monthly">—</span>
+      <div class="row" style="margin-top:6px">
+        <span class="row-l">Bu Ay Toplam</span>
+        <span class="row-r" id="monthly">—</span>
       </div>
     </div>
 
     <div class="panel">
-      <div class="sec-title">🧠 AX Durumu</div>
-      <div class="pr"><span class="pr-l">Mod</span><span class="pr-r cb" id="ax-mode">—</span></div>
-      <div class="pr"><span class="pr-l">Ortam</span><span class="pr-r" id="ax-env">—</span></div>
-      <div class="pr"><span class="pr-l">Ardışık Kayıp</span><span class="pr-r" id="ax-losses">—</span></div>
-      <div class="pr"><span class="pr-l">Circuit Breaker</span><span class="pr-r" id="ax-cb">—</span></div>
-      <div class="pr"><span class="pr-l">Bot Status</span><span class="pr-r" id="ax-bot">—</span></div>
-      <div class="pr"><span class="pr-l">Best Coin</span><span class="pr-r cg" id="ax-best">—</span></div>
-      <div class="pr"><span class="pr-l">Worst Coin</span><span class="pr-r cr" id="ax-worst">—</span></div>
+      <div class="sec-ttl">🧠 AX Sistemi</div>
+      <div class="row"><span class="row-l">Mod</span><span class="row-r cb" id="ax-mode">—</span></div>
+      <div class="row"><span class="row-l">Ortam</span><span class="row-r" id="ax-env">—</span></div>
+      <div class="row"><span class="row-l">Bot Durumu</span><span class="row-r" id="ax-bot">—</span></div>
+      <div class="row"><span class="row-l">Ardışık Kayıp</span><span class="row-r cr" id="ax-losses">0</span></div>
+      <div class="row"><span class="row-l">Circuit Breaker</span><span class="row-r" id="ax-cb">—</span></div>
+      <div class="row"><span class="row-l">En İyi Coin</span><span class="row-r cg" id="ax-best">—</span></div>
+      <div class="row"><span class="row-l">En Kötü Coin</span><span class="row-r cr" id="ax-worst">—</span></div>
     </div>
 
     <div class="panel">
-      <div class="sec-title">✈️ Telegram</div>
+      <div class="sec-ttl">✈️ Telegram</div>
       <div class="tg-row">
         <div class="tg-led" id="tg-led"></div>
-        <span class="tg-txt" id="tg-txt">Kontrol ediliyor...</span>
+        <span class="tg-txt" id="tg-txt">Kontrol ediliyor…</span>
       </div>
     </div>
 
     <div class="panel">
-      <div class="sec-title">🪙 Coin Profilleri</div>
-      <div id="coin-rows" style="max-height:260px;overflow-y:auto"></div>
+      <div class="sec-ttl">🪙 Coin Performansı</div>
+      <div id="coin-rows" style="max-height:280px;overflow-y:auto"></div>
     </div>
 
   </div>
 </div>
 <div class="toast-wrap" id="toasts"></div>
 <script>
-// ── TradingView Widget ─────────────────────────────────────
-let tvWidget = null;
+// ══ TradingView ═══════════════════════════════════════════
 const TV_SYMS = {
   'BTC/USDT':'BINANCE:BTCUSDT','ETH/USDT':'BINANCE:ETHUSDT',
   'SOL/USDT':'BINANCE:SOLUSDT','BNB/USDT':'BINANCE:BNBUSDT',
-  'DOGE/USDT':'BINANCE:DOGEUSDT','XRP/USDT':'BINANCE:XRPUSDT'
+  'DOGE/USDT':'BINANCE:DOGEUSDT','XRP/USDT':'BINANCE:XRPUSDT',
+  'ADA/USDT':'BINANCE:ADAUSDT','AVAX/USDT':'BINANCE:AVAXUSDT'
 };
-const TV_TF = {'1':'1','5':'5','15':'15','60':'60','240':'240'};
-let curSym = 'BINANCE:BTCUSDT', curTf = '5';
+let curSym='BINANCE:BTCUSDT', curTf='5', tvLoaded=false;
 
-function buildWidget() {
-  document.getElementById('tv-chart').innerHTML = '';
-  const s = document.createElement('script');
-  s.src = 'https://s3.tradingview.com/tv.js';
-  s.onload = () => {
-    tvWidget = new TradingView.widget({
-      container_id: 'tv-chart',
-      width: '100%', height: 320,
-      symbol: curSym, interval: curTf,
-      timezone: 'Europe/Istanbul',
-      theme: 'dark', style: '1',
-      locale: 'tr', toolbar_bg: '#0b0b1e',
-      enable_publishing: false,
-      hide_side_toolbar: true,
-      hide_top_toolbar: false,
-      allow_symbol_change: false,
-      save_image: false,
-      backgroundColor: '#0b0b1e',
-      gridColor: 'rgba(28,28,66,0.5)',
-    });
-  };
+function buildWidget(){
+  document.getElementById('tv-chart').innerHTML='';
+  if(tvLoaded){ _spawnWidget(); return; }
+  const s=document.createElement('script');
+  s.src='https://s3.tradingview.com/tv.js';
+  s.onload=()=>{ tvLoaded=true; _spawnWidget(); };
   document.head.appendChild(s);
 }
-
-function updateChart() {
-  const sel = document.getElementById('tv-sym').value;
-  curSym = TV_SYMS[sel] || 'BINANCE:BTCUSDT';
+function _spawnWidget(){
+  new TradingView.widget({
+    container_id:'tv-chart', width:'100%', height:300,
+    symbol:curSym, interval:curTf,
+    timezone:'Europe/Istanbul', theme:'dark', style:'1',
+    locale:'tr', toolbar_bg:'#07071a',
+    enable_publishing:false, hide_side_toolbar:true,
+    allow_symbol_change:false, save_image:false,
+    backgroundColor:'#07071a', gridColor:'rgba(19,19,58,0.6)',
+  });
+}
+function updateChart(){
+  curSym=TV_SYMS[document.getElementById('tv-sym').value]||'BINANCE:BTCUSDT';
   buildWidget();
 }
-
-document.querySelectorAll('.tf-btn').forEach(b => {
-  b.addEventListener('click', () => {
-    document.querySelectorAll('.tf-btn').forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
-    curTf = b.dataset.tf;
-    buildWidget();
+document.querySelectorAll('.tf-btn').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.tf-btn').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); curTf=b.dataset.tf; buildWidget();
   });
 });
-
 buildWidget();
 
-// ── State ──────────────────────────────────────────────────
-const LIMIT = 20, REFRESH = 30;
-let offset = 0, total = 0, activeTab = 'trades';
-let rTimer = null, rElapsed = 0;
+// ══ State ═════════════════════════════════════════════════
+const LIMIT=20, REFRESH=30;
+let offset=0, total=0, activeTab='trades', rTimer=null, rElapsed=0;
+let chartCum=null, chartDay=null;
 
-// ── Helpers ────────────────────────────────────────────────
-const f = (v,d=2) => { if(v==null||v==='')return'—'; const n=parseFloat(v); return isNaN(n)?'—':(n>=0?'+':'')+n.toFixed(d); };
-const fpnl = v => { const n=parseFloat(v||0); return `<span class="${n>=0?'cg':'cr'}">${n>=0?'+':''}${n.toFixed(2)}</span>`; };
-const pill = s => { const m={'CLOSED_WIN':'pw','WIN':'pw','CLOSED_LOSS':'pl','LOSS':'pl','CLOSED_TRAIL':'pt','CLOSED_MANUAL':'pt','OPEN':'po','TP1_HIT':'po','TP2_HIT':'po','RUNNER_ACTIVE':'pt'}; return `<span class="pill ${m[s]||'po'}">${s||'?'}</span>`; };
+// ══ Helpers ═══════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+const pf = (v,d=4) => { const n=parseFloat(v); return isNaN(n)?0:+n.toFixed(d); };
+const fv = (v,d=2) => { if(v==null||v==='')return'—'; const n=parseFloat(v); return isNaN(n)?'—':(n>=0?'+':'')+n.toFixed(d); };
+const fpnl = v => { const n=pf(v); return `<span class="${n>=0?'cg':'cr'}">${n>=0?'+':''}${n.toFixed(2)}$</span>`; };
+const pill = s => {
+  const m={'CLOSED_WIN':'pw','WIN':'pw','CLOSED_LOSS':'pl','LOSS':'pl',
+           'CLOSED_TRAIL':'pt','CLOSED_MANUAL':'pt',
+           'OPEN':'po','TP1_HIT':'po','TP2_HIT':'po','RUNNER_ACTIVE':'pt'};
+  return `<span class="pill ${m[s]||'po'}">${s||'?'}</span>`;
+};
 const dcls = d => d==='ALLOW'?'da':d==='VETO'?'dv':'dw';
-const esc  = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const esc  = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const MONTHS=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 
-async function apiFetch(url) {
-  try { const r=await fetch(url); return await r.json(); }
-  catch(e) { toast('API hatası: '+url,'err'); return {ok:false}; }
+async function api(url){
+  try{ const r=await fetch(url); return await r.json(); }
+  catch(e){ toast('API hatası: '+url,'err'); return {ok:false}; }
 }
-function toast(msg,type='err') {
-  const c=document.getElementById('toasts');
+function toast(msg,type='err'){
   const t=document.createElement('div'); t.className='toast '+type; t.textContent=msg;
-  c.appendChild(t); setTimeout(()=>t.remove(),4000);
+  $('toasts').appendChild(t); setTimeout(()=>t.remove(),4000);
 }
 
-// ── loadStats ──────────────────────────────────────────────
-async function loadStats() {
-  const d = await apiFetch('/api/stats'); if(!d.ok) return;
-  const s = d.data;
-  const bal = parseFloat(s.balance||250);
-  document.getElementById('s-bal').textContent   = '$'+bal.toFixed(2);
-  document.getElementById('s-mode').textContent  = (s.execution_mode||'paper').toUpperCase();
-  const tp=parseFloat(s.total_pnl||0);
-  document.getElementById('s-tpnl').innerHTML    = `<span class="${tp>=0?'cg':'cr'}">${f(tp)}$</span>`;
-  const dp=parseFloat(s.daily_pnl||0);
-  document.getElementById('s-dpnl').innerHTML    = `bugün: <span class="${dp>=0?'cg':'cr'}">${f(dp)}$</span>`;
-  const wr=s.win_rate||0;
-  document.getElementById('s-wr').innerHTML      = `<span class="${wr>=50?'cg':'cr'}">${wr}%</span>`;
-  document.getElementById('s-wl').textContent    = `${s.wins||0}W / ${s.losses||0}L`;
-  document.getElementById('s-pf').textContent    = s.profit_factor||'—';
-  document.getElementById('s-avgr').textContent  = 'avg RR '+f(s.avg_r,3);
-  document.getElementById('s-dd').textContent    = f(s.max_drawdown)+'$';
-  document.getElementById('s-open').textContent  = s.open_trades||0;
-  document.getElementById('s-veto').textContent  = 'veto: '+(s.top_veto||'—');
-  // header
-  const mE=document.getElementById('bdg-mode');
-  mE.textContent=((s.execution_mode)||'paper').toUpperCase();
+// ══ loadStats ════════════════════════════════════════════
+async function loadStats(){
+  const d=await api('/api/stats'); if(!d.ok) return;
+  const s=d.data;
+
+  // Bakiye
+  const bal=pf(s.balance||250,2);
+  $('s-bal').textContent='$'+bal.toFixed(2);
+  $('s-mode').textContent=(s.execution_mode||'paper').toUpperCase();
+
+  // PnL
+  const tp=pf(s.total_pnl);
+  $('s-tpnl').innerHTML=`<span class="${tp>=0?'cg':'cr'}">${fv(tp)}$</span>`;
+  const dp=pf(s.daily_pnl);
+  $('s-dpnl').innerHTML=`bugün <span class="${dp>=0?'cg':'cr'}">${fv(dp)}$</span>`;
+
+  // WR
+  const wr=pf(s.win_rate,1);
+  $('s-wr').innerHTML=`<span class="${wr>=50?'cg':'cr'}">${wr}%</span>`;
+  $('s-wl').textContent=`${s.wins||0} W / ${s.losses||0} L`;
+  $('s-wr-bar').style.width=Math.min(100,wr)+'%';
+  $('s-wr-bar').style.background=wr>=50?'var(--green)':'var(--red)';
+
+  // PF & AvgR
+  $('s-pf').textContent=pf(s.profit_factor,2)||'—';
+  $('s-avgr').textContent='avg R '+fv(s.avg_r,3);
+
+  // DD
+  $('s-dd').textContent=fv(s.max_drawdown)+'$';
+  $('s-trades').textContent=(s.total_trades||0)+' toplam trade';
+
+  // Open
+  $('s-open').textContent=s.open_trades||0;
+  $('s-veto').textContent='veto: '+(s.top_veto||'—');
+
+  // Header badges
+  const mE=$('bdg-mode');
+  mE.textContent=(s.execution_mode||'paper').toUpperCase();
   mE.className='bdg '+(s.execution_mode==='live'?'bdg-live':'bdg-paper');
-  const sE=document.getElementById('bdg-status');
+  const sE=$('bdg-status');
   sE.textContent=(s.bot_status||'?').toUpperCase();
   sE.className='bdg '+(s.bot_status==='running'?'bdg-run':'bdg-pause');
-  document.getElementById('bdg-cb').style.display=s.circuit_breaker?'inline-block':'none';
-  const dot=document.getElementById('bot-dot');
+  $('bdg-cb').style.display=s.circuit_breaker?'inline-block':'none';
+  const dot=$('bot-dot');
   dot.style.background=s.bot_status==='running'?'var(--green)':'var(--yellow)';
+  dot.style.boxShadow='0 0 7px '+(s.bot_status==='running'?'var(--green)':'var(--yellow)');
+
   // AX panel
-  document.getElementById('ax-mode').textContent   = s.ax_mode||'—';
-  document.getElementById('ax-env').textContent    = (s.execution_mode||'—').toUpperCase();
-  document.getElementById('ax-losses').textContent = s.consecutive_losses||0;
-  document.getElementById('ax-cb').innerHTML = s.circuit_breaker?'<span class="cr">AKTİF</span>':'<span class="cg">Kapalı</span>';
-  document.getElementById('ax-bot').textContent  = s.bot_status||'—';
-  document.getElementById('ax-best').textContent  = s.best_coin||'—';
-  document.getElementById('ax-worst').textContent = s.worst_coin||'—';
-  document.getElementById('hdr-time').textContent = new Date().toLocaleTimeString('tr-TR');
+  $('ax-mode').textContent=s.ax_mode||'—';
+  $('ax-env').textContent=(s.execution_mode||'—').toUpperCase();
+  $('ax-bot').textContent=s.bot_status||'—';
+  $('ax-losses').textContent=s.consecutive_losses||0;
+  $('ax-cb').innerHTML=s.circuit_breaker?'<span class="cr">⛔ AKTİF</span>':'<span class="cg">Kapalı</span>';
+  $('ax-best').textContent=s.best_coin||'—';
+  $('ax-worst').textContent=s.worst_coin||'—';
+  $('hdr-time').textContent=new Date().toLocaleTimeString('tr-TR');
 }
 
-// ── Chart.js instances ─────────────────────────────────────
-let chartCumulative = null, chartDaily = null;
+// ══ loadCharts ═══════════════════════════════════════════
+function buildCharts(calData){
+  if(!calData||!calData.length) return;
+  const sorted=[...calData].sort((a,b)=>a.day>b.day?1:-1);
+  const l30=sorted.slice(-30), l14=sorted.slice(-14);
 
-function loadCharts(calData) {
-  if(!calData || !calData.length) return;
+  // Kümülatif
+  let cum=0;
+  const cumLbls=l30.map(r=>r.day.slice(5));
+  const cumData=l30.map(r=>{ cum+=pf(r.pnl); return +cum.toFixed(2); });
+  const lastCum=cumData[cumData.length-1]||0;
+  $('cum-total').innerHTML=`<span class="${lastCum>=0?'cg':'cr'}">${fv(lastCum)}$</span>`;
 
-  // Tarihe göre artan sıra
-  const sorted = [...calData].sort((a,b)=>a.day>b.day?1:-1);
-  const last30 = sorted.slice(-30);
-  const last14 = sorted.slice(-14);
+  // Günlük
+  const barLbls=l14.map(r=>r.day.slice(5));
+  const barData=l14.map(r=>+pf(r.pnl,2));
+  const avgDay=barData.reduce((a,b)=>a+b,0)/Math.max(barData.length,1);
+  $('daily-avg').innerHTML=`<span class="${avgDay>=0?'cg':'cr'}">ort ${fv(avgDay)}$</span>`;
 
-  // Kümülatif PnL
-  let cum = 0;
-  const cumLabels = last30.map(r=>r.day.slice(5));
-  const cumData   = last30.map(r=>{ cum+=parseFloat(r.pnl||0); return +cum.toFixed(2); });
-
-  // Günlük PnL bar
-  const barLabels = last14.map(r=>r.day.slice(5));
-  const barData   = last14.map(r=>+parseFloat(r.pnl||0).toFixed(2));
-  const barColors = barData.map(v=>v>=0?'rgba(0,255,136,.65)':'rgba(255,51,85,.65)');
-  const barBorder = barData.map(v=>v>=0?'#00ff88':'#ff3355');
-
-  const chartOpts = {
+  const baseOpts={
     responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{display:false}, tooltip:{
-      backgroundColor:'#0c0c20', borderColor:'#141438', borderWidth:1,
-      titleColor:'#3a4060', bodyColor:'#ccd8f0',
-      callbacks:{ label: ctx=>(ctx.parsed.y>=0?'+':'')+ctx.parsed.y+'$' }
+    animation:{duration:600},
+    plugins:{legend:{display:false}, tooltip:{
+      backgroundColor:'#0b0b22', borderColor:'#13133a', borderWidth:1,
+      titleColor:'#8090b8', bodyColor:'#d0ddf5', padding:8,
+      callbacks:{label:ctx=>(ctx.parsed.y>=0?'+':'')+ctx.parsed.y+'$'}
     }},
     scales:{
-      x:{ grid:{color:'rgba(20,20,56,.8)'}, ticks:{color:'#3a4060',font:{size:9},maxTicksLimit:7} },
-      y:{ grid:{color:'rgba(20,20,56,.8)'}, ticks:{color:'#3a4060',font:{size:9},callback:v=>(v>=0?'+':'')+v+'$'} }
+      x:{grid:{color:'rgba(19,19,58,.7)',drawBorder:false},
+         ticks:{color:'#8090b8',font:{size:9,family:'JetBrains Mono'},maxTicksLimit:8}},
+      y:{grid:{color:'rgba(19,19,58,.7)',drawBorder:false},
+         ticks:{color:'#8090b8',font:{size:9,family:'JetBrains Mono'},
+                callback:v=>(v>=0?'+':'')+v+'$'}}
     }
   };
 
-  if(chartCumulative){ chartCumulative.destroy(); }
-  chartCumulative = new Chart(document.getElementById('chart-cumulative'), {
+  if(chartCum) chartCum.destroy();
+  chartCum=new Chart($('chart-cumulative'),{
     type:'line',
-    data:{
-      labels: cumLabels,
-      datasets:[{
-        data: cumData,
-        borderColor:'#00c8ff', borderWidth:2,
-        pointBackgroundColor:'#00c8ff', pointRadius:3, pointHoverRadius:5,
-        fill:true,
-        backgroundColor: ctx=>{
-          const g=ctx.chart.ctx.createLinearGradient(0,0,0,120);
-          g.addColorStop(0,'rgba(0,200,255,.18)');
-          g.addColorStop(1,'rgba(0,200,255,.01)');
-          return g;
-        },
-        tension:.35
-      }]
-    },
-    options: chartOpts
+    data:{labels:cumLbls,datasets:[{
+      data:cumData, borderColor:'#00c8ff', borderWidth:2,
+      pointBackgroundColor:'#00c8ff', pointRadius:2, pointHoverRadius:5,
+      fill:true, tension:.4,
+      backgroundColor:ctx=>{
+        const g=ctx.chart.ctx.createLinearGradient(0,0,0,140);
+        g.addColorStop(0,'rgba(0,200,255,.2)'); g.addColorStop(1,'rgba(0,200,255,.01)');
+        return g;
+      }
+    }]},
+    options:baseOpts
   });
 
-  if(chartDaily){ chartDaily.destroy(); }
-  chartDaily = new Chart(document.getElementById('chart-daily'), {
+  if(chartDay) chartDay.destroy();
+  chartDay=new Chart($('chart-daily'),{
     type:'bar',
-    data:{
-      labels: barLabels,
-      datasets:[{
-        data: barData,
-        backgroundColor: barColors,
-        borderColor: barBorder,
-        borderWidth:1, borderRadius:3
-      }]
-    },
-    options: chartOpts
+    data:{labels:barLbls,datasets:[{
+      data:barData,
+      backgroundColor:barData.map(v=>v>=0?'rgba(0,230,118,.6)':'rgba(255,61,87,.6)'),
+      borderColor:barData.map(v=>v>=0?'#00e676':'#ff3d57'),
+      borderWidth:1, borderRadius:4
+    }]},
+    options:baseOpts
   });
 }
 
-// ── loadCalendar ───────────────────────────────────────────
-async function loadCalendar() {
-  const d = await apiFetch('/api/calendar'); if(!d.ok) return;
+// ══ loadCalendar ════════════════════════════════════════
+async function loadCalendar(){
+  const d=await api('/api/calendar'); if(!d.ok) return;
+  buildCharts(d.data);
 
-  // Grafikleri doldur
-  loadCharts(d.data);
+  const g=$('cal-grid'); g.innerHTML='';
+  const today=new Date();
+  const todayStr=today.toISOString().slice(0,10);
+  const y=today.getFullYear(), mo=today.getMonth();
+  $('cal-month').textContent=MONTHS[mo]+' '+y;
 
-  // Takvim — mevcut ayı dolduracak grid
-  const g = document.getElementById('cal-grid'); g.innerHTML='';
-  if(!d.data.length){g.innerHTML='<div class="empty">Veri yok</div>';return;}
+  const map={};
+  d.data.forEach(r=>{ if(r.day) map[r.day]=r; });
 
-  // API'dan gelen son 42 günü bir map'e al
-  const pnlMap={};
-  d.data.forEach(r=>{ if(r.day) pnlMap[r.day]=r; });
+  const firstDow=(new Date(y,mo,1).getDay()+6)%7;
+  const dim=new Date(y,mo+1,0).getDate();
 
-  // Bu ayın 1. günü ve gün sayısı
-  const today  = new Date();
-  const todayStr = today.toISOString().slice(0,10);
-  const y = today.getFullYear(), mo = today.getMonth();
-  const firstDay = new Date(y,mo,1);
-  // Pazartesi=0, Pazar=6 (getDay: 0=Pazar → hizala)
-  let startOffset = (firstDay.getDay()+6)%7; // Pazartesi başlangıç
-  const daysInMonth = new Date(y,mo+1,0).getDate();
-
-  // Boş hücreler (ay başından önce)
-  for(let i=0;i<startOffset;i++){
-    const el=document.createElement('div'); el.className='cal-day empty';
-    g.appendChild(el);
+  for(let i=0;i<firstDow;i++){
+    const e=document.createElement('div'); e.className='cd empty'; g.appendChild(e);
   }
-  // Ayın günleri
-  for(let day=1;day<=daysInMonth;day++){
-    const dateStr=`${y}-${String(mo+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    const r=pnlMap[dateStr];
-    const pnl=r?parseFloat(r.pnl||0):null;
+  for(let day=1;day<=dim;day++){
+    const ds=`${y}-${String(mo+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const r=map[ds]; const pnl=r?pf(r.pnl):null;
     const el=document.createElement('div');
-    let cls='cal-day';
-    if(dateStr===todayStr) cls+=' today';
+    let cls='cd';
+    if(ds===todayStr) cls+=' today';
     if(pnl!=null) cls+=pnl>0?' win':pnl<0?' loss':'';
     el.className=cls;
-    el.innerHTML=`<div class="cd-date">${day}</div>`+
+    el.innerHTML=`<div class="cd-n">${day}</div>`+
       (pnl!=null
-        ? `<div class="cd-pnl ${pnl>=0?'cg':'cr'}">${f(pnl)}$</div><div class="cd-meta">${r.total||0}T&nbsp;${r.win_rate||0}%</div>`
-        : (dateStr<=todayStr?'<div class="cd-pnl cm">—</div>':'')
-      );
+        ?`<div class="cd-p ${pnl>=0?'cg':'cr'}">${fv(pnl)}$</div><div class="cd-m">${r.total||0}T ${r.win_rate||0}%</div>`
+        :(ds<=todayStr?'<div class="cd-p cm">—</div>':''));
     g.appendChild(el);
   }
 }
 
-// ── loadWeekly ─────────────────────────────────────────────
-async function loadWeekly() {
-  const d = await apiFetch('/api/weekly'); if(!d.ok) return;
-  const el=document.getElementById('weekly-rows'); el.innerHTML='';
-  let mo=0;
+// ══ loadWeekly ══════════════════════════════════════════
+async function loadWeekly(){
+  const d=await api('/api/weekly'); if(!d.ok) return;
+  const el=$('weekly-rows'); el.innerHTML=''; let mo=0;
   d.data.slice(0,4).forEach((r,i)=>{
-    const pnl=parseFloat(r.pnl||0); mo+=pnl;
-    el.innerHTML+=`<div class="pr"><span class="pr-l">Hafta ${i+1} <span style="font-size:9px;color:var(--dim)">${(r.week||'').slice(0,10)}</span></span><span class="pr-r ${pnl>=0?'cg':'cr'}">${f(pnl)}$ <span class="cm" style="font-size:9px;font-family:Inter">${r.total||0}T</span></span></div>`;
+    const pnl=pf(r.pnl); mo+=pnl;
+    el.innerHTML+=`<div class="row">
+      <span class="row-l">Hf ${i+1} <span style="font-size:9px;color:var(--dim)">${(r.week||'').slice(0,10)}</span></span>
+      <span class="row-r ${pnl>=0?'cg':'cr'}">${fv(pnl)}$ <span class="cm" style="font-size:9px">${r.total||0}T</span></span>
+    </div>`;
   });
-  document.getElementById('monthly').innerHTML=`<span class="${mo>=0?'cg':'cr'}">${f(mo)}$</span>`;
+  $('monthly').innerHTML=`<span class="${mo>=0?'cg':'cr'}">${fv(mo)}$</span>`;
 }
 
-// ── loadTrades ─────────────────────────────────────────────
-async function loadTrades(dir=0) {
+// ══ loadTrades ══════════════════════════════════════════
+async function loadTrades(dir=0){
   offset=Math.max(0,offset+dir*LIMIT);
-  const d=await apiFetch(`/api/trades?limit=${LIMIT}&offset=${offset}`); if(!d.ok) return;
+  const d=await api(`/api/trades?limit=${LIMIT}&offset=${offset}`); if(!d.ok) return;
   total=d.total||0;
-  const b=document.getElementById('tb-trades'); b.innerHTML='';
-  if(!d.data.length){b.innerHTML='<tr><td colspan="9"><div class="empty">Trade yok</div></td></tr>';}
-  else d.data.forEach(t=>{
-    const pnl=parseFloat(t.net_pnl||0);
-    b.innerHTML+=`<tr><td class="cm">${t.id}</td><td style="font-weight:700;font-family:Inter">${t.symbol}</td><td class="${t.direction==='LONG'?'dl':'ds'}">${t.direction}</td><td>${parseFloat(t.entry||0).toFixed(4)}</td><td>${parseFloat(t.sl||0).toFixed(4)}</td><td>${fpnl(pnl)}</td><td class="${(t.r_multiple||0)>=0?'cg':'cr'}">${f(t.r_multiple,3)}R</td><td class="cm">${t.duration_str||'—'}</td><td>${pill(t.status)}</td></tr>`;
-  });
-  const pg=Math.floor(offset/LIMIT)+1,pgs=Math.ceil(total/LIMIT)||1;
-  document.getElementById('pg-info').textContent=`Sayfa ${pg}/${pgs} (${total})`;
-  document.getElementById('btn-prev').disabled=offset===0;
-  document.getElementById('btn-next').disabled=offset+LIMIT>=total;
+  const b=$('tb-trades'); b.innerHTML='';
+  if(!d.data.length){
+    b.innerHTML='<tr><td colspan="9"><div class="empty">Henüz kapalı trade yok</div></td></tr>';
+  } else {
+    d.data.forEach(t=>{
+      const pnl=pf(t.net_pnl);
+      b.innerHTML+=`<tr>
+        <td class="cm" style="font-size:10px">#${t.id}</td>
+        <td style="font-weight:700;font-family:Inter;color:var(--txt)">${t.symbol}</td>
+        <td class="${t.direction==='LONG'?'dl':'ds'}">${t.direction}</td>
+        <td>${pf(t.entry,4)}</td>
+        <td>${pf(t.exit_price,4)||'—'}</td>
+        <td>${fpnl(pnl)}</td>
+        <td class="${pf(t.r_multiple)>=0?'cg':'cr'}">${fv(t.r_multiple,3)}R</td>
+        <td class="cm">${t.duration_str||'—'}</td>
+        <td>${pill(t.status)}</td>
+      </tr>`;
+    });
+  }
+  const pg=Math.floor(offset/LIMIT)+1, pgs=Math.ceil(total/LIMIT)||1;
+  $('pg-info').textContent=`${pg}/${pgs} sayfa (${total} trade)`;
+  $('btn-prev').disabled=offset===0;
+  $('btn-next').disabled=offset+LIMIT>=total;
 }
 
-// ── loadLive ───────────────────────────────────────────────
-async function loadLive() {
-  const d=await apiFetch('/api/live'); if(!d.ok) return;
-  const b=document.getElementById('tb-live'); b.innerHTML='';
-  if(!d.data.length){b.innerHTML='<tr><td colspan="8"><div class="empty">Açık pozisyon yok</div></td></tr>';return;}
+// ══ loadLive ════════════════════════════════════════════
+async function loadLive(){
+  const d=await api('/api/live'); if(!d.ok) return;
+  const b=$('tb-live'); b.innerHTML='';
+  if(!d.data.length){
+    b.innerHTML='<tr><td colspan="9"><div class="empty">Açık pozisyon yok</div></td></tr>'; return;
+  }
   d.data.forEach(t=>{
-    b.innerHTML+=`<tr><td class="cm">${t.id}</td><td style="font-weight:700;font-family:Inter">${t.symbol}</td><td class="${t.direction==='LONG'?'dl':'ds'}">${t.direction}</td><td>${parseFloat(t.entry||0).toFixed(4)}</td><td>${parseFloat(t.sl||0).toFixed(4)}</td><td>${parseFloat(t.tp1||0).toFixed(4)}</td><td class="cm">${t.duration_str||'—'}</td><td>${pill(t.status)}</td></tr>`;
+    b.innerHTML+=`<tr>
+      <td class="cm" style="font-size:10px">#${t.id}</td>
+      <td style="font-weight:700;font-family:Inter">${t.symbol}</td>
+      <td class="${t.direction==='LONG'?'dl':'ds'}">${t.direction}</td>
+      <td>${pf(t.entry,4)}</td>
+      <td class="cr">${pf(t.sl,4)}</td>
+      <td class="cg">${pf(t.tp1,4)}</td>
+      <td class="cg">${pf(t.tp2,4)}</td>
+      <td class="cm">${t.duration_str||'—'}</td>
+      <td>${pill(t.status)}</td>
+    </tr>`;
   });
 }
 
-// ── loadSignals ────────────────────────────────────────────
-async function loadSignals() {
-  const d=await apiFetch('/api/signals?limit=40'); if(!d.ok) return;
-  const b=document.getElementById('tb-signals'); b.innerHTML='';
-  if(!d.data.length){b.innerHTML='<tr><td colspan="8"><div class="empty">Sinyal yok</div></td></tr>';return;}
+// ══ loadSignals ═════════════════════════════════════════
+async function loadSignals(){
+  const d=await api('/api/signals?limit=50'); if(!d.ok) return;
+  const b=$('tb-signals'); b.innerHTML='';
+  if(!d.data.length){
+    b.innerHTML='<tr><td colspan="8"><div class="empty">Sinyal yok</div></td></tr>'; return;
+  }
   d.data.forEach(s=>{
     const t=(s.created_at||'').slice(11,16);
-    b.innerHTML+=`<tr><td style="font-weight:700;font-family:Inter">${s.symbol}</td><td class="${s.direction==='LONG'?'dl':'ds'}">${s.direction}</td><td>${f(s.rr,2)}</td><td>${f(s.expected_mfe_r,2)}</td><td>${s.score||0}</td><td class="${dcls(s.decision)}">${s.decision||'?'}</td><td class="cm" style="font-size:9px">${s.veto_reason||''}</td><td class="cm">${t}</td></tr>`;
+    b.innerHTML+=`<tr>
+      <td style="font-weight:700;font-family:Inter">${s.symbol}</td>
+      <td class="${s.direction==='LONG'?'dl':'ds'}">${s.direction}</td>
+      <td>${fv(s.rr,2)}</td>
+      <td>${fv(s.expected_mfe_r,2)}</td>
+      <td><span class="cb">${s.score||0}</span></td>
+      <td class="${dcls(s.decision)}">${s.decision||'?'}</td>
+      <td class="cm" style="font-size:9px">${esc(s.veto_reason||'')}</td>
+      <td class="cm">${t}</td>
+    </tr>`;
   });
 }
 
-// ── loadLogs ───────────────────────────────────────────────
-async function loadLogs() {
-  const d=await apiFetch('/api/logs?n=80'); if(!d.ok) return;
-  const b=document.getElementById('log-box');
+// ══ loadLogs ════════════════════════════════════════════
+async function loadLogs(){
+  const d=await api('/api/logs?n=100'); if(!d.ok) return;
+  const b=$('log-box');
   b.innerHTML=d.data.map(l=>`<div class="l${l.level[0]}">${esc(l.text)}</div>`).join('');
   b.scrollTop=b.scrollHeight;
 }
 
-// ── loadCoins ──────────────────────────────────────────────
-async function loadCoins() {
-  const d=await apiFetch('/api/coins'); if(!d.ok) return;
-  const el=document.getElementById('coin-rows'); el.innerHTML='';
-  if(!d.data.length){el.innerHTML='<div class="empty">Henüz profil yok</div>';return;}
-  d.data.slice(0,20).forEach(c=>{
+// ══ loadCoins ═══════════════════════════════════════════
+async function loadCoins(){
+  const d=await api('/api/coins'); if(!d.ok) return;
+  const el=$('coin-rows'); el.innerHTML='';
+  if(!d.data.length){el.innerHTML='<div class="empty">Henüz coin profili yok</div>';return;}
+  d.data.slice(0,25).forEach(c=>{
     const wr=Math.round((c.win_rate||0)*100);
-    el.innerHTML+=`<div class="pr"><span class="pr-l">${c.symbol} <span style="font-size:9px;color:var(--dim)">${c.volatility_profile||''}</span></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace"><span class="${wr>=50?'cg':'cr'}">${wr}%</span> <span class="cm">${c.trade_count||0}T</span></span></div>`;
+    const barColor=wr>=50?'var(--green)':'var(--red)';
+    el.innerHTML+=`<div class="coin-row">
+      <span class="coin-sym">${c.symbol}</span>
+      <div class="coin-wr-wrap"><div class="coin-wr-bar" style="width:${wr}%;background:${barColor}"></div></div>
+      <span class="coin-meta"><span class="${wr>=50?'cg':'cr'}">${wr}%</span> <span>${c.trade_count||0}T</span></span>
+    </div>`;
   });
 }
 
-// ── loadTelegram ───────────────────────────────────────────
-async function loadTelegram() {
-  const d=await apiFetch('/api/telegram');
-  const led=document.getElementById('tg-led'), txt=document.getElementById('tg-txt');
+// ══ loadTelegram ════════════════════════════════════════
+async function loadTelegram(){
+  const d=await api('/api/telegram');
+  const led=$('tg-led'), txt=$('tg-txt');
   if(d.ok&&d.data&&d.data.ok){
-    led.className='tg-led ok'; txt.textContent=`@${d.data.username} — aktif`; txt.style.color='var(--green)';
+    led.className='tg-led ok';
+    txt.textContent=`@${d.data.username} · aktif`;
+    txt.style.color='var(--green)';
   } else {
-    led.className='tg-led err'; txt.textContent=(d.data&&d.data.error)||'Bağlanamadı'; txt.style.color='var(--red)';
+    led.className='tg-led err';
+    txt.textContent=(d.data&&d.data.error)||'Bağlanamadı';
+    txt.style.color='var(--red)';
   }
 }
 
-// ── Tabs ───────────────────────────────────────────────────
+// ══ Tabs ════════════════════════════════════════════════
 document.querySelectorAll('.tab').forEach(el=>{
   el.addEventListener('click',()=>{
     const n=el.dataset.tab;
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('act',t.dataset.tab===n));
     document.querySelectorAll('.tab-panel').forEach(p=>{p.classList.remove('show');p.style.display='none'});
-    const tp=document.getElementById('tab-'+n); tp.style.display=''; setTimeout(()=>tp.classList.add('show'),10);
+    const tp=$('tab-'+n); tp.style.display=''; setTimeout(()=>tp.classList.add('show'),10);
     activeTab=n;
-    if(n==='live')loadLive(); if(n==='signals')loadSignals(); if(n==='logs')loadLogs();
+    if(n==='live') loadLive();
+    if(n==='signals') loadSignals();
+    if(n==='logs') loadLogs();
   });
 });
 
-// ── Refresh ────────────────────────────────────────────────
+// ══ Refresh bar ═════════════════════════════════════════
 function startBar(){
   clearInterval(rTimer); rElapsed=0;
-  const bar=document.getElementById('rbar');
+  const bar=$('rbar');
   rTimer=setInterval(()=>{
-    rElapsed++; bar.style.width=Math.max(0,100-(rElapsed/REFRESH*100))+'%';
-    if(rElapsed>=REFRESH){clearInterval(rTimer);doRefresh();}
+    rElapsed++;
+    bar.style.width=Math.max(0,100-(rElapsed/REFRESH*100))+'%';
+    if(rElapsed>=REFRESH){ clearInterval(rTimer); doRefresh(); }
   },1000);
 }
+
 async function doRefresh(){
-  await Promise.all([loadStats(),loadCalendar(),loadWeekly(),loadCoins(),loadTrades(0)]);
-  if(activeTab==='live')loadLive();
-  if(activeTab==='signals')loadSignals();
-  if(activeTab==='logs')loadLogs();
+  await Promise.all([loadStats(), loadCalendar(), loadWeekly(), loadCoins(), loadTrades(0)]);
+  if(activeTab==='live') loadLive();
+  if(activeTab==='signals') loadSignals();
+  if(activeTab==='logs') loadLogs();
   startBar();
 }
 
-// ── Init ───────────────────────────────────────────────────
+// ══ Init ════════════════════════════════════════════════
 doRefresh();
 loadTelegram();
 </script>
