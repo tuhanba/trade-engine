@@ -4,34 +4,33 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AURVEX.Ai — Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap');
 
 :root {
-  --bg:        #06060f;
-  --s1:        #0b0b1e;
-  --s2:        #0f0f26;
-  --s3:        #13132e;
-  --bdr:       #1c1c42;
-  --bdr2:      #252558;
-  --blue:      #00d4ff;
-  --blue2:     #0099cc;
-  --blu-d:     rgba(0,212,255,.07);
-  --blu-g:     rgba(0,212,255,.22);
-  --purple:    #a855f7;
-  --purple2:   #7c3aed;
-  --pur-d:     rgba(168,85,247,.07);
-  --pur-g:     rgba(168,85,247,.22);
+  --bg:        #04040e;
+  --s1:        #080816;
+  --s2:        #0c0c20;
+  --s3:        #101028;
+  --bdr:       #141438;
+  --bdr2:      #1e1e52;
+  --blue:      #00c8ff;
+  --blue2:     #0088dd;
+  --blue3:     #0055aa;
+  --blu-d:     rgba(0,200,255,.06);
+  --blu-d2:    rgba(0,200,255,.12);
+  --blu-g:     rgba(0,200,255,.28);
+  --blu-glow:  rgba(0,200,255,.5);
   --green:     #00ff88;
   --grn-d:     rgba(0,255,136,.07);
-  --red:       #ff3366;
-  --red-d:     rgba(255,51,102,.07);
+  --red:       #ff3355;
+  --red-d:     rgba(255,51,85,.07);
   --yellow:    #ffd600;
   --yel-d:     rgba(255,214,0,.07);
-  --txt:       #dde4f0;
-  --muted:     #444870;
-  --dim:       #1e1e48;
-  --gold:      #c9a227;
+  --txt:       #ccd8f0;
+  --muted:     #3a4060;
+  --dim:       #181840;
   --r:         10px;
   --r-sm:      6px;
 }
@@ -47,8 +46,8 @@ a{color:inherit;text-decoration:none}
 /* ── HEADER ── */
 .hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:var(--s1);border-bottom:1px solid var(--bdr);position:sticky;top:0;z-index:200;backdrop-filter:blur(24px)}
 .hdr-brand{display:flex;align-items:center;gap:12px}
-.hdr-logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--blue),var(--purple));display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 0 20px var(--blu-g)}
-.hdr-title h1{font-size:16px;font-weight:900;letter-spacing:2px;background:linear-gradient(90deg,var(--blue) 0%,var(--purple) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hdr-logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--blue),var(--blue2));display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 0 22px var(--blu-glow)}
+.hdr-title h1{font-size:16px;font-weight:900;letter-spacing:2px;background:linear-gradient(90deg,var(--blue) 0%,var(--blue2) 60%,#006aff 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .hdr-title p{font-size:9px;letter-spacing:3px;color:var(--muted);font-weight:500;margin-top:1px}
 .hdr-right{display:flex;align-items:center;gap:8px}
 .bdg{padding:3px 11px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.5px}
@@ -59,21 +58,21 @@ a{color:inherit;text-decoration:none}
 .bdg-cb     {background:var(--red-d);color:var(--red);border:1px solid rgba(255,51,102,.4);animation:blink .8s infinite}
 .hdr-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse-g 2s infinite}
 .rbar{width:70px;height:2px;background:var(--dim);border-radius:2px;overflow:hidden}
-.rbar-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--purple));border-radius:2px}
+.rbar-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--blue2));border-radius:2px}
 .hdr-time{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace}
 
 /* ── STATS ── */
 .stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;padding:14px 20px;border-bottom:1px solid var(--bdr)}
 .sc{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);padding:13px 15px;position:relative;overflow:hidden;transition:border-color .2s,transform .15s;cursor:default}
 .sc:hover{border-color:var(--bdr2);transform:translateY(-1px)}
-.sc::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--blu-d),var(--pur-d));opacity:0;transition:opacity .2s}
+.sc::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--blu-d),var(--blu-d2));opacity:0;transition:opacity .2s}
 .sc:hover::after{opacity:1}
-.sc-line{position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--blue),var(--purple));opacity:0;transition:opacity .2s}
+.sc-line{position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--blue),var(--blue2));opacity:0;transition:opacity .2s}
 .sc:hover .sc-line{opacity:1}
 .sc-lbl{font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
 .sc-val{font-size:20px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums;position:relative;z-index:1}
 .sc-sub{font-size:10px;color:var(--muted);margin-top:2px;position:relative;z-index:1}
-.cb{color:var(--blue)}.cg{color:var(--green)}.cr{color:var(--red)}.cy{color:var(--yellow)}.cp{color:var(--purple)}.cm{color:var(--muted)}
+.cb{color:var(--blue)}.cg{color:var(--green)}.cr{color:var(--red)}.cy{color:var(--yellow)}.cp{color:var(--blue)}.cm{color:var(--muted)}
 
 /* ── MAIN LAYOUT ── */
 .main{display:grid;grid-template-columns:1fr 280px;gap:14px;padding:14px 20px;max-width:1600px;margin:0 auto}
@@ -91,12 +90,23 @@ a{color:inherit;text-decoration:none}
 .tf-btn:hover,.tf-btn.active{background:var(--blu-d);color:var(--blue);border-color:var(--blu-g)}
 #tv-chart{height:320px;width:100%}
 
+/* ── PNL CHARTS ── */
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.chart-card{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);padding:14px 16px}
+.chart-card-hdr{font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.chart-card-hdr span{color:var(--blue)}
+.chart-canvas-wrap{position:relative;height:120px}
+@media(max-width:768px){.charts-row{grid-template-columns:1fr}}
+
 /* ── CALENDAR ── */
+.cal-day-headers{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:4px}
+.cal-day-hdr{font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);text-align:center;padding:2px 0}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:14px}
-.cal-day{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:7px;min-height:62px;transition:border-color .2s}
-.cal-day.win {border-color:rgba(0,255,136,.3);background:rgba(0,255,136,.04)}
-.cal-day.loss{border-color:rgba(255,51,102,.3);background:rgba(255,51,102,.04)}
-.cal-day.empty{background:transparent;border-color:transparent}
+.cal-day{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:7px;min-height:58px;transition:border-color .2s,background .2s}
+.cal-day.win {border-color:rgba(0,255,136,.35);background:rgba(0,255,136,.05)}
+.cal-day.loss{border-color:rgba(255,51,85,.35);background:rgba(255,51,85,.05)}
+.cal-day.empty{background:transparent;border-color:transparent;pointer-events:none}
+.cal-day.today{border-color:var(--blu-g);box-shadow:0 0 8px rgba(0,200,255,.1)}
 .cd-date{font-size:9px;color:var(--muted);font-weight:600}
 .cd-pnl {font-size:11px;font-weight:800;margin-top:3px;font-family:'JetBrains Mono',monospace}
 .cd-meta{font-size:9px;color:var(--muted);margin-top:1px}
@@ -136,7 +146,7 @@ tbody tr:last-child td{border-bottom:none}
 .pw{background:var(--grn-d);color:var(--green);border:1px solid rgba(0,255,136,.2)}
 .pl{background:var(--red-d);color:var(--red);border:1px solid rgba(255,51,102,.2)}
 .po{background:var(--blu-d);color:var(--blue);border:1px solid var(--blu-g)}
-.pt{background:var(--pur-d);color:var(--purple);border:1px solid var(--pur-g)}
+.pt{background:var(--blu-d);color:var(--blue2);border:1px solid var(--blu-g)}
 .da{color:var(--green);font-weight:700}
 .dv{color:var(--red);font-weight:700}
 .dw{color:var(--yellow);font-weight:700}
@@ -221,8 +231,29 @@ tbody tr:last-child td{border-bottom:none}
       <div id="tv-chart"></div>
     </div>
 
+    <!-- PnL Charts -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-card-hdr">📈 <span>Kümülatif PnL</span> (son 30 gün)</div>
+        <div class="chart-canvas-wrap"><canvas id="chart-cumulative"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-hdr">📊 <span>Günlük PnL</span> (son 14 gün)</div>
+        <div class="chart-canvas-wrap"><canvas id="chart-daily"></canvas></div>
+      </div>
+    </div>
+
     <!-- Calendar -->
-    <div class="sec-title">📅 Calendar PnL</div>
+    <div class="sec-title">📅 PnL Takvimi</div>
+    <div class="cal-day-headers">
+      <div class="cal-day-hdr">Pzt</div>
+      <div class="cal-day-hdr">Sal</div>
+      <div class="cal-day-hdr">Çar</div>
+      <div class="cal-day-hdr">Per</div>
+      <div class="cal-day-hdr">Cum</div>
+      <div class="cal-day-hdr">Cmt</div>
+      <div class="cal-day-hdr">Paz</div>
+    </div>
     <div class="cal-grid" id="cal-grid"></div>
 
     <!-- Tabs -->
@@ -428,17 +459,125 @@ async function loadStats() {
   document.getElementById('hdr-time').textContent = new Date().toLocaleTimeString('tr-TR');
 }
 
+// ── Chart.js instances ─────────────────────────────────────
+let chartCumulative = null, chartDaily = null;
+
+function loadCharts(calData) {
+  if(!calData || !calData.length) return;
+
+  // Tarihe göre artan sıra
+  const sorted = [...calData].sort((a,b)=>a.day>b.day?1:-1);
+  const last30 = sorted.slice(-30);
+  const last14 = sorted.slice(-14);
+
+  // Kümülatif PnL
+  let cum = 0;
+  const cumLabels = last30.map(r=>r.day.slice(5));
+  const cumData   = last30.map(r=>{ cum+=parseFloat(r.pnl||0); return +cum.toFixed(2); });
+
+  // Günlük PnL bar
+  const barLabels = last14.map(r=>r.day.slice(5));
+  const barData   = last14.map(r=>+parseFloat(r.pnl||0).toFixed(2));
+  const barColors = barData.map(v=>v>=0?'rgba(0,255,136,.65)':'rgba(255,51,85,.65)');
+  const barBorder = barData.map(v=>v>=0?'#00ff88':'#ff3355');
+
+  const chartOpts = {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false}, tooltip:{
+      backgroundColor:'#0c0c20', borderColor:'#141438', borderWidth:1,
+      titleColor:'#3a4060', bodyColor:'#ccd8f0',
+      callbacks:{ label: ctx=>(ctx.parsed.y>=0?'+':'')+ctx.parsed.y+'$' }
+    }},
+    scales:{
+      x:{ grid:{color:'rgba(20,20,56,.8)'}, ticks:{color:'#3a4060',font:{size:9},maxTicksLimit:7} },
+      y:{ grid:{color:'rgba(20,20,56,.8)'}, ticks:{color:'#3a4060',font:{size:9},callback:v=>(v>=0?'+':'')+v+'$'} }
+    }
+  };
+
+  if(chartCumulative){ chartCumulative.destroy(); }
+  chartCumulative = new Chart(document.getElementById('chart-cumulative'), {
+    type:'line',
+    data:{
+      labels: cumLabels,
+      datasets:[{
+        data: cumData,
+        borderColor:'#00c8ff', borderWidth:2,
+        pointBackgroundColor:'#00c8ff', pointRadius:3, pointHoverRadius:5,
+        fill:true,
+        backgroundColor: ctx=>{
+          const g=ctx.chart.ctx.createLinearGradient(0,0,0,120);
+          g.addColorStop(0,'rgba(0,200,255,.18)');
+          g.addColorStop(1,'rgba(0,200,255,.01)');
+          return g;
+        },
+        tension:.35
+      }]
+    },
+    options: chartOpts
+  });
+
+  if(chartDaily){ chartDaily.destroy(); }
+  chartDaily = new Chart(document.getElementById('chart-daily'), {
+    type:'bar',
+    data:{
+      labels: barLabels,
+      datasets:[{
+        data: barData,
+        backgroundColor: barColors,
+        borderColor: barBorder,
+        borderWidth:1, borderRadius:3
+      }]
+    },
+    options: chartOpts
+  });
+}
+
 // ── loadCalendar ───────────────────────────────────────────
 async function loadCalendar() {
   const d = await apiFetch('/api/calendar'); if(!d.ok) return;
+
+  // Grafikleri doldur
+  loadCharts(d.data);
+
+  // Takvim — mevcut ayı dolduracak grid
   const g = document.getElementById('cal-grid'); g.innerHTML='';
   if(!d.data.length){g.innerHTML='<div class="empty">Veri yok</div>';return;}
-  d.data.slice(0,35).forEach(r=>{
-    const pnl=parseFloat(r.pnl||0),el=document.createElement('div');
-    el.className='cal-day '+(pnl>0?'win':pnl<0?'loss':'');
-    el.innerHTML=`<div class="cd-date">${(r.day||'').slice(5)}</div><div class="cd-pnl ${pnl>=0?'cg':'cr'}">${f(pnl)}$</div><div class="cd-meta">${r.total||0}T ${r.win_rate||0}%</div>`;
+
+  // API'dan gelen son 42 günü bir map'e al
+  const pnlMap={};
+  d.data.forEach(r=>{ if(r.day) pnlMap[r.day]=r; });
+
+  // Bu ayın 1. günü ve gün sayısı
+  const today  = new Date();
+  const todayStr = today.toISOString().slice(0,10);
+  const y = today.getFullYear(), mo = today.getMonth();
+  const firstDay = new Date(y,mo,1);
+  // Pazartesi=0, Pazar=6 (getDay: 0=Pazar → hizala)
+  let startOffset = (firstDay.getDay()+6)%7; // Pazartesi başlangıç
+  const daysInMonth = new Date(y,mo+1,0).getDate();
+
+  // Boş hücreler (ay başından önce)
+  for(let i=0;i<startOffset;i++){
+    const el=document.createElement('div'); el.className='cal-day empty';
     g.appendChild(el);
-  });
+  }
+  // Ayın günleri
+  for(let day=1;day<=daysInMonth;day++){
+    const dateStr=`${y}-${String(mo+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const r=pnlMap[dateStr];
+    const pnl=r?parseFloat(r.pnl||0):null;
+    const el=document.createElement('div');
+    let cls='cal-day';
+    if(dateStr===todayStr) cls+=' today';
+    if(pnl!=null) cls+=pnl>0?' win':pnl<0?' loss':'';
+    el.className=cls;
+    el.innerHTML=`<div class="cd-date">${day}</div>`+
+      (pnl!=null
+        ? `<div class="cd-pnl ${pnl>=0?'cg':'cr'}">${f(pnl)}$</div><div class="cd-meta">${r.total||0}T&nbsp;${r.win_rate||0}%</div>`
+        : (dateStr<=todayStr?'<div class="cd-pnl cm">—</div>':'')
+      );
+    g.appendChild(el);
+  }
 }
 
 // ── loadWeekly ─────────────────────────────────────────────
