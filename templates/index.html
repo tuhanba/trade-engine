@@ -595,16 +595,15 @@ function buildCharts(calData){
     type:'line',
     data:{labels:cumLbls,datasets:[{
       data:cumData, borderWidth:2,
-      borderColor:ctx=>{
-        const g=ctx.chart.ctx.createLinearGradient(0,0,ctx.chart.width,0);
-        g.addColorStop(0,'#00d4ff'); g.addColorStop(1,'#a855f7'); return g;
-      },
+      borderColor:'#a855f7',
       pointBackgroundColor:'#a855f7', pointRadius:2, pointHoverRadius:5,
       fill:true, tension:.4,
       backgroundColor:ctx=>{
-        const g=ctx.chart.ctx.createLinearGradient(0,0,0,140);
-        g.addColorStop(0,'rgba(168,85,247,.20)'); g.addColorStop(1,'rgba(0,212,255,.02)');
-        return g;
+        try{
+          const g=ctx.chart.ctx.createLinearGradient(0,0,0,140);
+          g.addColorStop(0,'rgba(168,85,247,.22)'); g.addColorStop(1,'rgba(0,212,255,.02)');
+          return g;
+        } catch(e){ return 'rgba(168,85,247,.12)'; }
       }
     }]},
     options:baseOpts

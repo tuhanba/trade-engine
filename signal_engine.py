@@ -99,7 +99,7 @@ def _avg_volume(klines: list, period: int = 20) -> float:
 
 def _find_setup(klines: list) -> Optional[dict]:
     """
-    BREAKOUT veya PULLBACK setup döndürür.
+    BREAKOUT / PULLBACK / MOMENTUM setup döndürür (öncelik sırasıyla).
     Returns: {setup_type, direction} veya None
     """
     closes = [float(k[_C]) for k in klines]

@@ -120,8 +120,11 @@ def api_stats():
             if cum - peak < dd:
                 dd = cum - peak
 
-        # Açık trade
-        c.execute("SELECT COUNT(*) FROM trades WHERE status='OPEN'")
+        # Açık trade (tüm aktif durumlar)
+        c.execute("""
+            SELECT COUNT(*) FROM trades
+            WHERE status IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
+        """)
         open_cnt = c.fetchone()[0]
 
         # Bakiye

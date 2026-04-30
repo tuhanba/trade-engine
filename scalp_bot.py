@@ -306,7 +306,8 @@ def _scan_and_signal():
         candidate["linked_candidate_id"] = cid
 
         if decision["decision"] == "WATCH":
-            if _TG:
+            # Sadece yüksek skorlu WATCH'ları bildir (spam önleme)
+            if _TG and decision.get("score", 0) >= 42:
                 try:
                     _tg.notify_signal_alert(candidate, decision)
                 except Exception:
