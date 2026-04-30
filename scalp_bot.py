@@ -36,7 +36,7 @@ from database import (
     get_open_trades, get_trades, get_stats,
     set_state, get_state,
     save_daily_summary, save_coin_market_memory,
-    set_coin_cooldown,
+    set_coin_cooldown, save_pattern,
 )
 from coin_library import init_coin_library, update_coin_stats, get_coin_params
 from market_scan import scan, get_current_session, get_market_regime
@@ -93,6 +93,10 @@ closed_trade_counter: int = 0
 _ai_brain_counter: int = 0
 AI_BRAIN_EVERY = 10   # Her N kapanışta bir AI brain raporu
 
+# Açık trade'lerin sinyal özellikleri — ML eğitim verisi için cache
+# {trade_id: signal_features_dict}
+_pending_signal_features: dict = {}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CIRCUIT BREAKER
@@ -135,7 +139,7 @@ def tg_send(tg_manager, msg: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def on_trade_closed(client, tg_manager, trade: dict):
-    """Trade kapandığında: istatistik güncelle, AI brain tetikle."""
+    """Trade kapandığında: istatistik güncelle, AI brain tetikle, ML verisi kaydet."""
     global consecutive_losses, closed_trade_counter, _ai_brain_counter
 
     symbol    = trade["symbol"]
@@ -164,6 +168,29 @@ def on_trade_closed(client, tg_manager, trade: dict):
     # Piyasa hafızası
     regime = get_market_regime(client)
     save_coin_market_memory(symbol, session, regime, direction, result, r_mult)
+
+    # ML eğitim verisi — pattern_memory'ye kaydet
+    trade_id      = trade.get("id")
+    signal_feats  = _pending_signal_features.pop(trade_id, {})
+    # Önceki trade sonucu (Markov özelliği)
+    recent = get_trades(limit=2, status="closed", symbol=symbol)
+    prev_result = "NONE"
+    if len(recent) >= 2:
+        prev_pnl = (recent[1].get("net_pnl") or 0)
+        prev_result = "WIN" if prev_pnl > 0 else "LOSS"
+    try:
+        save_pattern(
+            symbol       = symbol,
+            direction    = direction,
+            session      = session,
+            result       = result,
+            net_pnl      = net_pnl,
+            hold_minutes = hold_min,
+            partial_exit = 1 if trade.get("tp1_hit") else 0,
+            signal_features = {**signal_feats, "prev_result": prev_result},
+        )
+    except Exception as e:
+        logger.debug(f"pattern_memory kayıt hatası: {e}")
 
     # Cooldown: ardışık kayıpta coin'i geçici olarak beklet
     if result == "LOSS":
@@ -424,6 +451,21 @@ def main():
                 trade_id = open_trade(client, signal, ax)
                 if not trade_id:
                     continue
+
+                # ML cache: sinyal özelliklerini trade kapanana kadar sakla
+                _pending_signal_features[trade_id] = {
+                    "adx":              signal.get("adx15",        0),
+                    "rv":               signal.get("rv",           0),
+                    "rsi5":             signal.get("rsi5",        50),
+                    "rsi1":             signal.get("rsi1",        50),
+                    "bb_width":         signal.get("bb_width",     0),
+                    "bb_width_chg":     signal.get("bb_width_chg", 0),
+                    "momentum_3c":      signal.get("momentum_3c",  0),
+                    "btc_trend":        signal.get("btc_trend",    "NEUTRAL"),
+                    "volume_m":         signal.get("volume_m",     0),
+                    "funding_favorable": 1 if abs(signal.get("funding", 0)) < 0.1 else 0,
+                    "ob_ratio":         1,  # placeholder
+                }
 
                 update_signal_decision(candidate_id, "ALLOW",
                                        ax["score"], ax["confidence"],

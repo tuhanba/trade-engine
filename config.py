@@ -43,7 +43,8 @@ RUNNER_CLOSE_PCT = float(os.getenv("RUNNER_CLOSE_PCT", "30"))
 TRAIL_ATR_MULT   = float(os.getenv("TRAIL_ATR_MULT", "1.0"))
 
 # ── Tarama ───────────────────────────────────────────────────────────────────
-SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "60"))   # saniye
+SCAN_INTERVAL    = int(os.getenv("SCAN_INTERVAL",    "60"))    # saniye
+MAX_HOLD_MINUTES = int(os.getenv("MAX_HOLD_MINUTES", "240"))   # dakika
 
 # ── Veritabanı ───────────────────────────────────────────────────────────────
 DB_PATH = os.getenv("DB_PATH", "/root/trade_engine/trading.db")

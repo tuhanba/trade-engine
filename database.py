@@ -255,22 +255,37 @@ def init_db():
         );
 
         -- ── pattern_memory ───────────────────────────────────────────────────
+        -- ML eğitim verisi: sinyal özellikleri + trade sonucu
         CREATE TABLE IF NOT EXISTS pattern_memory (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol       TEXT,
-            direction    TEXT,
-            session      TEXT,
-            result       TEXT,
-            net_pnl      REAL,
-            hold_minutes REAL,
-            partial_exit INTEGER DEFAULT 0,
-            created_at   TEXT DEFAULT (datetime('now'))
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol           TEXT,
+            direction        TEXT,
+            session          TEXT,
+            result           TEXT,
+            net_pnl          REAL,
+            hold_minutes     REAL DEFAULT 0,
+            partial_exit     INTEGER DEFAULT 0,
+            adx              REAL DEFAULT 0,
+            rv               REAL DEFAULT 0,
+            rsi5             REAL DEFAULT 50,
+            rsi1             REAL DEFAULT 50,
+            funding_favorable INTEGER DEFAULT 1,
+            bb_width_pct     REAL DEFAULT 0,
+            ob_ratio         REAL DEFAULT 1,
+            volume_m         REAL DEFAULT 0,
+            btc_trend        TEXT DEFAULT 'NEUTRAL',
+            bb_width_chg     REAL DEFAULT 0,
+            momentum_3c      REAL DEFAULT 0,
+            prev_result      TEXT DEFAULT 'NONE',
+            created_at       TEXT DEFAULT (datetime('now'))
         );
 
         """)
 
     # ── Eski şemadan yeni kolonlara migration ─────────────────────────────────
     _migrate(get_conn())
+    # ── Varsayılan params tohumla (AI Brain ilk çalıştırmada parametre bulur)
+    seed_default_params()
     logger.info("DB init tamamlandı.")
 
 
@@ -302,6 +317,28 @@ def _migrate(conn):
         ("coin_params", "min_volume_m",       "REAL DEFAULT 15.0"),
         ("coin_params", "enabled",            "INTEGER DEFAULT 1"),
         ("coin_params", "updated_at",         "TEXT DEFAULT (datetime('now'))"),
+        # coin_profile — ai_brain analiz kolonları
+        ("coin_profile", "avg_efficiency",    "REAL DEFAULT 0"),
+        ("coin_profile", "avg_hold_min",      "REAL DEFAULT 0"),
+        ("coin_profile", "best_rsi_min",      "REAL DEFAULT 30"),
+        ("coin_profile", "best_rsi_max",      "REAL DEFAULT 70"),
+        ("coin_profile", "best_rv_min",       "REAL DEFAULT 1.2"),
+        ("coin_profile", "sl_tight_rate",     "REAL DEFAULT 0"),
+        ("coin_profile", "long_wr",           "REAL DEFAULT 0"),
+        ("coin_profile", "short_wr",          "REAL DEFAULT 0"),
+        # pattern_memory — ML feature kolonları (mevcut DB için migration)
+        ("pattern_memory", "adx",              "REAL DEFAULT 0"),
+        ("pattern_memory", "rv",               "REAL DEFAULT 0"),
+        ("pattern_memory", "rsi5",             "REAL DEFAULT 50"),
+        ("pattern_memory", "rsi1",             "REAL DEFAULT 50"),
+        ("pattern_memory", "funding_favorable","INTEGER DEFAULT 1"),
+        ("pattern_memory", "bb_width_pct",     "REAL DEFAULT 0"),
+        ("pattern_memory", "ob_ratio",         "REAL DEFAULT 1"),
+        ("pattern_memory", "volume_m",         "REAL DEFAULT 0"),
+        ("pattern_memory", "btc_trend",        "TEXT DEFAULT 'NEUTRAL'"),
+        ("pattern_memory", "bb_width_chg",     "REAL DEFAULT 0"),
+        ("pattern_memory", "momentum_3c",      "REAL DEFAULT 0"),
+        ("pattern_memory", "prev_result",      "TEXT DEFAULT 'NONE'"),
         # paper_account — eski şemada 'paper_balance', yeni şemada 'balance'
         ("paper_account", "balance",         "REAL DEFAULT 250.0"),
         ("paper_account", "initial_balance", "REAL DEFAULT 250.0"),
@@ -723,11 +760,58 @@ def save_snapshot(note: str = "", balance: float = 0, data: dict = None):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_pattern(symbol: str, direction: str, session: str, result: str,
-                 net_pnl: float, hold_minutes: float = 0, partial_exit: int = 0):
+                 net_pnl: float, hold_minutes: float = 0, partial_exit: int = 0,
+                 signal_features: dict = None):
+    """
+    pattern_memory'ye kaydet. ML eğitimi için signal_features dict'i opsiyoneldir.
+    signal_features: adx, rv, rsi5, rsi1, funding_favorable, bb_width_pct,
+                     ob_ratio, volume_m, btc_trend, bb_width_chg, momentum_3c,
+                     prev_result
+    """
+    sf = signal_features or {}
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO pattern_memory
-               (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
+               (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit,
+                adx, rv, rsi5, rsi1, funding_favorable, bb_width_pct,
+                ob_ratio, volume_m, btc_trend, bb_width_chg, momentum_3c, prev_result)
+               VALUES (?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                symbol, direction, session, result, net_pnl, hold_minutes, partial_exit,
+                sf.get("adx", 0), sf.get("rv", 0),
+                sf.get("rsi5", 50), sf.get("rsi1", 50),
+                1 if sf.get("funding_favorable", True) else 0,
+                sf.get("bb_width", 0), sf.get("ob_ratio", 1),
+                sf.get("volume_m", 0), sf.get("btc_trend", "NEUTRAL"),
+                sf.get("bb_width_chg", 0), sf.get("momentum_3c", 0),
+                sf.get("prev_result", "NONE"),
+            )
         )
+
+
+def seed_default_params():
+    """
+    params tablosu boşsa başlangıç parametre setini yükle.
+    AI Brain ilk çalıştığında 'Parametre bulunamadı' hatası almaz.
+    """
+    import json as _json
+    defaults = {
+        "sl_atr_mult":    1.3,
+        "tp_atr_mult":    2.0,
+        "rsi5_min":       35,
+        "rsi5_max":       75,
+        "rsi1_min":       35,
+        "rsi1_max":       72,
+        "vol_ratio_min":  1.2,
+        "min_volume_m":   10.0,
+        "min_change_pct": 0.5,
+        "risk_pct":       1.0,
+    }
+    with get_conn() as conn:
+        row = conn.execute("SELECT id FROM params LIMIT 1").fetchone()
+        if not row:
+            conn.execute(
+                "INSERT INTO params (data, reason) VALUES (?, ?)",
+                (_json.dumps(defaults), "initial_defaults")
+            )
+            logger.info("DB: Varsayılan parametreler yüklendi.")
