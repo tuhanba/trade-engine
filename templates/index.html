@@ -3,842 +3,555 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AX Dashboard</title>
+<title>AURVEX.Ai — Dashboard</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap');
 
 :root {
-  --bg:          #07071a;
-  --surface:     #0d0d28;
-  --surface2:    #12122e;
-  --border:      #1e1e45;
-  --border-hi:   #2a2a5a;
-  --blue:        #00d4ff;
-  --blue-dim:    rgba(0,212,255,0.08);
-  --blue-glow:   rgba(0,212,255,0.25);
-  --purple:      #a855f7;
-  --purple-dim:  rgba(168,85,247,0.08);
-  --purple-glow: rgba(168,85,247,0.25);
-  --green:       #00ff88;
-  --green-dim:   rgba(0,255,136,0.08);
-  --red:         #ff3366;
-  --red-dim:     rgba(255,51,102,0.08);
-  --yellow:      #ffd700;
-  --text:        #e2e8f0;
-  --muted:       #4a5168;
-  --dim:         #2a2a45;
-  --radius:      10px;
-  --radius-sm:   6px;
+  --bg:        #06060f;
+  --s1:        #0b0b1e;
+  --s2:        #0f0f26;
+  --s3:        #13132e;
+  --bdr:       #1c1c42;
+  --bdr2:      #252558;
+  --blue:      #00d4ff;
+  --blue2:     #0099cc;
+  --blu-d:     rgba(0,212,255,.07);
+  --blu-g:     rgba(0,212,255,.22);
+  --purple:    #a855f7;
+  --purple2:   #7c3aed;
+  --pur-d:     rgba(168,85,247,.07);
+  --pur-g:     rgba(168,85,247,.22);
+  --green:     #00ff88;
+  --grn-d:     rgba(0,255,136,.07);
+  --red:       #ff3366;
+  --red-d:     rgba(255,51,102,.07);
+  --yellow:    #ffd600;
+  --yel-d:     rgba(255,214,0,.07);
+  --txt:       #dde4f0;
+  --muted:     #444870;
+  --dim:       #1e1e48;
+  --gold:      #c9a227;
+  --r:         10px;
+  --r-sm:      6px;
 }
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--txt);font-size:13px;line-height:1.5;min-height:100vh;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--dim);border-radius:3px}
 
-body {
-  font-family: 'Inter', sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.5;
-  min-height: 100vh;
-}
+/* ── HEADER ── */
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:var(--s1);border-bottom:1px solid var(--bdr);position:sticky;top:0;z-index:200;backdrop-filter:blur(24px)}
+.hdr-brand{display:flex;align-items:center;gap:12px}
+.hdr-logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--blue),var(--purple));display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 0 20px var(--blu-g)}
+.hdr-title h1{font-size:16px;font-weight:900;letter-spacing:2px;background:linear-gradient(90deg,var(--blue) 0%,var(--purple) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hdr-title p{font-size:9px;letter-spacing:3px;color:var(--muted);font-weight:500;margin-top:1px}
+.hdr-right{display:flex;align-items:center;gap:8px}
+.bdg{padding:3px 11px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.5px}
+.bdg-paper  {background:var(--blu-d);color:var(--blue);border:1px solid var(--blu-g)}
+.bdg-live   {background:var(--red-d);color:var(--red);border:1px solid rgba(255,51,102,.3)}
+.bdg-run    {background:var(--grn-d);color:var(--green);border:1px solid rgba(0,255,136,.3)}
+.bdg-pause  {background:var(--yel-d);color:var(--yellow);border:1px solid rgba(255,214,0,.3)}
+.bdg-cb     {background:var(--red-d);color:var(--red);border:1px solid rgba(255,51,102,.4);animation:blink .8s infinite}
+.hdr-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse-g 2s infinite}
+.rbar{width:70px;height:2px;background:var(--dim);border-radius:2px;overflow:hidden}
+.rbar-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--purple));border-radius:2px}
+.hdr-time{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace}
 
-a { color: inherit; text-decoration: none; }
+/* ── STATS ── */
+.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;padding:14px 20px;border-bottom:1px solid var(--bdr)}
+.sc{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);padding:13px 15px;position:relative;overflow:hidden;transition:border-color .2s,transform .15s;cursor:default}
+.sc:hover{border-color:var(--bdr2);transform:translateY(-1px)}
+.sc::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--blu-d),var(--pur-d));opacity:0;transition:opacity .2s}
+.sc:hover::after{opacity:1}
+.sc-line{position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--blue),var(--purple));opacity:0;transition:opacity .2s}
+.sc:hover .sc-line{opacity:1}
+.sc-lbl{font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
+.sc-val{font-size:20px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums;position:relative;z-index:1}
+.sc-sub{font-size:10px;color:var(--muted);margin-top:2px;position:relative;z-index:1}
+.cb{color:var(--blue)}.cg{color:var(--green)}.cr{color:var(--red)}.cy{color:var(--yellow)}.cp{color:var(--purple)}.cm{color:var(--muted)}
 
-/* ── Header ── */
-.header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 24px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; z-index: 100;
-  backdrop-filter: blur(20px);
-}
-.header-logo {
-  display: flex; align-items: center; gap: 10px;
-}
-.header-logo h1 {
-  font-size: 17px; font-weight: 800; letter-spacing: 1px;
-  background: linear-gradient(90deg, var(--blue), var(--purple));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-}
-.header-logo .logo-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 8px var(--green);
-  animation: pulse-dot 2s infinite;
-}
-.header-right { display: flex; align-items: center; gap: 8px; }
-.badge {
-  padding: 3px 10px; border-radius: 20px;
-  font-size: 10px; font-weight: 700; letter-spacing: .5px;
-}
-.badge-paper   { background: var(--blue-dim);   color: var(--blue);   border: 1px solid var(--blue-glow); }
-.badge-live    { background: var(--red-dim);    color: var(--red);    border: 1px solid rgba(255,51,102,.3); }
-.badge-running { background: var(--green-dim);  color: var(--green);  border: 1px solid rgba(0,255,136,.3); }
-.badge-paused  { background: rgba(255,215,0,.08); color: var(--yellow); border: 1px solid rgba(255,215,0,.3); }
-.badge-cb      { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,51,102,.4); animation: pulse-cb .8s infinite; }
-.refresh-bar {
-  width: 80px; height: 2px; background: var(--dim); border-radius: 2px; overflow: hidden;
-}
-.refresh-bar-inner {
-  height: 100%; background: linear-gradient(90deg, var(--blue), var(--purple));
-  border-radius: 2px; transition: width linear;
-}
-.last-update { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+/* ── MAIN LAYOUT ── */
+.main{display:grid;grid-template-columns:1fr 280px;gap:14px;padding:14px 20px;max-width:1600px;margin:0 auto}
+.sec-title{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sec-title::after{content:'';flex:1;height:1px;background:var(--bdr)}
+.panel{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);padding:14px}
 
-/* ── Main layout ── */
-.main {
-  display: grid; grid-template-columns: 1fr 290px;
-  gap: 16px; padding: 16px 20px;
-  max-width: 1500px; margin: 0 auto;
-}
+/* ── CHART ── */
+.chart-wrap{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);margin-bottom:14px;overflow:hidden}
+.chart-hdr{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--bdr)}
+.chart-hdr span{font-size:11px;font-weight:600;color:var(--muted)}
+.sym-select{background:var(--s2);border:1px solid var(--bdr);color:var(--txt);padding:4px 8px;border-radius:var(--r-sm);font-size:11px;font-family:'Inter',sans-serif;cursor:pointer;outline:none}
+.tf-btns{display:flex;gap:4px}
+.tf-btn{padding:3px 9px;border-radius:var(--r-sm);font-size:10px;font-weight:600;background:var(--s2);border:1px solid var(--bdr);color:var(--muted);cursor:pointer;transition:all .15s}
+.tf-btn:hover,.tf-btn.active{background:var(--blu-d);color:var(--blue);border-color:var(--blu-g)}
+#tv-chart{height:320px;width:100%}
 
-/* ── Stats grid ── */
-.stats-grid {
-  display: grid; grid-template-columns: repeat(4,1fr);
-  gap: 10px; margin-bottom: 16px;
-}
-.stat-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-  position: relative; overflow: hidden;
-  transition: border-color .2s, transform .15s;
-  cursor: default;
-}
-.stat-card:hover { border-color: var(--border-hi); transform: translateY(-1px); }
-.stat-card::before {
-  content: ''; position: absolute;
-  top: 0; left: 0; right: 0; height: 2px;
-  background: linear-gradient(90deg, var(--blue), var(--purple));
-  opacity: 0; transition: opacity .2s;
-}
-.stat-card:hover::before { opacity: 1; }
-.stat-card .s-label {
-  font-size: 10px; font-weight: 600; letter-spacing: .8px;
-  text-transform: uppercase; color: var(--muted);
-}
-.stat-card .s-val {
-  font-size: 22px; font-weight: 800; margin-top: 5px;
-  font-variant-numeric: tabular-nums;
-}
-.stat-card .s-sub {
-  font-size: 11px; color: var(--muted); margin-top: 3px;
-}
-.c-blue   { color: var(--blue); }
-.c-purple { color: var(--purple); }
-.c-green  { color: var(--green); }
-.c-red    { color: var(--red); }
-.c-yellow { color: var(--yellow); }
-.c-muted  { color: var(--muted); }
+/* ── CALENDAR ── */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:14px}
+.cal-day{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:7px;min-height:62px;transition:border-color .2s}
+.cal-day.win {border-color:rgba(0,255,136,.3);background:rgba(0,255,136,.04)}
+.cal-day.loss{border-color:rgba(255,51,102,.3);background:rgba(255,51,102,.04)}
+.cal-day.empty{background:transparent;border-color:transparent}
+.cd-date{font-size:9px;color:var(--muted);font-weight:600}
+.cd-pnl {font-size:11px;font-weight:800;margin-top:3px;font-family:'JetBrains Mono',monospace}
+.cd-meta{font-size:9px;color:var(--muted);margin-top:1px}
 
-/* ── Section title ── */
-.section-title {
-  font-size: 11px; font-weight: 700; letter-spacing: .8px;
-  text-transform: uppercase; color: var(--muted);
-  margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
-}
-.section-title::after {
-  content: ''; flex: 1; height: 1px; background: var(--border);
-}
+/* ── RIGHT PANEL ── */
+.right{display:flex;flex-direction:column;gap:12px}
+.pr{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bdr)}
+.pr:last-child{border-bottom:none}
+.pr-l{font-size:11px;color:var(--muted)}
+.pr-r{font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.tg-row{display:flex;align-items:center;gap:8px;padding:4px 0}
+.tg-led{width:7px;height:7px;border-radius:50%;background:var(--muted);flex-shrink:0}
+.tg-led.ok{background:var(--green);box-shadow:0 0 7px var(--green)}
+.tg-led.err{background:var(--red)}
+.tg-txt{font-size:11px}
 
-/* ── Calendar ── */
-.calendar-grid {
-  display: grid; grid-template-columns: repeat(7,1fr);
-  gap: 6px; margin-bottom: 20px;
-}
-.cal-day {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 8px; min-height: 68px;
-  transition: border-color .2s;
-}
-.cal-day.win  { border-color: rgba(0,255,136,.3); background: rgba(0,255,136,.04); }
-.cal-day.loss { border-color: rgba(255,51,102,.3); background: rgba(255,51,102,.04); }
-.cal-day.empty { background: transparent; border-color: transparent; }
-.cal-day .c-date { font-size: 9px; color: var(--muted); font-weight: 600; }
-.cal-day .c-pnl  { font-size: 12px; font-weight: 700; margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
-.cal-day .c-meta { font-size: 9px; color: var(--muted); margin-top: 2px; }
+/* ── TABS ── */
+.tabs{display:flex;gap:4px;margin-bottom:12px}
+.tab{padding:6px 14px;border-radius:var(--r-sm);cursor:pointer;font-size:11px;font-weight:600;background:var(--s2);color:var(--muted);border:1px solid var(--bdr);transition:all .2s;user-select:none}
+.tab:hover{color:var(--txt);border-color:var(--bdr2)}
+.tab.act{background:var(--blu-d);color:var(--blue);border-color:var(--blu-g)}
+.tab-panel{display:none}
+.tab-panel.show{display:block;animation:fadein .2s ease}
 
-/* ── Right panel ── */
-.right-panel { display: flex; flex-direction: column; gap: 12px; }
-.panel {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 14px;
-}
-.panel-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 7px 0; border-bottom: 1px solid var(--border);
-}
-.panel-row:last-child { border-bottom: none; }
-.panel-row .pr-label { font-size: 11px; color: var(--muted); }
-.panel-row .pr-val   { font-size: 12px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+/* ── TABLES ── */
+.tbl-wrap{overflow-x:auto;border-radius:var(--r-sm);border:1px solid var(--bdr)}
+table{width:100%;border-collapse:collapse;min-width:520px}
+thead tr{background:var(--s2)}
+th{font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:9px 10px;text-align:left;border-bottom:1px solid var(--bdr);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--bdr);font-size:11px;font-family:'JetBrains Mono',monospace;vertical-align:middle}
+tbody tr{transition:background .12s}
+tbody tr:hover td{background:var(--s2)}
+tbody tr:last-child td{border-bottom:none}
+.dl{color:var(--green);font-weight:700;font-family:'Inter',sans-serif}
+.ds{color:var(--red);font-weight:700;font-family:'Inter',sans-serif}
+.pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:9px;font-weight:700;font-family:'Inter',sans-serif;letter-spacing:.3px}
+.pw{background:var(--grn-d);color:var(--green);border:1px solid rgba(0,255,136,.2)}
+.pl{background:var(--red-d);color:var(--red);border:1px solid rgba(255,51,102,.2)}
+.po{background:var(--blu-d);color:var(--blue);border:1px solid var(--blu-g)}
+.pt{background:var(--pur-d);color:var(--purple);border:1px solid var(--pur-g)}
+.da{color:var(--green);font-weight:700}
+.dv{color:var(--red);font-weight:700}
+.dw{color:var(--yellow);font-weight:700}
+.pgn{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--bdr)}
+.btn{background:var(--s2);border:1px solid var(--bdr);color:var(--txt);padding:5px 12px;border-radius:var(--r-sm);cursor:pointer;font-size:11px;font-family:'Inter',sans-serif;transition:all .15s}
+.btn:hover{border-color:var(--blue);color:var(--blue)}
+.btn:disabled{opacity:.3;cursor:default}
+.pg-info{font-size:10px;color:var(--muted)}
 
-/* ── Telegram status ── */
-.tg-status { display: flex; align-items: center; gap: 6px; font-size: 11px; }
-.tg-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
-.tg-dot.ok  { background: var(--green); box-shadow: 0 0 6px var(--green); }
-.tg-dot.err { background: var(--red); }
+/* ── LOG ── */
+.log-box{background:#020208;border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 12px;height:280px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.7}
+.lI{color:var(--muted)}.lW{color:var(--yellow)}.lE{color:var(--red)}.lD{color:var(--dim)}
 
-/* ── Tabs ── */
-.tabs { display: flex; gap: 4px; margin-bottom: 12px; }
-.tab {
-  padding: 6px 14px; border-radius: var(--radius-sm);
-  cursor: pointer; font-size: 11px; font-weight: 600;
-  background: var(--surface2); color: var(--muted);
-  border: 1px solid var(--border); transition: all .2s;
-}
-.tab:hover { color: var(--text); border-color: var(--border-hi); }
-.tab.active {
-  background: var(--blue-dim); color: var(--blue);
-  border-color: rgba(0,212,255,.4);
-}
+/* ── EMPTY ── */
+.empty{text-align:center;padding:28px;color:var(--muted);font-size:11px}
 
-/* ── Tables ── */
-.table-wrap { overflow-x: auto; border-radius: var(--radius-sm); }
-table { width: 100%; border-collapse: collapse; min-width: 580px; }
-thead tr { background: var(--surface2); }
-th {
-  font-size: 10px; font-weight: 700; letter-spacing: .6px;
-  text-transform: uppercase; color: var(--muted);
-  padding: 9px 10px; text-align: left;
-  border-bottom: 1px solid var(--border);
-}
-td {
-  padding: 8px 10px; border-bottom: 1px solid var(--border);
-  font-size: 12px; font-family: 'JetBrains Mono', monospace;
-  vertical-align: middle;
-}
-tbody tr { transition: background .15s; }
-tbody tr:hover td { background: var(--surface2); }
-tbody tr:last-child td { border-bottom: none; }
+/* ── ANIMATIONS ── */
+@keyframes pulse-g{0%,100%{box-shadow:0 0 8px var(--green)}50%{box-shadow:0 0 18px var(--green),0 0 32px rgba(0,255,136,.3)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+@keyframes shimmer{0%{background-position:-600px 0}100%{background-position:600px 0}}
+.skel{background:linear-gradient(90deg,var(--s1) 25%,var(--s2) 50%,var(--s1) 75%);background-size:600px;animation:shimmer 1.5s infinite;border-radius:4px;height:14px}
 
-.dir-long  { color: var(--green); font-weight: 700; }
-.dir-short { color: var(--red);   font-weight: 700; }
+/* ── TOAST ── */
+.toast-wrap{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:9999}
+.toast{background:var(--s2);border:1px solid var(--bdr);border-radius:var(--r-sm);padding:10px 14px;font-size:11px;max-width:280px;animation:fadein .2s ease}
+.toast.err{border-color:rgba(255,51,102,.5);color:var(--red)}
+.toast.ok{border-color:rgba(0,255,136,.4);color:var(--green)}
 
-.pill {
-  display: inline-block; padding: 2px 8px;
-  border-radius: 20px; font-size: 10px; font-weight: 700;
-  font-family: 'Inter', sans-serif; letter-spacing: .3px;
-}
-.pill-win    { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,255,136,.2); }
-.pill-loss   { background: var(--red-dim);   color: var(--red);   border: 1px solid rgba(255,51,102,.2); }
-.pill-open   { background: var(--blue-dim);  color: var(--blue);  border: 1px solid rgba(0,212,255,.2); }
-.pill-trail  { background: var(--purple-dim);color: var(--purple);border: 1px solid rgba(168,85,247,.2); }
-
-.d-allow { color: var(--green); font-weight: 700; }
-.d-veto  { color: var(--red);   font-weight: 700; }
-.d-watch { color: var(--yellow);font-weight: 700; }
-
-/* Pagination */
-.pagination {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 10px; padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-.btn {
-  background: var(--surface2); border: 1px solid var(--border);
-  color: var(--text); padding: 5px 12px; border-radius: var(--radius-sm);
-  cursor: pointer; font-size: 11px; font-family: 'Inter', sans-serif;
-  transition: border-color .2s;
-}
-.btn:hover { border-color: var(--blue); color: var(--blue); }
-.btn:disabled { opacity: .3; cursor: default; }
-.page-info { font-size: 11px; color: var(--muted); }
-
-/* ── Log box ── */
-.log-box {
-  background: #03030d; border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 10px 12px;
-  height: 260px; overflow-y: auto;
-  font-family: 'JetBrains Mono', monospace; font-size: 11px;
-  line-height: 1.6;
-}
-.log-box::-webkit-scrollbar { width: 4px; }
-.log-box::-webkit-scrollbar-track { background: transparent; }
-.log-box::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 2px; }
-.log-INFO    { color: #4a5168; }
-.log-WARNING { color: var(--yellow); }
-.log-ERROR   { color: var(--red); }
-.log-DEBUG   { color: #2a2a45; }
-
-/* empty state */
-.empty-state {
-  text-align: center; padding: 30px; color: var(--muted); font-size: 12px;
-}
-
-/* ── Animations ── */
-@keyframes pulse-dot {
-  0%,100% { box-shadow: 0 0 6px var(--green); }
-  50%      { box-shadow: 0 0 14px var(--green), 0 0 24px rgba(0,255,136,.4); }
-}
-@keyframes pulse-cb {
-  0%,100% { opacity: 1; } 50% { opacity: .5; }
-}
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes shimmer {
-  0%   { background-position: -400px 0; }
-  100% { background-position: 400px 0; }
-}
-.skeleton {
-  background: linear-gradient(90deg, var(--surface) 25%, var(--surface2) 50%, var(--surface) 75%);
-  background-size: 400px 100%;
-  animation: shimmer 1.4s infinite;
-  border-radius: 4px; height: 14px;
-}
-.fade-in { animation: fade-in .3s ease; }
-
-/* live pulse */
-.live-pulse {
-  display: inline-block; width: 7px; height: 7px;
-  border-radius: 50%; background: var(--blue);
-  box-shadow: 0 0 6px var(--blue);
-  animation: pulse-dot 1.5s infinite;
-  margin-right: 5px; vertical-align: middle;
-}
-
-/* ── Toast ── */
-.toast-container {
-  position: fixed; bottom: 20px; right: 20px;
-  display: flex; flex-direction: column; gap: 8px; z-index: 9999;
-}
-.toast {
-  background: var(--surface2); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 10px 14px;
-  font-size: 12px; max-width: 300px;
-  animation: fade-in .2s ease;
-  display: flex; align-items: center; gap: 8px;
-}
-.toast.error { border-color: rgba(255,51,102,.4); color: var(--red); }
-.toast.ok    { border-color: rgba(0,255,136,.4); color: var(--green); }
-
-/* ── Responsive ── */
-@media (max-width: 960px) {
-  .main { grid-template-columns: 1fr; }
-  .stats-grid { grid-template-columns: repeat(2,1fr); }
-  .calendar-grid { grid-template-columns: repeat(4,1fr); }
-  .right-panel { order: -1; }
-}
-@media (max-width: 480px) {
-  .stats-grid { grid-template-columns: 1fr 1fr; }
-  .header-logo h1 { font-size: 14px; }
-}
+/* ── RESPONSIVE ── */
+@media(max-width:1024px){.stats{grid-template-columns:repeat(3,1fr)}.main{grid-template-columns:1fr}}
+@media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}.cal-grid{grid-template-columns:repeat(4,1fr)}.hdr-title p{display:none}}
 </style>
 </head>
 <body>
-<div class="toast-container" id="toasts"></div>
-
-<header class="header">
-  <div class="header-logo">
-    <div class="logo-dot" id="bot-dot"></div>
-    <h1>AX DASHBOARD</h1>
-  </div>
-  <div class="header-right">
-    <span id="badge-mode" class="badge badge-paper">PAPER</span>
-    <span id="badge-status" class="badge badge-running">RUNNING</span>
-    <span id="badge-cb" class="badge badge-cb" style="display:none">⛔ CB AKTİF</span>
-    <div class="refresh-bar" title="Yenileme sayacı">
-      <div class="refresh-bar-inner" id="refresh-bar" style="width:100%"></div>
+<header class="hdr">
+  <div class="hdr-brand">
+    <div class="hdr-logo">⚡</div>
+    <div class="hdr-title">
+      <h1>AURVEX.Ai</h1>
+      <p>ELITE TRADING · INTELLIGENCE · FUTURES</p>
     </div>
-    <span class="last-update" id="last-update">—</span>
+  </div>
+  <div class="hdr-right">
+    <div class="hdr-dot" id="bot-dot"></div>
+    <span id="bdg-mode" class="bdg bdg-paper">PAPER</span>
+    <span id="bdg-status" class="bdg bdg-run">RUNNING</span>
+    <span id="bdg-cb" class="bdg bdg-cb" style="display:none">⛔ CB</span>
+    <div class="rbar" title="Otomatik yenileme"><div class="rbar-fill" id="rbar" style="width:100%"></div></div>
+    <span class="hdr-time" id="hdr-time">—</span>
   </div>
 </header>
-
+<div class="stats">
+  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Bakiye</div><div class="sc-val cb" id="s-bal">—</div><div class="sc-sub" id="s-mode">paper</div></div>
+  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Toplam PnL</div><div class="sc-val" id="s-tpnl">—</div><div class="sc-sub" id="s-dpnl">bugün: —</div></div>
+  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Kazanma Oranı</div><div class="sc-val" id="s-wr">—</div><div class="sc-sub" id="s-wl">—W / —L</div></div>
+  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Profit Factor</div><div class="sc-val cp" id="s-pf">—</div><div class="sc-sub" id="s-avgr">avg RR —</div></div>
+  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Max Drawdown</div><div class="sc-val cr" id="s-dd">—</div><div class="sc-sub">kümülatif</div></div>
+  <div class="sc"><div class="sc-line"></div><div class="sc-lbl">Açık Pozisyon</div><div class="sc-val cb" id="s-open">0</div><div class="sc-sub" id="s-veto">veto: —</div></div>
+</div>
 <div class="main">
-  <div id="left-col">
+  <!-- SOL KOLON -->
+  <div>
 
-    <!-- Stats -->
-    <div class="stats-grid" id="stats-grid">
-      <div class="stat-card">
-        <div class="s-label">Bakiye</div>
-        <div class="s-val c-blue" id="s-balance">—</div>
-        <div class="s-sub" id="s-mode">paper</div>
+    <!-- TradingView Chart -->
+    <div class="chart-wrap">
+      <div class="chart-hdr">
+        <span>📈 CANLI MUM GRAFİĞİ</span>
+        <select class="sym-select" id="tv-sym" onchange="updateChart()">
+          <option>BTC/USDT</option><option>ETH/USDT</option>
+          <option>SOL/USDT</option><option>BNB/USDT</option>
+          <option>DOGE/USDT</option><option>XRP/USDT</option>
+        </select>
+        <div class="tf-btns">
+          <div class="tf-btn" data-tf="1">1m</div>
+          <div class="tf-btn active" data-tf="5">5m</div>
+          <div class="tf-btn" data-tf="15">15m</div>
+          <div class="tf-btn" data-tf="60">1H</div>
+          <div class="tf-btn" data-tf="240">4H</div>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="s-label">Toplam PnL</div>
-        <div class="s-val" id="s-total-pnl">—</div>
-        <div class="s-sub" id="s-daily-pnl">bugün: —</div>
-      </div>
-      <div class="stat-card">
-        <div class="s-label">Win Rate</div>
-        <div class="s-val" id="s-winrate">—</div>
-        <div class="s-sub" id="s-trades">0 trade</div>
-      </div>
-      <div class="stat-card">
-        <div class="s-label">Avg R</div>
-        <div class="s-val" id="s-avgr">—</div>
-        <div class="s-sub" id="s-pf">PF: —</div>
-      </div>
-      <div class="stat-card">
-        <div class="s-label">Max Drawdown</div>
-        <div class="s-val c-red" id="s-dd">—</div>
-        <div class="s-sub">kümülatif</div>
-      </div>
-      <div class="stat-card">
-        <div class="s-label">Açık Pozisyon</div>
-        <div class="s-val c-blue" id="s-open">0</div>
-        <div class="s-sub">aktif trade</div>
-      </div>
-      <div class="stat-card">
-        <div class="s-label">Best / Worst</div>
-        <div class="s-val c-green" id="s-best">—</div>
-        <div class="s-sub" id="s-worst">worst: —</div>
-      </div>
-      <div class="stat-card">
-        <div class="s-label">Top Veto</div>
-        <div class="s-val c-yellow" style="font-size:13px" id="s-veto">—</div>
-        <div class="s-sub">en çok reddeden</div>
-      </div>
+      <div id="tv-chart"></div>
     </div>
+
     <!-- Calendar -->
-    <div class="section-title">📅 Calendar PnL</div>
-    <div class="calendar-grid" id="calendar-grid"></div>
+    <div class="sec-title">📅 Calendar PnL</div>
+    <div class="cal-grid" id="cal-grid"></div>
 
     <!-- Tabs -->
     <div class="tabs">
-      <div class="tab active" data-tab="trades">Trade Geçmişi</div>
-      <div class="tab" data-tab="live"><span class="live-pulse"></span>Açık</div>
+      <div class="tab act" data-tab="trades">Trade Geçmişi</div>
+      <div class="tab" data-tab="live">⚡ Açık</div>
       <div class="tab" data-tab="signals">Sinyaller</div>
       <div class="tab" data-tab="logs">Loglar</div>
     </div>
 
     <!-- Tab: Trades -->
-    <div id="tab-trades" class="tab-panel">
-      <div class="table-wrap">
+    <div class="tab-panel show" id="tab-trades">
+      <div class="tbl-wrap">
         <table>
-          <thead><tr>
-            <th>#</th><th>Sembol</th><th>Yön</th><th>Entry</th>
-            <th>SL</th><th>Net PnL</th><th>R</th><th>Süre</th><th>Durum</th>
-          </tr></thead>
-          <tbody id="trades-body"></tbody>
+          <thead><tr><th>#</th><th>Sembol</th><th>Yön</th><th>Entry</th><th>SL</th><th>Net PnL</th><th>R</th><th>Süre</th><th>Durum</th></tr></thead>
+          <tbody id="tb-trades"></tbody>
         </table>
       </div>
-      <div class="pagination">
+      <div class="pgn">
         <button class="btn" id="btn-prev" onclick="loadTrades(-1)">← Önceki</button>
-        <span class="page-info" id="trade-page"></span>
+        <span class="pg-info" id="pg-info"></span>
         <button class="btn" id="btn-next" onclick="loadTrades(1)">Sonraki →</button>
       </div>
     </div>
 
     <!-- Tab: Live -->
-    <div id="tab-live" class="tab-panel" style="display:none">
-      <div class="table-wrap">
+    <div class="tab-panel" id="tab-live">
+      <div class="tbl-wrap">
         <table>
-          <thead><tr>
-            <th>#</th><th>Sembol</th><th>Yön</th><th>Entry</th>
-            <th>SL</th><th>TP1</th><th>Süre</th><th>Durum</th>
-          </tr></thead>
-          <tbody id="live-body"></tbody>
+          <thead><tr><th>#</th><th>Sembol</th><th>Yön</th><th>Entry</th><th>SL</th><th>TP1</th><th>Süre</th><th>Durum</th></tr></thead>
+          <tbody id="tb-live"></tbody>
         </table>
       </div>
     </div>
 
     <!-- Tab: Signals -->
-    <div id="tab-signals" class="tab-panel" style="display:none">
-      <div class="table-wrap">
+    <div class="tab-panel" id="tab-signals">
+      <div class="tbl-wrap">
         <table>
-          <thead><tr>
-            <th>Sembol</th><th>Yön</th><th>RR</th><th>MFE</th>
-            <th>Skor</th><th>Karar</th><th>Veto</th><th>Zaman</th>
-          </tr></thead>
-          <tbody id="signals-body"></tbody>
+          <thead><tr><th>Sembol</th><th>Yön</th><th>RR</th><th>MFE</th><th>Skor</th><th>Karar</th><th>Veto</th><th>Zaman</th></tr></thead>
+          <tbody id="tb-signals"></tbody>
         </table>
       </div>
     </div>
 
     <!-- Tab: Logs -->
-    <div id="tab-logs" class="tab-panel" style="display:none">
+    <div class="tab-panel" id="tab-logs">
       <div class="log-box" id="log-box"></div>
     </div>
 
-  </div><!-- /left-col -->
+  </div>
 
-  <!-- Right panel -->
-  <div class="right-panel">
+  <!-- SAĞ PANEL -->
+  <div class="right">
 
-    <!-- Weekly -->
     <div class="panel">
-      <div class="section-title">📊 Haftalık Özet</div>
+      <div class="sec-title">📊 Haftalık Özet</div>
       <div id="weekly-rows"></div>
-      <div class="panel-row" style="margin-top:4px">
-        <span class="pr-label">Aylık Toplam</span>
-        <span class="pr-val" id="monthly-total">—</span>
+      <div class="pr" style="margin-top:4px">
+        <span class="pr-l">Aylık Toplam</span>
+        <span class="pr-r" id="monthly">—</span>
       </div>
     </div>
 
-    <!-- AX Status -->
     <div class="panel">
-      <div class="section-title">🧠 AX Durumu</div>
-      <div class="panel-row"><span class="pr-label">Mod</span><span class="pr-val c-blue" id="ax-mode">—</span></div>
-      <div class="panel-row"><span class="pr-label">Ortam</span><span class="pr-val" id="ax-env">—</span></div>
-      <div class="panel-row"><span class="pr-label">Ardışık Kayıp</span><span class="pr-val" id="ax-losses">—</span></div>
-      <div class="panel-row"><span class="pr-label">Circuit Breaker</span><span class="pr-val" id="ax-cb">—</span></div>
-      <div class="panel-row"><span class="pr-label">Bot Status</span><span class="pr-val" id="ax-bot">—</span></div>
+      <div class="sec-title">🧠 AX Durumu</div>
+      <div class="pr"><span class="pr-l">Mod</span><span class="pr-r cb" id="ax-mode">—</span></div>
+      <div class="pr"><span class="pr-l">Ortam</span><span class="pr-r" id="ax-env">—</span></div>
+      <div class="pr"><span class="pr-l">Ardışık Kayıp</span><span class="pr-r" id="ax-losses">—</span></div>
+      <div class="pr"><span class="pr-l">Circuit Breaker</span><span class="pr-r" id="ax-cb">—</span></div>
+      <div class="pr"><span class="pr-l">Bot Status</span><span class="pr-r" id="ax-bot">—</span></div>
+      <div class="pr"><span class="pr-l">Best Coin</span><span class="pr-r cg" id="ax-best">—</span></div>
+      <div class="pr"><span class="pr-l">Worst Coin</span><span class="pr-r cr" id="ax-worst">—</span></div>
     </div>
 
-    <!-- Telegram -->
     <div class="panel">
-      <div class="section-title">✈️ Telegram</div>
-      <div id="tg-status-row" class="tg-status">
-        <div class="tg-dot" id="tg-dot"></div>
-        <span id="tg-label">Kontrol ediliyor...</span>
+      <div class="sec-title">✈️ Telegram</div>
+      <div class="tg-row">
+        <div class="tg-led" id="tg-led"></div>
+        <span class="tg-txt" id="tg-txt">Kontrol ediliyor...</span>
       </div>
     </div>
 
-    <!-- Coins -->
     <div class="panel">
-      <div class="section-title">🪙 Coin Profilleri</div>
-      <div id="coin-rows" style="max-height:280px;overflow-y:auto"></div>
+      <div class="sec-title">🪙 Coin Profilleri</div>
+      <div id="coin-rows" style="max-height:260px;overflow-y:auto"></div>
     </div>
 
-  </div><!-- /right-panel -->
-</div><!-- /main -->
+  </div>
+</div>
+<div class="toast-wrap" id="toasts"></div>
 <script>
+// ── TradingView Widget ─────────────────────────────────────
+let tvWidget = null;
+const TV_SYMS = {
+  'BTC/USDT':'BINANCE:BTCUSDT','ETH/USDT':'BINANCE:ETHUSDT',
+  'SOL/USDT':'BINANCE:SOLUSDT','BNB/USDT':'BINANCE:BNBUSDT',
+  'DOGE/USDT':'BINANCE:DOGEUSDT','XRP/USDT':'BINANCE:XRPUSDT'
+};
+const TV_TF = {'1':'1','5':'5','15':'15','60':'60','240':'240'};
+let curSym = 'BINANCE:BTCUSDT', curTf = '5';
+
+function buildWidget() {
+  document.getElementById('tv-chart').innerHTML = '';
+  const s = document.createElement('script');
+  s.src = 'https://s3.tradingview.com/tv.js';
+  s.onload = () => {
+    tvWidget = new TradingView.widget({
+      container_id: 'tv-chart',
+      width: '100%', height: 320,
+      symbol: curSym, interval: curTf,
+      timezone: 'Europe/Istanbul',
+      theme: 'dark', style: '1',
+      locale: 'tr', toolbar_bg: '#0b0b1e',
+      enable_publishing: false,
+      hide_side_toolbar: true,
+      hide_top_toolbar: false,
+      allow_symbol_change: false,
+      save_image: false,
+      backgroundColor: '#0b0b1e',
+      gridColor: 'rgba(28,28,66,0.5)',
+    });
+  };
+  document.head.appendChild(s);
+}
+
+function updateChart() {
+  const sel = document.getElementById('tv-sym').value;
+  curSym = TV_SYMS[sel] || 'BINANCE:BTCUSDT';
+  buildWidget();
+}
+
+document.querySelectorAll('.tf-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.tf-btn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    curTf = b.dataset.tf;
+    buildWidget();
+  });
+});
+
+buildWidget();
+
 // ── State ──────────────────────────────────────────────────
-const TRADE_LIMIT  = 20;
-const REFRESH_SEC  = 30;
-let tradeOffset    = 0;
-let tradeTotal     = 0;
-let activeTab      = 'trades';
-let refreshTimer   = null;
-let refreshElapsed = 0;
+const LIMIT = 20, REFRESH = 30;
+let offset = 0, total = 0, activeTab = 'trades';
+let rTimer = null, rElapsed = 0;
 
 // ── Helpers ────────────────────────────────────────────────
-function fmt(v, d=2) {
-  if (v == null || v === '') return '—';
-  const n = parseFloat(v);
-  if (isNaN(n)) return '—';
-  return (n >= 0 ? '+' : '') + n.toFixed(d);
-}
-function fmtPnl(v) {
-  const n = parseFloat(v || 0);
-  const cls = n >= 0 ? 'c-green' : 'c-red';
-  return `<span class="${cls}">${(n>=0?'+':'')}${n.toFixed(2)}</span>`;
-}
-function pill(s) {
-  const map = {
-    'CLOSED_WIN':'pill-win','WIN':'pill-win',
-    'CLOSED_LOSS':'pill-loss','LOSS':'pill-loss',
-    'CLOSED_TRAIL':'pill-trail','CLOSED_MANUAL':'pill-trail',
-    'OPEN':'pill-open','TP1_HIT':'pill-open','TP2_HIT':'pill-open','RUNNER_ACTIVE':'pill-trail',
-  };
-  return `<span class="pill ${map[s]||'pill-open'}">${s||'?'}</span>`;
-}
-function decisionClass(d) {
-  return d==='ALLOW'?'d-allow':d==='VETO'?'d-veto':'d-watch';
-}
+const f = (v,d=2) => { if(v==null||v==='')return'—'; const n=parseFloat(v); return isNaN(n)?'—':(n>=0?'+':'')+n.toFixed(d); };
+const fpnl = v => { const n=parseFloat(v||0); return `<span class="${n>=0?'cg':'cr'}">${n>=0?'+':''}${n.toFixed(2)}</span>`; };
+const pill = s => { const m={'CLOSED_WIN':'pw','WIN':'pw','CLOSED_LOSS':'pl','LOSS':'pl','CLOSED_TRAIL':'pt','CLOSED_MANUAL':'pt','OPEN':'po','TP1_HIT':'po','TP2_HIT':'po','RUNNER_ACTIVE':'pt'}; return `<span class="pill ${m[s]||'po'}">${s||'?'}</span>`; };
+const dcls = d => d==='ALLOW'?'da':d==='VETO'?'dv':'dw';
+const esc  = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-// ── Fetch ──────────────────────────────────────────────────
-async function api(url) {
-  try {
-    const r = await fetch(url);
-    return await r.json();
-  } catch(e) {
-    toast(`Fetch hatası: ${url}`, 'error');
-    return { ok: false };
-  }
+async function apiFetch(url) {
+  try { const r=await fetch(url); return await r.json(); }
+  catch(e) { toast('API hatası: '+url,'err'); return {ok:false}; }
 }
-
-// ── Toast ──────────────────────────────────────────────────
-function toast(msg, type='error') {
-  const c = document.getElementById('toasts');
-  const t = document.createElement('div');
-  t.className = `toast ${type}`;
-  t.textContent = msg;
-  c.appendChild(t);
-  setTimeout(() => t.remove(), 4000);
+function toast(msg,type='err') {
+  const c=document.getElementById('toasts');
+  const t=document.createElement('div'); t.className='toast '+type; t.textContent=msg;
+  c.appendChild(t); setTimeout(()=>t.remove(),4000);
 }
 
 // ── loadStats ──────────────────────────────────────────────
 async function loadStats() {
-  const d = await api('/api/stats');
-  if (!d.ok) return;
+  const d = await apiFetch('/api/stats'); if(!d.ok) return;
   const s = d.data;
-
-  const bal = parseFloat(s.balance || 250);
-  document.getElementById('s-balance').textContent = '$' + bal.toFixed(2);
-  document.getElementById('s-mode').textContent = (s.execution_mode || 'paper').toUpperCase();
-
-  const tp = parseFloat(s.total_pnl || 0);
-  document.getElementById('s-total-pnl').innerHTML =
-    `<span class="${tp>=0?'c-green':'c-red'}">${fmt(tp)}$</span>`;
-  const dp = parseFloat(s.daily_pnl || 0);
-  document.getElementById('s-daily-pnl').innerHTML =
-    `bugün: <span class="${dp>=0?'c-green':'c-red'}">${fmt(dp)}$</span>`;
-
-  const wr = s.win_rate || 0;
-  document.getElementById('s-winrate').innerHTML =
-    `<span class="${wr>=50?'c-green':'c-red'}">${wr}%</span>`;
-  document.getElementById('s-trades').textContent =
-    `${s.total_trades||0} trade (${s.wins||0}W / ${s.losses||0}L)`;
-
-  const ar = s.avg_r || 0;
-  document.getElementById('s-avgr').innerHTML =
-    `<span class="${ar>=0?'c-green':'c-red'}">${fmt(ar,3)}R</span>`;
-  document.getElementById('s-pf').textContent = `PF: ${s.profit_factor || 0}`;
-
-  document.getElementById('s-dd').textContent = fmt(s.max_drawdown) + '$';
-  document.getElementById('s-open').textContent = s.open_trades || 0;
-  document.getElementById('s-best').textContent = s.best_coin || '—';
-  document.getElementById('s-worst').textContent = 'worst: ' + (s.worst_coin || '—');
-  document.getElementById('s-veto').textContent = s.top_veto || '—';
-
-  // header badges
-  const mEl = document.getElementById('badge-mode');
-  mEl.textContent = (s.execution_mode || 'paper').toUpperCase();
-  mEl.className = 'badge ' + (s.execution_mode === 'live' ? 'badge-live' : 'badge-paper');
-
-  const sEl = document.getElementById('badge-status');
-  sEl.textContent = (s.bot_status || '?').toUpperCase();
-  sEl.className = 'badge ' + (s.bot_status === 'running' ? 'badge-running' : 'badge-paused');
-
-  document.getElementById('badge-cb').style.display = s.circuit_breaker ? 'inline-block' : 'none';
-
-  const dot = document.getElementById('bot-dot');
-  dot.style.background = s.bot_status === 'running' ? 'var(--green)' : 'var(--yellow)';
-
+  const bal = parseFloat(s.balance||250);
+  document.getElementById('s-bal').textContent   = '$'+bal.toFixed(2);
+  document.getElementById('s-mode').textContent  = (s.execution_mode||'paper').toUpperCase();
+  const tp=parseFloat(s.total_pnl||0);
+  document.getElementById('s-tpnl').innerHTML    = `<span class="${tp>=0?'cg':'cr'}">${f(tp)}$</span>`;
+  const dp=parseFloat(s.daily_pnl||0);
+  document.getElementById('s-dpnl').innerHTML    = `bugün: <span class="${dp>=0?'cg':'cr'}">${f(dp)}$</span>`;
+  const wr=s.win_rate||0;
+  document.getElementById('s-wr').innerHTML      = `<span class="${wr>=50?'cg':'cr'}">${wr}%</span>`;
+  document.getElementById('s-wl').textContent    = `${s.wins||0}W / ${s.losses||0}L`;
+  document.getElementById('s-pf').textContent    = s.profit_factor||'—';
+  document.getElementById('s-avgr').textContent  = 'avg RR '+f(s.avg_r,3);
+  document.getElementById('s-dd').textContent    = f(s.max_drawdown)+'$';
+  document.getElementById('s-open').textContent  = s.open_trades||0;
+  document.getElementById('s-veto').textContent  = 'veto: '+(s.top_veto||'—');
+  // header
+  const mE=document.getElementById('bdg-mode');
+  mE.textContent=((s.execution_mode)||'paper').toUpperCase();
+  mE.className='bdg '+(s.execution_mode==='live'?'bdg-live':'bdg-paper');
+  const sE=document.getElementById('bdg-status');
+  sE.textContent=(s.bot_status||'?').toUpperCase();
+  sE.className='bdg '+(s.bot_status==='running'?'bdg-run':'bdg-pause');
+  document.getElementById('bdg-cb').style.display=s.circuit_breaker?'inline-block':'none';
+  const dot=document.getElementById('bot-dot');
+  dot.style.background=s.bot_status==='running'?'var(--green)':'var(--yellow)';
   // AX panel
-  document.getElementById('ax-mode').textContent  = s.ax_mode || '—';
-  document.getElementById('ax-env').textContent   = (s.execution_mode || '—').toUpperCase();
-  document.getElementById('ax-losses').textContent = s.consecutive_losses || 0;
-  document.getElementById('ax-cb').innerHTML = s.circuit_breaker
-    ? '<span class="c-red">AKTİF</span>' : '<span class="c-green">Kapalı</span>';
-  document.getElementById('ax-bot').textContent = s.bot_status || '—';
-
-  document.getElementById('last-update').textContent =
-    new Date().toLocaleTimeString('tr-TR');
+  document.getElementById('ax-mode').textContent   = s.ax_mode||'—';
+  document.getElementById('ax-env').textContent    = (s.execution_mode||'—').toUpperCase();
+  document.getElementById('ax-losses').textContent = s.consecutive_losses||0;
+  document.getElementById('ax-cb').innerHTML = s.circuit_breaker?'<span class="cr">AKTİF</span>':'<span class="cg">Kapalı</span>';
+  document.getElementById('ax-bot').textContent  = s.bot_status||'—';
+  document.getElementById('ax-best').textContent  = s.best_coin||'—';
+  document.getElementById('ax-worst').textContent = s.worst_coin||'—';
+  document.getElementById('hdr-time').textContent = new Date().toLocaleTimeString('tr-TR');
 }
 
 // ── loadCalendar ───────────────────────────────────────────
 async function loadCalendar() {
-  const d = await api('/api/calendar');
-  if (!d.ok) return;
-  const grid = document.getElementById('calendar-grid');
-  grid.innerHTML = '';
-  d.data.slice(0, 35).forEach(r => {
-    const pnl = parseFloat(r.pnl || 0);
-    const el  = document.createElement('div');
-    el.className = 'cal-day ' + (pnl > 0 ? 'win' : pnl < 0 ? 'loss' : '');
-    const date = (r.day || '').slice(5);
-    el.innerHTML = `
-      <div class="c-date">${date}</div>
-      <div class="c-pnl ${pnl>=0?'c-green':'c-red'}">${fmt(pnl)}$</div>
-      <div class="c-meta">${r.total||0}T ${r.win_rate||0}%</div>`;
-    grid.appendChild(el);
+  const d = await apiFetch('/api/calendar'); if(!d.ok) return;
+  const g = document.getElementById('cal-grid'); g.innerHTML='';
+  if(!d.data.length){g.innerHTML='<div class="empty">Veri yok</div>';return;}
+  d.data.slice(0,35).forEach(r=>{
+    const pnl=parseFloat(r.pnl||0),el=document.createElement('div');
+    el.className='cal-day '+(pnl>0?'win':pnl<0?'loss':'');
+    el.innerHTML=`<div class="cd-date">${(r.day||'').slice(5)}</div><div class="cd-pnl ${pnl>=0?'cg':'cr'}">${f(pnl)}$</div><div class="cd-meta">${r.total||0}T ${r.win_rate||0}%</div>`;
+    g.appendChild(el);
   });
-  if (!d.data.length) {
-    grid.innerHTML = '<div class="empty-state">Henüz veri yok</div>';
-  }
 }
 
 // ── loadWeekly ─────────────────────────────────────────────
 async function loadWeekly() {
-  const d = await api('/api/weekly');
-  if (!d.ok) return;
-  const el = document.getElementById('weekly-rows');
-  el.innerHTML = '';
-  let monthly = 0;
-  d.data.slice(0, 4).forEach((r, i) => {
-    const pnl = parseFloat(r.pnl || 0);
-    monthly += pnl;
-    el.innerHTML += `
-      <div class="panel-row">
-        <span class="pr-label">Hafta ${i+1} <span style="color:var(--dim);font-size:10px">${(r.week||'').slice(0,10)}</span></span>
-        <span class="pr-val ${pnl>=0?'c-green':'c-red'}">${fmt(pnl)}$ <span style="color:var(--muted);font-size:10px;font-family:Inter">${r.total||0}T</span></span>
-      </div>`;
+  const d = await apiFetch('/api/weekly'); if(!d.ok) return;
+  const el=document.getElementById('weekly-rows'); el.innerHTML='';
+  let mo=0;
+  d.data.slice(0,4).forEach((r,i)=>{
+    const pnl=parseFloat(r.pnl||0); mo+=pnl;
+    el.innerHTML+=`<div class="pr"><span class="pr-l">Hafta ${i+1} <span style="font-size:9px;color:var(--dim)">${(r.week||'').slice(0,10)}</span></span><span class="pr-r ${pnl>=0?'cg':'cr'}">${f(pnl)}$ <span class="cm" style="font-size:9px;font-family:Inter">${r.total||0}T</span></span></div>`;
   });
-  const mEl = document.getElementById('monthly-total');
-  mEl.innerHTML = `<span class="${monthly>=0?'c-green':'c-red'}">${fmt(monthly)}$</span>`;
+  document.getElementById('monthly').innerHTML=`<span class="${mo>=0?'cg':'cr'}">${f(mo)}$</span>`;
 }
 
 // ── loadTrades ─────────────────────────────────────────────
-async function loadTrades(dir = 0) {
-  tradeOffset = Math.max(0, tradeOffset + dir * TRADE_LIMIT);
-  const d = await api(`/api/trades?limit=${TRADE_LIMIT}&offset=${tradeOffset}`);
-  if (!d.ok) return;
-  tradeTotal = d.total || 0;
-  const body = document.getElementById('trades-body');
-  body.innerHTML = '';
-  if (!d.data.length) {
-    body.innerHTML = '<tr><td colspan="9"><div class="empty-state">Henüz kapanmış trade yok</div></td></tr>';
-  } else {
-    d.data.forEach(t => {
-      const pnl = parseFloat(t.net_pnl || 0);
-      body.innerHTML += `<tr class="fade-in">
-        <td class="c-muted">${t.id}</td>
-        <td style="font-weight:600">${t.symbol}</td>
-        <td class="${t.direction==='LONG'?'dir-long':'dir-short'}">${t.direction}</td>
-        <td>${parseFloat(t.entry||0).toFixed(4)}</td>
-        <td>${parseFloat(t.sl||0).toFixed(4)}</td>
-        <td>${fmtPnl(pnl)}</td>
-        <td class="${(t.r_multiple||0)>=0?'c-green':'c-red'}">${fmt(t.r_multiple,3)}R</td>
-        <td class="c-muted">${t.duration_str||'—'}</td>
-        <td>${pill(t.status)}</td>
-      </tr>`;
-    });
-  }
-  const page  = Math.floor(tradeOffset / TRADE_LIMIT) + 1;
-  const pages = Math.ceil(tradeTotal / TRADE_LIMIT);
-  document.getElementById('trade-page').textContent =
-    `Sayfa ${page}/${pages || 1} (${tradeTotal} toplam)`;
-  document.getElementById('btn-prev').disabled = tradeOffset === 0;
-  document.getElementById('btn-next').disabled = tradeOffset + TRADE_LIMIT >= tradeTotal;
+async function loadTrades(dir=0) {
+  offset=Math.max(0,offset+dir*LIMIT);
+  const d=await apiFetch(`/api/trades?limit=${LIMIT}&offset=${offset}`); if(!d.ok) return;
+  total=d.total||0;
+  const b=document.getElementById('tb-trades'); b.innerHTML='';
+  if(!d.data.length){b.innerHTML='<tr><td colspan="9"><div class="empty">Trade yok</div></td></tr>';}
+  else d.data.forEach(t=>{
+    const pnl=parseFloat(t.net_pnl||0);
+    b.innerHTML+=`<tr><td class="cm">${t.id}</td><td style="font-weight:700;font-family:Inter">${t.symbol}</td><td class="${t.direction==='LONG'?'dl':'ds'}">${t.direction}</td><td>${parseFloat(t.entry||0).toFixed(4)}</td><td>${parseFloat(t.sl||0).toFixed(4)}</td><td>${fpnl(pnl)}</td><td class="${(t.r_multiple||0)>=0?'cg':'cr'}">${f(t.r_multiple,3)}R</td><td class="cm">${t.duration_str||'—'}</td><td>${pill(t.status)}</td></tr>`;
+  });
+  const pg=Math.floor(offset/LIMIT)+1,pgs=Math.ceil(total/LIMIT)||1;
+  document.getElementById('pg-info').textContent=`Sayfa ${pg}/${pgs} (${total})`;
+  document.getElementById('btn-prev').disabled=offset===0;
+  document.getElementById('btn-next').disabled=offset+LIMIT>=total;
 }
 
 // ── loadLive ───────────────────────────────────────────────
 async function loadLive() {
-  const d = await api('/api/live');
-  if (!d.ok) return;
-  const body = document.getElementById('live-body');
-  body.innerHTML = '';
-  if (!d.data.length) {
-    body.innerHTML = '<tr><td colspan="8"><div class="empty-state">Açık pozisyon yok</div></td></tr>';
-    return;
-  }
-  d.data.forEach(t => {
-    body.innerHTML += `<tr class="fade-in">
-      <td class="c-muted">${t.id}</td>
-      <td style="font-weight:600">${t.symbol}</td>
-      <td class="${t.direction==='LONG'?'dir-long':'dir-short'}">${t.direction}</td>
-      <td>${parseFloat(t.entry||0).toFixed(4)}</td>
-      <td>${parseFloat(t.sl||0).toFixed(4)}</td>
-      <td>${parseFloat(t.tp1||0).toFixed(4)}</td>
-      <td class="c-muted">${t.duration_str||'—'}</td>
-      <td>${pill(t.status)}</td>
-    </tr>`;
+  const d=await apiFetch('/api/live'); if(!d.ok) return;
+  const b=document.getElementById('tb-live'); b.innerHTML='';
+  if(!d.data.length){b.innerHTML='<tr><td colspan="8"><div class="empty">Açık pozisyon yok</div></td></tr>';return;}
+  d.data.forEach(t=>{
+    b.innerHTML+=`<tr><td class="cm">${t.id}</td><td style="font-weight:700;font-family:Inter">${t.symbol}</td><td class="${t.direction==='LONG'?'dl':'ds'}">${t.direction}</td><td>${parseFloat(t.entry||0).toFixed(4)}</td><td>${parseFloat(t.sl||0).toFixed(4)}</td><td>${parseFloat(t.tp1||0).toFixed(4)}</td><td class="cm">${t.duration_str||'—'}</td><td>${pill(t.status)}</td></tr>`;
   });
 }
 
 // ── loadSignals ────────────────────────────────────────────
 async function loadSignals() {
-  const d = await api('/api/signals?limit=40');
-  if (!d.ok) return;
-  const body = document.getElementById('signals-body');
-  body.innerHTML = '';
-  if (!d.data.length) {
-    body.innerHTML = '<tr><td colspan="8"><div class="empty-state">Sinyal yok</div></td></tr>';
-    return;
-  }
-  d.data.forEach(s => {
-    const t = (s.created_at || '').slice(11, 16);
-    body.innerHTML += `<tr class="fade-in">
-      <td style="font-weight:600">${s.symbol}</td>
-      <td class="${s.direction==='LONG'?'dir-long':'dir-short'}">${s.direction}</td>
-      <td>${fmt(s.rr, 2)}</td>
-      <td>${fmt(s.expected_mfe_r, 2)}</td>
-      <td>${s.score || 0}</td>
-      <td class="${decisionClass(s.decision)}">${s.decision || '?'}</td>
-      <td class="c-muted" style="font-size:10px">${s.veto_reason || ''}</td>
-      <td class="c-muted">${t}</td>
-    </tr>`;
+  const d=await apiFetch('/api/signals?limit=40'); if(!d.ok) return;
+  const b=document.getElementById('tb-signals'); b.innerHTML='';
+  if(!d.data.length){b.innerHTML='<tr><td colspan="8"><div class="empty">Sinyal yok</div></td></tr>';return;}
+  d.data.forEach(s=>{
+    const t=(s.created_at||'').slice(11,16);
+    b.innerHTML+=`<tr><td style="font-weight:700;font-family:Inter">${s.symbol}</td><td class="${s.direction==='LONG'?'dl':'ds'}">${s.direction}</td><td>${f(s.rr,2)}</td><td>${f(s.expected_mfe_r,2)}</td><td>${s.score||0}</td><td class="${dcls(s.decision)}">${s.decision||'?'}</td><td class="cm" style="font-size:9px">${s.veto_reason||''}</td><td class="cm">${t}</td></tr>`;
   });
 }
 
 // ── loadLogs ───────────────────────────────────────────────
 async function loadLogs() {
-  const d = await api('/api/logs?n=80');
-  if (!d.ok) return;
-  const box = document.getElementById('log-box');
-  box.innerHTML = d.data.map(l =>
-    `<div class="log-${l.level}">${escHtml(l.text)}</div>`
-  ).join('');
-  box.scrollTop = box.scrollHeight;
-}
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const d=await apiFetch('/api/logs?n=80'); if(!d.ok) return;
+  const b=document.getElementById('log-box');
+  b.innerHTML=d.data.map(l=>`<div class="l${l.level[0]}">${esc(l.text)}</div>`).join('');
+  b.scrollTop=b.scrollHeight;
 }
 
 // ── loadCoins ──────────────────────────────────────────────
 async function loadCoins() {
-  const d = await api('/api/coins');
-  if (!d.ok) return;
-  const el = document.getElementById('coin-rows');
-  el.innerHTML = '';
-  if (!d.data.length) {
-    el.innerHTML = '<div class="empty-state">Henüz coin profili yok</div>';
-    return;
-  }
-  d.data.slice(0, 20).forEach(c => {
-    const wr = Math.round((c.win_rate || 0) * 100);
-    el.innerHTML += `
-      <div class="panel-row">
-        <span class="pr-label">${c.symbol}
-          <span style="font-size:9px;color:var(--dim);margin-left:4px">${c.volatility_profile||''}</span>
-        </span>
-        <span style="font-size:11px;font-family:'JetBrains Mono',monospace">
-          <span class="${wr>=50?'c-green':'c-red'}">${wr}%</span>
-          <span class="c-muted" style="margin-left:6px">${c.trade_count||0}T</span>
-        </span>
-      </div>`;
+  const d=await apiFetch('/api/coins'); if(!d.ok) return;
+  const el=document.getElementById('coin-rows'); el.innerHTML='';
+  if(!d.data.length){el.innerHTML='<div class="empty">Henüz profil yok</div>';return;}
+  d.data.slice(0,20).forEach(c=>{
+    const wr=Math.round((c.win_rate||0)*100);
+    el.innerHTML+=`<div class="pr"><span class="pr-l">${c.symbol} <span style="font-size:9px;color:var(--dim)">${c.volatility_profile||''}</span></span><span style="font-size:11px;font-family:'JetBrains Mono',monospace"><span class="${wr>=50?'cg':'cr'}">${wr}%</span> <span class="cm">${c.trade_count||0}T</span></span></div>`;
   });
 }
 
 // ── loadTelegram ───────────────────────────────────────────
 async function loadTelegram() {
-  const d = await api('/api/telegram');
-  const dot   = document.getElementById('tg-dot');
-  const label = document.getElementById('tg-label');
-  if (d.ok && d.data && d.data.ok) {
-    dot.className = 'tg-dot ok';
-    label.textContent = `@${d.data.username} — aktif`;
-    label.style.color = 'var(--green)';
+  const d=await apiFetch('/api/telegram');
+  const led=document.getElementById('tg-led'), txt=document.getElementById('tg-txt');
+  if(d.ok&&d.data&&d.data.ok){
+    led.className='tg-led ok'; txt.textContent=`@${d.data.username} — aktif`; txt.style.color='var(--green)';
   } else {
-    dot.className = 'tg-dot err';
-    label.textContent = (d.data && d.data.error) ? d.data.error : 'Bağlanamadı';
-    label.style.color = 'var(--red)';
+    led.className='tg-led err'; txt.textContent=(d.data&&d.data.error)||'Bağlanamadı'; txt.style.color='var(--red)';
   }
 }
 
 // ── Tabs ───────────────────────────────────────────────────
-document.querySelectorAll('.tab').forEach(el => {
-  el.addEventListener('click', () => {
-    const name = el.dataset.tab;
-    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-    document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
-    document.getElementById('tab-' + name).style.display = '';
-    activeTab = name;
-    if (name === 'live')    loadLive();
-    if (name === 'signals') loadSignals();
-    if (name === 'logs')    loadLogs();
+document.querySelectorAll('.tab').forEach(el=>{
+  el.addEventListener('click',()=>{
+    const n=el.dataset.tab;
+    document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('act',t.dataset.tab===n));
+    document.querySelectorAll('.tab-panel').forEach(p=>{p.classList.remove('show');p.style.display='none'});
+    const tp=document.getElementById('tab-'+n); tp.style.display=''; setTimeout(()=>tp.classList.add('show'),10);
+    activeTab=n;
+    if(n==='live')loadLive(); if(n==='signals')loadSignals(); if(n==='logs')loadLogs();
   });
 });
 
-// ── Refresh bar ────────────────────────────────────────────
-function startRefreshBar() {
-  const bar = document.getElementById('refresh-bar');
-  refreshElapsed = 0;
-  clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => {
-    refreshElapsed += 1;
-    const pct = Math.max(0, 100 - (refreshElapsed / REFRESH_SEC * 100));
-    bar.style.width = pct + '%';
-    if (refreshElapsed >= REFRESH_SEC) {
-      clearInterval(refreshTimer);
-      refresh();
-    }
-  }, 1000);
+// ── Refresh ────────────────────────────────────────────────
+function startBar(){
+  clearInterval(rTimer); rElapsed=0;
+  const bar=document.getElementById('rbar');
+  rTimer=setInterval(()=>{
+    rElapsed++; bar.style.width=Math.max(0,100-(rElapsed/REFRESH*100))+'%';
+    if(rElapsed>=REFRESH){clearInterval(rTimer);doRefresh();}
+  },1000);
 }
-
-// ── Main refresh ───────────────────────────────────────────
-async function refresh() {
-  await Promise.all([
-    loadStats(),
-    loadCalendar(),
-    loadWeekly(),
-    loadCoins(),
-    loadTrades(0),
-  ]);
-  if (activeTab === 'live')    loadLive();
-  if (activeTab === 'signals') loadSignals();
-  if (activeTab === 'logs')    loadLogs();
-  startRefreshBar();
+async function doRefresh(){
+  await Promise.all([loadStats(),loadCalendar(),loadWeekly(),loadCoins(),loadTrades(0)]);
+  if(activeTab==='live')loadLive();
+  if(activeTab==='signals')loadSignals();
+  if(activeTab==='logs')loadLogs();
+  startBar();
 }
 
 // ── Init ───────────────────────────────────────────────────
-refresh();
+doRefresh();
 loadTelegram();
 </script>
 </body>
