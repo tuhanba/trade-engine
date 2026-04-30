@@ -84,7 +84,7 @@ def _daily_pnl() -> float:
     c.execute("""
         SELECT COALESCE(SUM(net_pnl), 0.0)
         FROM trades
-        WHERE status IN ('CLOSED_WIN','CLOSED_LOSS','CLOSED_MANUAL','CLOSED_TRAIL','WIN','LOSS')
+        WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
           AND close_time >= ?
     """, (today,))
     total = c.fetchone()[0]

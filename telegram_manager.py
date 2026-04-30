@@ -195,7 +195,7 @@ def _cmd_trades():
     c = conn.cursor()
     c.execute(
         "SELECT symbol, direction, entry, sl, tp1, status FROM trades "
-        "WHERE status NOT IN ('CLOSED_WIN','CLOSED_LOSS','CLOSED_MANUAL','CLOSED_TRAIL','WIN','LOSS') "
+        "WHERE status IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE') "
         "ORDER BY id DESC LIMIT 10"
     )
     rows = [dict(r) for r in c.fetchall()]

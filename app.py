@@ -30,6 +30,13 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 init_db()
 
+try:
+    from n8n_bridge import n8n_bp
+    app.register_blueprint(n8n_bp)
+except Exception as _e:
+    import logging as _lg
+    _lg.getLogger(__name__).warning(f"n8n_bridge yüklenemedi: {_e}")
+
 
 # ── Yardımcılar ──────────────────────────────────────────────────────────────
 

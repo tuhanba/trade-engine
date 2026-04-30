@@ -79,6 +79,11 @@ def _heartbeat():
     )
     conn.commit()
     conn.close()
+    try:
+        from n8n_bridge import ping_health
+        ping_health()
+    except Exception:
+        pass
 
 
 def _write_candidate(candidate: dict, decision: dict) -> int:
@@ -121,8 +126,7 @@ def _open_trades() -> list:
     c = conn.cursor()
     c.execute("""
         SELECT * FROM trades
-        WHERE status NOT IN
-            ('CLOSED_WIN','CLOSED_LOSS','CLOSED_MANUAL','CLOSED_TRAIL','WIN','LOSS')
+        WHERE status IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
     """)
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
@@ -486,6 +490,11 @@ def run():
             break
         except Exception as e:
             logger.error(f"[Bot] Döngü hatası: {e}", exc_info=True)
+            try:
+                from n8n_bridge import post_crash_alert
+                post_crash_alert(str(e))
+            except Exception:
+                pass
 
         time.sleep(LOOP_INTERVAL)
 
