@@ -18,7 +18,7 @@ import os
 import re
 from datetime import datetime, timezone
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, make_response
 from flask_socketio import SocketIO
 
 import config
@@ -57,7 +57,11 @@ def _fmt_dur(open_time: str, close_time: str = None) -> str:
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    resp = make_response(render_template("index.html"))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 # ── /api/stats ───────────────────────────────────────────────────────────────
