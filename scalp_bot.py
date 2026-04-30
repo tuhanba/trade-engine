@@ -93,9 +93,9 @@ def _write_candidate(candidate: dict, decision: dict) -> int:
         INSERT INTO signal_candidates
             (symbol, direction, entry, sl, tp1, tp2, runner_target,
              rr, expected_mfe_r, score, confidence,
-             decision, veto_reason, session,
+             decision, veto_reason, session, setup_type,
              ax_mode, execution_mode, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         candidate["symbol"],
         candidate["direction"],
@@ -111,6 +111,7 @@ def _write_candidate(candidate: dict, decision: dict) -> int:
         decision["decision"],
         decision.get("veto_reason"),
         candidate.get("session"),
+        candidate.get("setup_type"),
         config.AX_MODE,
         config.EXECUTION_MODE,
         _now(),
@@ -217,6 +218,69 @@ def _update_daily_summary():
         conn.close()
     except Exception as e:
         logger.error(f"[Bot] daily_summary hata: {e}")
+
+
+def _update_weekly_summary():
+    """Bu haftanın kapanmış trade'lerinden weekly_summary güncelle."""
+    try:
+        now_dt     = datetime.now(timezone.utc)
+        week_start = (now_dt - timedelta(days=now_dt.weekday())).strftime("%Y-%m-%d")
+        week_end   = (now_dt - timedelta(days=now_dt.weekday()) + timedelta(days=6)).strftime("%Y-%m-%d")
+
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT COUNT(*) total,
+                   SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) wins,
+                   SUM(CASE WHEN result='LOSS' THEN 1 ELSE 0 END) losses,
+                   ROUND(SUM(net_pnl),4) pnl,
+                   ROUND(AVG(r_multiple),4) avg_r,
+                   ROUND(SUM(CASE WHEN result='WIN' THEN net_pnl ELSE 0 END) /
+                         (ABS(SUM(CASE WHEN result='LOSS' THEN net_pnl ELSE 0 END))+1e-10),3) pf
+            FROM trades
+            WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
+              AND close_time >= ?
+        """, (week_start,))
+        row   = dict(c.fetchone() or {})
+        total = row.get("total") or 0
+        if total == 0:
+            conn.close()
+            return
+        wins = row.get("wins") or 0
+        wr   = round(wins / total, 4)
+
+        c.execute("""
+            SELECT symbol FROM trades
+            WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
+              AND close_time >= ? GROUP BY symbol ORDER BY SUM(net_pnl) DESC LIMIT 1
+        """, (week_start,))
+        best_row  = c.fetchone()
+        c.execute("""
+            SELECT symbol FROM trades
+            WHERE status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
+              AND close_time >= ? GROUP BY symbol ORDER BY SUM(net_pnl) ASC LIMIT 1
+        """, (week_start,))
+        worst_row = c.fetchone()
+
+        conn.execute("""
+            INSERT INTO weekly_summary
+                (week_start, week_end, total_trades, wins, losses,
+                 win_rate, total_pnl, avg_r, profit_factor, best_coin, worst_coin)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(week_start) DO UPDATE SET
+                week_end=excluded.week_end,
+                total_trades=excluded.total_trades, wins=excluded.wins,
+                losses=excluded.losses, win_rate=excluded.win_rate,
+                total_pnl=excluded.total_pnl, avg_r=excluded.avg_r,
+                profit_factor=excluded.profit_factor,
+                best_coin=excluded.best_coin, worst_coin=excluded.worst_coin
+        """, (week_start, week_end, total, wins, row.get("losses") or 0,
+              wr, row.get("pnl") or 0, row.get("avg_r") or 0, row.get("pf") or 0,
+              best_row[0] if best_row else None, worst_row[0] if worst_row else None))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"[Bot] weekly_summary hata: {e}")
 
 
 # ---------- Circuit breaker ----------
@@ -335,6 +399,7 @@ def _after_close(trade: dict):
         mae=mae_r,
     )
     _update_daily_summary()
+    _update_weekly_summary()
     if _TG:
         try:
             _tg.notify_trade_close(trade)

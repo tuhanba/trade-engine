@@ -62,7 +62,10 @@ def ping_health():
     c = conn.cursor()
     c.execute("SELECT * FROM system_state WHERE id=1")
     row = c.fetchone()
-    c.execute("SELECT COUNT(*) FROM trades WHERE status='OPEN'")
+    c.execute("""
+        SELECT COUNT(*) FROM trades
+        WHERE status IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
+    """)
     open_cnt = c.fetchone()[0]
     c.execute("SELECT paper_balance FROM paper_account WHERE id=1")
     bal = float((c.fetchone() or [250])[0])

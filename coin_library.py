@@ -211,19 +211,28 @@ def update_coin_profile(symbol: str, trade: dict):
             elif win_rate >= 0.55:
                 danger = max(danger - 0.2, 1.0)
 
+        # total_pnl: trades tablosundan gerçek toplam
+        c2 = conn.cursor()
+        c2.execute("""
+            SELECT COALESCE(SUM(net_pnl), 0)
+            FROM trades WHERE symbol=?
+              AND status NOT IN ('OPEN','TP1_HIT','TP2_HIT','RUNNER_ACTIVE')
+        """, (symbol,))
+        total_pnl = round(float(c2.fetchone()[0] or 0), 4)
+
         c.execute("""
             UPDATE coin_profile
             SET trade_count=?, win_rate=?, avg_r=?, avg_mfe=?, avg_mae=?,
                 profit_factor=?, preferred_direction=?,
                 long_count=?, short_count=?,
-                danger_score=?, updated_at=?
+                danger_score=?, total_pnl=?, updated_at=?
             WHERE symbol=?
         """, (
             n, round(win_rate, 4), round(avg_r, 4),
             round(avg_mfe, 4), round(avg_mae, 4),
             round(pf, 3), pref,
             longs, shorts,
-            round(danger, 2), now,
+            round(danger, 2), total_pnl, now,
             symbol,
         ))
     else:
