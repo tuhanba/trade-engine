@@ -238,13 +238,15 @@ def init_db():
 
         -- ── best_params ──────────────────────────────────────────────────────
         CREATE TABLE IF NOT EXISTS best_params (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            data        TEXT NOT NULL,
-            win_rate    REAL,
-            avg_r       REAL,
-            pnl         REAL,
-            trade_count INTEGER,
-            created_at  TEXT DEFAULT (datetime('now'))
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            data          TEXT,
+            params_json   TEXT,
+            win_rate      REAL DEFAULT 0,
+            avg_r         REAL DEFAULT 0,
+            pnl           REAL DEFAULT 0,
+            trade_count   INTEGER DEFAULT 0,
+            profit_factor REAL DEFAULT 0,
+            created_at    TEXT DEFAULT (datetime('now'))
         );
 
         -- ── system_state ─────────────────────────────────────────────────────
