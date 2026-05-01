@@ -101,14 +101,15 @@ MIN_PRICE          = float(os.getenv("MIN_PRICE", "0.001"))
 MAX_PRICE_CHANGE   = float(os.getenv("MAX_PRICE_CHANGE", "30.0"))    # pump/dump filtresi
 
 # ── Coin Evreni ──────────────────────────────────────────────────────────────
-# v2.1: AVAXUSDT kaldırıldı (WR=12.5%, PF=0.27, PnL=-$48)
-#       SUIUSDT  kaldırıldı (WR=18.2%, PF=0.42, PnL=-$55)
-# Kalan coinler: Backtest PF >= 1.0 veya izleme listesinde
+# v2.2: Backtest ile genişletildi — 30 coin, PF ≥ 1.0, ≥8 trade
+# Test tarihi: 2026-05-01 | BTC 4H: BULLISH
 COIN_UNIVERSE = [
-    "BTCUSDT",  "ETHUSDT",  "SOLUSDT",  "BNBUSDT",  "XRPUSDT",
-    "DOGEUSDT", "ADAUSDT",  "LINKUSDT", "NEARUSDT",
-    "OPUSDT",   "ARBUSDT",  "INJUSDT",  "FETUSDT",
-    "RNDRUSDT", "WIFUSDT",  "PEPEUSDT", "SEIUSDT",  "LTCUSDT",
+    "SNDKUSDT", "ZEREBROUSDT", "TACUSDT", "ADAUSDT", "1000SHIBUSDT",
+    "PENDLEUSDT", "BZUSDT", "BCHUSDT", "FARTCOINUSDT", "ENAUSDT",
+    "CLUSDT", "1000PEPEUSDT", "XAGUSDT", "WIFUSDT", "MSTRUSDT",
+    "DRIFTUSDT", "ETHUSDT", "HUSDT", "BIOUSDT", "APTUSDT",
+    "CRCLUSDT", "DOTUSDT", "TAOUSDT", "SKYAIUSDT", "PUMPUSDT",
+    "BSBUSDT", "ZBTUSDT", "FILUSDT", "PENGUUSDT", "ZECUSDT",
 ]
 
 # ── Log ──────────────────────────────────────────────────────────────────────
