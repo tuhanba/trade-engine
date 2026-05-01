@@ -459,11 +459,11 @@ body::before{
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <div style="flex:1;min-width:160px">
-        <div style="font-family:var(--orb);font-size:7px;letter-spacing:0.18em;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase">Sinyal Dagilimi (Bugun)</div>
+        <div style="font-family:var(--orb);font-size:7px;letter-spacing:0.18em;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase">Sinyal Kalitesi (Bugun)</div>
         <div class="sig-row">
-          <div class="sig-stat"><div class="sig-stat-val sig-allow" id="sigAllow">—</div><div class="sig-stat-lbl">ALLOW</div></div>
-          <div class="sig-stat"><div class="sig-stat-val sig-veto" id="sigVeto">—</div><div class="sig-stat-lbl">VETO</div></div>
-          <div class="sig-stat"><div class="sig-stat-val sig-watch" id="sigWatch">—</div><div class="sig-stat-lbl">WATCH</div></div>
+          <div class="sig-stat"><div class="sig-stat-val sig-allow" id="sigAPlus">—</div><div class="sig-stat-lbl">A+</div></div>
+          <div class="sig-stat"><div class="sig-stat-val sig-allow" id="sigA">—</div><div class="sig-stat-lbl">A</div></div>
+          <div class="sig-stat"><div class="sig-stat-val sig-watch" id="sigB">—</div><div class="sig-stat-lbl">B</div></div>
           <div class="sig-stat"><div class="sig-stat-val" id="sigTotal" style="color:var(--text-muted)">—</div><div class="sig-stat-lbl">TOPLAM</div></div>
         </div>
       </div>
@@ -755,7 +755,7 @@ async function loadAxStatus(){
   try{
     const [jsAx,jsSig]=await Promise.all([
       fetch(BASE+"/api/ax_status").then(r=>r.json()),
-      fetch(BASE+"/api/signal_stats?days=1").then(r=>r.json()),
+      fetch(BASE+"/api/scalp_signal_stats").then(r=>r.json()),
     ]);
     if(jsAx.ok){
       const d=jsAx.data;
@@ -787,9 +787,9 @@ async function loadAxStatus(){
     }
     if(jsSig.ok){
       const s=jsSig.data;
-      document.getElementById("sigAllow").textContent=s.ALLOW||0;
-      document.getElementById("sigVeto").textContent=s.VETO||0;
-      document.getElementById("sigWatch").textContent=s.WATCH||0;
+      document.getElementById("sigAPlus").textContent=s["A+"]||0;
+      document.getElementById("sigA").textContent=s["A"]||0;
+      document.getElementById("sigB").textContent=s["B"]||0;
       document.getElementById("sigTotal").textContent=s.total||0;
     }
   }catch(e){console.error("axStatus",e)}

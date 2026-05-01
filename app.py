@@ -476,3 +476,28 @@ def api_signal_stats():
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
+
+# ── /api/scalp_signals ────────────────────────────────────────────────────────
+@app.route("/api/scalp_signals")
+def api_scalp_signals():
+    """Aktif scalp sinyalleri (Data Layer'dan validate edilmiş veri)."""
+    try:
+        from database import get_active_scalp_signals
+        signals = get_active_scalp_signals(limit=100)
+        # Null veri frontend'e gitmesin
+        clean = [s for s in signals if s.get("direction") and s.get("entry_zone", 0) > 0]
+        return jsonify({"ok": True, "data": clean, "total": len(clean)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/scalp_signal_stats ───────────────────────────────────────────────────
+@app.route("/api/scalp_signal_stats")
+def api_scalp_signal_stats():
+    """Günlük sinyal istatistikleri: A+/A/B/C dağılımı."""
+    try:
+        from database import get_daily_signal_count
+        stats = get_daily_signal_count()
+        return jsonify({"ok": True, "data": stats})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500

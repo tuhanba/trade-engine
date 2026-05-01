@@ -254,6 +254,42 @@ def init_db():
             updated_at TEXT DEFAULT (datetime('now'))
         );
 
+        -- ── scalp_signals (Yeni Tek Schema) ──────────────────────────────────
+        CREATE TABLE IF NOT EXISTS scalp_signals (
+            id                 TEXT PRIMARY KEY,
+            symbol             TEXT NOT NULL,
+            timestamp          REAL,
+            source             TEXT DEFAULT 'system',
+            timeframe          TEXT DEFAULT '1m',
+            direction          TEXT,
+            coin_score         REAL DEFAULT 0,
+            trend_score        REAL DEFAULT 0,
+            trigger_score      REAL DEFAULT 0,
+            risk_score         REAL DEFAULT 0,
+            final_score        REAL DEFAULT 0,
+            setup_quality      TEXT DEFAULT 'D',
+            entry_zone         REAL DEFAULT 0,
+            stop_loss          REAL DEFAULT 0,
+            tp1                REAL DEFAULT 0,
+            tp2                REAL DEFAULT 0,
+            tp3                REAL DEFAULT 0,
+            rr                 REAL DEFAULT 0,
+            risk_percent       REAL DEFAULT 0,
+            position_size      REAL DEFAULT 0,
+            notional_size      REAL DEFAULT 0,
+            leverage_suggestion INTEGER DEFAULT 1,
+            max_loss           REAL DEFAULT 0,
+            invalidation_level REAL DEFAULT 0,
+            confidence         REAL DEFAULT 0,
+            status             TEXT DEFAULT 'pending',
+            reason             TEXT DEFAULT '',
+            telegram_status    TEXT DEFAULT 'pending',
+            dashboard_status   TEXT DEFAULT 'pending',
+            error              TEXT DEFAULT '',
+            created_at         TEXT DEFAULT (datetime('now')),
+            archived_at        TEXT
+        );
+
         -- ── pattern_memory ───────────────────────────────────────────────────
         CREATE TABLE IF NOT EXISTS pattern_memory (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -731,3 +767,68 @@ def save_pattern(symbol: str, direction: str, session: str, result: str,
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
         )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCALP SIGNALS — Yeni Tek Schema
+# ─────────────────────────────────────────────────────────────────────────────
+def save_scalp_signal(sig_data: dict):
+    """Yeni schema ile sinyali kaydet."""
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO scalp_signals (
+                id, symbol, timestamp, source, timeframe, direction,
+                coin_score, trend_score, trigger_score, risk_score, final_score,
+                setup_quality, entry_zone, stop_loss, tp1, tp2, tp3,
+                rr, risk_percent, position_size, notional_size, leverage_suggestion,
+                max_loss, invalidation_level, confidence, status, reason,
+                telegram_status, dashboard_status, error
+            ) VALUES (
+                :id, :symbol, :timestamp, :source, :timeframe, :direction,
+                :coin_score, :trend_score, :trigger_score, :risk_score, :final_score,
+                :setup_quality, :entry_zone, :stop_loss, :tp1, :tp2, :tp3,
+                :rr, :risk_percent, :position_size, :notional_size, :leverage_suggestion,
+                :max_loss, :invalidation_level, :confidence, :status, :reason,
+                :telegram_status, :dashboard_status, :error
+            )
+        """, sig_data)
+
+def get_active_scalp_signals(limit: int = 100) -> list:
+    """Dashboard için aktif sinyalleri getir (null veri olmadan)."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT * FROM scalp_signals
+            WHERE status != 'archived'
+              AND direction IS NOT NULL
+              AND entry_zone > 0
+              AND setup_quality NOT IN ('D', '')
+            ORDER BY final_score DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+def archive_old_scalp_signals(hours: int = 24):
+    """Eski sinyalleri arşivle."""
+    with get_conn() as conn:
+        conn.execute("""
+            UPDATE scalp_signals
+            SET status = 'archived', archived_at = datetime('now')
+            WHERE created_at < datetime('now', ?) AND status != 'archived'
+        """, (f"-{hours} hours",))
+
+def get_daily_signal_count() -> dict:
+    """Bugünkü sinyal istatistikleri."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT setup_quality, COUNT(*) as cnt
+            FROM scalp_signals
+            WHERE created_at >= datetime('now', '-1 day')
+              AND status != 'archived'
+            GROUP BY setup_quality
+        """).fetchall()
+    counts = {"A+": 0, "A": 0, "B": 0, "C": 0, "total": 0}
+    for row in rows:
+        q = row["setup_quality"]
+        if q in counts:
+            counts[q] = row["cnt"]
+        counts["total"] += row["cnt"]
+    return counts
