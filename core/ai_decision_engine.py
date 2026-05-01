@@ -11,6 +11,16 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
+# Config'den backtest tabanlı filtre parametrelerini al
+try:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    from config import BAD_HOURS_UTC as _BAD_HOURS, GOOD_HOURS_UTC as _GOOD_HOURS, ALLOWED_QUALITIES as _ALLOWED_QUAL
+except ImportError:
+    _BAD_HOURS   = [5, 6, 14, 20]
+    _GOOD_HOURS  = [0, 2, 3, 7, 15]
+    _ALLOWED_QUAL = ["A+"]
+
 PARAM_BOUNDS = {
     "sl_atr_mult":    (0.8,  2.5),
     "tp_atr_mult":    (1.2,  4.5),
@@ -124,10 +134,10 @@ class AIDecisionEngine:
         except Exception as e:
             logger.error(f"Heatmap hesaplama hatası: {e}")
             
-        # Fallback
+        # Fallback — Backtest bulgularına göre kalibre edildi
         current_hour = datetime.utcnow().hour
-        if 0 <= current_hour <= 6: return -1.0
-        elif 13 <= current_hour <= 16: return 1.0
+        if current_hour in _BAD_HOURS:  return -2.5  # WR %13-22 — ağır ceza
+        if current_hour in _GOOD_HOURS: return +1.5  # WR %44-51 — bonus
         return 0.0
 
     def _calc_markov_matrix(self) -> dict:

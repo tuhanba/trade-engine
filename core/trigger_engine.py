@@ -8,6 +8,21 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Config'den filtre parametrelerini al
+try:
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from config import (
+        ALLOWED_QUALITIES, BAD_HOURS_UTC, GOOD_HOURS_UTC,
+        SHORT_REQUIRES_BTC_BEARISH, BTC_TREND_INTERVAL
+    )
+except ImportError:
+    ALLOWED_QUALITIES       = ["A+"]
+    BAD_HOURS_UTC           = [5, 6, 14, 20]
+    GOOD_HOURS_UTC          = [0, 2, 3, 7, 15]
+    SHORT_REQUIRES_BTC_BEARISH = True
+    BTC_TREND_INTERVAL      = "4h"
+
 class TriggerEngine:
     def __init__(self, client):
         self.client = client
@@ -71,10 +86,26 @@ class TriggerEngine:
         except Exception:
             return 0.0
 
-    def analyze(self, symbol: str, direction: str) -> dict:
+    def analyze(self, symbol: str, direction: str, btc_trend: str = "NEUTRAL") -> dict:
         """Trigger analizi yapar ve setup kalitesi döner."""
         if direction == "NO TRADE":
             return {"quality": "D", "score": 0, "entry": 0}
+
+        # ── Saat Filtresi (UTC) ────────────────────────────────────────────────
+        from datetime import datetime, timezone
+        current_hour = datetime.now(timezone.utc).hour
+        if current_hour in BAD_HOURS_UTC:
+            logger.debug(f"[{symbol}] Kötü saat filtresi: {current_hour}:00 UTC — trade yok")
+            return {"quality": "D", "score": 0, "entry": 0}
+
+        # ── BTC Trend Filtresi ─────────────────────────────────────────────────
+        if SHORT_REQUIRES_BTC_BEARISH:
+            if direction == "SHORT" and btc_trend == "BULLISH":
+                logger.debug(f"[{symbol}] SHORT engellendi: BTC 4H BULLISH")
+                return {"quality": "D", "score": 0, "entry": 0}
+            if direction == "LONG" and btc_trend == "BEARISH":
+                logger.debug(f"[{symbol}] LONG engellendi: BTC 4H BEARISH")
+                return {"quality": "D", "score": 0, "entry": 0}
 
         # ── 5m Analizi ────────────────────────────────────────────────────────
         df5 = self.get_candles(symbol, "5m", 150)
@@ -157,6 +188,15 @@ class TriggerEngine:
         if quality == "A" and score >= 9.0:
             quality = "A+"
 
+        # ── Kalite Filtresi ────────────────────────────────────────────────────
+        if quality not in ALLOWED_QUALITIES:
+            logger.debug(f"[{symbol}] Kalite filtresi: {quality} izin verilenler={ALLOWED_QUALITIES}")
+            return {"quality": "D", "score": 0, "entry": 0}
+
+        # ── İyi Saat Bonusu ────────────────────────────────────────────────────
+        if current_hour in GOOD_HOURS_UTC:
+            score = min(10.0, score + 0.5)
+
         # ML Sinyal Skoru Hesaplama
         ml_score = 50
         try:
@@ -196,5 +236,8 @@ class TriggerEngine:
             "rv": rv,
             "momentum_3c": mom3c,
             "macd_hist": round(hist, 6),
-            "funding": round(funding * 100, 4)
+            "funding": round(funding * 100, 4),
+            "btc_trend": btc_trend,
+            "hour_utc": current_hour,
+            "good_hour": current_hour in GOOD_HOURS_UTC,
         }
