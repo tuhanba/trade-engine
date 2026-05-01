@@ -1,18 +1,33 @@
 """
-Market Scanner — Coin Discovery
-Sabit listeye bağlı kalmadan Binance'den USDT paritelerini çeker ve filtreler.
+Market Scanner — Profesyonel Sürüm
+Coin Discovery, cooldown kontrolü, hacim ve volatilite filtreleri.
 """
 import logging
+import sqlite3
 from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
 class MarketScanner:
-    def __init__(self, client):
+    def __init__(self, client, db_path="trade_engine.db"):
         self.client = client
+        self.db_path = db_path
         self.min_volume = 10_000_000  # 10M USD
         self.min_price = 0.001
-        
+
+    def _get_cooldown_coins(self) -> set:
+        """Cooldown'da olan coinleri getirir."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                rows = conn.execute("""
+                    SELECT symbol FROM coin_profiles 
+                    WHERE danger_score > 0.8
+                """).fetchall()
+                return {row[0] for row in rows}
+        except Exception as e:
+            logger.error(f"Cooldown okuma hatası: {e}")
+            return set()
+
     def scan(self) -> List[Dict]:
         """Tüm USDT paritelerini tarar ve filtrelenmiş listeyi döner."""
         try:
@@ -25,10 +40,15 @@ class MarketScanner:
                 if s["quoteAsset"] == "USDT" and s["status"] == "TRADING"
             }
             
+            cooldown_coins = self._get_cooldown_coins()
             candidates = []
+            
             for t in tickers:
                 symbol = t["symbol"]
                 if symbol not in valid_symbols:
+                    continue
+                    
+                if symbol in cooldown_coins:
                     continue
                     
                 volume = float(t["quoteVolume"])

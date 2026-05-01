@@ -23,7 +23,7 @@ from config import (
     CIRCUIT_BREAKER_LOSSES, CIRCUIT_BREAKER_MINUTES,
     PAPER_MODE, AX_MODE, EXECUTION_MODE, COIN_UNIVERSE,
     LOG_DIR, LOG_MAX_DAYS, LOG_MAX_MB,
-    MAX_DAILY_SIGNALS,
+    MAX_DAILY_SIGNALS, DB_PATH,
 )
 from database import (
     init_db, init_paper_account, get_paper_balance,
@@ -119,11 +119,11 @@ def main():
         ai_set_client(client, send_message)
 
     # Modülleri başlat
-    scanner  = MarketScanner(client)
+    scanner  = MarketScanner(client, db_path=DB_PATH)
     trend    = TrendEngine(client)
     trigger  = TriggerEngine(client)
     risk     = RiskEngine(client)
-    ai_engine = AIDecisionEngine()
+    ai_engine = AIDecisionEngine(db_path=DB_PATH)
 
     # Telegram Manager (komut dinleyici)
     tg_manager = None
@@ -327,6 +327,9 @@ def main():
                         f"Entry={sig.entry_zone:.6f} SL={sig.stop_loss:.6f} "
                         f"RR={sig.rr:.2f} Score={sig.final_score:.1f}"
                     )
+
+                    # AI Öğrenme: Trade kapandığında çağrılır (execution_engine callback)
+                    # Örnek: ai_engine.learn_from_trade(symbol, "WIN", pnl, sig.setup_quality)
 
                 except Exception as e:
                     logger.error(f"Coin işleme hatası {symbol}: {e}", exc_info=True)

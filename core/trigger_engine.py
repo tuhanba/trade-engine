@@ -1,9 +1,10 @@
 """
-Trigger Engine
-Giriş onayı, setup kalitesi ve anlık fiyatı belirler.
+Trigger Engine — Profesyonel Sürüm
+Giriş onayı, setup kalitesi, çoklu timeframe (5m + 1m), RSI, VWAP, MACD ve momentum.
 """
 import logging
 import pandas as pd
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -25,46 +26,145 @@ class TriggerEngine:
             logger.error(f"Mum verisi alınamadı {symbol}: {e}")
             return pd.DataFrame()
 
+    def _ema(self, series: pd.Series, period: int) -> pd.Series:
+        return series.ewm(span=period, adjust=False).mean()
+
+    def _rsi(self, series: pd.Series, period: int = 14) -> float:
+        delta = series.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / (loss + 1e-10)
+        return float(100 - (100 / (1 + rs)).iloc[-1])
+
+    def _macd_hist(self, series: pd.Series) -> float:
+        fast = self._ema(series, 12).iloc[-1] - self._ema(series, 26).iloc[-1]
+        slow = self._ema(pd.Series((self._ema(series, 12) - self._ema(series, 26)).values), 9).iloc[-1]
+        return fast - slow
+
+    def _vwap(self, df: pd.DataFrame) -> float:
+        tp = (df["high"] + df["low"] + df["close"]) / 3
+        return float((tp * df["volume"]).sum() / (df["volume"].sum() + 1e-10))
+
+    def _relative_volume(self, df: pd.DataFrame, period: int = 20) -> float:
+        avg = df["volume"].iloc[-period - 1:-1].mean()
+        cur = df["volume"].iloc[-1]
+        return round(cur / (avg + 1e-10), 2)
+
+    def _momentum_3c(self, df: pd.DataFrame) -> float:
+        """Son 3 mumun yönlü momentum skoru (-3 ile +3)."""
+        if len(df) < 4:
+            return 0
+        score = 0.0
+        for i in range(-3, 0):
+            o = df["open"].iloc[i]
+            c = df["close"].iloc[i]
+            body = abs(c - o)
+            rng = df["high"].iloc[i] - df["low"].iloc[i]
+            strength = body / (rng + 1e-10)
+            score += strength if c > o else -strength
+        return round(score, 3)
+
+    def get_funding_rate(self, symbol: str) -> float:
+        try:
+            result = self.client.futures_funding_rate(symbol=symbol, limit=1)
+            return float(result[-1]["fundingRate"]) if result else 0.0
+        except Exception:
+            return 0.0
+
     def analyze(self, symbol: str, direction: str) -> dict:
         """Trigger analizi yapar ve setup kalitesi döner."""
         if direction == "NO TRADE":
             return {"quality": "D", "score": 0, "entry": 0}
 
-        df5 = self.get_candles(symbol, "5m", 50)
-        if df5.empty:
+        # ── 5m Analizi ────────────────────────────────────────────────────────
+        df5 = self.get_candles(symbol, "5m", 150)
+        if df5.empty or len(df5) < 50:
             return {"quality": "D", "score": 0, "entry": 0}
 
-        c = df5["close"].iloc[-1]
-        v = df5["volume"].iloc[-1]
-        avg_v = df5["volume"].iloc[-20:-1].mean()
+        c5 = df5["close"].iloc[-1]
+        e9_5 = self._ema(df5["close"], 9)
+        e21_5 = self._ema(df5["close"], 21)
+        e50_5 = self._ema(df5["close"], 50)
+        rsi5 = self._rsi(df5["close"], 14)
 
+        bull5 = direction == "LONG" and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5 < 75
+        bear5 = direction == "SHORT" and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5 < 65
+
+        if not bull5 and not bear5:
+            return {"quality": "D", "score": 0, "entry": 0}
+
+        # ── 1m Analizi ────────────────────────────────────────────────────────
+        df1 = self.get_candles(symbol, "1m", 100)
+        if df1.empty or len(df1) < 30:
+            return {"quality": "D", "score": 0, "entry": 0}
+
+        c1 = df1["close"].iloc[-1]
+        rsi1 = self._rsi(df1["close"], 7)
+        hist = self._macd_hist(df1["close"])
+        rv = self._relative_volume(df1, 20)
+        mom3c = self._momentum_3c(df1)
+        vwap_val = self._vwap(df1)
+
+        # RSI 1m giriş onayı
+        if bull5 and not (32 < rsi1 < 75):
+            return {"quality": "D", "score": 0, "entry": 0}
+        if bear5 and not (25 < rsi1 < 68):
+            return {"quality": "D", "score": 0, "entry": 0}
+
+        # ── Funding Rate Kontrolü ─────────────────────────────────────────────
+        funding = self.get_funding_rate(symbol)
+        if direction == "LONG" and funding > 0.001:
+            return {"quality": "D", "score": 0, "entry": 0}  # Longs ağır, olumsuz funding
+        if direction == "SHORT" and funding < -0.001:
+            return {"quality": "D", "score": 0, "entry": 0}
+
+        # ── Skor ve Kalite Hesaplama ──────────────────────────────────────────
         score = 5.0
         quality = "C"
 
-        # Hacim onayı
-        if v > avg_v * 1.5:
+        # Relative Volume
+        if rv > 2.0:
             score += 2.0
             quality = "B"
-        if v > avg_v * 2.5:
-            score += 3.0
-            quality = "A"
+        elif rv > 1.5:
+            score += 1.0
 
-        # Basit mum formasyonu onayı
-        body = abs(df5["close"].iloc[-1] - df5["open"].iloc[-1])
-        wick_up = df5["high"].iloc[-1] - max(df5["close"].iloc[-1], df5["open"].iloc[-1])
-        wick_dn = min(df5["close"].iloc[-1], df5["open"].iloc[-1]) - df5["low"].iloc[-1]
+        # Momentum Uyumu
+        if direction == "LONG" and mom3c > 1.5:
+            score += 2.0
+            if quality == "B": quality = "A"
+        elif direction == "SHORT" and mom3c < -1.5:
+            score += 2.0
+            if quality == "B": quality = "A"
+        elif direction == "LONG" and mom3c > 0.5:
+            score += 1.0
+        elif direction == "SHORT" and mom3c < -0.5:
+            score += 1.0
 
-        if direction == "LONG" and body > wick_up and wick_dn > body:
-            score += 2.0
-            if quality == "A": quality = "A+"
-            elif quality == "B": quality = "A"
-        elif direction == "SHORT" and body > wick_dn and wick_up > body:
-            score += 2.0
-            if quality == "A": quality = "A+"
-            elif quality == "B": quality = "A"
+        # MACD Histogram
+        if direction == "LONG" and hist > 0: score += 1.0
+        if direction == "SHORT" and hist < 0: score += 1.0
+
+        # VWAP Uyumu
+        if direction == "LONG" and c1 > vwap_val: score += 1.0
+        if direction == "SHORT" and c1 < vwap_val: score += 1.0
+
+        # RSI Merkeze Yakınlık (Aşırılardan uzak = iyi)
+        rsi_mid_dist = abs(rsi5 - 50)
+        if rsi_mid_dist > 30: score -= 2.0  # Aşırı alım/satım bölgesi
+
+        # A+ Kalite Yükseltmesi
+        if quality == "A" and score >= 9.0:
+            quality = "A+"
 
         return {
             "quality": quality,
-            "score": min(10.0, score),
-            "entry": c
+            "score": min(10.0, max(0.0, score)),
+            "entry": c1,
+            "rsi5": round(rsi5, 1),
+            "rsi1": round(rsi1, 1),
+            "rv": rv,
+            "momentum_3c": mom3c,
+            "macd_hist": round(hist, 6),
+            "funding": round(funding * 100, 4)
         }
