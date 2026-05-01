@@ -340,6 +340,27 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
         record_close(trade_id, close_price, reason)
     except Exception as e:
         logger.warning(f"Live tracker record_close hatası: {e}")
+
+    # ── AI Öğrenme Döngüsü — Eksik 2 Düzeltmesi ──────────────────────────────
+    # Her kapanan trade AI'ın Markov, heatmap ve parametre optimizasyonunu besler
+    try:
+        from core.ai_decision_engine import AIDecisionEngine
+        from config import DB_PATH
+        ai_engine = AIDecisionEngine(db_path=DB_PATH)
+        setup_quality = t.get("setup_quality") or t.get("quality") or "B"
+        ai_engine.learn_from_trade(
+            symbol        = t["symbol"],
+            result        = result,          # "WIN" | "LOSS"
+            pnl           = net_pnl,
+            setup_quality = setup_quality,
+        )
+        logger.info(
+            f"[AI Learn] #{trade_id} {t['symbol']} {result} "
+            f"pnl={net_pnl:+.3f}$ quality={setup_quality}"
+        )
+    except Exception as e:
+        logger.warning(f"AI learn_from_trade hatası: {e}")
+
     logger.info(
         f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
         f"{reason.upper()} pnl={net_pnl:+.3f}$ hold={hold_min:.0f}dk"

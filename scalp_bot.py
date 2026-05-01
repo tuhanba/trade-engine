@@ -217,7 +217,7 @@ def main():
                         continue
 
                     # ── ADIM 3: TRIGGER ENGINE ─────────────────────────────
-                    trigger_result = trigger.analyze(symbol, trend_result["direction"])
+                    trigger_result = trigger.analyze(symbol, trend_result["direction"], trend_result.get("btc_trend", "NEUTRAL"))
                     if trigger_result["quality"] == "D":
                         continue
 
