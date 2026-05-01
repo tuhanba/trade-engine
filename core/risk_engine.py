@@ -48,24 +48,42 @@ class RiskEngine:
         if pd.isna(atr_val) or atr_val == 0:
             return {"score": 0, "valid": False}
 
+        # Coin profili parametrelerini al
+        try:
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from coin_library import get_coin_params
+            coin_params = get_coin_params(symbol)
+            sl_mult = coin_params.get("sl_atr_mult", 1.5)
+            tp_mult = coin_params.get("tp_atr_mult", 2.0)
+            base_risk = coin_params.get("risk_pct", self.base_risk_pct)
+            max_lev = coin_params.get("max_leverage", 20)
+        except Exception as e:
+            logger.warning(f"Coin profili alınamadı: {e}")
+            sl_mult = 1.5
+            tp_mult = 2.0
+            base_risk = self.base_risk_pct
+            max_lev = 20
+
         # Stop mesafesi (ATR bazlı)
-        sl_dist = atr_val * 1.5
+        sl_dist = atr_val * sl_mult
         
         if direction == "LONG":
             sl = entry - sl_dist
-            tp1 = entry + sl_dist * 1.0
-            tp2 = entry + sl_dist * 2.0
-            tp3 = entry + sl_dist * 3.0
+            tp1 = entry + sl_dist * (tp_mult * 0.5)
+            tp2 = entry + sl_dist * tp_mult
+            tp3 = entry + sl_dist * (tp_mult * 1.5)
         else:
             sl = entry + sl_dist
-            tp1 = entry - sl_dist * 1.0
-            tp2 = entry - sl_dist * 2.0
-            tp3 = entry - sl_dist * 3.0
+            tp1 = entry - sl_dist * (tp_mult * 0.5)
+            tp2 = entry - sl_dist * tp_mult
+            tp3 = entry - sl_dist * (tp_mult * 1.5)
 
         rr = abs(tp2 - entry) / sl_dist
 
         # Risk ayarlaması
-        risk_pct = self.base_risk_pct
+        risk_pct = base_risk
         if quality == "A+": risk_pct *= 1.2
         elif quality == "B": risk_pct *= 0.5
         elif quality in ["C", "D"]: risk_pct = 0
@@ -75,8 +93,8 @@ class RiskEngine:
         position_size = risk_amount / sl_dist if sl_dist > 0 else 0
         notional = position_size * entry
         
-        # Kaldıraç önerisi (max 20x)
-        leverage = min(20, max(1, int(notional / balance))) if balance > 0 else 1
+        # Kaldıraç önerisi
+        leverage = min(max_lev, max(1, int(notional / balance))) if balance > 0 else 1
 
         valid = rr >= self.min_rr and risk_pct > 0
 

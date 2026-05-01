@@ -21,6 +21,7 @@ class SignalData:
     trend_score: float = 0.0
     trigger_score: float = 0.0
     risk_score: float = 0.0
+    ml_score: int = 0
     final_score: float = 0.0
     setup_quality: str = "D"
     

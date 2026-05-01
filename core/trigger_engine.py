@@ -157,9 +157,39 @@ class TriggerEngine:
         if quality == "A" and score >= 9.0:
             quality = "A+"
 
+        # ML Sinyal Skoru Hesaplama
+        ml_score = 50
+        try:
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from ml_signal_scorer import get_scorer
+            scorer = get_scorer()
+            signal_data = {
+                "symbol": symbol,
+                "direction": direction,
+                "rsi5": rsi5,
+                "rsi1": rsi1,
+                "rv": rv,
+                "momentum_3c": mom3c,
+                "funding_favorable": 1 if (direction == "LONG" and funding < 0) or (direction == "SHORT" and funding > 0) else 0,
+                "btc_trend": "NEUTRAL", # Trend engine'den gelmeli ama şimdilik nötr
+                "session": "OFF", # AI decision engine'den gelmeli
+            }
+            ml_score = scorer.predict(signal_data)
+            
+            # ML skoru düşükse kaliteyi düşür
+            if ml_score < 35 and quality in ["A+", "A", "B"]:
+                quality = "C"
+            elif ml_score > 70 and quality == "B":
+                quality = "A"
+        except Exception as e:
+            logger.warning(f"ML Skor hesaplama hatası: {e}")
+
         return {
             "quality": quality,
             "score": min(10.0, max(0.0, score)),
+            "ml_score": ml_score,
             "entry": c1,
             "rsi5": round(rsi5, 1),
             "rsi1": round(rsi1, 1),

@@ -58,6 +58,8 @@ class MLSignalScorer:
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
+            
+            # Veri kalitesi güvencesi: Sadece sağlıklı verileri al
             c.execute("""
                 SELECT
                     adx, rv, rsi5, rsi1, funding_favorable,
@@ -75,6 +77,9 @@ class MLSignalScorer:
                     COALESCE(prev_result, 'NONE') as prev_result
                 FROM pattern_memory
                 WHERE result IN ('WIN','LOSS')
+                  AND rsi5 IS NOT NULL
+                  AND rsi1 IS NOT NULL
+                  AND adx IS NOT NULL
                 ORDER BY id DESC
                 LIMIT 1000
             """)
@@ -270,7 +275,12 @@ class MLSignalScorer:
 
     def predict(self, signal: dict) -> int:
         if not self.trained or self.model is None:
-            return 50
+            # Cold-start stratejisi: Model eğitilmemişse, coin'in kendi win rate'ini kullan
+            sym = signal.get("symbol", "")
+            coin_data = self.coin_stats.get(sym, {})
+            if coin_data.get("total", 0) >= 5:
+                return int(round(coin_data.get("win_rate", 0.5) * 100))
+            return 50  # Model eğitilmemişse ve coin verisi yoksa nötr skor
 
         try:
             import numpy as np

@@ -330,6 +330,16 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     update_paper_balance(net_pnl - (t.get("realized_pnl") or 0))
 
     result = "WIN" if net_pnl > 0 else "LOSS"
+
+    # Live Tracker Postmortem Analizi
+    try:
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+        from live_tracker import record_close
+        record_close(trade_id, close_price, reason)
+    except Exception as e:
+        logger.warning(f"Live tracker record_close hatası: {e}")
     logger.info(
         f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
         f"{reason.upper()} pnl={net_pnl:+.3f}$ hold={hold_min:.0f}dk"

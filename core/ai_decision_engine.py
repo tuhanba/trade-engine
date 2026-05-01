@@ -218,8 +218,22 @@ class AIDecisionEngine:
             if markov["LOSS->LOSS"] > 0.65 and markov["sample"] >= 12:
                 ai_adj -= 1.0
 
+        # 5. ML Sinyal Skoru Etkisi
+        ml_score = getattr(signal_data, "ml_score", 50)
+        if ml_score > 75:
+            ai_adj += 1.5
+        elif ml_score > 60:
+            ai_adj += 0.5
+        elif ml_score < 35:
+            ai_adj -= 2.0
+        elif ml_score < 45:
+            ai_adj -= 1.0
+
         final_score = base_score + ai_adj
-        confidence = max(0.0, min(1.0, final_score / 10.0))
+        
+        # Confidence hesaplamasında ML skorunu da hesaba kat
+        base_confidence = max(0.0, min(1.0, final_score / 10.0))
+        confidence = (base_confidence * 0.6) + ((ml_score / 100.0) * 0.4)
 
         if final_score >= 7.5 and signal_data.setup_quality in ["A+", "A"]:
             decision = "ALLOW"
