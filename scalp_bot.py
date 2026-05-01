@@ -24,6 +24,7 @@ from config import (
     PAPER_MODE, AX_MODE, EXECUTION_MODE, COIN_UNIVERSE,
     LOG_DIR, LOG_MAX_DAYS, LOG_MAX_MB,
     MAX_DAILY_SIGNALS, DB_PATH,
+    DAILY_MAX_LOSS_PCT,
 )
 from database import (
     init_db, init_paper_account, get_paper_balance,
@@ -163,6 +164,33 @@ def main():
                     break
                 time.sleep(10)
                 continue
+
+            # Günlük kayıp limiti kontrolü (DAILY_MAX_LOSS_PCT)
+            try:
+                from database import get_conn
+                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                with get_conn() as _conn:
+                    _row = _conn.execute(
+                        "SELECT SUM(net_pnl) FROM trades WHERE DATE(close_time)=? AND close_time IS NOT NULL",
+                        (today_str,)
+                    ).fetchone()
+                today_loss = _row[0] or 0.0
+                balance = get_paper_balance()
+                max_loss_abs = balance * (DAILY_MAX_LOSS_PCT / 100.0)
+                if today_loss < -max_loss_abs:
+                    logger.warning(
+                        f"⛔ Günlük kayıp limiti aşıldı: {today_loss:.2f}$ "
+                        f"(limit: -{max_loss_abs:.2f}$) — yeni trade alınmıyor."
+                    )
+                    send_message(
+                        f"⛔ Günlük kayıp limiti aşıldı!\n"
+                        f"Bugün: {today_loss:.2f}$ | Limit: -{max_loss_abs:.2f}$\n"
+                        f"Yeni sinyal alımı durduruldu."
+                    )
+                    time.sleep(300)  # 5 dakika bekle, tekrar kontrol et
+                    continue
+            except Exception as _e:
+                logger.warning(f"Günlük kayıp kontrolü hatası: {_e}")
 
             # Günlük sinyal limiti kontrolü
             daily_counts = get_daily_signal_count()
