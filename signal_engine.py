@@ -16,6 +16,7 @@ Teknik analiz + sinyal üretimi. Hiçbir DB yazma işlemi yok — saf hesaplama.
   confidence     — Güven skoru (0-1)
 """
 
+import json
 import time
 import logging
 import pandas as pd
@@ -36,6 +37,48 @@ _btc_cache: dict = {"trend": "NEUTRAL", "ts": 0}
 _4h_cache:  dict = {}
 _BTC_TTL = 300   # 5 dk
 _4H_TTL  = 240   # 4 dk
+
+# AI Brain params cache — 5 dakikada bir güncellenir
+_ai_params_cache: dict = {}
+_ai_params_ts:    float = 0
+_AI_PARAMS_TTL = 300  # saniye
+
+
+def get_ai_params() -> dict:
+    """
+    AI Brain'in params tablosuna yazdığı en son optimize parametreleri oku.
+    Yoksa config.py varsayılanlarına düş.
+    5 dakika cache'li.
+    """
+    global _ai_params_cache, _ai_params_ts
+    now = time.time()
+    if _ai_params_cache and now - _ai_params_ts < _AI_PARAMS_TTL:
+        return _ai_params_cache
+
+    defaults = {
+        "sl_atr_mult":   SL_ATR_MULT,
+        "rsi5_min":      35,
+        "rsi5_max":      75,
+        "rsi1_min":      32,
+        "rsi1_max":      75,
+        "vol_ratio_min": 1.2,
+        "min_rr":        MIN_RR,
+    }
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT data FROM params ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if row and row["data"]:
+                loaded = json.loads(row["data"])
+                defaults.update({k: loaded[k] for k in defaults if k in loaded})
+    except Exception as e:
+        logger.debug(f"[SignalEngine] AI params okunamadı: {e}")
+
+    _ai_params_cache = defaults
+    _ai_params_ts    = now
+    return defaults
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -327,7 +370,8 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
         expected_mfe_r, score, confidence + debug alanları
     """
     NULL = {"symbol": symbol, "direction": None}
-    coin_p = get_coin_params(symbol)
+    coin_p  = get_coin_params(symbol)
+    ai_p    = get_ai_params()
 
     # ── 15m Ana Trend ────────────────────────────────────────────────────────
     df15 = get_candles(client, symbol, "15m", 100)
@@ -376,8 +420,10 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     if (atr5 / (c5 + 1e-10) * 100) < 0.03:
         return NULL
 
-    bull5 = trend_up15 and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5 < 75
-    bear5 = trend_dn15 and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5 < 65
+    rsi5_min = ai_p["rsi5_min"]
+    rsi5_max = ai_p["rsi5_max"]
+    bull5 = trend_up15 and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and rsi5_min < rsi5 < rsi5_max
+    bear5 = trend_dn15 and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and (100 - rsi5_max) < rsi5 < (100 - rsi5_min + 10)
 
     if not bull5 and not bear5:
         return NULL
@@ -394,10 +440,12 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     rv     = relative_volume(df1, 20)
     mom3c  = momentum_3c(df1)
 
-    # RSI 1m giriş onayı
-    if bull5 and not (32 < rsi1 < 75):
+    # RSI 1m giriş onayı (AI Brain tarafından tune edilebilir)
+    rsi1_min = ai_p["rsi1_min"]
+    rsi1_max = ai_p["rsi1_max"]
+    if bull5 and not (rsi1_min < rsi1 < rsi1_max):
         return NULL
-    if bear5 and not (25 < rsi1 < 68):
+    if bear5 and not ((100 - rsi1_max) < rsi1 < (100 - rsi1_min + 5)):
         return NULL
 
     # ── Yön Belirle ─────────────────────────────────────────────────────────
@@ -419,15 +467,24 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     btc_trend = get_btc_trend(client)
     trend_4h  = get_4h_trend(client, symbol)
 
-    # ── Seviyeler Hesapla ────────────────────────────────────────────────────
-    entry  = c1
-    levels = _calc_levels(direction, entry, atr1, coin_p)
+    # ── Relative Volume filtresi (AI tune edilebilir) ───────────────────────
+    vol_min = coin_p.get("vol_ratio_min", ai_p["vol_ratio_min"])
+    if rv < vol_min:
+        return NULL
 
-    if levels["rr"] < MIN_RR:
+    # ── Seviyeler Hesapla (AI sl_atr_mult override) ──────────────────────────
+    entry  = c1
+    # AI Brain sl_atr_mult'ını coin profiline merge et
+    merged_coin_p = dict(coin_p)
+    merged_coin_p.setdefault("sl_atr_mult", ai_p["sl_atr_mult"])
+    levels = _calc_levels(direction, entry, atr1, merged_coin_p)
+
+    eff_min_rr = ai_p.get("min_rr", MIN_RR)
+    if levels["rr"] < eff_min_rr:
         return NULL
 
     # ── MFE Tahmini ─────────────────────────────────────────────────────────
-    expected_mfe_r = _estimate_mfe_r(bb_w, adx15, mom3c, direction, coin_p)
+    expected_mfe_r = _estimate_mfe_r(bb_w, adx15, mom3c, direction, merged_coin_p)
     if expected_mfe_r < MIN_EXPECTED_MFE_R:
         return NULL
 

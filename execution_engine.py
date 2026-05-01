@@ -33,6 +33,15 @@ from database import (
 
 logger = logging.getLogger(__name__)
 
+# Binance Futures taker fee: %0.04 (varsayılan VIP-0)
+# Her açılış + kapanış için ödenir → giriş + çıkış = 2 × fee
+TAKER_FEE = float(__import__('os').getenv("TAKER_FEE", "0.0004"))
+
+
+def _calc_fee(qty: float, price: float) -> float:
+    """Tek taraflı işlem ücreti = qty × price × TAKER_FEE."""
+    return qty * price * TAKER_FEE
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EXCHANGE INFO CACHE — futures_exchange_info ağır bir çağrıdır; 1 saat cache
@@ -182,9 +191,14 @@ def open_trade(client, signal: dict, ax_decision: dict,
     }
 
     trade_id = save_trade(trade)
+
+    # Açılış ücreti bakiyeden düş (taker fee, tüm pozisyon)
+    entry_fee = _calc_fee(qty, entry)
+    update_paper_balance(-entry_fee)
+
     logger.info(
         f"[Execution] AÇILDI #{trade_id} {symbol} {direction} "
-        f"entry={entry:.6f} sl={sl:.6f} tp1={tp1:.6f} tp2={tp2:.6f} qty={qty}"
+        f"entry={entry:.6f} sl={sl:.6f} tp1={tp1:.6f} tp2={tp2:.6f} qty={qty} fee={entry_fee:.3f}$"
     )
     return trade_id
 
@@ -263,24 +277,28 @@ def _check_trade(client, t: dict) -> bool:
     if status == "open":
         tp1_hit = (is_long and price >= tp1) or (not is_long and price <= tp1)
         if tp1_hit:
-            pnl_tp1 = _calc_pnl(direction, entry, tp1, qty_tp1)
+            pnl_tp1  = _calc_pnl(direction, entry, tp1, qty_tp1)
+            fee_tp1  = _calc_fee(qty_tp1, tp1)  # sadece çıkış ücreti (giriş ücreti başta düşüldü)
+            net_tp1  = pnl_tp1 - fee_tp1
             update_trade(trade_id, {
                 "status":       "tp1_hit",
                 "tp1_hit":      1,
-                "realized_pnl": pnl_tp1,
+                "realized_pnl": net_tp1,
                 "sl":           entry,  # Break-even'e çek
             })
-            update_paper_balance(pnl_tp1)
-            logger.info(f"[Execution] TP1 #{trade_id} {symbol} +{pnl_tp1:.3f}$")
+            update_paper_balance(net_tp1)
+            logger.info(f"[Execution] TP1 #{trade_id} {symbol} pnl={net_tp1:+.3f}$ (fee={fee_tp1:.3f}$)")
             return False
 
     # ── TP2 Kontrolü ────────────────────────────────────────────────────────
     if status == "tp1_hit":
         tp2_hit = (is_long and price >= tp2) or (not is_long and price <= tp2)
         if tp2_hit:
-            pnl_tp2  = _calc_pnl(direction, entry, tp2, qty_tp2)
-            new_real = realized + pnl_tp2
-            atr_val  = _get_atr(client, symbol)
+            pnl_tp2   = _calc_pnl(direction, entry, tp2, qty_tp2)
+            fee_tp2   = _calc_fee(qty_tp2, tp2)
+            net_tp2   = pnl_tp2 - fee_tp2
+            new_real  = realized + net_tp2
+            atr_val   = _get_atr(client, symbol)
             new_trail = (tp2 - atr_val * TRAIL_ATR_MULT) if is_long else (tp2 + atr_val * TRAIL_ATR_MULT)
             update_trade(trade_id, {
                 "status":       "runner",
@@ -289,8 +307,8 @@ def _check_trade(client, t: dict) -> bool:
                 "trail_stop":   new_trail,
                 "sl":           entry,
             })
-            update_paper_balance(pnl_tp2)
-            logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ → RUNNER trail={new_trail:.6f}")
+            update_paper_balance(net_tp2)
+            logger.info(f"[Execution] TP2 #{trade_id} {symbol} pnl={net_tp2:+.3f}$ → RUNNER trail={new_trail:.6f}")
             return False
 
     # ── Runner: Trailing Stop ────────────────────────────────────────────────
@@ -354,12 +372,13 @@ def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> flo
         return 0.01
 
 
-def _finalize(trade_id: int, close_price: float, net_pnl: float,
+def _finalize(trade_id: int, close_price: float, gross_pnl: float,
               reason: str, t: dict):
     """
     Trade'i kapat, bakiyeyi ve R-multiple'ı güncelle.
 
-    net_pnl: Bu trade'in TOPLAM net kârı/zararı (realized_pnl dahil).
+    gross_pnl: Bu trade'in TOPLAM brüt kârı/zararı (realized_pnl dahil, ücret hariç).
+    Fee: giriş (entry × original_qty) + son çıkış (close_price × remaining_qty).
     Bakiye güncellemesi = net_pnl - already_credited_realized
     """
     already_realized = t.get("realized_pnl") or 0
@@ -370,12 +389,19 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     except Exception:
         hold_min = 0
 
-    # R-multiple: net_pnl / (sl_dist * original_qty)
     entry   = t.get("entry", 0) or 0
-    sl      = t.get("sl",    0) or 0
+    sl      = t.get("sl_original") or t.get("sl", 0) or 0
     qty     = t.get("qty",   1) or 1
-    sl_dist = abs(entry - sl)
-    r_mult  = round(net_pnl / (sl_dist * qty), 3) if sl_dist > 0 and qty > 0 else 0.0
+    sl_dist = abs(entry - (t.get("sl_original") or sl))
+
+    # Kalan miktar için çıkış ücreti + giriş açılışı ücreti (toplam ücret)
+    rem_qty     = _remaining_qty(t)
+    entry_fee   = _calc_fee(qty, entry)         # açılışta ödendi (tüm pozisyon)
+    close_fee   = _calc_fee(rem_qty, close_price)
+    total_fee   = entry_fee + close_fee
+    net_pnl     = gross_pnl - total_fee
+
+    r_mult = round(net_pnl / (sl_dist * qty), 3) if sl_dist > 0 and qty > 0 else 0.0
 
     db_close_trade(trade_id, close_price, net_pnl, reason, hold_min)
     update_trade(trade_id, {"r_multiple": r_mult})
@@ -383,8 +409,8 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     # Bakiyeye sadece henüz kredilendirilmemiş kısmı ekle
     update_paper_balance(net_pnl - already_realized)
 
-    result = "WIN" if net_pnl > 0 else "LOSS"
     logger.info(
         f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
-        f"{reason.upper()} pnl={net_pnl:+.3f}$ R={r_mult:+.2f} hold={hold_min:.0f}dk"
+        f"{reason.upper()} gross={gross_pnl:+.3f}$ fee={total_fee:.3f}$ net={net_pnl:+.3f}$ "
+        f"R={r_mult:+.2f} hold={hold_min:.0f}dk"
     )

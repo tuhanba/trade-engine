@@ -150,11 +150,12 @@ def on_trade_closed(client, tg_manager, trade: dict):
     r_mult    = trade.get("r_multiple", 0) or 0
     session   = get_current_session()
 
-    # Ardışık kayıp takibi
+    # Ardışık kayıp takibi + kalıcı durum
     if result == "LOSS":
         consecutive_losses += 1
     else:
         consecutive_losses = 0
+    set_state("consecutive_losses", str(consecutive_losses))
 
     closed_trade_counter += 1
     _ai_brain_counter    += 1
@@ -281,6 +282,16 @@ def main():
     if cb_str:
         try:
             circuit_breaker_until = datetime.fromisoformat(cb_str)
+        except Exception:
+            pass
+
+    # Ardışık kayıp sayacını yükle (restart'ta sıfırlanmasın)
+    cl_str = get_state("consecutive_losses")
+    if cl_str:
+        try:
+            consecutive_losses = int(cl_str)
+            if consecutive_losses > 0:
+                logger.info(f"[Bot] Önceki ardışık kayıp sayacı geri yüklendi: {consecutive_losses}")
         except Exception:
             pass
 

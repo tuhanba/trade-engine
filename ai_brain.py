@@ -31,7 +31,7 @@ from config import (
 )
 from database import (
     get_conn, save_postmortem, save_ai_log,
-    is_coin_in_cooldown, get_stats,
+    is_coin_in_cooldown, get_stats, get_open_trades,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,9 +117,16 @@ def evaluate_signal(signal: dict, open_trades: list, balance: float,
     if is_coin_in_cooldown(symbol):
         return veto("coin_cooldown", -20)
 
-    # ── Günlük kayıp limiti ──────────────────────────────────────────────────
+    # ── Günlük kayıp limiti (realized + unrealized) ──────────────────────────
     stats = get_stats(hours=24)
-    daily_loss = abs(min(stats.get("total_pnl", 0), 0))
+    realized_loss = min(stats.get("total_pnl", 0), 0)
+    # Açık trade'lerin unrealized PnL'ini de ekle (muhafazakâr yaklaşım)
+    try:
+        open_trades = get_open_trades()
+        unrealized  = sum(t.get("unrealized_pnl", 0) or 0 for t in open_trades)
+    except Exception:
+        unrealized = 0
+    daily_loss       = abs(min(realized_loss + unrealized, 0))
     daily_loss_limit = balance * DAILY_MAX_LOSS_PCT / 100
     if daily_loss >= daily_loss_limit:
         return veto("daily_loss_limit", -30)
