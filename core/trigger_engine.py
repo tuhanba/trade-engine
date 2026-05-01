@@ -14,14 +14,16 @@ try:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from config import (
         ALLOWED_QUALITIES, BAD_HOURS_UTC, GOOD_HOURS_UTC,
-        SHORT_REQUIRES_BTC_BEARISH, BTC_TREND_INTERVAL
+        SHORT_REQUIRES_BTC_BEARISH, BTC_TREND_INTERVAL,
+        ADX_MIN_THRESHOLD
     )
 except ImportError:
-    ALLOWED_QUALITIES       = ["A+"]
-    BAD_HOURS_UTC           = [5, 6, 14, 20]
-    GOOD_HOURS_UTC          = [0, 2, 3, 7, 15]
+    ALLOWED_QUALITIES        = ["A+"]
+    BAD_HOURS_UTC            = [1,4,5,6,10,11,12,13,14,16,19,20,21,22]
+    GOOD_HOURS_UTC           = [0,3,7,9,17,23]
     SHORT_REQUIRES_BTC_BEARISH = True
-    BTC_TREND_INTERVAL      = "4h"
+    BTC_TREND_INTERVAL       = "4h"
+    ADX_MIN_THRESHOLD        = 28
 
 class TriggerEngine:
     def __init__(self, client):
@@ -117,6 +119,31 @@ class TriggerEngine:
         e21_5 = self._ema(df5["close"], 21)
         e50_5 = self._ema(df5["close"], 50)
         rsi5 = self._rsi(df5["close"], 14)
+
+        # ── ADX Trend Gücü Filtresi ────────────────────────────────────────────
+        # Backtest: ADX < 25 olan sinyallerde WR düşük — trend gücü zayıf
+        try:
+            high = df5["high"]
+            low  = df5["low"]
+            close = df5["close"]
+            tr = pd.concat([
+                high - low,
+                (high - close.shift()).abs(),
+                (low  - close.shift()).abs()
+            ], axis=1).max(axis=1)
+            atr14 = tr.rolling(14).mean()
+            plus_dm  = (high.diff()).where((high.diff() > 0) & (high.diff() > -low.diff()), 0)
+            minus_dm = (-low.diff()).where((-low.diff() > 0) & (-low.diff() > high.diff()), 0)
+            plus_di  = 100 * (plus_dm.rolling(14).mean()  / (atr14 + 1e-10))
+            minus_di = 100 * (minus_dm.rolling(14).mean() / (atr14 + 1e-10))
+            dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10)
+            adx_val  = float(dx.rolling(14).mean().iloc[-1])
+        except Exception:
+            adx_val = 30  # Hesaplanamadıysa geç
+
+        if adx_val < ADX_MIN_THRESHOLD:
+            logger.debug(f"[{symbol}] ADX filtresi: {adx_val:.1f} < {ADX_MIN_THRESHOLD} — trend zayıf")
+            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
 
         bull5 = direction == "LONG" and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5 < 75
         bear5 = direction == "SHORT" and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5 < 65

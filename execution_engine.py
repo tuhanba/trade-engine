@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from config import (
     RISK_PCT, TP1_CLOSE_PCT, TP2_CLOSE_PCT, RUNNER_CLOSE_PCT,
     TRAIL_ATR_MULT, EXECUTION_MODE,
+    BREAKEVEN_ENABLED, BREAKEVEN_OFFSET_PCT,
 )
 from database import (
     save_trade, update_trade, close_trade as db_close_trade,
@@ -213,15 +214,31 @@ def _check_trade(client, t: dict) -> bool:
         tp1_hit = (is_long and price >= tp1) or (not is_long and price <= tp1)
         if tp1_hit:
             pnl_tp1 = _calc_pnl(direction, entry, tp1, qty_tp1)
+            # ── Breakeven SL — Backtest: Max Loss serisi 17, Loss→Loss %80.2 ──
+            # TP1 tetiklenince SL entry + buffer'a çekilir (sıfır riskli runner)
+            try:
+                be_enabled = t.get("breakeven_enabled", BREAKEVEN_ENABLED)
+                be_sl      = t.get("breakeven_sl")
+                if be_sl is None:
+                    offset = entry * (BREAKEVEN_OFFSET_PCT / 100)
+                    be_sl  = (entry + offset) if is_long else (entry - offset)
+            except Exception:
+                be_enabled = True
+                offset = entry * 0.0005
+                be_sl  = (entry + offset) if is_long else (entry - offset)
+
+            new_sl = be_sl if be_enabled else entry
             update_trade(trade_id, {
                 "status":       "tp1_hit",
                 "tp1_hit":      1,
                 "realized_pnl": pnl_tp1,
-                # SL'yi break-even'e çek
-                "sl": entry,
+                "sl":           round(new_sl, 6),   # Breakeven SL
             })
             update_paper_balance(pnl_tp1)
-            logger.info(f"[Execution] TP1 #{trade_id} {symbol} +{pnl_tp1:.3f}$")
+            logger.info(
+                f"[Execution] TP1 #{trade_id} {symbol} +{pnl_tp1:.3f}$ "
+                f"| Breakeven SL → {new_sl:.6f}"
+            )
             return False
 
     # ── TP2 Kontrolü ────────────────────────────────────────────────────────
