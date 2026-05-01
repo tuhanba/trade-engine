@@ -31,7 +31,7 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 # ── Risk ─────────────────────────────────────────────────────────────────────
 RISK_PCT                = float(os.getenv("RISK_PCT", "1.0"))
 MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "2"))
-DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "3.0"))
+DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "5.0"))
 CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "3"))
 CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "120"))
 
