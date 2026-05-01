@@ -215,8 +215,8 @@ def get_weekly_data(weeks: int = 8) -> list[dict]:
                 "win_count":   r[3] or 0,
                 "loss_count":  r[4] or 0,
                 "win_rate":    round((r[5] or 0) * 100, 1),
-                "best_day":    r[6],
-                "worst_day":   r[7],
+                "best_day":    0,
+                "worst_day":   0,
             }
             for r in reversed(rows)
         ]
@@ -270,7 +270,7 @@ def get_ax_status() -> dict:
             today_signals = row2[0] or 0
 
             row3 = conn.execute(
-                "SELECT COUNT(*) FROM signal_candidates WHERE DATE(created_at)=? AND ax_decision='ALLOW'",
+                "SELECT COUNT(*) FROM signal_candidates WHERE DATE(created_at)=? AND decision='ALLOW'",
                 (today,),
             ).fetchone()
             today_allowed = row3[0] or 0
