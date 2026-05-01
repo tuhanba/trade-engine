@@ -34,9 +34,9 @@ def compute_daily(date_str: str | None = None) -> dict | None:
         with get_conn() as conn:
             rows = conn.execute(
                 """
-                SELECT net_pnl, result, close_reason, entry, sl
+                SELECT net_pnl, close_reason, entry, sl
                 FROM trades
-                WHERE DATE(close_time) = ? AND status IN ('closed_win','closed_loss','sl','trail','timeout','tp1_hit','runner','open')
+                WHERE DATE(close_time) = ? AND status IN ('closed_win','closed_loss','sl','trail','timeout','tp1_hit','runner','open','closed')
                   AND close_time IS NOT NULL
                 """,
                 (date_str,),
@@ -45,7 +45,7 @@ def compute_daily(date_str: str | None = None) -> dict | None:
             if not rows:
                 rows = conn.execute(
                     """
-                    SELECT net_pnl, result, close_reason, entry, sl
+                    SELECT net_pnl, close_reason, entry, sl
                     FROM trades
                     WHERE DATE(close_time) = ?
                       AND close_time IS NOT NULL

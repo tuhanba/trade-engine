@@ -501,3 +501,18 @@ def api_scalp_signal_stats():
         return jsonify({"ok": True, "data": stats})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+# ── /api/paper_state ──────────────────────────────────────────────────────────
+@app.route("/api/paper_state")
+def api_paper_state():
+    """Paper trade simülatörü durumu."""
+    try:
+        import json, os
+        state_file = "/home/ubuntu/trade-engine/paper_state.json"
+        if os.path.exists(state_file):
+            with open(state_file) as f:
+                state = json.load(f)
+            return jsonify({"ok": True, "data": state})
+        return jsonify({"ok": False, "error": "State file not found"}), 404
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
