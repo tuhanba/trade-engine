@@ -1,4 +1,4 @@
-import os, json, sqlite3
+import os, json
 from datetime import datetime, timezone
 from flask import Flask, render_template, jsonify, request
 try:
@@ -25,8 +25,6 @@ client = Client(os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_API_SECRET"
 
 init_db()
 dash_svc.start()
-
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
 
 
 def _fmt_duration(open_time_str, close_time_str=None):
@@ -345,16 +343,14 @@ def api_logs():
 def api_coin_library():
     """Coin Library: tüm coin profilleri ve istatistikleri"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        c = conn.cursor()
-        # coin_params tablosu yoksa boş dön
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='coin_params'")
-        if not c.fetchone():
-            conn.close()
-            return jsonify({"ok": True, "data": [], "note": "coin_params tablosu henüz oluşturulmadı"})
-        with get_conn() as conn2:
-            rows2 = conn2.execute("""
+        with get_conn() as conn:
+            # coin_params tablosu yoksa boş dön
+            tbl = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='coin_params'"
+            ).fetchone()
+            if not tbl:
+                return jsonify({"ok": True, "data": [], "note": "coin_params tablosu henüz oluşturulmadı"})
+            rows = conn.execute("""
                 SELECT symbol,
                        COALESCE(volatility_profile, 'normal') as profile,
                        sl_atr_mult, tp_atr_mult, risk_pct, max_leverage,
@@ -362,8 +358,7 @@ def api_coin_library():
                 FROM coin_params
                 ORDER BY symbol ASC
             """).fetchall()
-        conn.close()
-        return jsonify({"ok": True, "data": [dict(r) for r in rows2], "total": len(rows2)})
+        return jsonify({"ok": True, "data": [dict(r) for r in rows], "total": len(rows)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -427,22 +422,19 @@ def api_ax_status():
 def api_coin_profiles():
     """Tüm coin öğrenme profilleri (coin_profile tablosu)."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
-            SELECT symbol, trade_count, win_count, loss_count,
-                   ROUND(win_rate*100,1) as win_rate_pct,
-                   avg_r, profit_factor, danger_score, fakeout_rate,
-                   volatility_profile, preferred_direction, best_session,
-                   updated_at
-            FROM coin_profile
-            ORDER BY trade_count DESC, danger_score DESC
-            """
-        ).fetchall()
-        conn.close()
-        result = [dict(r) for r in rows]
-        return jsonify({"ok": True, "data": result})
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT symbol, trade_count, win_count, loss_count,
+                       ROUND(win_rate*100,1) as win_rate_pct,
+                       avg_r, profit_factor, danger_score, fakeout_rate,
+                       volatility_profile, preferred_direction, best_session,
+                       updated_at
+                FROM coin_profile
+                ORDER BY trade_count DESC, danger_score DESC
+                """
+            ).fetchall()
+        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -453,17 +445,16 @@ def api_signal_stats():
     """Bugünkü sinyal istatistikleri: ALLOW/VETO/WATCH dağılımı."""
     try:
         days = int(request.args.get("days", 1))
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute(
-            """
-            SELECT ax_decision, COUNT(*) as cnt
-            FROM signal_candidates
-            WHERE created_at >= datetime('now', ?)
-            GROUP BY ax_decision
-            """,
-            (f"-{days} days",),
-        ).fetchall()
-        conn.close()
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT ax_decision, COUNT(*) as cnt
+                FROM signal_candidates
+                WHERE created_at >= datetime('now', ?)
+                GROUP BY ax_decision
+                """,
+                (f"-{days} days",),
+            ).fetchall()
         stats = {"ALLOW": 0, "VETO": 0, "WATCH": 0, "total": 0}
         for dec, cnt in rows:
             if dec in stats:

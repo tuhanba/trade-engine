@@ -181,6 +181,24 @@ def evaluate_signal(signal: dict, open_trades: list, balance: float,
     if vol < 5.0:
         return veto("low_volume", score_adj - 15)
 
+    # ── ML Sinyal Skoru ──────────────────────────────────────────────────────
+    try:
+        from ml_signal_scorer import get_scorer
+        scorer = get_scorer()
+        if scorer.trained:
+            ml_score = scorer.predict(signal)
+            if ml_score < 20:
+                return veto("ml_low_confidence", score_adj - 20)
+            elif ml_score < 35:
+                score_adj -= 15
+            elif ml_score >= 70:
+                score_adj += 8   # ML güçlü onay: bonus
+            elif ml_score >= 55:
+                score_adj += 4
+            logger.debug(f"[AI] ML skor {symbol}: {ml_score} → adj={score_adj:+.0f}")
+    except Exception as e:
+        logger.debug(f"[AI] ML skor alınamadı: {e}")
+
     final_score = score + score_adj
 
     # WATCH: sinyal var ama güven düşük (sadece logla, execute etme)
@@ -1372,6 +1390,47 @@ def post_trade_analysis(trade_id, client_ref=None, tg_fn=None):
 _EOD_CACHE = [None]
 
 
+def _backtest_validate(current_params: dict, new_params: dict,
+                       symbol: str = "BTCUSDT", days: int = 7) -> bool:
+    """
+    Yeni parametreler mevcut parametrelerden backtest'te daha iyi mi?
+    Kötüyse False döndürür → parametre değişikliği iptal edilir.
+    Client erişilemezse True döndürür (değişikliğe izin ver).
+    """
+    try:
+        from backtest import run_backtest
+        client = _client_ref
+        if client is None:
+            return True   # client yok → geç
+
+        curr_perf = run_backtest(client, symbol, days=days,
+                                 params=current_params, silent=True)
+        new_perf  = run_backtest(client, symbol, days=days,
+                                 params=new_params,     silent=True)
+
+        if curr_perf.get("total", 0) < 5 or new_perf.get("total", 0) < 5:
+            return True   # Yetersiz örnek → geç
+
+        # Yeni parametreler en az 2 kriterde eskiyi geçmeli
+        better = 0
+        if new_perf["win_rate"]      > curr_perf["win_rate"]:      better += 1
+        if new_perf["profit_factor"] > curr_perf["profit_factor"]: better += 1
+        if new_perf["avg_r"]         > curr_perf["avg_r"]:         better += 1
+        if new_perf["max_drawdown"]  < curr_perf["max_drawdown"]:  better += 1
+
+        ok = better >= 2
+        logger.info(
+            f"[AI] Backtest doğrulama {symbol}: "
+            f"mevcut WR={curr_perf['win_rate']:.1f}% PF={curr_perf['profit_factor']:.2f} | "
+            f"yeni WR={new_perf['win_rate']:.1f}% PF={new_perf['profit_factor']:.2f} | "
+            f"{'✅ onaylandı' if ok else '❌ reddedildi'} ({better}/4)"
+        )
+        return ok
+    except Exception as e:
+        logger.debug(f"[AI] Backtest doğrulama hata: {e}")
+        return True   # hata varsa değişikliğe izin ver
+
+
 def analyze_and_adapt():
     try:
         conn    = db()
@@ -1435,6 +1494,15 @@ def analyze_and_adapt():
                 changes.extend(markov_changes)
 
             if changes:
+                # Backtest doğrulaması: yeni parametreler mevcut parametrelerden
+                # daha iyi mi? Kötüyse değişikliği iptal et.
+                try:
+                    bt_ok = _backtest_validate(current, new_params)
+                    if not bt_ok:
+                        changes = ["⚠️ Backtest doğrulaması başarısız — parametre değişikliği iptal"]
+                        new_params = current
+                except Exception:
+                    pass   # backtest çalışamazsa değişikliğe izin ver
                 save_params(conn, new_params, " | ".join(changes), changes)
 
         insight = build_report(
@@ -1451,6 +1519,18 @@ def analyze_and_adapt():
         eod = check_eod_summary(conn, today_t)
         _EOD_CACHE[0] = eod
         conn.close()
+
+        # ML modelini yeniden eğit (yeterli veri varsa, arka planda)
+        try:
+            from ml_signal_scorer import get_scorer
+            import threading
+            scorer = get_scorer()
+            new_samples = len(all_t)
+            if new_samples >= 30 and new_samples > (scorer.n_samples + 5):
+                threading.Thread(target=scorer.train, daemon=True).start()
+                logger.info(f"[AI] ML yeniden eğitim başlatıldı: {new_samples} örnek")
+        except Exception as e:
+            logger.debug(f"[AI] ML eğitim tetiklenemedi: {e}")
 
         if eod:
             return insight + "\n\n" + "─" * 30 + "\n\n" + eod
