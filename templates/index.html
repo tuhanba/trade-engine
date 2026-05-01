@@ -338,8 +338,8 @@ body::after {
 .feed-pnl { font-size:10px; font-weight:600 }
 
 /* ─── AX STATUS ─────────────────────────────────────────── */
-.ax-status-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin-bottom:0 }
-@media(max-width:900px){ .ax-status-grid{grid-template-columns:repeat(3,1fr)} }
+.ax-status-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-bottom:0 }
+@media(max-width:1100px){ .ax-status-grid{grid-template-columns:repeat(3,1fr)} }
 .axs {
   background:var(--surface); border:1px solid var(--border);
   padding:12px 14px; border-radius:var(--r);
@@ -632,6 +632,11 @@ body::after {
           <div class="sig-stat"><div class="sig-stat-val sig-veto"  id="sigVeto">—</div><div class="sig-stat-lbl">Veto</div></div>
           <div class="sig-stat"><div class="sig-stat-val sig-watch" id="sigWatch">—</div><div class="sig-stat-lbl">Watch</div></div>
         </div>
+      </div>
+      <div class="axs" id="mlCard">
+        <div class="axs-label">ML Modeli</div>
+        <div class="axs-val dim-c" id="mlStatus">—</div>
+        <div class="axs-sub" id="mlSub">yükleniyor...</div>
       </div>
     </div>
     <div class="ai-box" id="aiBox">⚡ AI Brain — Parametreler aktif. Analiz bekleniyor...</div>
@@ -964,6 +969,26 @@ async function loadAxStatus(){
       document.getElementById("sigVeto").textContent=s.VETO||0;
       document.getElementById("sigWatch").textContent=s.WATCH||0;
     }
+    // ML model durumu
+    try {
+      const jsMl = await fetch(BASE+"/api/ml_status").then(r=>r.json());
+      if(jsMl.ok){
+        const m = jsMl.data;
+        const mlEl  = document.getElementById("mlStatus");
+        const mlSub = document.getElementById("mlSub");
+        const mlCard= document.getElementById("mlCard");
+        if(m.trained){
+          mlEl.textContent = m.cv_accuracy > 0 ? (m.cv_accuracy*100).toFixed(0)+"%" : "AKTİF";
+          mlEl.className   = "axs-val pos";
+          mlSub.textContent= m.n_samples+" örnek · AUC "+m.cv_accuracy.toFixed(2);
+          mlCard.style.borderTop = "2px solid var(--green-br)";
+        } else {
+          mlEl.textContent = m.n_samples < 30 ? m.n_samples+"/30" : "EĞİTİLİYOR";
+          mlEl.className   = "axs-val warn";
+          mlSub.textContent= "Veri biriktirilyor...";
+        }
+      }
+    } catch(e){}
   } catch(e){ console.error("axStatus",e) }
 }
 

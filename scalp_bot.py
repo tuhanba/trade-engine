@@ -330,6 +330,7 @@ def main():
 
     last_scan    = 0
     last_hb      = time.time()
+    last_maint   = time.time()   # DB bakım zamanlayıcısı
     prev_open_ids = {t["id"] for t in get_open_trades()}
 
     while True:
@@ -361,6 +362,12 @@ def main():
                     f"Bakiye: ${get_paper_balance():.2f}"
                 )
                 maybe_save_daily_summary()
+
+            # DB bakımı — günde bir kez
+            if now - last_maint >= 86400:
+                last_maint = now
+                from database import run_maintenance
+                run_maintenance()
 
             # ── SCAN döngüsü ──────────────────────────────────────────────────
             if now - last_scan < SCAN_INTERVAL:
@@ -508,8 +515,21 @@ def main():
             logger.info("Bot durduruldu (KeyboardInterrupt).")
             break
         except Exception as e:
-            logger.error(f"Ana döngü hatası: {e}", exc_info=True)
-            time.sleep(10)
+            # Bağlantı hatalarında exponential backoff (max 5dk)
+            err_str = str(e).lower()
+            is_conn = any(k in err_str for k in (
+                "connection", "timeout", "read timed out",
+                "remotedisconnected", "connectionreset", "network",
+            ))
+            _loop_errors = getattr(main, "_loop_errors", 0) + 1
+            main._loop_errors = _loop_errors
+            wait = min(10 * (2 ** min(_loop_errors - 1, 4)), 300)  # 10,20,40,80,160,300
+            logger.error(f"Ana döngü hatası #{_loop_errors}: {e}", exc_info=True)
+            if is_conn:
+                logger.warning(f"Bağlantı hatası — {wait}s bekleniyor...")
+            time.sleep(wait)
+        else:
+            main._loop_errors = 0  # başarılı döngüde sayacı sıfırla
 
 
 # ─────────────────────────────────────────────────────────────────────────────

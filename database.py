@@ -815,3 +815,33 @@ def seed_default_params():
                 (_json.dumps(defaults), "initial_defaults")
             )
             logger.info("DB: Varsayılan parametreler yüklendi.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DB BAKIMI
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_maintenance(keep_tick_days: int = 7):
+    """
+    Periyodik DB temizliği.
+    - trade_ticks: 7 günden eski kayıtları sil
+    - ai_logs: 14 günden eski kayıtları sil
+    - WAL checkpoint: write-ahead log'unu ana DB'ye birleştir
+    Scalp_bot ana döngüsünden günde bir kez çağrılmalı.
+    """
+    try:
+        with get_conn() as conn:
+            deleted_ticks = conn.execute(
+                "DELETE FROM trade_ticks WHERE created_at < datetime('now', ?)",
+                (f"-{keep_tick_days} days",)
+            ).rowcount
+            deleted_logs = conn.execute(
+                "DELETE FROM ai_logs WHERE created_at < datetime('now', '-14 days')"
+            ).rowcount
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        logger.info(
+            f"DB bakım: {deleted_ticks} eski tick, "
+            f"{deleted_logs} eski log silindi."
+        )
+    except Exception as e:
+        logger.warning(f"DB bakım hatası: {e}")

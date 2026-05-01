@@ -76,7 +76,11 @@ def api_stats():
         except Exception:
             stats["session_stats"] = {}
 
-        stats["ml_status"] = {"trained": False, "n_samples": 0}
+        try:
+            from ml_signal_scorer import get_scorer
+            stats["ml_status"] = get_scorer().get_status()
+        except Exception:
+            stats["ml_status"] = {"trained": False, "n_samples": 0}
         return jsonify({"ok": True, "data": stats})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -461,6 +465,53 @@ def api_signal_stats():
                 stats[dec] = cnt
             stats["total"] += cnt
         return jsonify({"ok": True, "data": stats})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/health ───────────────────────────────────────────────────────────────
+@app.route("/api/health")
+def api_health():
+    """Uptime / sağlık kontrolü — monitoring sistemleri için."""
+    from database import get_conn
+    db_ok = False
+    try:
+        with get_conn() as conn:
+            conn.execute("SELECT 1").fetchone()
+            db_ok = True
+    except Exception:
+        pass
+
+    ml_trained = False
+    ml_samples = 0
+    try:
+        from ml_signal_scorer import get_scorer
+        s = get_scorer()
+        ml_trained = s.trained
+        ml_samples = s.n_samples
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok":       True,
+        "status":   "healthy" if db_ok else "degraded",
+        "db":       db_ok,
+        "ml":       {"trained": ml_trained, "n_samples": ml_samples},
+        "ts":       datetime.now(timezone.utc).isoformat(),
+        "version":  "4.3",
+    }), 200 if db_ok else 503
+
+
+# ── /api/backtest ─────────────────────────────────────────────────────────────
+@app.route("/api/backtest")
+def api_backtest():
+    """Tek bir sembol için backtest çalıştırır."""
+    symbol = request.args.get("symbol", "BTCUSDT").upper()
+    days   = int(request.args.get("days", 14))
+    try:
+        from backtest import run_backtest
+        perf = run_backtest(client, symbol, days=days, silent=True)
+        return jsonify({"ok": True, "symbol": symbol, "days": days, "data": perf})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

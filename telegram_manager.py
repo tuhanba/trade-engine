@@ -186,22 +186,25 @@ class TelegramManager:
 
     def _dispatch(self, cmd: str, args: str):
         handlers = {
-            "status":   self._cmd_status,
-            "ax":       self._cmd_ax,
-            "help":     self._cmd_help,
-            "balance":  self._cmd_balance,
-            "bakiye":   self._cmd_balance,
-            "trades":   self._cmd_trades,
-            "pozisyon": self._cmd_trades,
-            "rapor":    self._cmd_report,
-            "report":   self._cmd_report,
-            "calendar": self._cmd_calendar,
-            "takvim":   self._cmd_calendar,
-            "weekly":   self._cmd_weekly,
-            "haftalik": self._cmd_weekly,
-            "signal":   self._cmd_signal_stats,
-            "coin":     lambda: self._cmd_coin(args),
-            "mode":     self._cmd_mode,
+            "status":    self._cmd_status,
+            "ax":        self._cmd_ax,
+            "help":      self._cmd_help,
+            "balance":   self._cmd_balance,
+            "bakiye":    self._cmd_balance,
+            "trades":    self._cmd_trades,
+            "pozisyon":  self._cmd_trades,
+            "rapor":     self._cmd_report,
+            "report":    self._cmd_report,
+            "calendar":  self._cmd_calendar,
+            "takvim":    self._cmd_calendar,
+            "weekly":    self._cmd_weekly,
+            "haftalik":  self._cmd_weekly,
+            "signal":    self._cmd_signal_stats,
+            "coin":      lambda: self._cmd_coin(args),
+            "mode":      self._cmd_mode,
+            "backtest":  lambda: self._cmd_backtest(args),
+            "bt":        lambda: self._cmd_backtest(args),
+            "ml":        self._cmd_ml,
         }
 
         if cmd in ("pause", "duraklat"):
@@ -252,7 +255,11 @@ class TelegramManager:
             "/calendar — Günlük PnL takvimi\n"
             "/weekly — Haftalık özet\n"
             "/signal — Sinyal istatistikleri\n"
-            "/coin BTCUSDT — Coin detayı"
+            "/coin BTCUSDT — Coin detayı\n\n"
+            "<b>ML / Backtest</b>\n"
+            "/ml — ML model durumu + yeniden eğit\n"
+            "/backtest BTCUSDT 14 — Backtest çalıştır\n"
+            "/bt BTCUSDT 14 — Kısaltma"
         )
 
     def _cmd_status(self):
@@ -420,3 +427,85 @@ class TelegramManager:
             )
         except Exception as e:
             self.send(f"Coin verisi alınamadı: {e}")
+
+    def _cmd_ml(self):
+        """ML model durumunu göster ve yeniden eğitim başlat."""
+        try:
+            from ml_signal_scorer import get_scorer
+            scorer = get_scorer()
+            status = scorer.get_status()
+            trained_str = "✅ EĞİTİLDİ" if status["trained"] else "⏳ Henüz eğitilmedi"
+            top_feat = ""
+            if status.get("top_features"):
+                top_feat = "\n<b>Top Features:</b>\n" + "\n".join(
+                    f"  {n}: {v:.3f}" for n, v in status["top_features"][:5]
+                )
+            self.send(
+                f"🤖 <b>ML Sinyal Skoru</b>\n\n"
+                f"Durum: {trained_str}\n"
+                f"Örnek: {status['n_samples']}\n"
+                f"Eşik: {status['threshold']} puan\n"
+                f"CV AUC: {status['cv_accuracy']:.3f}\n"
+                f"Son eğitim: {status.get('last_train') or '—'}"
+                f"{top_feat}"
+            )
+            if status["n_samples"] >= 30:
+                self.send("🔄 Yeniden eğitim başlatılıyor...")
+                import threading
+                threading.Thread(target=lambda: self._ml_train_and_notify(scorer), daemon=True).start()
+        except Exception as e:
+            self.send(f"ML durumu alınamadı: {e}")
+
+    def _ml_train_and_notify(self, scorer):
+        try:
+            ok = scorer.train()
+            s  = scorer.get_status()
+            if ok:
+                self.send(
+                    f"✅ <b>ML Eğitimi Tamamlandı</b>\n"
+                    f"Örnek: {s['n_samples']} | CV AUC: {s['cv_accuracy']:.3f}"
+                )
+            else:
+                self.send("⚠️ ML eğitimi başarısız (yetersiz veri?).")
+        except Exception as e:
+            self.send(f"ML eğitim hatası: {e}")
+
+    def _cmd_backtest(self, args: str):
+        """
+        Kullanım: /backtest BTCUSDT 14
+        Varsayılan: BTCUSDT, 14 gün
+        """
+        parts  = args.strip().split()
+        symbol = parts[0].upper() if parts else "BTCUSDT"
+        try:
+            days = int(parts[1]) if len(parts) > 1 else 14
+            days = max(3, min(days, 90))
+        except ValueError:
+            days = 14
+
+        self.send(f"⏳ {symbol} {days} günlük backtest çalışıyor...")
+        import threading
+        threading.Thread(
+            target=lambda: self._run_bt_and_notify(symbol, days),
+            daemon=True
+        ).start()
+
+    def _run_bt_and_notify(self, symbol: str, days: int):
+        try:
+            from backtest import run_backtest
+            perf = run_backtest(self.client, symbol, days=days, silent=True)
+            if perf.get("total", 0) == 0:
+                self.send(f"⚠️ {symbol}: yeterli sinyal üretilemedi ({days} gün).")
+                return
+            pnl = perf["net_pnl"]
+            self.send(
+                f"📊 <b>Backtest: {symbol} ({days}g)</b>\n\n"
+                f"Trade: {perf['total']} ({perf['wins']}W / {perf['losses']}L)\n"
+                f"Win Rate: {perf['win_rate']:.1f}%\n"
+                f"Profit Factor: {perf['profit_factor']:.2f}x\n"
+                f"Net PNL: {pnl:+.2f}$\n"
+                f"Max DD: {perf['max_drawdown']:.1f}%\n"
+                f"Avg R: {perf['avg_r']:+.3f}R"
+            )
+        except Exception as e:
+            self.send(f"Backtest hatası: {e}")
