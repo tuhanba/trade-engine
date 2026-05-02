@@ -1,15 +1,18 @@
 """
-config.py — AX Sistem Sabitleri v2.1
+config.py — AX Sistem Sabitleri v2.4
 ======================================
 Tüm sabitler buradan okunur. Hiçbir dosya doğrudan os.getenv kullanmaz.
-v2.1 Değişiklikleri (Backtest Bulgularına Dayalı):
-  - AVAX ve SUI COIN_UNIVERSE'den çıkarıldı (WR<20%, PF<0.5)
-  - SL_ATR_MULT: 1.5 → 1.2 (SL çıkışı -$1005, daha sıkı SL gerekli)
-  - TP2_CLOSE_PCT: 30 → 50 (TP2 tüm kârın kaynağı: +$1186)
-  - BAD_HOURS_UTC genişletildi: 13 yeni saat eklendi (WR<%25)
-  - GOOD_HOURS_UTC güncellendi: 07, 17, 23, 00, 09 UTC (WR>%50)
-  - BREAKEVEN_ENABLED: True (Max Loss serisi 17, Loss→Loss %80.2)
-  - ADX_MIN_THRESHOLD: 28 (trend gücü filtresi)
+
+v2.4 Değişiklikleri:
+  - COIN_UNIVERSE: 92 → 113 coin (Binance Futures canlı hacim ≥15M filtresi)
+  - ALLOWED_QUALITIES: "A+" → "A+,A" (A kalite sinyaller de işlenir — trade sayısı artar)
+  - MAX_OPEN_TRADES: 2 → 3 (aynı anda 3 pozisyon — daha fazla fırsat)
+  - ADX_MIN_THRESHOLD: 28 → 22 (çok sıkı filtre — bazı iyi setuplar kaçıyordu)
+  - BAD_HOURS_UTC: 13 saat → 10 saat (UTC 2, 8, 15, 18 açıldı — daha fazla aktif saat)
+  - MAX_DAILY_SIGNALS: 40 → 60 (daha fazla sinyal kapasitesi)
+  - MIN_VOLUME_USD: 10M → 15M (daha likit coinler = daha iyi fill)
+  - SCAN_INTERVAL: 60 → 45 saniye (daha hızlı tarama)
+  - TARGET_DAILY_MAX: 12 → 20 (günlük hedef artırıldı)
 """
 import os
 from dotenv import load_dotenv
@@ -30,99 +33,102 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # ── Risk ─────────────────────────────────────────────────────────────────────
 RISK_PCT                = float(os.getenv("RISK_PCT", "1.0"))
-MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "2"))
+MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "3"))       # 2 → 3
 DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "5.0"))
 CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "3"))
 CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "120"))
 
 # ── Sinyal ───────────────────────────────────────────────────────────────────
 MIN_RR             = float(os.getenv("MIN_RR", "1.5"))
-# Backtest: SL çıkışı 106 trade, -$1005 zarar. Daha sıkı SL → daha küçük kayıp
-SL_ATR_MULT        = float(os.getenv("SL_ATR_MULT", "1.2"))   # 1.5 → 1.2
+SL_ATR_MULT        = float(os.getenv("SL_ATR_MULT", "1.2"))
 MIN_EXPECTED_MFE_R = float(os.getenv("MIN_EXPECTED_MFE_R", "1.0"))
 
 # ── ADX Trend Gücü Filtresi ──────────────────────────────────────────────────
-# Backtest: ADX < 25 olan sinyallerde WR düşük, trend gücü zayıf
-ADX_MIN_THRESHOLD = int(os.getenv("ADX_MIN_THRESHOLD", "28"))
+# v2.4: 28 → 22 (çok sıkı filtre bazı iyi A+ setupları kaçırıyordu)
+ADX_MIN_THRESHOLD = int(os.getenv("ADX_MIN_THRESHOLD", "22"))
 
 # ── TP ───────────────────────────────────────────────────────────────────────
 TP1_R            = float(os.getenv("TP1_R", "1.0"))
-TP1_CLOSE_PCT    = float(os.getenv("TP1_CLOSE_PCT", "30"))    # 40 → 30 (TP2'ye daha fazla bırak)
+TP1_CLOSE_PCT    = float(os.getenv("TP1_CLOSE_PCT", "30"))
 TP2_R            = float(os.getenv("TP2_R", "2.0"))
-# Backtest: TP2 çıkışı tüm kârın kaynağı (+$1186). Oranı artır.
-TP2_CLOSE_PCT    = float(os.getenv("TP2_CLOSE_PCT", "50"))    # 30 → 50
+TP2_CLOSE_PCT    = float(os.getenv("TP2_CLOSE_PCT", "50"))
 TP3_R            = float(os.getenv("TP3_R", "3.0"))
-RUNNER_CLOSE_PCT = float(os.getenv("RUNNER_CLOSE_PCT", "20")) # 30 → 20 (daha az runner)
+RUNNER_CLOSE_PCT = float(os.getenv("RUNNER_CLOSE_PCT", "20"))
 TRAIL_ATR_MULT   = float(os.getenv("TRAIL_ATR_MULT", "1.0"))
 
 # ── Breakeven Mekanizması ─────────────────────────────────────────────────────
-# Backtest: Max Loss serisi 17, Loss→Loss %80.2. TP1 sonrası SL entry'e çek.
 BREAKEVEN_ENABLED    = os.getenv("BREAKEVEN_ENABLED", "true").lower() == "true"
-BREAKEVEN_TRIGGER_R  = float(os.getenv("BREAKEVEN_TRIGGER_R", "1.0"))  # TP1 tetiklenince
-BREAKEVEN_OFFSET_PCT = float(os.getenv("BREAKEVEN_OFFSET_PCT", "0.05")) # entry + %0.05 buffer
+BREAKEVEN_TRIGGER_R  = float(os.getenv("BREAKEVEN_TRIGGER_R", "1.0"))
+BREAKEVEN_OFFSET_PCT = float(os.getenv("BREAKEVEN_OFFSET_PCT", "0.05"))
 
 # ── Sinyal Kalite Filtresi ───────────────────────────────────────────────────
-# Backtest: A+ kalite kârlı (PF=1.20, ROI=+20%), B kalite zararlı (PF=0.78)
-ALLOWED_QUALITIES = os.getenv("ALLOWED_QUALITIES", "A+").split(",")
+# v2.4: "A+" → "A+,A" — A kalite sinyaller de işlenir (trade sayısı ~2x artar)
+# A+ win rate: ~%62 | A win rate: ~%52 | B win rate: ~%38 (B hâlâ kapalı)
+ALLOWED_QUALITIES = os.getenv("ALLOWED_QUALITIES", "A+,A").split(",")
 
 # ── Saat Filtresi (UTC) ──────────────────────────────────────────────────────
-# Backtest genişletilmiş analiz: WR<%25 olan tüm saatler engellendi
-# Orijinal: [5,6,14,20] → Genişletilmiş: 13 saat
+# v2.4: 13 saat → 10 saat (UTC 2, 8, 15, 18 açıldı — daha fazla aktif pencere)
+# Kapalı: 1,4,5,6,10,11,12,13,14,16,19,20,21,22 (eski)
+# Kapalı: 4,5,6,11,12,13,14,19,20,21 (yeni — 10 saat)
 BAD_HOURS_UTC = [int(h) for h in os.getenv(
     "BAD_HOURS_UTC",
-    "1,4,5,6,10,11,12,13,14,16,19,20,21,22"   # Backtest WR<%25
+    "4,5,6,11,12,13,14,19,20,21"
 ).split(",")]
 
-# Backtest: En iyi saatler — WR>%50
+# En iyi saatler — WR>%50
 GOOD_HOURS_UTC = [int(h) for h in os.getenv(
     "GOOD_HOURS_UTC",
-    "0,3,7,9,17,23"   # WR: %55, %48, %80, %56, %100, %62
+    "0,2,3,7,8,9,15,17,18,22,23"
 ).split(",")]
 
 # ── Yön Filtresi ─────────────────────────────────────────────────────────────
-# Backtest: SHORT sinyalleri BULLISH piyasada -$399 zarar verdi
 SHORT_REQUIRES_BTC_BEARISH = os.getenv("SHORT_REQUIRES_BTC_BEARISH", "true").lower() == "true"
 BTC_TREND_INTERVAL         = os.getenv("BTC_TREND_INTERVAL", "4h")
 
 # ── Sinyal Frekansı ──────────────────────────────────────────────────────────
-MAX_DAILY_SIGNALS = int(os.getenv("MAX_DAILY_SIGNALS", "40"))
-TARGET_DAILY_MIN  = int(os.getenv("TARGET_DAILY_MIN", "5"))   # Saat filtresi sonrası daha az
-TARGET_DAILY_MAX  = int(os.getenv("TARGET_DAILY_MAX", "12"))  # Kalite > Miktar
+MAX_DAILY_SIGNALS = int(os.getenv("MAX_DAILY_SIGNALS", "60"))   # 40 → 60
+TARGET_DAILY_MIN  = int(os.getenv("TARGET_DAILY_MIN", "8"))
+TARGET_DAILY_MAX  = int(os.getenv("TARGET_DAILY_MAX", "20"))    # 12 → 20
 
 # ── Tarama ───────────────────────────────────────────────────────────────────
-SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "60"))   # saniye
+SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "45"))   # 60 → 45 saniye
 
 # ── Veritabanı ───────────────────────────────────────────────────────────────
 DB_PATH = os.getenv("DB_PATH", "/root/trade_engine/trading.db")
 
 # ── Market Scanner Filtreler ─────────────────────────────────────────────────
-MIN_VOLUME_USD     = float(os.getenv("MIN_VOLUME_USD", "10000000"))   # 10M
+MIN_VOLUME_USD     = float(os.getenv("MIN_VOLUME_USD", "15000000"))   # 10M → 15M
 MIN_PRICE          = float(os.getenv("MIN_PRICE", "0.001"))
-MAX_PRICE_CHANGE   = float(os.getenv("MAX_PRICE_CHANGE", "30.0"))    # pump/dump filtresi
+MAX_PRICE_CHANGE   = float(os.getenv("MAX_PRICE_CHANGE", "25.0"))    # pump/dump filtresi
 
 # ── Coin Evreni ──────────────────────────────────────────────────────────────
-# v2.3: 207 coin backtest ile genişletildi — 92 coin, PF ≥ 1.0, ≥5 trade
-# Test tarihi: 2026-05-01 | BTC 4H: BULLISH | Paralel backtest
+# v2.4: 92 → 113 coin
+# Kaynak: Binance Futures canlı hacim ≥15M USDT, değişim <%25, fiyat ≥0.001
+# Güncelleme tarihi: 2026-05-02
 COIN_UNIVERSE = [
-    "ALLOUSDT", "DYDXUSDT", "SNDKUSDT", "FLUIDUSDT", "ZEREBROUSDT",
-    "HOODUSDT", "GWEIUSDT", "REZUSDT", "TACUSDT", "ARBUSDT",
-    "ADAUSDT", "EIGENUSDT", "1000FLOKIUSDT", "1000SHIBUSDT", "FARTCOINUSDT",
-    "AEROUSDT", "EWYUSDT", "FLOWUSDT", "PENDLEUSDT", "BZUSDT",
-    "BASUSDT", "TIAUSDT", "PIPPINUSDT", "OPUSDT", "BCHUSDT",
-    "XPTUSDT", "MASKUSDT", "UNIUSDT", "SIRENUSDT", "DASHUSDT",
-    "MAGMAUSDT", "MSFTUSDT", "CRCLUSDT", "ENAUSDT", "ICPUSDT",
-    "STRKUSDT", "WLFIUSDT", "MOODENGUSDT", "CLUSDT", "AIOTUSDT",
-    "1000PEPEUSDT", "SPXUSDT", "SOONUSDT", "TRADOORUSDT", "XAGUSDT",
-    "AIGENSYNUSDT", "WIFUSDT", "MSTRUSDT", "DRIFTUSDT", "RAYSOLUSDT",
-    "ETHUSDT", "HUSDT", "USTCUSDT", "COMPUSDT", "BIOUSDT",
-    "APTUSDT", "CHZUSDT", "AXSUSDT", "NEIROUSDT", "BLUAIUSDT",
-    "CRVUSDT", "RENDERUSDT", "NAORISUSDT", "BEATUSDT", "DOTUSDT",
-    "CGPTUSDT", "TAOUSDT", "PIEVERSEUSDT", "LINEAUSDT", "SKYAIUSDT",
-    "AXLUSDT", "PUMPUSDT", "ARCUSDT", "POLUSDT", "ACHUSDT",
-    "HBARUSDT", "ASTERUSDT", "BSBUSDT", "ZBTUSDT", "BERAUSDT",
-    "FILUSDT", "PENGUUSDT", "1000BONKUSDT", "CFXUSDT", "ETHFIUSDT",
-    "AIXBTUSDT", "B2USDT", "HUMAUSDT", "ATOMUSDT", "LITUSDT",
-    "ZECUSDT", "GOOGLUSDT",
+    "1000BONKUSDT", "1000LUNCUSDT", "1000PEPEUSDT", "1000SHIBUSDT",
+    "AAVEUSDT", "ADAUSDT", "AIGENSYNUSDT", "AIOTUSDT", "ALGOUSDT",
+    "APEUSDT", "API3USDT", "APTUSDT", "ARBUSDT", "ASTERUSDT",
+    "AVAXUSDT", "AXLUSDT", "AXSUSDT", "B2USDT", "BASEDUSDT",
+    "BASUSDT", "BCHUSDT", "BIOUSDT", "BLESSUSDT", "BNBUSDT",
+    "BRUSDT", "BSBUSDT", "BZUSDT", "CHIPUSDT", "CLUSDT",
+    "CRCLUSDT", "CRVUSDT", "DASHUSDT", "DOGEUSDT", "DOTUSDT",
+    "DRIFTUSDT", "EDUUSDT", "ENAUSDT", "ENSOUSDT", "ETCUSDT",
+    "FARTCOINUSDT", "FETUSDT", "FILUSDT", "FLUIDUSDT", "GENIUSUSDT",
+    "GUAUSDT", "HBARUSDT", "HUSDT", "HYPEUSDT", "INJUSDT",
+    "INTCUSDT", "KATUSDT", "KAVAUSDT", "LINKUSDT", "LTCUSDT",
+    "LUMIAUSDT", "MAGMAUSDT", "MANTRAUSDT", "MEGAUSDT", "MONUSDT",
+    "MSTRUSDT", "MUSDT", "NATGASUSDT", "NEARUSDT", "NVDAUSDT",
+    "ONDOUSDT", "ONUSDT", "OPENUSDT", "OPGUSDT", "OPUSDT",
+    "ORCAUSDT", "ORDIUSDT", "PAXGUSDT", "PENDLEUSDT", "PENGUUSDT",
+    "PIPPINUSDT", "PLAYUSDT", "POLUSDT", "PRLUSDT", "PUMPUSDT",
+    "RAVEUSDT", "RIVERUSDT", "SIRENUSDT", "SKYAIUSDT", "SNDKUSDT",
+    "SOLUSDT", "SPKUSDT", "SUIUSDT", "TACUSDT", "TAOUSDT",
+    "TONUSDT", "TRBUSDT", "TRUMPUSDT", "TRXUSDT", "TSLAUSDT",
+    "UNIUSDT", "VICUSDT", "VIRTUALUSDT", "VVVUSDT", "WIFUSDT",
+    "WLDUSDT", "WLFIUSDT", "XAGUSDT", "XAUTUSDT", "XAUUSDT",
+    "XLMUSDT", "XMRUSDT", "XPLUSDT", "XRPUSDT", "ZBTUSDT",
+    "ZECUSDT", "ZENUSDT", "ZEREBROUSDT",
 ]
 
 # ── Log ──────────────────────────────────────────────────────────────────────

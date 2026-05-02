@@ -34,7 +34,7 @@ class AIDecisionEngine:
     def __init__(self, db_path="trade_engine.db"):
         self.db_path = db_path
         self.daily_signals = 0
-        self.max_daily_signals = 40
+        self.max_daily_signals = 60  # 40 → 60
         self.recent_coins = []
         self.last_reset_date = datetime.utcnow().date()
         
@@ -188,7 +188,8 @@ class AIDecisionEngine:
         if self.daily_signals >= self.max_daily_signals:
             return {"decision": "VETO", "reason": "Daily limit reached"}
 
-        if signal_data.symbol in self.recent_coins[-3:]:
+        # Coin spam koruması: aynı coin son 2 sinyalde varsa engelle
+        if signal_data.symbol in self.recent_coins[-2:]:
             return {"decision": "VETO", "reason": "Coin spam protection"}
 
         profile = self._get_coin_profile(signal_data.symbol)
@@ -239,12 +240,18 @@ class AIDecisionEngine:
         base_confidence = max(0.0, min(1.0, final_score / 10.0))
         confidence = (base_confidence * 0.6) + ((ml_score / 100.0) * 0.4)
 
-        if final_score >= 7.5 and signal_data.setup_quality in ["A+", "A"]:
+        # A+ için eşik: 7.0 (eski: 7.5) — daha fazla A+ sinyali geçer
+        # A  için eşik: 6.5 (yeni) — A kalite sinyaller de işlenir
+        # B  hâlâ kapalı — ALLOWED_QUALITIES'de yok
+        if final_score >= 7.0 and signal_data.setup_quality == "A+":
             decision = "ALLOW"
-            reason = "High quality setup with AI approval"
+            reason = "A+ setup with AI approval"
+        elif final_score >= 6.5 and signal_data.setup_quality == "A" and profile["danger_score"] < 0.6:
+            decision = "ALLOW"
+            reason = "A setup with AI approval"
         elif final_score >= 6.0 and signal_data.setup_quality == "B" and profile["danger_score"] < 0.5:
             decision = "ALLOW"
-            reason = "Acceptable setup, safe coin profile"
+            reason = "B setup — safe coin profile"
         else:
             decision = "VETO"
             reason = "Low AI score or dangerous profile"
