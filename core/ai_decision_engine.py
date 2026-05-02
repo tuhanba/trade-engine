@@ -67,13 +67,7 @@ class AIDecisionEngine:
                     danger_score REAL DEFAULT 0,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )""")
-                conn.execute("""CREATE TABLE IF NOT EXISTS best_params (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    params_json TEXT,
-                    win_rate REAL,
-                    profit_factor REAL,
-                    saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )""")
+                # best_params tablosu database.py tarafından yönetilir
                 conn.commit()
         except Exception as e:
             logger.error(f"AI DB init hatası: {e}")
@@ -309,9 +303,10 @@ class AIDecisionEngine:
                     best = conn.execute("SELECT * FROM best_params ORDER BY profit_factor DESC LIMIT 1").fetchone()
                     if not best or (pf > best["profit_factor"] and wr > best["win_rate"]):
                         conn.execute("""
-                            INSERT INTO best_params (params_json, win_rate, profit_factor)
-                            VALUES (?, ?, ?)
-                        """, (json.dumps(self.params), wr, pf))
+                            INSERT INTO best_params
+                                (data, params_json, win_rate, profit_factor)
+                            VALUES (?, ?, ?, ?)
+                        """, (json.dumps(self.params), json.dumps(self.params), wr, pf))
                         conn.commit()
                         logger.info(f"Yeni en iyi parametreler kaydedildi: {self.params}")
                         

@@ -1,11 +1,13 @@
-import os, json, sqlite3
+import os, json, sqlite3, re
 from datetime import datetime, timezone
 from flask import Flask, render_template, jsonify, request
+
 try:
     from n8n_bridge import n8n_bp
     N8N_AVAILABLE = True
 except ImportError:
     N8N_AVAILABLE = False
+
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
 from database import (
@@ -21,6 +23,7 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "scalp2026")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 if N8N_AVAILABLE:
     app.register_blueprint(n8n_bp)
+
 client = Client(os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_API_SECRET", ""))
 
 init_db()
@@ -32,17 +35,19 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
 def _fmt_duration(open_time_str, close_time_str=None):
     try:
         ot = datetime.fromisoformat((open_time_str or "").replace("Z", "+00:00"))
-        if close_time_str:
-            ct = datetime.fromisoformat((close_time_str or "").replace("Z", "+00:00"))
-        else:
-            ct = datetime.now(timezone.utc)
+        ct = (
+            datetime.fromisoformat((close_time_str or "").replace("Z", "+00:00"))
+            if close_time_str
+            else datetime.now(timezone.utc)
+        )
         mins = (ct - ot).total_seconds() / 60
         h, m = divmod(int(mins), 60)
         return (f"{h}s {m}dk" if h else f"{m}dk"), round(mins, 1)
-    except:
+    except Exception:
         return "—", 0
 
 
+# ── / ─────────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -53,8 +58,6 @@ def index():
 def api_stats():
     try:
         stats = get_stats()
-
-        # Seans istatistikleri — coin_market_memory tablosundan
         try:
             with get_conn() as conn:
                 sess_stats = {}
@@ -76,8 +79,11 @@ def api_stats():
                     }
                 stats["session_stats"] = sess_stats
         except Exception:
-            stats["session_stats"] = {}
-
+            stats["session_stats"] = {
+                "ASIA":     {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0},
+                "LONDON":   {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0},
+                "NEW_YORK": {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0},
+            }
         stats["ml_status"] = {"trained": False, "n_samples": 0}
         return jsonify({"ok": True, "data": stats})
     except Exception as e:
@@ -114,12 +120,12 @@ def api_pnl_chart():
 def api_trades():
     try:
         page  = int(request.args.get("page", 1))
-        limit = int(request.args.get("limit", 10))
-        # Tüm kapanmış trade sayısını al
-        all_trades = get_trades(limit=10000, status="closed")
+        # Frontend hem "limit" hem "per_page" gönderebilir
+        limit = int(request.args.get("limit", request.args.get("per_page", 10)))
+        all_trades  = get_trades(limit=10000, status="closed")
         total_count = len(all_trades)
         total_pages = max(1, (total_count + limit - 1) // limit)
-        page = max(1, min(page, total_pages))
+        page   = max(1, min(page, total_pages))
         offset = (page - 1) * limit
         trades = all_trades[offset:offset + limit]
         result = []
@@ -129,7 +135,7 @@ def api_trades():
         return jsonify({
             "ok": True, "data": result,
             "page": page, "total_pages": total_pages,
-            "total_count": total_count, "limit": limit
+            "total_count": total_count, "limit": limit,
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -139,8 +145,8 @@ def api_trades():
 @app.route("/api/live")
 def api_live():
     try:
-        open_trades = get_open_trades()
-        live = []
+        open_trades      = get_open_trades()
+        live             = []
         total_unrealized = 0.0
 
         for t in open_trades:
@@ -155,13 +161,10 @@ def api_live():
             try:
                 ticker = client.futures_symbol_ticker(symbol=symbol)
                 mark   = float(ticker["price"])
-                if direction == "LONG":
-                    raw_pnl = (mark - entry) * qty
-                else:
-                    raw_pnl = (entry - mark) * qty
-                sl_dist    = abs(entry - sl)
-                tp_dist    = abs(tp - entry)
-                current_rr = round(raw_pnl / (sl_dist * qty + 1e-10), 3) if sl_dist else 0
+                raw_pnl = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
+                sl_dist     = abs(entry - sl)
+                tp_dist     = abs(tp - entry)
+                current_rr  = round(raw_pnl / (sl_dist * qty + 1e-10), 3) if sl_dist else 0
                 sl_dist_pct = round(abs(mark - sl) / (mark + 1e-10) * 100, 2)
                 progress    = round(min(abs(mark - entry) / (tp_dist + 1e-10) * 100, 100), 1) if tp_dist else 0
                 total_unrealized += raw_pnl
@@ -176,11 +179,12 @@ def api_live():
                     "hold_str":        hold_str,
                     "hold_min":        hold_min,
                 })
-            except:
+            except Exception:
                 live.append({
                     **t,
                     "current_price": 0, "unrealized_pnl": 0,
                     "unrealized_pct": 0, "current_rr": 0,
+                    "sl_distance_pct": 0, "tp_progress": 0,
                     "hold_str": hold_str, "hold_min": hold_min,
                 })
 
@@ -234,7 +238,6 @@ def api_params():
 # ── /api/coin_stats ───────────────────────────────────────────────────────────
 @app.route("/api/coin_stats")
 def api_coin_stats():
-    """En iyi ve en kötü performanslı coinler — coin_profile tablosundan"""
     try:
         with get_conn() as conn:
             rows = conn.execute("""
@@ -246,13 +249,12 @@ def api_coin_stats():
                 ORDER BY profit_factor DESC
                 LIMIT 20
             """).fetchall()
-        result = [dict(r) for r in rows]
-        return jsonify({"ok": True, "data": result})
+        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ── /api/ml_status ────────────────────────────────────────────────────────────────────────────────
+# ── /api/ml_status ────────────────────────────────────────────────────────────
 @app.route("/api/ml_status")
 def api_ml_status():
     try:
@@ -263,17 +265,9 @@ def api_ml_status():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ── /api/logs ─────────────────────────────────────────────────────────────────────────────────────────
+# ── /api/logs ─────────────────────────────────────────────────────────────────
 @app.route("/api/logs")
 def api_logs():
-    """
-    Son N satır log döndürür.
-    Log dosyası yolları (sırayla denenecek):
-      1. /root/trade_engine/bot.log
-      2. /root/trade_engine/scalp_bot.log
-      3. /tmp/scalp_bot.log
-    """
-    import re
     LOG_PATHS = [
         "/root/trade_engine/logs/ax_bot.log",
         "/root/trade_engine/logs/bot.log",
@@ -288,13 +282,9 @@ def api_logs():
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    raw_lines = f.readlines()
-                raw_lines = raw_lines[-n:]
-
-                # Log satırlarını parse et
+                    raw_lines = f.readlines()[-n:]
                 for raw in raw_lines:
                     raw = raw.rstrip("\n")
-                    # Seviye tespiti
                     level = "INFO"
                     if re.search(r"\bERROR\b|\bCRITICAL\b|\bException\b|Traceback", raw, re.I):
                         level = "ERROR"
@@ -302,23 +292,16 @@ def api_logs():
                         level = "WARNING"
                     elif re.search(r"\bDEBUG\b", raw, re.I):
                         level = "DEBUG"
-                    elif re.search(r"WIN|K\u00c2R|PROFIT|LONG|SHORT|ENTRY|OPEN", raw):
+                    elif re.search(r"WIN|KÂR|PROFIT|LONG|SHORT|ENTRY|OPEN", raw):
                         level = "TRADE"
                     elif re.search(r"LOSS|STOP|CLOSE|KAPAND", raw):
                         level = "CLOSE"
-
                     lines_out.append({"text": raw, "level": level})
-
-                return jsonify({
-                    "ok":   True,
-                    "data": lines_out,
-                    "path": path,
-                    "total": len(lines_out),
-                })
-            except Exception as ex:
+                return jsonify({"ok": True, "data": lines_out, "path": path, "total": len(lines_out)})
+            except Exception:
                 continue
 
-    # Log dosyası bulunamadı — DB'den son trade'leri log gibi döndür
+    # Fallback: DB'den son trade'ler
     try:
         with get_conn() as conn:
             rows = conn.execute(
@@ -328,10 +311,11 @@ def api_logs():
         for r in reversed(rows):
             r = dict(r)
             pnl = r.get("net_pnl", 0) or 0
-            res = "WIN" if pnl > 0 else "LOSS"
             level = "TRADE" if pnl > 0 else "CLOSE"
             lines_out.append({
-                "text":  f"[{r.get('close_time','')}] {r.get('symbol','')} {r.get('direction','')} → {r.get('close_reason','?').upper()}  PNL: {pnl:+.4f}$",
+                "text": f"[{r.get('close_time','')}] {r.get('symbol','')} "
+                        f"{r.get('direction','')} → {r.get('close_reason','?').upper()} "
+                        f"PNL: {pnl:+.4f}$",
                 "level": level,
             })
         return jsonify({"ok": True, "data": lines_out, "path": "db_fallback", "total": len(lines_out)})
@@ -339,16 +323,13 @@ def api_logs():
         return jsonify({"ok": False, "error": str(e), "data": []}), 500
 
 
-
-# ── /api/coin_library ─────────────────────────────────────────────────────────────────────────
+# ── /api/coin_library ─────────────────────────────────────────────────────────
 @app.route("/api/coin_library")
 def api_coin_library():
-    """Coin Library: tüm coin profilleri ve istatistikleri"""
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        # coin_params tablosu yoksa boş dön
         c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='coin_params'")
         if not c.fetchone():
             conn.close()
@@ -370,11 +351,9 @@ def api_coin_library():
 
 @app.route("/api/coin_library/<symbol>", methods=["POST"])
 def api_coin_library_update(symbol):
-    """Coin profilini güncelle (enable/disable, profil değiştir)"""
     try:
-        data = request.get_json() or {}
-        allowed = ["enabled", "volatility_profile", "sl_atr_mult", "tp_atr_mult",
-                   "risk_pct", "max_leverage"]
+        data    = request.get_json() or {}
+        allowed = ["enabled", "volatility_profile", "sl_atr_mult", "tp_atr_mult", "risk_pct", "max_leverage"]
         updates = {k: v for k, v in data.items() if k in allowed}
         if not updates:
             return jsonify({"ok": False, "error": "Güncellenecek alan yok"}), 400
@@ -390,7 +369,6 @@ def api_coin_library_update(symbol):
 # ── /api/daily_pnl ────────────────────────────────────────────────────────────
 @app.route("/api/daily_pnl")
 def api_daily_pnl():
-    """30 günlük takvim verisi."""
     try:
         days = int(request.args.get("days", 30))
         data = dash_svc.get_calendar_data(days)
@@ -402,10 +380,9 @@ def api_daily_pnl():
 # ── /api/weekly ───────────────────────────────────────────────────────────────
 @app.route("/api/weekly")
 def api_weekly():
-    """Son 8 haftalık özet."""
     try:
         weeks = int(request.args.get("weeks", 8))
-        data = dash_svc.get_weekly_data(weeks)
+        data  = dash_svc.get_weekly_data(weeks)
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -414,7 +391,6 @@ def api_weekly():
 # ── /api/ax_status ────────────────────────────────────────────────────────────
 @app.route("/api/ax_status")
 def api_ax_status():
-    """AX sistem durumu: CB, açık trade, bakiye, bugünkü PnL."""
     try:
         data = dash_svc.get_ax_status()
         return jsonify({"ok": True, "data": data})
@@ -425,24 +401,18 @@ def api_ax_status():
 # ── /api/coin_profiles ────────────────────────────────────────────────────────
 @app.route("/api/coin_profiles")
 def api_coin_profiles():
-    """Tüm coin öğrenme profilleri (coin_profile tablosu)."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
-            SELECT symbol, trade_count, win_count, loss_count,
-                   ROUND(win_rate*100,1) as win_rate_pct,
-                   avg_r, profit_factor, danger_score, fakeout_rate,
-                   volatility_profile, preferred_direction, best_session,
-                   updated_at
-            FROM coin_profile
-            ORDER BY trade_count DESC, danger_score DESC
-            """
-        ).fetchall()
-        conn.close()
-        result = [dict(r) for r in rows]
-        return jsonify({"ok": True, "data": result})
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT symbol, trade_count, win_count, loss_count,
+                       ROUND(win_rate*100,1) as win_rate_pct,
+                       avg_r, profit_factor, danger_score, fakeout_rate,
+                       volatility_profile, preferred_direction, best_session,
+                       updated_at
+                FROM coin_profile
+                ORDER BY trade_count DESC, danger_score DESC
+            """).fetchall()
+        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -450,20 +420,27 @@ def api_coin_profiles():
 # ── /api/signal_stats ─────────────────────────────────────────────────────────
 @app.route("/api/signal_stats")
 def api_signal_stats():
-    """Bugünkü sinyal istatistikleri: ALLOW/VETO/WATCH dağılımı."""
+    """ALLOW/VETO/WATCH dağılımı — 'decision' sütunu kullanılır."""
     try:
         days = int(request.args.get("days", 1))
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute(
-            """
-            SELECT ax_decision, COUNT(*) as cnt
-            FROM signal_candidates
-            WHERE created_at >= datetime('now', ?)
-            GROUP BY ax_decision
-            """,
-            (f"-{days} days",),
-        ).fetchall()
-        conn.close()
+        with get_conn() as conn:
+            # 'decision' sütununu dene, yoksa 'ax_decision' sütununu dene
+            try:
+                rows = conn.execute(
+                    "SELECT decision, COUNT(*) as cnt "
+                    "FROM signal_candidates "
+                    "WHERE created_at >= datetime('now', ?) "
+                    "GROUP BY decision",
+                    (f"-{days} days",),
+                ).fetchall()
+            except Exception:
+                rows = conn.execute(
+                    "SELECT ax_decision, COUNT(*) as cnt "
+                    "FROM signal_candidates "
+                    "WHERE created_at >= datetime('now', ?) "
+                    "GROUP BY ax_decision",
+                    (f"-{days} days",),
+                ).fetchall()
         stats = {"ALLOW": 0, "VETO": 0, "WATCH": 0, "total": 0}
         for dec, cnt in rows:
             if dec in stats:
@@ -474,17 +451,12 @@ def api_signal_stats():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
-
 # ── /api/scalp_signals ────────────────────────────────────────────────────────
 @app.route("/api/scalp_signals")
 def api_scalp_signals():
-    """Aktif scalp sinyalleri (Data Layer'dan validate edilmiş veri)."""
     try:
         from database import get_active_scalp_signals
         signals = get_active_scalp_signals(limit=100)
-        # Null veri frontend'e gitmesin
         clean = [s for s in signals if s.get("direction") and s.get("entry_zone", 0) > 0]
         return jsonify({"ok": True, "data": clean, "total": len(clean)})
     except Exception as e:
@@ -494,7 +466,7 @@ def api_scalp_signals():
 # ── /api/scalp_signal_stats ───────────────────────────────────────────────────
 @app.route("/api/scalp_signal_stats")
 def api_scalp_signal_stats():
-    """Günlük sinyal istatistikleri: A+/A/B/C dağılımı."""
+    """A+/A/B/C dağılımı."""
     try:
         from database import get_daily_signal_count
         stats = get_daily_signal_count()
@@ -502,13 +474,12 @@ def api_scalp_signal_stats():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+
 # ── /api/paper_state ──────────────────────────────────────────────────────────
 @app.route("/api/paper_state")
 def api_paper_state():
-    """Paper trade simülatörü durumu."""
     try:
-        import json, os
-        state_file = "/home/ubuntu/trade-engine/paper_state.json"
+        state_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paper_state.json")
         if os.path.exists(state_file):
             with open(state_file) as f:
                 state = json.load(f)
@@ -516,3 +487,30 @@ def api_paper_state():
         return jsonify({"ok": False, "error": "State file not found"}), 404
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/health ───────────────────────────────────────────────────────────────
+@app.route("/api/health")
+def api_health():
+    """Watchdog ve monitoring için health check endpoint."""
+    try:
+        balance = get_paper_balance()
+        open_count = len(get_open_trades())
+        return jsonify({
+            "ok":        True,
+            "status":    "healthy",
+            "balance":   round(balance, 2),
+            "open":      open_count,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "status": "unhealthy", "error": str(e)}), 500
+
+
+# ── ENTRY POINT ───────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    socketio.run(
+        app, host="0.0.0.0", port=5000,
+        debug=False, use_reloader=False,
+        allow_unsafe_werkzeug=True,
+    )

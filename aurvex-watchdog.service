@@ -1,0 +1,17 @@
+[Unit]
+Description=AURVEX.Ai Watchdog
+After=network.target aurvex-bot.service aurvex-dashboard.service
+Wants=aurvex-bot.service aurvex-dashboard.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/trade_engine
+ExecStart=/root/trade_engine/venv/bin/python3 /root/trade_engine/watchdog.py
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
