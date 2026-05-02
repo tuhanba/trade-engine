@@ -498,6 +498,7 @@ def api_signal_funnel():
                 "scanned": scanned,
                 "candidate": candidate,
                 "watchlist": watchlist,
+                "telegram": telegram,
                 "telegram_sent": telegram,
                 "trade": trade,
                 "wins": wins,
