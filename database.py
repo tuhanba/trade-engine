@@ -827,7 +827,7 @@ def get_daily_signal_count() -> dict:
               AND status != 'archived'
             GROUP BY setup_quality
         """).fetchall()
-    counts = {"A+": 0, "A": 0, "B": 0, "C": 0, "total": 0}
+    counts = {"S": 0, "A+": 0, "A": 0, "B": 0, "C": 0, "total": 0}
     for row in rows:
         q = row["setup_quality"]
         if q in counts:

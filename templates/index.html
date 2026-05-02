@@ -516,6 +516,7 @@ for(let i=0;i<18;i++){
       <div style="flex:1;min-width:160px">
         <div style="font-family:var(--orb);font-size:6.5px;letter-spacing:0.18em;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase">Sinyal Kalitesi (Bugun)</div>
         <div class="sig-row">
+          <div class="sig-stat"><div class="sig-stat-val" id="sigS" style="color:#ff6b35;font-weight:700;text-shadow:0 0 10px rgba(255,107,53,0.5)">—</div><div class="sig-stat-lbl" style="color:#ff6b35">S</div></div>
           <div class="sig-stat"><div class="sig-stat-val sig-allow" id="sigAPlus">—</div><div class="sig-stat-lbl">A+</div></div>
           <div class="sig-stat"><div class="sig-stat-val sig-allow" id="sigA">—</div><div class="sig-stat-lbl">A</div></div>
           <div class="sig-stat"><div class="sig-stat-val sig-watch" id="sigB">—</div><div class="sig-stat-lbl">B</div></div>
@@ -803,11 +804,13 @@ function renderPager(pag){
 // AX STATUS
 async function loadAxStatus(){
   try{
-    const [jsAx,jsSig]=await Promise.all([
+    const results=await Promise.allSettled([
       fetch(BASE+"/api/ax_status").then(r=>r.json()),
       fetch(BASE+"/api/scalp_signal_stats").then(r=>r.json()),
     ]);
-    if(jsAx.ok){
+    const jsAx  = results[0].status==="fulfilled"?results[0].value:null;
+    const jsSig = results[1].status==="fulfilled"?results[1].value:null;
+    if(jsAx&&jsAx.ok){
       const d=jsAx.data;
       document.getElementById("axBalance").textContent="$"+f(d.balance,2);
       const ot=document.getElementById("axOpenTrades");
@@ -825,8 +828,9 @@ async function loadAxStatus(){
       pausedEl.textContent=d.paused?"DURAKLATILDI":"AKTİF";pausedEl.style.color=d.paused?"var(--cyan-br)":"var(--green-br)";
       document.getElementById("axStatusMeta").textContent=new Date().toLocaleTimeString("tr-TR",{timeZone:"UTC"})+" UTC";
     }
-    if(jsSig.ok){
+    if(jsSig&&jsSig.ok){
       const s=jsSig.data;
+      document.getElementById("sigS").textContent=s["S"]||0;
       document.getElementById("sigAPlus").textContent=s["A+"]||0;
       document.getElementById("sigA").textContent=s["A"]||0;
       document.getElementById("sigB").textContent=s["B"]||0;
