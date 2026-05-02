@@ -24,6 +24,7 @@ Tablolar:
 import sqlite3
 import json
 import logging
+import uuid
 from datetime import datetime, timezone, date, timedelta
 from config import DB_PATH
 
@@ -303,6 +304,169 @@ def init_db():
             hold_minutes REAL,
             partial_exit INTEGER DEFAULT 0,
             created_at   TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── market_snapshots ────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS market_snapshots (
+            id                    TEXT PRIMARY KEY,
+            symbol                TEXT NOT NULL,
+            timestamp             REAL,
+            price                 REAL,
+            volume_24h            REAL,
+            price_change_24h      REAL,
+            atr_percent           REAL,
+            spread_percent        REAL,
+            funding_rate          REAL,
+            open_interest_change  REAL,
+            tradeability_score    REAL,
+            scanner_status        TEXT,
+            scanner_reason        TEXT,
+            created_at            TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── scanned_coins ────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS scanned_coins (
+            id                     TEXT PRIMARY KEY,
+            symbol                 TEXT NOT NULL,
+            timestamp              REAL,
+            scanner_status         TEXT,
+            scanner_reason         TEXT,
+            volume                 REAL,
+            volatility             REAL,
+            spread                 REAL,
+            price_change           REAL,
+            funding                REAL,
+            open_interest          REAL,
+            trend_cleanliness      REAL,
+            tradeability_score     REAL,
+            volume_score           REAL,
+            volatility_score       REAL,
+            spread_score           REAL,
+            orderbook_depth_score  REAL,
+            open_interest_score    REAL,
+            funding_score          REAL,
+            trend_cleanliness_score REAL,
+            pump_dump_penalty      REAL,
+            correlation_penalty    REAL,
+            created_at             TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── candidate_signals ────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS candidate_signals (
+            id                    TEXT PRIMARY KEY,
+            signal_id             TEXT,
+            symbol                TEXT NOT NULL,
+            direction             TEXT,
+            trend_score           REAL DEFAULT 0,
+            trigger_score         REAL DEFAULT 0,
+            risk_score            REAL DEFAULT 0,
+            ai_score              REAL DEFAULT 0,
+            final_score           REAL DEFAULT 0,
+            quality               TEXT DEFAULT 'D',
+            reason                TEXT DEFAULT '',
+            reject_reason         TEXT DEFAULT '',
+            ai_veto_reason        TEXT DEFAULT '',
+            risk_reject_reason    TEXT DEFAULT '',
+            lifecycle_stage       TEXT DEFAULT 'SCANNED',
+            entry                 REAL,
+            stop                  REAL,
+            tp1                   REAL,
+            tp2                   REAL,
+            tp3                   REAL,
+            rr                    REAL,
+            atr                   REAL,
+            stop_distance_percent REAL,
+            estimated_fee         REAL,
+            estimated_slippage    REAL,
+            net_rr                REAL,
+            position_size         REAL,
+            notional              REAL,
+            leverage_suggestion   INTEGER,
+            risk_amount           REAL,
+            max_loss              REAL,
+            execution_status      TEXT DEFAULT 'candidate',
+            created_at            TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── signal_events ────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS signal_events (
+            id            TEXT PRIMARY KEY,
+            signal_id     TEXT NOT NULL,
+            symbol        TEXT,
+            stage         TEXT NOT NULL,
+            reason        TEXT DEFAULT '',
+            reject_reason TEXT DEFAULT '',
+            payload       TEXT,
+            created_at    TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── trade_events ─────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS trade_events (
+            id            TEXT PRIMARY KEY,
+            trade_id      INTEGER,
+            signal_id     TEXT,
+            symbol        TEXT NOT NULL,
+            event_type    TEXT NOT NULL,
+            event_payload TEXT,
+            created_at    TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── paper_results ────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS paper_results (
+            id                      TEXT PRIMARY KEY,
+            signal_id               TEXT,
+            candidate_id            TEXT,
+            symbol                  TEXT NOT NULL,
+            direction               TEXT,
+            tracked_from            TEXT DEFAULT 'candidate',
+            hit_tp                  INTEGER DEFAULT 0,
+            hit_stop_first          INTEGER DEFAULT 0,
+            time_to_move_minutes    REAL DEFAULT 0,
+            max_favorable_excursion REAL DEFAULT 0,
+            max_adverse_excursion   REAL DEFAULT 0,
+            setup_worked            INTEGER DEFAULT 0,
+            would_have_won          INTEGER DEFAULT 0,
+            created_at              TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── adaptive_stats ───────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS adaptive_stats (
+            id                    TEXT PRIMARY KEY,
+            scope                 TEXT NOT NULL,
+            key                   TEXT NOT NULL,
+            sample_size           INTEGER DEFAULT 0,
+            win_rate              REAL DEFAULT 0,
+            expectancy            REAL DEFAULT 0,
+            avg_r                 REAL DEFAULT 0,
+            threshold_data        REAL DEFAULT 0,
+            threshold_watchlist   REAL DEFAULT 0,
+            threshold_telegram    REAL DEFAULT 0,
+            threshold_trade       REAL DEFAULT 0,
+            action_taken          TEXT DEFAULT '',
+            notes                 TEXT DEFAULT '',
+            created_at            TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── telegram_messages ────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS telegram_messages (
+            id            TEXT PRIMARY KEY,
+            signal_id     TEXT,
+            symbol        TEXT NOT NULL,
+            dedupe_key    TEXT UNIQUE,
+            status        TEXT DEFAULT 'queued',
+            message_body  TEXT,
+            created_at    TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── backtest_runs ────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS backtest_runs (
+            id            TEXT PRIMARY KEY,
+            run_name      TEXT,
+            config        TEXT,
+            started_at    TEXT,
+            finished_at   TEXT,
+            summary       TEXT,
+            created_at    TEXT DEFAULT (datetime('now'))
         );
 
         """)
@@ -861,3 +1025,161 @@ def get_daily_signal_count() -> dict:
             counts[q] = row["cnt"]
         counts["total"] += row["cnt"]
     return counts
+
+
+VALID_SIGNAL_STAGES = {
+    "SCANNED", "TREND_CHECKED", "TRIGGER_CHECKED", "RISK_CHECKED", "AI_CHECKED",
+    "APPROVED_FOR_WATCHLIST", "APPROVED_FOR_TELEGRAM", "APPROVED_FOR_TRADE",
+    "REJECTED", "OPENED", "MANAGED", "CLOSED", "ERROR",
+}
+
+VALID_REJECT_REASONS = {
+    "low_volume", "bad_spread", "weak_trend", "weak_trigger", "bad_rr", "high_funding",
+    "low_confidence", "bad_session", "ai_veto", "risk_guard_failed", "duplicate_signal",
+    "correlation_risk", "pump_dump_risk",
+}
+
+
+def _id() -> str:
+    return str(uuid.uuid4())
+
+
+def save_market_snapshot(data: dict):
+    defaults = {
+        "id": _id(), "symbol": "", "timestamp": None, "price": 0, "volume_24h": 0,
+        "price_change_24h": 0, "atr_percent": 0, "spread_percent": 0, "funding_rate": 0,
+        "open_interest_change": 0, "tradeability_score": 0, "scanner_status": "",
+        "scanner_reason": "",
+    }
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO market_snapshots (
+               id, symbol, timestamp, price, volume_24h, price_change_24h, atr_percent,
+               spread_percent, funding_rate, open_interest_change, tradeability_score,
+               scanner_status, scanner_reason
+            ) VALUES (
+               :id, :symbol, :timestamp, :price, :volume_24h, :price_change_24h, :atr_percent,
+               :spread_percent, :funding_rate, :open_interest_change, :tradeability_score,
+               :scanner_status, :scanner_reason
+            )""",
+            {**defaults, **data},
+        )
+
+
+def save_scanned_coin(data: dict):
+    defaults = {
+        "id": _id(), "symbol": "", "timestamp": None, "scanner_status": "", "scanner_reason": "",
+        "volume": 0, "volatility": 0, "spread": 0, "price_change": 0, "funding": 0, "open_interest": 0,
+        "trend_cleanliness": 0, "tradeability_score": 0, "volume_score": 0, "volatility_score": 0,
+        "spread_score": 0, "orderbook_depth_score": 0, "open_interest_score": 0, "funding_score": 0,
+        "trend_cleanliness_score": 0, "pump_dump_penalty": 0, "correlation_penalty": 0,
+    }
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO scanned_coins (
+               id, symbol, timestamp, scanner_status, scanner_reason, volume, volatility, spread,
+               price_change, funding, open_interest, trend_cleanliness, tradeability_score,
+               volume_score, volatility_score, spread_score, orderbook_depth_score, open_interest_score,
+               funding_score, trend_cleanliness_score, pump_dump_penalty, correlation_penalty
+            ) VALUES (
+               :id, :symbol, :timestamp, :scanner_status, :scanner_reason, :volume, :volatility, :spread,
+               :price_change, :funding, :open_interest, :trend_cleanliness, :tradeability_score,
+               :volume_score, :volatility_score, :spread_score, :orderbook_depth_score, :open_interest_score,
+               :funding_score, :trend_cleanliness_score, :pump_dump_penalty, :correlation_penalty
+            )""",
+            {**defaults, **data},
+        )
+
+
+def save_candidate_signal(data: dict):
+    defaults = {
+        "id": _id(), "signal_id": None, "symbol": "", "direction": None, "trend_score": 0,
+        "trigger_score": 0, "risk_score": 0, "ai_score": 0, "final_score": 0, "quality": "D",
+        "reason": "", "reject_reason": "", "ai_veto_reason": "", "risk_reject_reason": "",
+        "lifecycle_stage": "SCANNED", "entry": None, "stop": None, "tp1": None, "tp2": None,
+        "tp3": None, "rr": 0, "atr": 0, "stop_distance_percent": 0, "estimated_fee": 0,
+        "estimated_slippage": 0, "net_rr": 0, "position_size": 0, "notional": 0,
+        "leverage_suggestion": 1, "risk_amount": 0, "max_loss": 0, "execution_status": "candidate",
+    }
+    payload = {**defaults, **data}
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO candidate_signals (
+               id, signal_id, symbol, direction, trend_score, trigger_score, risk_score,
+               ai_score, final_score, quality, reason, reject_reason, ai_veto_reason,
+               risk_reject_reason, lifecycle_stage, entry, stop, tp1, tp2, tp3, rr, atr,
+               stop_distance_percent, estimated_fee, estimated_slippage, net_rr, position_size,
+               notional, leverage_suggestion, risk_amount, max_loss, execution_status
+            ) VALUES (
+               :id, :signal_id, :symbol, :direction, :trend_score, :trigger_score, :risk_score,
+               :ai_score, :final_score, :quality, :reason, :reject_reason, :ai_veto_reason,
+               :risk_reject_reason, :lifecycle_stage, :entry, :stop, :tp1, :tp2, :tp3, :rr, :atr,
+               :stop_distance_percent, :estimated_fee, :estimated_slippage, :net_rr, :position_size,
+               :notional, :leverage_suggestion, :risk_amount, :max_loss, :execution_status
+            )""",
+            payload,
+        )
+    return payload["id"]
+
+
+def update_candidate_status(candidate_id: str, **updates):
+    if not updates:
+        return
+    sets = ", ".join(f"{k}=?" for k in updates)
+    values = list(updates.values()) + [candidate_id]
+    with get_conn() as conn:
+        conn.execute(f"UPDATE candidate_signals SET {sets} WHERE id=?", values)
+
+
+def save_signal_event(signal_id: str, stage: str, symbol: str = "", reason: str = "", reject_reason: str = "", payload: dict | None = None):
+    if stage not in VALID_SIGNAL_STAGES:
+        stage = "ERROR"
+    if reject_reason and reject_reason not in VALID_REJECT_REASONS:
+        reject_reason = "risk_guard_failed"
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO signal_events (id, signal_id, symbol, stage, reason, reject_reason, payload)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (_id(), signal_id, symbol, stage, reason, reject_reason, json.dumps(payload or {})),
+        )
+
+
+def save_trade_event(trade_id: int, signal_id: str, symbol: str, event_type: str, payload: dict | None = None):
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO trade_events (id, trade_id, signal_id, symbol, event_type, event_payload)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (_id(), trade_id, signal_id, symbol, event_type, json.dumps(payload or {})),
+        )
+
+
+def save_paper_result(data: dict):
+    defaults = {
+        "id": _id(), "signal_id": None, "candidate_id": None, "symbol": "", "direction": None,
+        "tracked_from": "candidate", "hit_tp": 0, "hit_stop_first": 0, "time_to_move_minutes": 0,
+        "max_favorable_excursion": 0, "max_adverse_excursion": 0, "setup_worked": 0, "would_have_won": 0,
+    }
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO paper_results (
+               id, signal_id, candidate_id, symbol, direction, tracked_from, hit_tp, hit_stop_first,
+               time_to_move_minutes, max_favorable_excursion, max_adverse_excursion, setup_worked, would_have_won
+            ) VALUES (
+               :id, :signal_id, :candidate_id, :symbol, :direction, :tracked_from, :hit_tp, :hit_stop_first,
+               :time_to_move_minutes, :max_favorable_excursion, :max_adverse_excursion, :setup_worked, :would_have_won
+            )""",
+            {**defaults, **data},
+        )
+
+
+def save_telegram_message(signal_id: str, symbol: str, dedupe_key: str, message_body: str, status: str = "queued") -> bool:
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """INSERT INTO telegram_messages (id, signal_id, symbol, dedupe_key, status, message_body)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (_id(), signal_id, symbol, dedupe_key, status, message_body),
+            )
+        return True
+    except sqlite3.IntegrityError:
+        return False

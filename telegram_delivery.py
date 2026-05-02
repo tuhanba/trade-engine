@@ -11,7 +11,8 @@ import threading
 import requests
 from collections import deque
 from datetime import datetime, timezone
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, EXECUTION_MODE, TELEGRAM_THRESHOLD
+from database import save_telegram_message
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ def format_signal(sig):
     msg = (
         f"{header}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🧭 Mode: <b>{EXECUTION_MODE.upper()}</b>\n"
         f"🪙 <b>{sig.symbol}</b>  {dir_emoji}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📌 Entry:  <code>{_fmt(sig.entry_zone)}</code>\n"
@@ -105,11 +107,15 @@ def format_signal(sig):
         f"🎯 TP2:    <code>{_fmt(sig.tp2)}</code>\n"
         f"🚀 TP3:    <code>{_fmt(sig.tp3)}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 Score:   <b>{_fmt(sig.final_score, 1)}</b> | Quality: <b>{sig.setup_quality}</b>\n"
         f"⚖️ RR:      <b>{_fmt(sig.rr, 2)}R</b>  |  Risk: {_fmt(sig.risk_percent, 1)}%\n"
+        f"💸 Risk Amt:<b>{_fmt(sig.max_loss, 2)}</b> | Size: {_fmt(sig.position_size, 4)}\n"
+        f"🧮 Notional:<b>{_fmt(sig.notional_size, 2)}</b> | Lev: {sig.leverage_suggestion or '?'}x\n"
         f"🔧 Kaldıraç: {sig.leverage_suggestion or '?'}x\n"
         f"📊 Kalite:  {qbar}\n"
         f"🧠 Güven:   {conf_bar} {conf_pct}%\n"
-        f"💡 Neden:   <i>{sig.reason or '—'}</i>\n"
+        f"💡 Why this trade?:   <i>{sig.reason or '—'}</i>\n"
+        f"🛡 Invalidasyon: <code>{_fmt(sig.stop_loss)}</code>\n"
         f"⏰ {now_utc}\n"
     )
     if quality == "B":
@@ -155,11 +161,16 @@ def deliver_signal(sig):
         if sig.id in _sent_ids:
             logger.debug(f"Duplicate sinyal engellendi: {sig.symbol}")
             return False
+        if (sig.final_score or 0) < TELEGRAM_THRESHOLD:
+            return False
         if sig.setup_quality not in ["S", "A+", "A", "B"]:
             return False
         if not sig.is_valid():
             return False
+        dedupe_key = f"{sig.symbol}:{sig.direction}:{round(sig.entry_zone, 6)}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
         msg = format_signal(sig)
+        if not save_telegram_message(sig.id, sig.symbol, dedupe_key, msg, status="queued"):
+            return False
         _queue.push(msg)
         _sent_ids.add(sig.id)
         sig.telegram_status = "sent"

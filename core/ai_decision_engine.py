@@ -15,11 +15,29 @@ logger = logging.getLogger(__name__)
 try:
     import sys as _sys, os as _os
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-    from config import BAD_HOURS_UTC as _BAD_HOURS, GOOD_HOURS_UTC as _GOOD_HOURS, ALLOWED_QUALITIES as _ALLOWED_QUAL
+    from config import (
+        BAD_HOURS_UTC as _BAD_HOURS,
+        GOOD_HOURS_UTC as _GOOD_HOURS,
+        ALLOWED_QUALITIES as _ALLOWED_QUAL,
+        DATA_THRESHOLD,
+        WATCHLIST_THRESHOLD,
+        TELEGRAM_THRESHOLD,
+        TRADE_THRESHOLD,
+        MIN_CANDIDATES_FOR_COIN_LEARNING,
+        MIN_TRADES_FOR_RISK_UPDATE,
+        MIN_CANDIDATES_FOR_THRESHOLD_UPDATE,
+    )
 except ImportError:
     _BAD_HOURS   = [5, 6, 14, 20]
     _GOOD_HOURS  = [0, 2, 3, 7, 15]
     _ALLOWED_QUAL = ["A+"]
+    DATA_THRESHOLD = 45
+    WATCHLIST_THRESHOLD = 65
+    TELEGRAM_THRESHOLD = 75
+    TRADE_THRESHOLD = 82
+    MIN_CANDIDATES_FOR_COIN_LEARNING = 30
+    MIN_TRADES_FOR_RISK_UPDATE = 50
+    MIN_CANDIDATES_FOR_THRESHOLD_UPDATE = 100
 
 PARAM_BOUNDS = {
     "sl_atr_mult":    (0.8,  2.5),
@@ -37,6 +55,12 @@ class AIDecisionEngine:
         self.max_daily_signals = 40  # Backtest: kalite > miktar
         self.recent_coins = []
         self.last_reset_date = datetime.utcnow().date()
+        self.thresholds = {
+            "data": DATA_THRESHOLD,
+            "watchlist": WATCHLIST_THRESHOLD,
+            "telegram": TELEGRAM_THRESHOLD,
+            "trade": TRADE_THRESHOLD,
+        }
         
         # Dinamik parametreler
         self.params = {
@@ -234,25 +258,28 @@ class AIDecisionEngine:
         elif ml_score < 45:
             ai_adj -= 1.0
 
-        final_score = base_score + ai_adj
+        ai_score = (base_score + ai_adj) * 10
+        final_score = max(0.0, min(100.0, ai_score))
         
         # Confidence hesaplamasında ML skorunu da hesaba kat
-        base_confidence = max(0.0, min(1.0, final_score / 10.0))
+        base_confidence = max(0.0, min(1.0, final_score / 100.0))
         confidence = (base_confidence * 0.6) + ((ml_score / 100.0) * 0.4)
 
-        # S  için eşik: 5.5 — Composite skor ≥10, en güvenilir setup
-        # A+ için eşik: 6.0 — Backtest kanıtlı, yüksek kalite
-        # Not: base_score max=10.0, ai_adj tipik -2.5 ile +1.5 arasında
-        # Yeni DB'de veri yok → ai_adj ≈ 0.0 → base_score 6.0+ yeterli
-        if final_score >= 5.5 and signal_data.setup_quality == "S":
+        if final_score >= self.thresholds["trade"]:
             decision = "ALLOW"
-            reason = "S-class composite setup with AI approval"
-        elif final_score >= 6.0 and signal_data.setup_quality == "A+":
-            decision = "ALLOW"
-            reason = "A+ setup with AI approval"
+            reason = "approved_for_trade"
+        elif final_score >= self.thresholds["telegram"]:
+            decision = "WATCH"
+            reason = "approved_for_telegram"
+        elif final_score >= self.thresholds["watchlist"]:
+            decision = "WATCH"
+            reason = "approved_for_watchlist"
+        elif final_score >= self.thresholds["data"]:
+            decision = "CANDIDATE"
+            reason = "approved_for_data_collection"
         else:
             decision = "VETO"
-            reason = f"Low AI score ({final_score:.1f}) or dangerous profile"
+            reason = "low_confidence"
 
         if decision == "ALLOW":
             self.daily_signals += 1
@@ -266,6 +293,7 @@ class AIDecisionEngine:
         return {
             "decision": decision,
             "final_score": round(final_score, 1),
+            "ai_score": round(ai_score, 1),
             "confidence": round(confidence, 2),
             "reason": reason,
             "ai_adjustment": round(ai_adj, 1)
@@ -278,7 +306,7 @@ class AIDecisionEngine:
                 conn.row_factory = sqlite3.Row
                 trades = conn.execute("SELECT * FROM ai_learning ORDER BY id DESC LIMIT 50").fetchall()
                 
-                if len(trades) < 10:
+                if len(trades) < MIN_TRADES_FOR_RISK_UPDATE:
                     return
                     
                 wins = [t for t in trades if t["trade_result"] == "WIN"]
@@ -304,7 +332,7 @@ class AIDecisionEngine:
                     self.params["tp_atr_mult"] = clamp(self.params["tp_atr_mult"] + 0.15, *PARAM_BOUNDS["tp_atr_mult"])
                     
                 # En iyi parametreleri kaydet
-                if wr > 0.40 and pf > 1.0:
+                if wr > 0.40 and pf > 1.0 and len(trades) >= MIN_CANDIDATES_FOR_THRESHOLD_UPDATE:
                     best = conn.execute("SELECT * FROM best_params ORDER BY profit_factor DESC LIMIT 1").fetchone()
                     if not best or (pf > best["profit_factor"] and wr > best["win_rate"]):
                         conn.execute("""
@@ -337,7 +365,7 @@ class AIDecisionEngine:
                     win_rate = wins / total
                     
                     danger = 0.0
-                    if total >= 3 and all(t[0] == "LOSS" for t in trades[:3]):
+                    if total >= MIN_CANDIDATES_FOR_COIN_LEARNING and all(t[0] == "LOSS" for t in trades[:3]):
                         danger = 0.8
                     elif win_rate < 0.3:
                         danger = 0.6

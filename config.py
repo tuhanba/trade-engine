@@ -20,6 +20,8 @@ load_dotenv()
 AX_MODE        = os.getenv("AX_MODE", "execute")      # execute | observe
 EXECUTION_MODE = os.getenv("EXECUTION_MODE", "paper") # paper | live
 PAPER_MODE     = EXECUTION_MODE == "paper"
+LIVE_MODE_DEFAULT = os.getenv("LIVE_MODE_DEFAULT", "false").lower() == "true"
+LIVE_CONFIRM = os.getenv("LIVE_CONFIRM", "false").lower() == "true"
 
 # ── API ──────────────────────────────────────────────────────────────────────
 BINANCE_API_KEY    = os.getenv("BINANCE_API_KEY", "")
@@ -35,12 +37,21 @@ MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "2"))
 DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "3.0"))
 CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "3"))
 CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "120"))
+MAX_CORRELATED_TRADES   = int(os.getenv("MAX_CORRELATED_TRADES", "2"))
+MAX_LEVERAGE            = int(os.getenv("MAX_LEVERAGE", "20"))
+MAX_SPREAD_PCT          = float(os.getenv("MAX_SPREAD_PCT", "0.10"))
 
 # ── Sinyal ───────────────────────────────────────────────────────────────────
 MIN_RR             = float(os.getenv("MIN_RR", "1.5"))
 # Backtest: SL çıkışı 106 trade, -$1005 zarar. Daha sıkı SL → daha küçük kayıp
 SL_ATR_MULT        = float(os.getenv("SL_ATR_MULT", "1.2"))   # 1.5 → 1.2
 MIN_EXPECTED_MFE_R = float(os.getenv("MIN_EXPECTED_MFE_R", "1.0"))
+
+# ── Multi-threshold Sinyal Geçitleri ──────────────────────────────────────────
+DATA_THRESHOLD      = float(os.getenv("DATA_THRESHOLD", "45"))
+WATCHLIST_THRESHOLD = float(os.getenv("WATCHLIST_THRESHOLD", "65"))
+TELEGRAM_THRESHOLD  = float(os.getenv("TELEGRAM_THRESHOLD", "75"))
+TRADE_THRESHOLD     = float(os.getenv("TRADE_THRESHOLD", "82"))
 
 # ── ADX Trend Gücü Filtresi ──────────────────────────────────────────────────
 # Backtest: ADX < 25 olan sinyallerde WR düşük, trend gücü zayıf
@@ -93,6 +104,15 @@ TARGET_DAILY_MAX  = int(os.getenv("TARGET_DAILY_MAX", "12"))  # Kalite > Miktar
 
 # ── Tarama ───────────────────────────────────────────────────────────────────
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "60"))   # saniye
+
+# ── Adaptive Engine Örneklem Eşikleri ─────────────────────────────────────────
+MIN_CANDIDATES_FOR_COIN_LEARNING = int(os.getenv("MIN_CANDIDATES_FOR_COIN_LEARNING", "30"))
+MIN_TRADES_FOR_RISK_UPDATE = int(os.getenv("MIN_TRADES_FOR_RISK_UPDATE", "50"))
+MIN_CANDIDATES_FOR_THRESHOLD_UPDATE = int(os.getenv("MIN_CANDIDATES_FOR_THRESHOLD_UPDATE", "100"))
+
+# ── Paper Tracking ─────────────────────────────────────────────────────────────
+PAPER_TRACK_REJECTED_CANDIDATES = os.getenv("PAPER_TRACK_REJECTED_CANDIDATES", "true").lower() == "true"
+PAPER_TRACK_WATCHLIST = os.getenv("PAPER_TRACK_WATCHLIST", "true").lower() == "true"
 
 # ── Veritabanı ───────────────────────────────────────────────────────────────
 DB_PATH = os.getenv("DB_PATH", "/root/trade_engine/trading.db")

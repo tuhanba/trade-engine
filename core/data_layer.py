@@ -46,6 +46,11 @@ class SignalData:
     telegram_status: str = "pending"
     dashboard_status: str = "pending"
     error: str = ""
+    lifecycle_stage: str = "SCANNED"
+    candidate_id: str = ""
+    reject_reason: str = ""
+    ai_veto_reason: str = ""
+    risk_reject_reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

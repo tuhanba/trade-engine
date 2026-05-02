@@ -25,12 +25,15 @@ from config import (
     LOG_DIR, LOG_MAX_DAYS, LOG_MAX_MB,
     MAX_DAILY_SIGNALS, DB_PATH,
     DAILY_MAX_LOSS_PCT,
+    DATA_THRESHOLD, WATCHLIST_THRESHOLD, TELEGRAM_THRESHOLD, TRADE_THRESHOLD,
+    EXECUTION_MODE, LIVE_CONFIRM, MAX_LEVERAGE, MIN_RR,
 )
 from database import (
     init_db, init_paper_account, get_paper_balance,
     get_open_trades, set_state, get_state,
     save_scalp_signal, archive_old_scalp_signals,
     get_daily_signal_count,
+    save_candidate_signal, save_signal_event, update_candidate_status, save_paper_result,
 )
 from core.data_layer import data_layer, SignalData
 from core.market_scanner import MarketScanner
@@ -241,14 +244,20 @@ def main():
 
                 try:
                     # ── ADIM 2: TREND ENGINE ───────────────────────────────
+                    signal_id = data_layer.create_signal(symbol).id
+                    save_signal_event(signal_id, "SCANNED", symbol=symbol, reason="scanner_pass")
                     trend_result = trend.analyze(symbol)
                     if trend_result["direction"] == "NO TRADE":
+                        save_signal_event(signal_id, "REJECTED", symbol=symbol, reject_reason="weak_trend", reason="trend_engine_no_trade")
                         continue
+                    save_signal_event(signal_id, "TREND_CHECKED", symbol=symbol, reason="trend_pass")
 
                     # ── ADIM 3: TRIGGER ENGINE ─────────────────────────────
                     trigger_result = trigger.analyze(symbol, trend_result["direction"], trend_result.get("btc_trend", "NEUTRAL"))
                     if trigger_result["quality"] == "D":
+                        save_signal_event(signal_id, "REJECTED", symbol=symbol, reject_reason="weak_trigger", reason="trigger_quality_d")
                         continue
+                    save_signal_event(signal_id, "TRIGGER_CHECKED", symbol=symbol, reason="trigger_pass")
 
                     # C kalitesi sadece dashboard'da izlenir
                     if trigger_result["quality"] == "C":
@@ -264,6 +273,27 @@ def main():
                         sig.dashboard_status = "active"
                         sig.telegram_status = "skip"
                         save_scalp_signal(sig.to_dict())
+                        candidate_id = save_candidate_signal({
+                            "signal_id": sig.id,
+                            "symbol": symbol,
+                            "direction": sig.direction,
+                            "trend_score": sig.trend_score,
+                            "trigger_score": sig.trigger_score,
+                            "final_score": max(DATA_THRESHOLD, 50),
+                            "quality": "C",
+                            "reason": "watchlist_only_candidate",
+                            "execution_status": "candidate",
+                            "lifecycle_stage": "APPROVED_FOR_WATCHLIST",
+                        })
+                        save_signal_event(sig.id, "APPROVED_FOR_WATCHLIST", symbol=symbol, reason="quality_c_watchlist")
+                        if True:
+                            save_paper_result({
+                                "signal_id": sig.id,
+                                "candidate_id": candidate_id,
+                                "symbol": symbol,
+                                "direction": sig.direction,
+                                "tracked_from": "watchlist",
+                            })
                         continue
 
                     # ── ADIM 4: RISK ENGINE ────────────────────────────────
@@ -275,10 +305,25 @@ def main():
                         balance
                     )
                     if not risk_result.get("valid"):
+                        save_candidate_signal({
+                            "signal_id": signal_id,
+                            "symbol": symbol,
+                            "direction": trend_result["direction"],
+                            "trend_score": trend_result["score"],
+                            "trigger_score": trigger_result["score"],
+                            "risk_score": risk_result.get("score", 0),
+                            "quality": trigger_result["quality"],
+                            "reject_reason": risk_result.get("risk_reject_reason", "risk_guard_failed"),
+                            "risk_reject_reason": risk_result.get("risk_reject_reason", "risk_guard_failed"),
+                            "lifecycle_stage": "REJECTED",
+                            "execution_status": "rejected",
+                        })
+                        save_signal_event(signal_id, "REJECTED", symbol=symbol, reject_reason=risk_result.get("risk_reject_reason", "risk_guard_failed"), reason="risk_engine_reject")
                         continue
+                    save_signal_event(signal_id, "RISK_CHECKED", symbol=symbol, reason="risk_pass")
 
                     # ── ADIM 5: DATA LAYER — SİNYAL OLUŞTUR ───────────────
-                    sig = data_layer.create_signal(symbol)
+                    sig = data_layer.get_signal(signal_id)
                     sig.direction = trend_result["direction"]
                     sig.coin_score = coin_info["tradeability_score"]
                     sig.trend_score = trend_result["score"]
@@ -305,27 +350,103 @@ def main():
                     sig.final_score = decision["final_score"]
                     sig.confidence = decision["confidence"]
                     sig.reason = decision["reason"]
+                    save_signal_event(sig.id, "AI_CHECKED", symbol=symbol, reason=decision["reason"])
 
-                    if decision["decision"] != "ALLOW":
+                    candidate_payload = {
+                        "signal_id": sig.id,
+                        "symbol": sig.symbol,
+                        "direction": sig.direction,
+                        "trend_score": sig.trend_score,
+                        "trigger_score": sig.trigger_score,
+                        "risk_score": sig.risk_score,
+                        "ai_score": decision.get("ai_score", sig.final_score),
+                        "final_score": sig.final_score,
+                        "quality": sig.setup_quality,
+                        "reason": sig.reason,
+                        "lifecycle_stage": "AI_CHECKED",
+                        "entry": sig.entry_zone,
+                        "stop": sig.stop_loss,
+                        "tp1": sig.tp1,
+                        "tp2": sig.tp2,
+                        "tp3": sig.tp3,
+                        "rr": sig.rr,
+                        "atr": risk_result.get("atr", 0),
+                        "stop_distance_percent": risk_result.get("stop_distance_percent", 0),
+                        "estimated_fee": risk_result.get("estimated_fee", 0),
+                        "estimated_slippage": risk_result.get("estimated_slippage", 0),
+                        "net_rr": risk_result.get("net_rr", sig.rr),
+                        "position_size": sig.position_size,
+                        "notional": sig.notional_size,
+                        "leverage_suggestion": sig.leverage_suggestion,
+                        "risk_amount": risk_result.get("risk_amount", sig.max_loss),
+                        "max_loss": sig.max_loss,
+                        "execution_status": "candidate",
+                    }
+                    candidate_id = save_candidate_signal(candidate_payload)
+                    sig.candidate_id = candidate_id
+
+                    if sig.final_score < DATA_THRESHOLD:
                         sig.status = "vetoed"
+                        sig.reject_reason = "low_confidence"
                         sig.telegram_status = "skip"
+                        update_candidate_status(candidate_id, reject_reason="low_confidence", lifecycle_stage="REJECTED", execution_status="rejected")
+                        save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="low_confidence", reason="below_data_threshold")
+                        save_scalp_signal(sig.to_dict())
+                        continue
+
+                    if decision["decision"] == "VETO":
+                        sig.status = "vetoed"
+                        sig.ai_veto_reason = decision["reason"]
+                        sig.reject_reason = "ai_veto"
+                        sig.telegram_status = "skip"
+                        update_candidate_status(candidate_id, ai_veto_reason=decision["reason"], reject_reason="ai_veto", lifecycle_stage="REJECTED", execution_status="rejected")
+                        save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="ai_veto", reason=decision["reason"])
                         save_scalp_signal(sig.to_dict())
                         logger.info(
                             f"[VETO] {symbol} {sig.direction} | {decision['reason']} | "
                             f"score={sig.final_score}"
                         )
+                        save_paper_result({
+                            "signal_id": sig.id,
+                            "candidate_id": candidate_id,
+                            "symbol": symbol,
+                            "direction": sig.direction,
+                            "tracked_from": "candidate",
+                        })
                         continue
 
                     sig.status = "approved"
+                    update_candidate_status(candidate_id, lifecycle_stage="APPROVED_FOR_WATCHLIST")
+                    save_signal_event(sig.id, "APPROVED_FOR_WATCHLIST", symbol=symbol, reason="watchlist_threshold_pass")
 
                     # ── ADIM 7: DATA LAYER'A KAYDET ────────────────────────
                     save_scalp_signal(sig.to_dict())
 
                     # ── ADIM 8: TELEGRAM DELIVERY ──────────────────────────
-                    deliver_signal(sig)
+                    if sig.final_score >= TELEGRAM_THRESHOLD:
+                        sig.telegram_status = "queued"
+                        update_candidate_status(candidate_id, lifecycle_stage="APPROVED_FOR_TELEGRAM")
+                        save_signal_event(sig.id, "APPROVED_FOR_TELEGRAM", symbol=symbol, reason="telegram_threshold_pass")
+                        deliver_signal(sig)
+                    else:
+                        sig.telegram_status = "skip"
 
                     # ── ADIM 9: TRADE AÇMA (execute modunda) ──────────────
-                    if AX_MODE == "execute" and EXECUTION_AVAILABLE:
+                    if AX_MODE == "execute" and EXECUTION_AVAILABLE and sig.final_score >= TRADE_THRESHOLD:
+                        if sig.rr < MIN_RR:
+                            update_candidate_status(candidate_id, reject_reason="bad_rr", lifecycle_stage="REJECTED", execution_status="rejected")
+                            save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="bad_rr", reason="trade_guard_min_rr")
+                            continue
+                        if sig.leverage_suggestion > MAX_LEVERAGE:
+                            update_candidate_status(candidate_id, reject_reason="risk_guard_failed", lifecycle_stage="REJECTED", execution_status="rejected")
+                            save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="risk_guard_failed", reason="trade_guard_max_leverage")
+                            continue
+                        if EXECUTION_MODE == "live" and not LIVE_CONFIRM:
+                            update_candidate_status(candidate_id, reject_reason="risk_guard_failed", lifecycle_stage="REJECTED", execution_status="rejected")
+                            save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="risk_guard_failed", reason="live_confirm_required")
+                            continue
+                        update_candidate_status(candidate_id, lifecycle_stage="APPROVED_FOR_TRADE")
+                        save_signal_event(sig.id, "APPROVED_FOR_TRADE", symbol=symbol, reason="trade_threshold_pass")
                         # Eski signal formatına dönüştür (geriye uyumluluk)
                         legacy_signal = {
                             "symbol": sig.symbol,
@@ -338,6 +459,7 @@ def main():
                             "rr": sig.rr,
                             "score": sig.final_score,
                             "confidence": sig.confidence,
+                            "candidate_id": candidate_id,
                         }
                         ax_result = {
                             "decision": "ALLOW",
@@ -347,6 +469,8 @@ def main():
                         }
                         trade_id = open_trade(client, legacy_signal, ax_result)
                         if trade_id:
+                            save_signal_event(sig.id, "OPENED", symbol=symbol, reason=f"trade_id={trade_id}")
+                            update_candidate_status(candidate_id, lifecycle_stage="OPENED", execution_status="opened")
                             logger.info(
                                 f"✅ TRADE AÇILDI #{trade_id} {symbol} {sig.direction} "
                                 f"score={sig.final_score:.1f} rr={sig.rr:.2f}"

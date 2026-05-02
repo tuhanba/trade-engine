@@ -108,6 +108,7 @@ class RiskEngine:
             breakeven_sl = entry - (entry * BREAKEVEN_OFFSET_PCT / 100)
 
         rr = abs(tp2 - entry) / (sl_dist + 1e-10)
+        estimated_fee = notional_fee = 0.0
 
         # ── Dinamik Risk Yönetimi — Kalite Bazlı ────────────────────────────
         # S  : %2.0 risk — Composite skor ≥10, en güvenilir setup
@@ -133,11 +134,19 @@ class RiskEngine:
         risk_amount   = balance * (risk_pct / 100)
         position_size = risk_amount / sl_dist if sl_dist > 0 else 0
         notional      = position_size * entry
+        estimated_fee = notional * 0.0008
+        estimated_slippage = notional * 0.0005
+        net_rr = max(0.0, rr - ((estimated_fee + estimated_slippage) / (risk_amount + 1e-10)))
 
         # Kaldıraç önerisi
         leverage = min(max_lev, max(1, int(notional / (balance + 1e-10)))) if balance > 0 else 1
 
+        risk_reject_reason = ""
         valid = rr >= self.min_rr and risk_pct > 0
+        if rr < self.min_rr:
+            risk_reject_reason = "bad_rr"
+        elif risk_pct <= 0:
+            risk_reject_reason = "risk_guard_failed"
 
         # ── Risk Skoru ────────────────────────────────────────────────────────
         score = 5.0
@@ -162,6 +171,13 @@ class RiskEngine:
             "notional":      round(notional, 2),
             "leverage":      leverage,
             "max_loss":      round(risk_amount, 2),
+            "atr":           round(float(atr_val), 6),
+            "stop_distance_percent": round((sl_dist / (entry + 1e-10)) * 100, 4),
+            "estimated_fee": round(estimated_fee, 4),
+            "estimated_slippage": round(estimated_slippage, 4),
+            "net_rr":        round(net_rr, 3),
+            "risk_amount":   round(risk_amount, 2),
+            "risk_reject_reason": risk_reject_reason,
             # ── Breakeven Parametreleri ────────────────────────────────────────
             "breakeven_enabled":   BREAKEVEN_ENABLED,
             "breakeven_sl":        round(breakeven_sl, 6),

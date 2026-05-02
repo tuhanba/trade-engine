@@ -470,6 +470,35 @@ def api_signal_stats():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# ── /api/signal_funnel ────────────────────────────────────────────────────────
+@app.route("/api/signal_funnel")
+def api_signal_funnel():
+    try:
+        with get_conn() as conn:
+            scanned = conn.execute("SELECT COUNT(*) FROM scanned_coins").fetchone()[0] or 0
+            candidate = conn.execute("SELECT COUNT(*) FROM candidate_signals").fetchone()[0] or 0
+            watchlist = conn.execute(
+                "SELECT COUNT(*) FROM candidate_signals WHERE lifecycle_stage IN ('APPROVED_FOR_WATCHLIST','APPROVED_FOR_TELEGRAM','APPROVED_FOR_TRADE','OPENED','MANAGED','CLOSED')"
+            ).fetchone()[0] or 0
+            telegram = conn.execute(
+                "SELECT COUNT(*) FROM telegram_messages WHERE status IN ('queued','sent')"
+            ).fetchone()[0] or 0
+            trade = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] or 0
+            wins = conn.execute("SELECT COUNT(*) FROM trades WHERE net_pnl > 0 AND close_time IS NOT NULL").fetchone()[0] or 0
+            losses = conn.execute("SELECT COUNT(*) FROM trades WHERE net_pnl <= 0 AND close_time IS NOT NULL").fetchone()[0] or 0
+        return jsonify({"ok": True, "data": {
+            "scanned": scanned,
+            "candidate": candidate,
+            "watchlist": watchlist,
+            "telegram": telegram,
+            "trade": trade,
+            "wins": wins,
+            "losses": losses,
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ── /api/scalp_signals ────────────────────────────────────────────────────────
 @app.route("/api/scalp_signals")
 def api_scalp_signals():
