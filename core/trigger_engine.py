@@ -243,7 +243,7 @@ class TriggerEngine:
         except Exception:
             pass
         # BTC trend uyumu (0-1 puan)
-        if (direction == "LONG" and btc_trend == "BULLISH") or            (direction == "SHORT" and btc_trend == "BEARISH"):
+        if (direction == "LONG" and btc_trend == "BULLISH") or (direction == "SHORT" and btc_trend == "BEARISH"):
             s_score += 1
         # İyi saat bonusu (0-1 puan)
         if current_hour in GOOD_HOURS_UTC:

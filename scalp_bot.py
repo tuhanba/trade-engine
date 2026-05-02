@@ -136,6 +136,7 @@ def main():
             logger.warning(f"TelegramManager başlatılamadı: {e}")
 
     consecutive_losses = 0
+    _last_ai_adapt = 0  # AI Brain periyodik adaptasyon (30 dakikada bir)
     send_message(
         f"🚀 <b>AX Scalp Engine v2.0 başlatıldı</b>\n"
         f"Mod: {AX_MODE.upper()} | {EXECUTION_MODE.upper()}\n"
@@ -284,6 +285,7 @@ def main():
                     sig.trigger_score = trigger_result["score"]
                     sig.risk_score = risk_result["score"]
                     sig.setup_quality = trigger_result["quality"]
+                    sig.ml_score = trigger_result.get("ml_score", 50)
                     sig.entry_zone = trigger_result["entry"]
                     sig.stop_loss = risk_result["sl"]
                     sig.tp1 = risk_result["tp1"]
@@ -364,6 +366,16 @@ def main():
                     continue
 
             time.sleep(SCAN_INTERVAL)
+            # ── AI Brain Periyodik Adaptasyon (30 dakikada bir) ─────────────
+            _now_ts = time.time()
+            if AI_BRAIN_AVAILABLE and (_now_ts - _last_ai_adapt) >= 1800:
+                try:
+                    from ai_brain import analyze_and_adapt
+                    threading.Thread(target=analyze_and_adapt, daemon=True).start()
+                    _last_ai_adapt = _now_ts
+                    logger.info("[AI Brain] Periyodik adaptasyon baslatildi.")
+                except Exception as _ae:
+                    logger.warning(f"AI Brain adaptasyon hatasi: {_ae}")
 
         except KeyboardInterrupt:
             logger.info("Bot durduruldu (KeyboardInterrupt).")

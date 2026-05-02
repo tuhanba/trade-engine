@@ -89,6 +89,6 @@ class DataLayer:
         return [s.to_dict() for s in self.active_signals.values() if s.is_valid()]
 
     def get_valid_signals_for_telegram(self):
-        return [s for s in self.active_signals.values() if s.is_valid() and s.setup_quality in ["A+", "A", "B"] and s.telegram_status == "pending"]
+        return [s for s in self.active_signals.values() if s.is_valid() and s.setup_quality in ["S", "A+", "A", "B"] and s.telegram_status == "pending"]
 
 data_layer = DataLayer()

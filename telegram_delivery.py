@@ -78,7 +78,10 @@ def _fmt(val, decimals=4):
 def format_signal(sig):
     quality   = sig.setup_quality or "B"
     direction = sig.direction or "?"
-    if quality == "A+":
+    if quality == "S":
+        header    = "⭐ <b>S-CLASS SETUP — FULL SIZE</b>"
+        qbar      = "██████████ S"
+    elif quality == "A+":
         header    = "🔥 <b>A+ SCALP SETUPu</b>"
         qbar      = "████████ A+"
     elif quality == "A":
@@ -152,7 +155,7 @@ def deliver_signal(sig):
         if sig.id in _sent_ids:
             logger.debug(f"Duplicate sinyal engellendi: {sig.symbol}")
             return False
-        if sig.setup_quality not in ["A+", "A", "B"]:
+        if sig.setup_quality not in ["S", "A+", "A", "B"]:
             return False
         if not sig.is_valid():
             return False

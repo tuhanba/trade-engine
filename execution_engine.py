@@ -378,6 +378,33 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     except Exception as e:
         logger.warning(f"AI learn_from_trade hatası: {e}")
 
+    # ── CoinLibrary Öğrenme Döngüsü ──────────────────────────────────────────
+    try:
+        from coin_library import update_coin_stats
+        entry_p = t.get("entry", 0)
+        sl_p    = t.get("sl", 0)
+        sl_dist = abs(entry_p - sl_p) if sl_p else 1e-10
+        r_mult  = round(net_pnl / (sl_dist * t.get("qty", 1) + 1e-10), 3)
+        update_coin_stats(
+            symbol    = t["symbol"],
+            result    = result,
+            net_pnl   = net_pnl,
+            r_multiple= r_mult,
+            direction = t.get("direction"),
+        )
+    except Exception as e:
+        logger.warning(f"CoinLibrary update_coin_stats hatası: {e}")
+    # ── AI Brain Postmortem Analizi ───────────────────────────────────────────
+    try:
+        import threading
+        from ai_brain import post_trade_analysis
+        threading.Thread(
+            target=post_trade_analysis,
+            args=(trade_id,),
+            daemon=True
+        ).start()
+    except Exception as e:
+        logger.warning(f"AI Brain post_trade_analysis hatası: {e}")
     logger.info(
         f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
         f"{reason.upper()} pnl={net_pnl:+.3f}$ hold={hold_min:.0f}dk"

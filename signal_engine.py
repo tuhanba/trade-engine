@@ -21,7 +21,7 @@ import logging
 import pandas as pd
 
 from config import (
-    SL_ATR_MULT, TP1_R, TP2_R, TRAIL_ATR_MULT,
+    SL_ATR_MULT, TP1_R, TP2_R, TP3_R, TRAIL_ATR_MULT,
     MIN_RR, MIN_EXPECTED_MFE_R,
 )
 from coin_library import get_coin_params
@@ -225,12 +225,12 @@ def _calc_levels(direction: str, entry: float, atr_val: float,
         sl  = entry - sl_dist
         tp1 = entry + sl_dist * TP1_R
         tp2 = entry + sl_dist * TP2_R
-        runner = tp2 + sl_dist * 0.5
+        runner = entry + sl_dist * TP3_R   # TP3 = 3.0R (config'den)
     else:
         sl  = entry + sl_dist
         tp1 = entry - sl_dist * TP1_R
         tp2 = entry - sl_dist * TP2_R
-        runner = tp2 - sl_dist * 0.5
+        runner = entry - sl_dist * TP3_R   # TP3 = 3.0R (config'den)
 
     rr = abs(tp2 - entry) / (sl_dist + 1e-10)
 

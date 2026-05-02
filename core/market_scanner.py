@@ -8,12 +8,21 @@ from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
+# Config'den coin evrenini al
+try:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    from config import COIN_UNIVERSE as _COIN_UNIVERSE
+except ImportError:
+    _COIN_UNIVERSE = []
+
 class MarketScanner:
     def __init__(self, client, db_path="trade_engine.db"):
         self.client = client
         self.db_path = db_path
         self.min_volume = 10_000_000  # 10M USD
         self.min_price = 0.001
+        self.coin_universe = set(_COIN_UNIVERSE)  # 92 coin filtresi
 
     def _get_cooldown_coins(self) -> set:
         """Cooldown'da olan coinleri getirir."""
@@ -47,7 +56,9 @@ class MarketScanner:
                 symbol = t["symbol"]
                 if symbol not in valid_symbols:
                     continue
-                    
+                # ── 92 Coin Evreni Filtresi ───────────────────────────────────
+                if self.coin_universe and symbol not in self.coin_universe:
+                    continue
                 if symbol in cooldown_coins:
                     continue
                     
