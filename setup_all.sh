@@ -65,13 +65,38 @@ fi
     2>/dev/null
 echo "   ✓ Bağımlılıklar güncellendi"
 
-# 4. DB başlat
+# 4. DB başlat ve sıfırla
 echo ""
-echo "▶ [4/8] Veritabanı başlatılıyor..."
+echo "▶ [4/8] Veritabanı başlatılıyor ve sıfırlanıyor..."
 "$VENV/bin/python3" -c "
 import sys; sys.path.insert(0,'$REPO')
 from database import init_db; init_db()
 print('   ✓ DB tabloları hazır')
+"
+# Eski verileri temizle, temiz başlangıç yap
+echo "   Eski veriler temizleniyor (AI Brain korunuyor)..."
+"$VENV/bin/python3" -c "
+import sys, sqlite3, os
+sys.path.insert(0,'$REPO')
+from config import DB_PATH, COIN_UNIVERSE
+if os.path.exists(DB_PATH):
+    with sqlite3.connect(DB_PATH) as conn:
+        for tbl in ['trades','signal_candidates','scalp_signals','daily_summary','weekly_summary','dashboard_snapshots','ai_logs','coin_market_memory']:
+            try: conn.execute(f'DELETE FROM {tbl}')
+            except: pass
+        try:
+            conn.execute("DELETE FROM system_state WHERE key='paper_balance'")
+            conn.execute("INSERT INTO system_state (key,value,updated_at) VALUES ('paper_balance','10000.0',datetime('now'))")
+        except: pass
+        try:
+            conn.execute("DELETE FROM system_state WHERE key='circuit_breaker_until'")
+            conn.execute("DELETE FROM system_state WHERE key='paused'")
+        except: pass
+        conn.commit()
+    print(f'   ✓ Veriler temizlendi, bakiye \$10,000 sıfırlandı')
+from coin_library import init_coin_library
+init_coin_library()
+print(f'   ✓ {len(COIN_UNIVERSE)} coin parametresi yüklendi')
 "
 
 # 5. nginx kur ve yapılandır

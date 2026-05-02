@@ -631,45 +631,72 @@ def save_weekly_summary(data: dict):
 # STATS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_stats(hours: int = 48) -> dict:
+def get_stats(hours: int = 720) -> dict:
+    """Son N saatin istatistikleri (varsayilan: 720 saat = 30 gun)."""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status='closed' AND close_time >= ?", (cutoff,)
+            """SELECT * FROM trades
+               WHERE status IN ('closed','closed_win','closed_loss','sl','tp1_hit','runner','trail','timeout')
+               AND close_time >= ? AND close_time IS NOT NULL""",
+            (cutoff,)
         ).fetchall()
-
+        open_rows = conn.execute(
+            "SELECT COUNT(*) FROM trades WHERE close_time IS NULL"
+        ).fetchone()
     trades = [dict(r) for r in rows]
+    open_count = open_rows[0] if open_rows else 0
+    _empty = {
+        "total": 0, "wins": 0, "losses": 0, "win_rate": 0,
+        "total_pnl": 0, "avg_pnl": 0, "avg_win": 0, "avg_loss": 0,
+        "avg_r": 0, "avg_rr": 0, "profit_factor": 0, "max_drawdown": 0,
+        "best_trade": 0, "worst_trade": 0, "avg_dur": 0,
+        "open_count": open_count, "last_ai": {},
+    }
     if not trades:
-        return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0,
-                "total_pnl": 0, "avg_win": 0, "avg_loss": 0,
-                "avg_r": 0, "profit_factor": 0, "max_drawdown": 0}
-
-    wins   = [t for t in trades if t["net_pnl"] > 0]
-    losses = [t for t in trades if t["net_pnl"] <= 0]
-    pnls   = [t["net_pnl"] for t in trades]
-
+        return _empty
+    wins   = [t for t in trades if (t.get("net_pnl") or 0) > 0]
+    losses = [t for t in trades if (t.get("net_pnl") or 0) <= 0]
+    pnls   = [t.get("net_pnl") or 0 for t in trades]
     gross_win  = sum(t["net_pnl"] for t in wins)
     gross_loss = abs(sum(t["net_pnl"] for t in losses))
-
     cum, peak, max_dd = 0, 0, 0
     for p in reversed(pnls):
         cum += p
         peak = max(peak, cum)
         max_dd = max(max_dd, peak - cum)
-
+    # Ortalama sure (dakika)
+    durations = []
+    for t in trades:
+        try:
+            if t.get("open_time") and t.get("close_time"):
+                from datetime import datetime as _dt
+                ot = _dt.fromisoformat(str(t["open_time"]).replace("Z",""))
+                ct = _dt.fromisoformat(str(t["close_time"]).replace("Z",""))
+                durations.append(abs((ct - ot).total_seconds() / 60))
+        except Exception:
+            pass
+    avg_dur = round(sum(durations) / len(durations), 1) if durations else 0
+    r_vals = [t.get("r_multiple") or 0 for t in trades]
     return {
         "total":         len(trades),
         "wins":          len(wins),
         "losses":        len(losses),
-        "win_rate":      len(wins) / len(trades),
-        "total_pnl":     sum(pnls),
-        "avg_win":       gross_win  / len(wins)   if wins   else 0,
-        "avg_loss":      gross_loss / len(losses) if losses else 0,
-        "avg_r":         sum((t.get("r_multiple") or 0) for t in trades) / len(trades),
-        "profit_factor": gross_win / gross_loss if gross_loss > 0 else 0,
-        "max_drawdown":  max_dd,
+        "win_rate":      round(len(wins) / len(trades), 4),
+        "total_pnl":     round(sum(pnls), 4),
+        "avg_pnl":       round(sum(pnls) / len(trades), 4),
+        "avg_win":       round(gross_win  / len(wins),   4) if wins   else 0,
+        "avg_loss":      round(gross_loss / len(losses), 4) if losses else 0,
+        "avg_r":         round(sum(r_vals) / len(trades), 4),
+        "avg_rr":        round(sum(r_vals) / len(trades), 4),
+        "profit_factor": round(gross_win / gross_loss, 4) if gross_loss > 0 else 0,
+        "max_drawdown":  round(max_dd, 4),
+        "best_trade":    round(max(pnls), 4),
+        "worst_trade":   round(min(pnls), 4),
+        "avg_dur":       avg_dur,
+        "open_count":    open_count,
+        "last_ai":       {},
     }
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SYSTEM STATE

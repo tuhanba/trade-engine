@@ -61,28 +61,47 @@ def api_stats():
         try:
             with get_conn() as conn:
                 sess_stats = {}
+                # Session istatistiklerini trades tablosundan hesapla
                 for sess in ["ASIA", "LONDON", "NEW_YORK"]:
-                    row = conn.execute(
-                        "SELECT COUNT(*), "
-                        "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END), "
-                        "SUM(CASE WHEN result='WIN' THEN r_multiple ELSE 0 END), "
-                        "SUM(CASE WHEN result='LOSS' THEN r_multiple ELSE 0 END) "
-                        "FROM coin_market_memory WHERE session=?", (sess,)
-                    ).fetchone()
-                    total_s = row[0] or 0
-                    wins_s  = row[1] or 0
+                    try:
+                        srow = conn.execute(
+                            """SELECT COUNT(*),
+                               SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END),
+                               SUM(net_pnl)
+                               FROM trades
+                               WHERE session=? AND close_time IS NOT NULL
+                               AND status IN ('closed','closed_win','closed_loss','sl','tp1_hit','runner','trail','timeout')""",
+                            (sess,)
+                        ).fetchone()
+                        total_s = srow[0] or 0
+                        wins_s  = srow[1] or 0
+                        pnl_s   = round(srow[2] or 0, 4)
+                    except Exception:
+                        # coin_market_memory fallback
+                        srow = conn.execute(
+                            "SELECT COUNT(*), SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END), 0 "
+                            "FROM coin_market_memory WHERE session=?", (sess,)
+                        ).fetchone()
+                        total_s = srow[0] or 0
+                        wins_s  = srow[1] or 0
+                        pnl_s   = 0.0
                     sess_stats[sess] = {
                         "total":    total_s,
                         "wins":     wins_s,
                         "losses":   total_s - wins_s,
                         "win_rate": round(wins_s / max(total_s, 1) * 100, 1),
+                        "pnl":      pnl_s,
                     }
+                # NEWYORK -> NEW_YORK alias
+                if "NEW_YORK" in sess_stats and "NEWYORK" not in sess_stats:
+                    sess_stats["NEWYORK"] = sess_stats["NEW_YORK"]
                 stats["session_stats"] = sess_stats
         except Exception:
             stats["session_stats"] = {
-                "ASIA":     {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0},
-                "LONDON":   {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0},
-                "NEW_YORK": {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0},
+                "ASIA":     {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "pnl": 0.0},
+                "LONDON":   {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "pnl": 0.0},
+                "NEW_YORK": {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "pnl": 0.0},
+                "NEWYORK":  {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "pnl": 0.0},
             }
         stats["ml_status"] = {"trained": False, "n_samples": 0}
         return jsonify({"ok": True, "data": stats})
