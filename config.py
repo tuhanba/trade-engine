@@ -40,7 +40,7 @@ CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "120"))
 
 # ── Sinyal ───────────────────────────────────────────────────────────────────
 MIN_RR             = float(os.getenv("MIN_RR", "1.5"))
-SL_ATR_MULT        = float(os.getenv("SL_ATR_MULT", "1.0"))
+SL_ATR_MULT        = float(os.getenv("SL_ATR_MULT", "1.2"))
 MIN_EXPECTED_MFE_R = float(os.getenv("MIN_EXPECTED_MFE_R", "1.0"))
 
 # ── ADX Trend Gücü Filtresi ──────────────────────────────────────────────────
@@ -48,11 +48,11 @@ MIN_EXPECTED_MFE_R = float(os.getenv("MIN_EXPECTED_MFE_R", "1.0"))
 ADX_MIN_THRESHOLD = int(os.getenv("ADX_MIN_THRESHOLD", "22"))
 
 # ── TP ───────────────────────────────────────────────────────────────────────
-TP1_R            = float(os.getenv("TP1_R", "0.8"))
-TP1_CLOSE_PCT    = float(os.getenv("TP1_CLOSE_PCT", "20"))
-TP2_R            = float(os.getenv("TP2_R", "3.5"))
-TP2_CLOSE_PCT    = float(os.getenv("TP2_CLOSE_PCT", "40"))
-TP3_R            = float(os.getenv("TP3_R", "4.5"))
+TP1_R            = float(os.getenv("TP1_R", "1.0"))
+TP1_CLOSE_PCT    = float(os.getenv("TP1_CLOSE_PCT", "30"))
+TP2_R            = float(os.getenv("TP2_R", "2.0"))
+TP2_CLOSE_PCT    = float(os.getenv("TP2_CLOSE_PCT", "50"))
+TP3_R            = float(os.getenv("TP3_R", "3.0"))
 RUNNER_CLOSE_PCT = float(os.getenv("RUNNER_CLOSE_PCT", "20"))
 TRAIL_ATR_MULT   = float(os.getenv("TRAIL_ATR_MULT", "1.0"))
 
@@ -64,7 +64,7 @@ BREAKEVEN_OFFSET_PCT = float(os.getenv("BREAKEVEN_OFFSET_PCT", "0.05"))
 # ── Sinyal Kalite Filtresi ───────────────────────────────────────────────────
 # v2.4: "A+" → "A+,A" — A kalite sinyaller de işlenir (trade sayısı ~2x artar)
 # A+ win rate: ~%62 | A win rate: ~%52 | B win rate: ~%38 (B hâlâ kapalı)
-ALLOWED_QUALITIES = os.getenv("ALLOWED_QUALITIES", "S,A+").split(",")
+ALLOWED_QUALITIES = os.getenv("ALLOWED_QUALITIES", "A+").split(",")
 
 # ── Saat Filtresi (UTC) ──────────────────────────────────────────────────────
 # v2.4: 13 saat → 10 saat (UTC 2, 8, 15, 18 açıldı — daha fazla aktif pencere)
