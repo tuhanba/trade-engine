@@ -29,14 +29,22 @@ class MarketScanner:
         self.coin_universe = set(_COIN_UNIVERSE)  # 92 coin filtresi
 
     def _get_cooldown_coins(self) -> set:
-        """Cooldown'da olan coinleri getirir."""
+        """Cooldown'da olan coinleri getirir (danger_score kayıtları `coin_profile` tablosunda)."""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                rows = conn.execute("""
-                    SELECT symbol FROM coin_profiles 
-                    WHERE danger_score > 0.8
-                """).fetchall()
-                return {row[0] for row in rows}
+                conn.row_factory = sqlite3.Row
+                try:
+                    rows = conn.execute(
+                        "SELECT symbol FROM coin_profile WHERE danger_score > 0.8"
+                    ).fetchall()
+                except Exception:
+                    try:
+                        rows = conn.execute(
+                            "SELECT symbol FROM coin_profiles WHERE danger_score > 0.8"
+                        ).fetchall()
+                    except Exception:
+                        rows = []
+                return {r["symbol"] if isinstance(r, sqlite3.Row) else r[0] for r in rows}
         except Exception as e:
             logger.error(f"Cooldown okuma hatası: {e}")
             return set()

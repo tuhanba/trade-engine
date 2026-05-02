@@ -113,6 +113,16 @@ MIN_CANDIDATES_FOR_THRESHOLD_UPDATE = int(os.getenv("MIN_CANDIDATES_FOR_THRESHOL
 # ── Paper Tracking ─────────────────────────────────────────────────────────────
 PAPER_TRACK_REJECTED_CANDIDATES = os.getenv("PAPER_TRACK_REJECTED_CANDIDATES", "true").lower() == "true"
 PAPER_TRACK_WATCHLIST = os.getenv("PAPER_TRACK_WATCHLIST", "true").lower() == "true"
+PAPER_TRACK_TELEGRAM_GAPS = os.getenv("PAPER_TRACK_TELEGRAM_GAPS", "true").lower() == "true"
+PAPER_TRACK_HORIZON_HOURS = float(os.getenv("PAPER_TRACK_HORIZON_HOURS", "8"))
+
+# ── Scanner genişliği (kalite filtresini gevşetmeden daha fazla tarama) ────────
+SCAN_INCLUDE_WATCH = os.getenv("SCAN_INCLUDE_WATCH", "true").lower() == "true"
+WATCHLIST_MIN_SCAN_SCORE = float(os.getenv("WATCHLIST_MIN_SCAN_SCORE", "5.5"))
+MAX_COINS_PER_SCAN_LOOP = int(os.getenv("MAX_COINS_PER_SCAN_LOOP", "80"))
+
+# ── Portfolio / korelasyon ───────────────────────────────────────────────────
+MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "40.0"))
 
 # ── Veritabanı ───────────────────────────────────────────────────────────────
 DB_PATH = os.getenv("DB_PATH", "/root/trade_engine/trading.db")

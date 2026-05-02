@@ -26,7 +26,14 @@ from config import (
     MAX_DAILY_SIGNALS, DB_PATH,
     DAILY_MAX_LOSS_PCT,
     DATA_THRESHOLD, WATCHLIST_THRESHOLD, TELEGRAM_THRESHOLD, TRADE_THRESHOLD,
-    EXECUTION_MODE, LIVE_CONFIRM, MAX_LEVERAGE, MIN_RR,
+    LIVE_CONFIRM, MAX_LEVERAGE, MIN_RR,
+    MAX_CORRELATED_TRADES,
+    SCAN_INCLUDE_WATCH, WATCHLIST_MIN_SCAN_SCORE, MAX_COINS_PER_SCAN_LOOP,
+    MAX_PORTFOLIO_EXPOSURE_PCT,
+    PAPER_TRACK_REJECTED_CANDIDATES,
+    PAPER_TRACK_WATCHLIST,
+    PAPER_TRACK_TELEGRAM_GAPS,
+    PAPER_TRACK_HORIZON_HOURS,
 )
 from database import (
     init_db, init_paper_account, get_paper_balance,
@@ -80,6 +87,41 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("scalp_bot")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCAN + RİSK YARDIMCILARI
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def build_eligible_scan_subset(candidates: list) -> list:
+    eligible = []
+    for c in candidates:
+        status = c.get("status")
+        ts = float(c.get("tradeability_score") or 0)
+        if status == "Eligible":
+            eligible.append(c)
+        elif SCAN_INCLUDE_WATCH and status == "Watch" and ts >= WATCHLIST_MIN_SCAN_SCORE:
+            eligible.append(c)
+    eligible.sort(key=lambda x: float(x.get("tradeability_score") or 0), reverse=True)
+    return eligible[:MAX_COINS_PER_SCAN_LOOP]
+
+
+def correlation_blocks(open_trades: list, direction: str) -> bool:
+    if not direction or direction == "NO TRADE":
+        return False
+    n = sum(1 for t in open_trades if t.get("direction") == direction)
+    return n >= MAX_CORRELATED_TRADES
+
+
+def exposure_blocks(open_trades: list, extra_notional: float, balance: float) -> bool:
+    expo = sum((t.get("qty") or 0) * (t.get("entry") or 0) for t in open_trades)
+    cap = balance * MAX_PORTFOLIO_EXPOSURE_PCT / 100.0
+    return expo + max(0.0, extra_notional or 0) > cap + 1e-8
+
+
+def _paper_horizon_minutes() -> float:
+    return PAPER_TRACK_HORIZON_HOURS * 60.0
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DEVRE KESİCİ
@@ -217,6 +259,15 @@ def main():
 
             open_symbols = {t["symbol"] for t in open_trades_now}
 
+            try:
+                from core.paper_tracker import process_pending_paper_results
+
+                done_p = process_pending_paper_results(client, limit=30)
+                if done_p:
+                    logger.info(f"[paper_tracker] finalize {done_p} satır tamamlandı")
+            except Exception as _pte:
+                logger.debug(f"[paper_tracker] atlandı: {_pte}")
+
             # ── ADIM 1: MARKET SCANNER ─────────────────────────────────────
             candidates = scanner.scan()
             if not candidates:
@@ -224,14 +275,16 @@ def main():
                 time.sleep(SCAN_INTERVAL)
                 continue
 
-            # Sadece Eligible olanları işle
-            eligible = [c for c in candidates if c["status"] == "Eligible"]
-            logger.info(f"Scanner: {len(eligible)} eligible coin bulundu")
+            eligible = build_eligible_scan_subset(candidates)
+            logger.info(
+                f"Scanner: {len(eligible)} coin işlenecek "
+                f"(Eligible + Watch≥{WATCHLIST_MIN_SCAN_SCORE if SCAN_INCLUDE_WATCH else 'OFF'})"
+            )
 
             # Eski sinyalleri arşivle
             archive_old_scalp_signals(hours=24)
 
-            for coin_info in eligible[:50]:  # Max 50 coin işle
+            for coin_info in eligible:
                 symbol = coin_info["symbol"]
 
                 if symbol in open_symbols:
@@ -261,8 +314,8 @@ def main():
 
                     # C kalitesi sadece dashboard'da izlenir
                     if trigger_result["quality"] == "C":
-                        # Sadece kaydet, Telegram'a gönderme
-                        sig = data_layer.create_signal(symbol)
+                        # Watchlist katmanı — tek signal kaynağı kullan (çift orphan yok)
+                        sig = data_layer.get_signal(signal_id)
                         sig.direction = trend_result["direction"]
                         sig.trend_score = trend_result["score"]
                         sig.trigger_score = trigger_result["score"]
@@ -284,16 +337,27 @@ def main():
                             "reason": "watchlist_only_candidate",
                             "execution_status": "candidate",
                             "lifecycle_stage": "APPROVED_FOR_WATCHLIST",
+                            "entry": trigger_result["entry"],
                         })
                         save_signal_event(sig.id, "APPROVED_FOR_WATCHLIST", symbol=symbol, reason="quality_c_watchlist")
-                        if True:
-                            save_paper_result({
-                                "signal_id": sig.id,
-                                "candidate_id": candidate_id,
-                                "symbol": symbol,
-                                "direction": sig.direction,
-                                "tracked_from": "watchlist",
-                            })
+                        if PAPER_TRACK_WATCHLIST:
+                            prv_c = risk.preview_for_paper(symbol, trend_result["direction"], trigger_result["entry"], balance)
+                            if prv_c.get("valid"):
+                                save_paper_result({
+                                    "signal_id": sig.id,
+                                    "candidate_id": candidate_id,
+                                    "symbol": symbol,
+                                    "direction": sig.direction,
+                                    "tracked_from": "watchlist",
+                                    "final_score_snap": sig.coin_score,
+                                    "horizon_minutes": _paper_horizon_minutes(),
+                                    "preview_entry": trigger_result["entry"],
+                                    "preview_sl": prv_c["sl"],
+                                    "preview_tp1": prv_c["tp1"],
+                                    "preview_tp2": prv_c["tp2"],
+                                    "preview_tp3": prv_c["tp3"],
+                                    "leverage_hint": int(prv_c.get("leverage") or 10),
+                                })
                         continue
 
                     # ── ADIM 4: RISK ENGINE ────────────────────────────────
@@ -305,7 +369,7 @@ def main():
                         balance
                     )
                     if not risk_result.get("valid"):
-                        save_candidate_signal({
+                        rk_id = save_candidate_signal({
                             "signal_id": signal_id,
                             "symbol": symbol,
                             "direction": trend_result["direction"],
@@ -317,8 +381,27 @@ def main():
                             "risk_reject_reason": risk_result.get("risk_reject_reason", "risk_guard_failed"),
                             "lifecycle_stage": "REJECTED",
                             "execution_status": "rejected",
+                            "entry": trigger_result["entry"],
                         })
                         save_signal_event(signal_id, "REJECTED", symbol=symbol, reject_reason=risk_result.get("risk_reject_reason", "risk_guard_failed"), reason="risk_engine_reject")
+                        if PAPER_TRACK_REJECTED_CANDIDATES:
+                            prv = risk.preview_for_paper(symbol, trend_result["direction"], trigger_result["entry"], balance)
+                            if prv.get("valid"):
+                                save_paper_result({
+                                    "signal_id": signal_id,
+                                    "candidate_id": rk_id,
+                                    "symbol": symbol,
+                                    "direction": trend_result["direction"],
+                                    "tracked_from": "candidate",
+                                    "reject_reason_snap": risk_result.get("risk_reject_reason", "risk_guard_failed"),
+                                    "horizon_minutes": _paper_horizon_minutes(),
+                                    "preview_entry": trigger_result["entry"],
+                                    "preview_sl": prv["sl"],
+                                    "preview_tp1": prv["tp1"],
+                                    "preview_tp2": prv["tp2"],
+                                    "preview_tp3": prv["tp3"],
+                                    "leverage_hint": int(prv.get("leverage") or 10),
+                                })
                         continue
                     save_signal_event(signal_id, "RISK_CHECKED", symbol=symbol, reason="risk_pass")
 
@@ -392,6 +475,23 @@ def main():
                         update_candidate_status(candidate_id, reject_reason="low_confidence", lifecycle_stage="REJECTED", execution_status="rejected")
                         save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="low_confidence", reason="below_data_threshold")
                         save_scalp_signal(sig.to_dict())
+                        if PAPER_TRACK_REJECTED_CANDIDATES:
+                            save_paper_result({
+                                "signal_id": sig.id,
+                                "candidate_id": candidate_id,
+                                "symbol": symbol,
+                                "direction": sig.direction,
+                                "tracked_from": "candidate",
+                                "reject_reason_snap": "below_data_threshold",
+                                "final_score_snap": sig.final_score,
+                                "horizon_minutes": _paper_horizon_minutes(),
+                                "preview_entry": sig.entry_zone,
+                                "preview_sl": sig.stop_loss,
+                                "preview_tp1": sig.tp1,
+                                "preview_tp2": sig.tp2,
+                                "preview_tp3": sig.tp3,
+                                "leverage_hint": int(sig.leverage_suggestion or 10),
+                            })
                         continue
 
                     if decision["decision"] == "VETO":
@@ -406,13 +506,23 @@ def main():
                             f"[VETO] {symbol} {sig.direction} | {decision['reason']} | "
                             f"score={sig.final_score}"
                         )
-                        save_paper_result({
-                            "signal_id": sig.id,
-                            "candidate_id": candidate_id,
-                            "symbol": symbol,
-                            "direction": sig.direction,
-                            "tracked_from": "candidate",
-                        })
+                        if PAPER_TRACK_REJECTED_CANDIDATES:
+                            save_paper_result({
+                                "signal_id": sig.id,
+                                "candidate_id": candidate_id,
+                                "symbol": symbol,
+                                "direction": sig.direction,
+                                "tracked_from": "candidate",
+                                "reject_reason_snap": sig.ai_veto_reason or decision.get("reason"),
+                                "final_score_snap": sig.final_score,
+                                "horizon_minutes": _paper_horizon_minutes(),
+                                "preview_entry": sig.entry_zone,
+                                "preview_sl": sig.stop_loss,
+                                "preview_tp1": sig.tp1,
+                                "preview_tp2": sig.tp2,
+                                "preview_tp3": sig.tp3,
+                                "leverage_hint": int(sig.leverage_suggestion or 10),
+                            })
                         continue
 
                     sig.status = "approved"
@@ -423,13 +533,39 @@ def main():
                     save_scalp_signal(sig.to_dict())
 
                     # ── ADIM 8: TELEGRAM DELIVERY ──────────────────────────
+                    telegram_sent_ok = False
                     if sig.final_score >= TELEGRAM_THRESHOLD:
                         sig.telegram_status = "queued"
                         update_candidate_status(candidate_id, lifecycle_stage="APPROVED_FOR_TELEGRAM")
                         save_signal_event(sig.id, "APPROVED_FOR_TELEGRAM", symbol=symbol, reason="telegram_threshold_pass")
-                        deliver_signal(sig)
+                        telegram_sent_ok = bool(deliver_signal(sig))
+                        if telegram_sent_ok:
+                            sig.telegram_status = "sent"
                     else:
                         sig.telegram_status = "skip"
+
+                    if (
+                        PAPER_TRACK_TELEGRAM_GAPS
+                        and telegram_sent_ok
+                        and sig.final_score < TRADE_THRESHOLD
+                    ):
+                        save_paper_result({
+                            "signal_id": sig.id,
+                            "candidate_id": candidate_id,
+                            "symbol": symbol,
+                            "direction": sig.direction,
+                            "tracked_from": "telegram_gap",
+                            "final_score_snap": sig.final_score,
+                            "horizon_minutes": _paper_horizon_minutes(),
+                            "preview_entry": sig.entry_zone,
+                            "preview_sl": sig.stop_loss,
+                            "preview_tp1": sig.tp1,
+                            "preview_tp2": sig.tp2,
+                            "preview_tp3": sig.tp3,
+                            "leverage_hint": int(sig.leverage_suggestion or 10),
+                        })
+
+                    save_scalp_signal(sig.to_dict())
 
                     # ── ADIM 9: TRADE AÇMA (execute modunda) ──────────────
                     if AX_MODE == "execute" and EXECUTION_AVAILABLE and sig.final_score >= TRADE_THRESHOLD:
@@ -444,6 +580,39 @@ def main():
                         if EXECUTION_MODE == "live" and not LIVE_CONFIRM:
                             update_candidate_status(candidate_id, reject_reason="risk_guard_failed", lifecycle_stage="REJECTED", execution_status="rejected")
                             save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="risk_guard_failed", reason="live_confirm_required")
+                            continue
+                        bal_trade = get_paper_balance()
+                        if correlation_blocks(open_trades_now, sig.direction):
+                            update_candidate_status(
+                                candidate_id,
+                                reject_reason="correlation_risk",
+                                lifecycle_stage="REJECTED",
+                                execution_status="rejected",
+                            )
+                            save_signal_event(
+                                sig.id,
+                                "REJECTED",
+                                symbol=symbol,
+                                reject_reason="correlation_risk",
+                                reason="max_correlated_positions",
+                            )
+                            logger.info(f"[risk] Korrelasyon filtresi: {symbol} {sig.direction}")
+                            continue
+                        if exposure_blocks(open_trades_now, float(sig.notional_size or 0), bal_trade):
+                            update_candidate_status(
+                                candidate_id,
+                                reject_reason="max_portfolio_exposure",
+                                lifecycle_stage="REJECTED",
+                                execution_status="rejected",
+                            )
+                            save_signal_event(
+                                sig.id,
+                                "REJECTED",
+                                symbol=symbol,
+                                reject_reason="max_portfolio_exposure",
+                                reason=f"cap_{MAX_PORTFOLIO_EXPOSURE_PCT}pct",
+                            )
+                            logger.info(f"[risk] Exposure limiti: {symbol} notional≈{sig.notional_size}")
                             continue
                         update_candidate_status(candidate_id, lifecycle_stage="APPROVED_FOR_TRADE")
                         save_signal_event(sig.id, "APPROVED_FOR_TRADE", symbol=symbol, reason="trade_threshold_pass")

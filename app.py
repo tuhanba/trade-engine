@@ -486,15 +486,38 @@ def api_signal_funnel():
             trade = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] or 0
             wins = conn.execute("SELECT COUNT(*) FROM trades WHERE net_pnl > 0 AND close_time IS NOT NULL").fetchone()[0] or 0
             losses = conn.execute("SELECT COUNT(*) FROM trades WHERE net_pnl <= 0 AND close_time IS NOT NULL").fetchone()[0] or 0
-        return jsonify({"ok": True, "data": {
-            "scanned": scanned,
-            "candidate": candidate,
-            "watchlist": watchlist,
-            "telegram": telegram,
-            "trade": trade,
-            "wins": wins,
-            "losses": losses,
-        }})
+        try:
+            from dashboard_service import get_learning_metrics
+            learned = get_learning_metrics(days=int(request.args.get("days", "14")))
+        except Exception:
+            learned = {}
+
+        return jsonify({
+            "ok": True,
+            "data": {
+                "scanned": scanned,
+                "candidate": candidate,
+                "watchlist": watchlist,
+                "telegram_sent": telegram,
+                "trade": trade,
+                "wins": wins,
+                "losses": losses,
+                "funnel_labels": "Scanned → Candidate → Watchlist → Telegram → Executed → Win/Loss",
+            },
+            "learning": learned,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/learning_metrics ─────────────────────────────────────────────────────
+@app.route("/api/learning_metrics")
+def api_learning_metrics():
+    try:
+        from dashboard_service import get_learning_metrics
+        days = int(request.args.get("days", "14"))
+        data = get_learning_metrics(days=days)
+        return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

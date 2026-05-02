@@ -6,6 +6,7 @@ Markov zinciri, postmortem analizi, saatlik heatmap, coin profili öğrenmesi ve
 import logging
 import sqlite3
 import json
+import uuid
 from datetime import datetime, timedelta
 from collections import defaultdict
 
@@ -133,7 +134,9 @@ class AIDecisionEngine:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                trades = conn.execute("SELECT created_at, trade_result FROM ai_learning").fetchall()
+                trades = conn.execute(
+                    "SELECT created_at, trade_result FROM ai_learning WHERE trade_result IN ('WIN','LOSS')"
+                ).fetchall()
                 
                 by_hour = defaultdict(list)
                 for t in trades:
@@ -163,7 +166,11 @@ class AIDecisionEngine:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                trades = conn.execute("SELECT trade_result FROM ai_learning ORDER BY id ASC").fetchall()
+                trades = conn.execute(
+                    """SELECT trade_result FROM ai_learning
+                       WHERE trade_result IN ('WIN','LOSS')
+                       ORDER BY id ASC"""
+                ).fetchall()
                 
                 if len(trades) < 5:
                     return None
@@ -345,6 +352,47 @@ class AIDecisionEngine:
                         
         except Exception as e:
             logger.error(f"Parametre optimizasyon hatası: {e}")
+
+    def learn_from_paper_outcome(
+        self,
+        symbol: str,
+        tracked_from: str,
+        would_have_won: int,
+        mfe_r: float,
+        mae_r: float,
+        first_touch: str,
+        skip_correct: int,
+    ):
+        """Girilmeyen fırsatların çıktısı — gerçek trade Markov zincirine karışmasın."""
+        try:
+            tr = "PAPER_WIN" if would_have_won else "PAPER_LOSS"
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    """INSERT INTO ai_learning (symbol, trade_result, pnl, setup_quality)
+                       VALUES (?, ?, 0.0, ?)""",
+                    (
+                        symbol,
+                        tr,
+                        f"paper:{tracked_from}:{first_touch}:mfe={mfe_r}:mae={mae_r}:skip_ok={skip_correct}",
+                    ),
+                )
+
+                conn.execute(
+                    """INSERT INTO adaptive_stats (
+                        id, scope, key, sample_size, win_rate, expectancy, avg_r,
+                        threshold_data, threshold_watchlist, threshold_telegram, threshold_trade,
+                        action_taken, notes)
+                       VALUES (?, 'paper_tracking', ?, 1, ?, 0.0, 0.0, 0, 0, 0, 0, '', ?)""",
+                    (
+                        str(uuid.uuid4()),
+                        f"{tracked_from}:{first_touch}:{symbol}",
+                        float(would_have_won),
+                        json.dumps({"mfe_r": mfe_r, "mae_r": mae_r, "skip_correct": skip_correct}),
+                    ),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.debug(f"Paper outcome learn atlandı: {e}")
 
     def learn_from_trade(self, symbol: str, result: str, pnl: float, setup_quality: str):
         """Kapanan işlemlerden öğrenir, coin profillerini günceller ve parametreleri optimize eder."""

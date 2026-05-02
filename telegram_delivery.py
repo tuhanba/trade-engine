@@ -52,9 +52,9 @@ class _Queue:
         self._event  = threading.Event()
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
-    def push(self, text, parse_mode="HTML"):
+    def push(self, text, parse_mode="HTML", dedupe_key=None):
         with self._lock:
-            self._q.append((text, parse_mode))
+            self._q.append((text, parse_mode, dedupe_key))
         self._event.set()
     def _worker(self):
         while True:
@@ -65,7 +65,17 @@ class _Queue:
                     if not self._q:
                         break
                     item = self._q.popleft()
-                _send_raw(*item)
+                if len(item) >= 3:
+                    text, pm, dk = item[0], item[1], item[2]
+                else:
+                    text, pm, dk = item[0], item[1] if len(item) > 1 else "HTML", None
+                ok = _send_raw(text, pm)
+                if ok and dk:
+                    try:
+                        from database import mark_telegram_message_sent
+                        mark_telegram_message_sent(dk)
+                    except Exception:
+                        pass
                 time.sleep(0.5)
 
 _queue = _Queue()
@@ -171,7 +181,7 @@ def deliver_signal(sig):
         msg = format_signal(sig)
         if not save_telegram_message(sig.id, sig.symbol, dedupe_key, msg, status="queued"):
             return False
-        _queue.push(msg)
+        _queue.push(msg, "HTML", dedupe_key)
         _sent_ids.add(sig.id)
         sig.telegram_status = "sent"
         logger.info(

@@ -80,6 +80,7 @@ def init_db():
             tp2_hit          INTEGER DEFAULT 0,
 
             linked_candidate_id INTEGER,
+            linked_candidate_uuid TEXT,
             open_time        TEXT,
             close_time       TEXT,
             close_price      REAL,
@@ -426,6 +427,19 @@ def init_db():
             max_adverse_excursion   REAL DEFAULT 0,
             setup_worked            INTEGER DEFAULT 0,
             would_have_won          INTEGER DEFAULT 0,
+            status                  TEXT DEFAULT 'pending',
+            preview_entry           REAL,
+            preview_sl              REAL,
+            preview_tp1             REAL,
+            preview_tp2             REAL,
+            preview_tp3             REAL,
+            leverage_hint           INTEGER DEFAULT 10,
+            finalized_at            TEXT,
+            first_touch             TEXT DEFAULT '',
+            horizon_minutes         REAL DEFAULT 480,
+            skip_decision_correct   INTEGER DEFAULT 1,
+            final_score_snap        REAL DEFAULT 0,
+            reject_reason_snap      TEXT,
             created_at              TEXT DEFAULT (datetime('now'))
         );
 
@@ -489,6 +503,7 @@ def _migrate(conn):
         ("trades", "tp1_hit",            "INTEGER DEFAULT 0"),
         ("trades", "tp2_hit",            "INTEGER DEFAULT 0"),
         ("trades", "linked_candidate_id","INTEGER"),
+        ("trades", "linked_candidate_uuid", "TEXT"),
         ("trades", "hold_minutes",       "REAL DEFAULT 0"),
         ("trades", "ax_mode",            "TEXT DEFAULT 'execute'"),
         ("trades", "environment",        "TEXT DEFAULT 'paper'"),
@@ -507,6 +522,19 @@ def _migrate(conn):
         # paper_account — eski şemada 'paper_balance', yeni şemada 'balance'
         ("paper_account", "balance",         "REAL DEFAULT 250.0"),
         ("paper_account", "initial_balance", "REAL DEFAULT 250.0"),
+        ("paper_results", "status", "TEXT DEFAULT 'pending'"),
+        ("paper_results", "preview_entry", "REAL"),
+        ("paper_results", "preview_sl", "REAL"),
+        ("paper_results", "preview_tp1", "REAL"),
+        ("paper_results", "preview_tp2", "REAL"),
+        ("paper_results", "preview_tp3", "REAL"),
+        ("paper_results", "leverage_hint", "INTEGER DEFAULT 10"),
+        ("paper_results", "finalized_at", "TEXT"),
+        ("paper_results", "first_touch", "TEXT DEFAULT ''"),
+        ("paper_results", "horizon_minutes", "REAL DEFAULT 480"),
+        ("paper_results", "skip_decision_correct", "INTEGER DEFAULT 1"),
+        ("paper_results", "final_score_snap", "REAL DEFAULT 0"),
+        ("paper_results", "reject_reason_snap", "TEXT"),
     ]
     for table, col, col_type in migrations:
         try:
@@ -597,17 +625,18 @@ def save_trade(t: dict) -> int:
             (symbol, direction, status, environment, ax_mode,
              entry, sl, tp1, tp2, trail_stop,
              qty, qty_tp1, qty_tp2, qty_runner,
-             linked_candidate_id, open_time)
+             linked_candidate_id, linked_candidate_uuid, open_time)
         VALUES
             (:symbol, :direction, :status, :environment, :ax_mode,
              :entry, :sl, :tp1, :tp2, :trail_stop,
              :qty, :qty_tp1, :qty_tp2, :qty_runner,
-             :linked_candidate_id, :open_time)
+             :linked_candidate_id, :linked_candidate_uuid, :open_time)
     """
     defaults = {
         "status": "open", "environment": "paper", "ax_mode": "execute",
         "trail_stop": None, "qty_tp1": None, "qty_tp2": None, "qty_runner": None,
         "linked_candidate_id": None,
+        "linked_candidate_uuid": None,
         "open_time": datetime.now(timezone.utc).isoformat(),
     }
     with get_conn() as conn:
@@ -1037,6 +1066,7 @@ VALID_REJECT_REASONS = {
     "low_volume", "bad_spread", "weak_trend", "weak_trigger", "bad_rr", "high_funding",
     "low_confidence", "bad_session", "ai_veto", "risk_guard_failed", "duplicate_signal",
     "correlation_risk", "pump_dump_risk",
+    "max_portfolio_exposure",
 }
 
 
@@ -1153,23 +1183,60 @@ def save_trade_event(trade_id: int, signal_id: str, symbol: str, event_type: str
         )
 
 
-def save_paper_result(data: dict):
+def save_paper_result(data: dict) -> str:
     defaults = {
         "id": _id(), "signal_id": None, "candidate_id": None, "symbol": "", "direction": None,
         "tracked_from": "candidate", "hit_tp": 0, "hit_stop_first": 0, "time_to_move_minutes": 0,
         "max_favorable_excursion": 0, "max_adverse_excursion": 0, "setup_worked": 0, "would_have_won": 0,
+        "status": "pending", "preview_entry": None, "preview_sl": None, "preview_tp1": None,
+        "preview_tp2": None, "preview_tp3": None, "leverage_hint": 10, "finalized_at": None,
+        "first_touch": "", "horizon_minutes": 480.0, "skip_decision_correct": 1,
+        "final_score_snap": 0.0, "reject_reason_snap": "",
     }
+    payload = {**defaults, **data}
+    if payload["horizon_minutes"] is None:
+        payload["horizon_minutes"] = 480.0
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO paper_results (
-               id, signal_id, candidate_id, symbol, direction, tracked_from, hit_tp, hit_stop_first,
-               time_to_move_minutes, max_favorable_excursion, max_adverse_excursion, setup_worked, would_have_won
+               id, signal_id, candidate_id, symbol, direction, tracked_from,
+               hit_tp, hit_stop_first, time_to_move_minutes,
+               max_favorable_excursion, max_adverse_excursion, setup_worked, would_have_won,
+               status, preview_entry, preview_sl, preview_tp1, preview_tp2, preview_tp3,
+               leverage_hint, finalized_at, first_touch, horizon_minutes,
+               skip_decision_correct, final_score_snap, reject_reason_snap
             ) VALUES (
-               :id, :signal_id, :candidate_id, :symbol, :direction, :tracked_from, :hit_tp, :hit_stop_first,
-               :time_to_move_minutes, :max_favorable_excursion, :max_adverse_excursion, :setup_worked, :would_have_won
+               :id, :signal_id, :candidate_id, :symbol, :direction, :tracked_from,
+               :hit_tp, :hit_stop_first, :time_to_move_minutes,
+               :max_favorable_excursion, :max_adverse_excursion, :setup_worked, :would_have_won,
+               :status, :preview_entry, :preview_sl, :preview_tp1, :preview_tp2, :preview_tp3,
+               :leverage_hint, :finalized_at, :first_touch, :horizon_minutes,
+               :skip_decision_correct, :final_score_snap, :reject_reason_snap
             )""",
-            {**defaults, **data},
+            payload,
         )
+    return payload["id"]
+
+
+def get_pending_paper_results(limit: int = 40) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM paper_results
+               WHERE (status IS NULL OR status='pending')
+                 AND preview_entry IS NOT NULL AND preview_sl IS NOT NULL AND preview_tp1 IS NOT NULL
+               ORDER BY created_at ASC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_paper_result(row_id: str, updates: dict):
+    if not updates:
+        return
+    sets = ", ".join(f"{k}=?" for k in updates)
+    vals = list(updates.values()) + [row_id]
+    with get_conn() as conn:
+        conn.execute(f"UPDATE paper_results SET {sets} WHERE id=?", vals)
 
 
 def save_telegram_message(signal_id: str, symbol: str, dedupe_key: str, message_body: str, status: str = "queued") -> bool:
@@ -1183,3 +1250,11 @@ def save_telegram_message(signal_id: str, symbol: str, dedupe_key: str, message_
         return True
     except sqlite3.IntegrityError:
         return False
+
+
+def mark_telegram_message_sent(dedupe_key: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE telegram_messages SET status='sent' WHERE dedupe_key=? AND status!='sent'",
+            (dedupe_key,),
+        )

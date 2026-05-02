@@ -40,6 +40,10 @@ class RiskEngine:
         self.base_risk_pct = 1.0
         self.min_rr = MIN_RR
 
+    def preview_for_paper(self, symbol: str, direction: str, entry: float, balance: float) -> dict:
+        """Sadece paper-outcome için SL/TP; kaliteyi B olarak alır (C/risk-ret sonrası yol için)."""
+        return self.calculate(symbol, direction, entry, "B", balance)
+
     def get_candles(self, symbol: str, interval: str, limit: int) -> pd.DataFrame:
         try:
             klines = self.client.futures_klines(symbol=symbol, interval=interval, limit=limit)
@@ -141,6 +145,10 @@ class RiskEngine:
         # Kaldıraç önerisi
         leverage = min(max_lev, max(1, int(notional / (balance + 1e-10)))) if balance > 0 else 1
 
+        # Tasfiye mesafesi (yaklaşık — USDT lineer izole, güvenlik marjlı kaba formül)
+        lev_use = max(1, min(int(leverage), int(max_lev)))
+        liquidation_distance_percent = round(100.0 / lev_use * 0.92, 4)
+
         risk_reject_reason = ""
         valid = rr >= self.min_rr and risk_pct > 0
         if rr < self.min_rr:
@@ -178,6 +186,7 @@ class RiskEngine:
             "net_rr":        round(net_rr, 3),
             "risk_amount":   round(risk_amount, 2),
             "risk_reject_reason": risk_reject_reason,
+            "liquidation_distance_percent": liquidation_distance_percent,
             # ── Breakeven Parametreleri ────────────────────────────────────────
             "breakeven_enabled":   BREAKEVEN_ENABLED,
             "breakeven_sl":        round(breakeven_sl, 6),

@@ -325,6 +325,73 @@ def stop():
     _running = False
 
 
+def get_learning_metrics(days: int = 14) -> dict:
+    """
+    Paper outcome özetleri: kaçırılan fırsatlar (skip yanlıştı),
+    veto sonrası kazanılan hypotetik, Telegram'da bildirilmiş ama açılmamış ve SL önce olanlar vb.
+    """
+    try:
+        with get_conn() as conn:
+            since_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            total_paper = conn.execute(
+                "SELECT COUNT(*) FROM paper_results WHERE created_at >= ?", (since_iso,),
+            ).fetchone()[0]
+
+            finalized = conn.execute(
+                """SELECT COUNT(*) FROM paper_results
+                   WHERE created_at >= ? AND status='completed'""",
+                (since_iso,),
+            ).fetchone()[0]
+
+            missed = conn.execute(
+                """SELECT COUNT(*) FROM paper_results
+                   WHERE created_at >= ? AND status='completed' AND skip_decision_correct=0""",
+                (since_iso,),
+            ).fetchone()[0]
+
+            rejected_but_successful = conn.execute(
+                """SELECT COUNT(*) FROM paper_results
+                   WHERE created_at >= ?
+                     AND status='completed' AND tracked_from='candidate'
+                     AND would_have_won=1""",
+                (since_iso,),
+            ).fetchone()[0]
+
+            approved_hypo_fail = conn.execute(
+                """SELECT COUNT(*) FROM paper_results
+                   WHERE created_at >= ?
+                     AND status='completed' AND tracked_from='telegram_gap'
+                     AND setup_worked=0 AND hit_stop_first=1""",
+                (since_iso,),
+            ).fetchone()[0]
+
+            avg_mfe_hit = conn.execute(
+                """SELECT AVG(max_favorable_excursion) FROM paper_results
+                   WHERE created_at >= ? AND status='completed' AND hit_tp=1""",
+                (since_iso,),
+            ).fetchone()[0]
+
+            avg_mae_sl = conn.execute(
+                """SELECT AVG(max_adverse_excursion) FROM paper_results
+                   WHERE created_at >= ? AND status='completed' AND hit_stop_first=1""",
+                (since_iso,),
+            ).fetchone()[0]
+
+        return {
+            "window_days": days,
+            "paper_rows": int(total_paper or 0),
+            "paper_finalized": int(finalized or 0),
+            "missed_opportunities_skip_wrong": int(missed or 0),
+            "rejected_candidate_but_hypo_win": int(rejected_but_successful or 0),
+            "telegram_announced_but_hypo_stop_first": int(approved_hypo_fail or 0),
+            "avg_mfe_R_on_tp_hit": round(float(avg_mfe_hit or 0), 4),
+            "avg_mae_R_on_stop_first": round(float(avg_mae_sl or 0), 4),
+        }
+    except Exception as e:
+        logger.warning(f"[Dashboard] learning metrics: {e}")
+        return {"error": str(e)}
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     start()

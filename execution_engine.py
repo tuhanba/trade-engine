@@ -129,7 +129,8 @@ def open_trade(client, signal: dict, ax_decision: dict,
         "qty_tp1":        qty_tp1,
         "qty_tp2":        qty_tp2,
         "qty_runner":     qty_runner,
-        "linked_candidate_id": signal.get("candidate_id"),
+        "linked_candidate_id": None,
+        "linked_candidate_uuid": signal.get("candidate_id"),
         "open_time":      datetime.now(timezone.utc).isoformat(),
     }
 
