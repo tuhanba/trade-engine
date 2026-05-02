@@ -204,7 +204,7 @@ def main():
             if EXECUTION_AVAILABLE:
                 open_trades_now = get_open_trades()
                 if open_trades_now:
-                    exec_monitor(client, open_trades_now)
+                    exec_monitor(client)
 
             # Açık trade limiti
             open_trades_now = get_open_trades()
