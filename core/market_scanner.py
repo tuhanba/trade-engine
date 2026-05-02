@@ -44,7 +44,7 @@ class MarketScanner:
                         ).fetchall()
                     except Exception:
                         rows = []
-                return {r["symbol"] if isinstance(r, sqlite3.Row) else r[0] for r in rows}
+                return {r["symbol"] for r in rows}
         except Exception as e:
             logger.error(f"Cooldown okuma hatası: {e}")
             return set()
