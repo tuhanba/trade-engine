@@ -20,6 +20,7 @@ from config import (
     RISK_PCT, TP1_CLOSE_PCT, TP2_CLOSE_PCT, RUNNER_CLOSE_PCT,
     TRAIL_ATR_MULT, EXECUTION_MODE,
     BREAKEVEN_ENABLED, BREAKEVEN_OFFSET_PCT,
+    LIVE_CONFIRM,
 )
 from database import (
     save_trade, update_trade, close_trade as db_close_trade,
@@ -83,11 +84,20 @@ def _calc_qty(balance: float, entry: float, sl: float,
 def open_trade(client, signal: dict, ax_decision: dict,
                risk_pct: float = None) -> int | None:
     """
-    Paper trade aç.
+    Paper veya Live trade aç.
+    Live mode'da LIVE_CONFIRM=true zorunludur.
 
     Returns:
         trade_id (int) ya da None (başarısız)
     """
+    # ── LIVE GUARD ───────────────────────────────────────────────────────────
+    if EXECUTION_MODE == "live" and not LIVE_CONFIRM:
+        logger.error(
+            f"[LIVE GUARD] {signal.get('symbol')} — LIVE_CONFIRM=false! "
+            "Emir açılmadı. .env dosyasında LIVE_CONFIRM=true yapın."
+        )
+        return None
+
     symbol    = signal["symbol"]
     direction = signal["direction"]
     entry     = signal["entry"]

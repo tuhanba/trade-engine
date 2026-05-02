@@ -25,12 +25,16 @@ from config import (
     LOG_DIR, LOG_MAX_DAYS, LOG_MAX_MB,
     MAX_DAILY_SIGNALS, DB_PATH,
     DAILY_MAX_LOSS_PCT,
+    DATA_THRESHOLD, WATCHLIST_THRESHOLD, TELEGRAM_THRESHOLD, TRADE_THRESHOLD,
+    LIVE_CONFIRM,
 )
 from database import (
     init_db, init_paper_account, get_paper_balance,
     get_open_trades, set_state, get_state,
     save_scalp_signal, archive_old_scalp_signals,
     get_daily_signal_count,
+    log_signal_event, log_trade_event,
+    is_telegram_sent, mark_telegram_sent,
 )
 from core.data_layer import data_layer, SignalData
 from core.market_scanner import MarketScanner
@@ -113,6 +117,9 @@ def main():
     # DB ve hesap başlat
     init_db()
     init_paper_account()
+
+    # Bot restart sonrası açık sinyalleri geri yükle
+    data_layer.restore_from_db()
 
     # Binance client
     client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
@@ -215,154 +222,179 @@ def main():
             open_symbols = {t["symbol"] for t in open_trades_now}
 
             # ── ADIM 1: MARKET SCANNER ─────────────────────────────────────
-            candidates = scanner.scan()
+            candidates = scanner.scan(save_to_db=True)
             if not candidates:
                 logger.debug("Market scanner: aday bulunamadı")
                 time.sleep(SCAN_INTERVAL)
                 continue
 
-            # Sadece Eligible olanları işle
-            eligible = [c for c in candidates if c["status"] == "Eligible"]
-            logger.info(f"Scanner: {len(eligible)} eligible coin bulundu")
+            eligible = [c for c in candidates if c["scanner_status"] == "ELIGIBLE"]
+            logger.info(f"Scanner: {len(candidates)} tarandı, {len(eligible)} ELIGIBLE")
 
-            # Eski sinyalleri arşivle
             archive_old_scalp_signals(hours=24)
 
-            for coin_info in eligible[:50]:  # Max 50 coin işle
+            for coin_info in eligible[:50]:
                 symbol = coin_info["symbol"]
 
                 if symbol in open_symbols:
                     continue
 
-                # Günlük limit tekrar kontrol
                 daily_counts = get_daily_signal_count()
                 if daily_counts["total"] >= MAX_DAILY_SIGNALS:
                     break
 
                 try:
+                    # ── SCANNED stage ──────────────────────────────────────
+                    sig = data_layer.create_signal(symbol)
+                    sig.coin_score  = coin_info.get("tradeability_score", 0)
+                    data_layer.update_stage(sig, "SCANNED")
+
                     # ── ADIM 2: TREND ENGINE ───────────────────────────────
                     trend_result = trend.analyze(symbol)
+                    data_layer.update_stage(sig, "TREND_CHECKED",
+                                            {"trend_score": trend_result.get("score", 0)})
                     if trend_result["direction"] == "NO TRADE":
+                        data_layer.reject(sig, "weak_trend",
+                                          trend_result.get("reason", "no_direction"))
                         continue
+
+                    sig.direction   = trend_result["direction"]
+                    sig.trend_score = trend_result.get("score", 0)
 
                     # ── ADIM 3: TRIGGER ENGINE ─────────────────────────────
-                    trigger_result = trigger.analyze(symbol, trend_result["direction"], trend_result.get("btc_trend", "NEUTRAL"))
-                    if trigger_result["quality"] == "D":
+                    trigger_result = trigger.analyze(
+                        symbol, trend_result["direction"],
+                        trend_result.get("btc_trend", "NEUTRAL")
+                    )
+                    data_layer.update_stage(sig, "TRIGGER_CHECKED",
+                                            {"trigger_score": trigger_result.get("score", 0)})
+                    if trigger_result["quality"] in ("D", ""):
+                        data_layer.reject(sig, "weak_trigger", trigger_result.get("reason"))
                         continue
 
-                    # C kalitesi sadece dashboard'da izlenir
-                    if trigger_result["quality"] == "C":
-                        # Sadece kaydet, Telegram'a gönderme
-                        sig = data_layer.create_signal(symbol)
-                        sig.direction = trend_result["direction"]
-                        sig.trend_score = trend_result["score"]
-                        sig.trigger_score = trigger_result["score"]
-                        sig.coin_score = coin_info["tradeability_score"]
-                        sig.entry_zone = trigger_result["entry"]
-                        sig.setup_quality = "C"
-                        sig.status = "watch"
-                        sig.dashboard_status = "active"
-                        sig.telegram_status = "skip"
-                        save_scalp_signal(sig.to_dict())
-                        continue
+                    sig.trigger_score = trigger_result.get("score", 0)
+                    sig.entry_zone    = trigger_result.get("entry", 0)
+                    sig.setup_quality = trigger_result["quality"]
 
                     # ── ADIM 4: RISK ENGINE ────────────────────────────────
                     balance = get_paper_balance()
                     risk_result = risk.calculate(
                         symbol, trend_result["direction"],
-                        trigger_result["entry"],
+                        trigger_result.get("entry", 0),
                         trigger_result["quality"],
                         balance
                     )
+                    data_layer.update_stage(sig, "RISK_CHECKED",
+                                            {"risk_score": risk_result.get("score", 0)})
                     if not risk_result.get("valid"):
+                        data_layer.reject(sig, risk_result.get("risk_reject_reason", "risk_guard_failed"))
                         continue
 
-                    # ── ADIM 5: DATA LAYER — SİNYAL OLUŞTUR ───────────────
-                    sig = data_layer.create_signal(symbol)
-                    sig.direction = trend_result["direction"]
-                    sig.coin_score = coin_info["tradeability_score"]
-                    sig.trend_score = trend_result["score"]
-                    sig.trigger_score = trigger_result["score"]
-                    sig.risk_score = risk_result["score"]
-                    sig.setup_quality = trigger_result["quality"]
-                    sig.ml_score = trigger_result.get("ml_score", 50)
-                    sig.entry_zone = trigger_result["entry"]
-                    sig.stop_loss = risk_result["sl"]
-                    sig.tp1 = risk_result["tp1"]
-                    sig.tp2 = risk_result["tp2"]
-                    sig.tp3 = risk_result["tp3"]
-                    sig.rr = risk_result["rr"]
-                    sig.risk_percent = risk_result["risk_pct"]
-                    sig.position_size = risk_result["position_size"]
-                    sig.notional_size = risk_result["notional"]
+                    sig.risk_score          = risk_result.get("score", 0)
+                    sig.stop_loss           = risk_result["sl"]
+                    sig.tp1                 = risk_result["tp1"]
+                    sig.tp2                 = risk_result["tp2"]
+                    sig.tp3                 = risk_result["tp3"]
+                    sig.rr                  = risk_result["rr"]
+                    sig.net_rr              = risk_result.get("net_rr", 0)
+                    sig.risk_percent        = risk_result["risk_pct"]
+                    sig.risk_amount         = risk_result.get("risk_amount", 0)
+                    sig.position_size       = risk_result["position_size"]
+                    sig.notional_size       = risk_result["notional"]
                     sig.leverage_suggestion = risk_result["leverage"]
-                    sig.max_loss = risk_result["max_loss"]
-                    sig.status = "ready"
-                    sig.dashboard_status = "active"
+                    sig.max_loss            = risk_result["max_loss"]
+                    sig.estimated_fee       = risk_result.get("estimated_fee", 0)
+                    sig.estimated_slippage  = risk_result.get("estimated_slippage", 0)
 
-                    # ── ADIM 6: AI DECISION ENGINE ─────────────────────────
+                    # ── ADIM 5: AI DECISION ENGINE ─────────────────────────
                     decision = ai_engine.evaluate(sig)
+                    sig.ai_score    = decision.get("ai_score", 0)
                     sig.final_score = decision["final_score"]
-                    sig.confidence = decision["confidence"]
-                    sig.reason = decision["reason"]
+                    sig.confidence  = decision["confidence"]
+                    sig.reason      = decision["reason"]
+                    data_layer.update_stage(sig, "AI_CHECKED",
+                                            {"ai_score": sig.ai_score,
+                                             "final_score": sig.final_score})
 
                     if decision["decision"] != "ALLOW":
-                        sig.status = "vetoed"
-                        sig.telegram_status = "skip"
-                        save_scalp_signal(sig.to_dict())
+                        data_layer.reject(sig, "ai_veto", decision["reason"])
                         logger.info(
-                            f"[VETO] {symbol} {sig.direction} | {decision['reason']} | "
-                            f"score={sig.final_score}"
+                            f"[AI VETO] {symbol} {sig.direction} | {decision['reason']} | "
+                            f"score={sig.final_score:.1f}"
                         )
                         continue
 
-                    sig.status = "approved"
+                    # ── ADIM 6: Eşik değerlendirme ─────────────────────────
+                    data_layer.evaluate_thresholds(sig)
 
-                    # ── ADIM 7: DATA LAYER'A KAYDET ────────────────────────
-                    save_scalp_signal(sig.to_dict())
+                    if not sig.passes_data_threshold():
+                        data_layer.reject(sig, "low_confidence",
+                                          f"score={sig.final_score:.1f}<{DATA_THRESHOLD}")
+                        continue
 
-                    # ── ADIM 8: TELEGRAM DELIVERY ──────────────────────────
-                    deliver_signal(sig)
+                    if sig.approved_for_watchlist:
+                        data_layer.approve_watchlist(sig)
+                        logger.info(
+                            f"[WATCHLIST] {symbol} {sig.direction} "
+                            f"score={sig.final_score:.1f} quality={sig.setup_quality}"
+                        )
 
-                    # ── ADIM 9: TRADE AÇMA (execute modunda) ──────────────
-                    if AX_MODE == "execute" and EXECUTION_AVAILABLE:
-                        # Eski signal formatına dönüştür (geriye uyumluluk)
-                        legacy_signal = {
-                            "symbol": sig.symbol,
-                            "direction": sig.direction,
-                            "entry": sig.entry_zone,
-                            "sl": sig.stop_loss,
-                            "tp1": sig.tp1,
-                            "tp2": sig.tp2,
-                            "runner_target": sig.tp3,
-                            "rr": sig.rr,
-                            "score": sig.final_score,
-                            "confidence": sig.confidence,
-                        }
-                        ax_result = {
-                            "decision": "ALLOW",
-                            "score": sig.final_score,
-                            "confidence": sig.confidence,
-                            "veto_reason": None,
-                        }
-                        trade_id = open_trade(client, legacy_signal, ax_result)
-                        if trade_id:
-                            logger.info(
-                                f"✅ TRADE AÇILDI #{trade_id} {symbol} {sig.direction} "
-                                f"score={sig.final_score:.1f} rr={sig.rr:.2f}"
-                            )
+                    # ── ADIM 7: Telegram ───────────────────────────────────
+                    if sig.approved_for_telegram:
+                        if not is_telegram_sent(sig.id):
+                            data_layer.approve_telegram(sig)
+                            deliver_signal(sig)
+                            mark_telegram_sent(sig.id, sig.symbol, sig.direction or "", sig.setup_quality)
+                        else:
+                            logger.debug(f"Telegram duplicate engellendi (DB): {symbol}")
+
+                    # ── ADIM 8: DB'ye persist ─────────────────────────────
+                    data_layer.persist(sig)
 
                     logger.info(
-                        f"✅ SİNYAL [{sig.setup_quality}] {symbol} {sig.direction} "
+                        f"[{sig.setup_quality}] {symbol} {sig.direction} "
                         f"Entry={sig.entry_zone:.6f} SL={sig.stop_loss:.6f} "
-                        f"RR={sig.rr:.2f} Score={sig.final_score:.1f}"
+                        f"RR={sig.rr:.2f} netRR={sig.net_rr:.2f} "
+                        f"Score={sig.final_score:.1f} "
+                        f"[tg={'✓' if sig.approved_for_telegram else '—'} "
+                        f"trade={'✓' if sig.approved_for_trade else '—'}]"
                     )
 
-                    # AI Öğrenme: Trade kapandığında çağrılır (execution_engine callback)
-                    # Örnek: ai_engine.learn_from_trade(symbol, "WIN", pnl, sig.setup_quality)
+                    # ── ADIM 9: TRADE AÇMA ─────────────────────────────────
+                    if (AX_MODE == "execute" and sig.approved_for_trade
+                            and EXECUTION_AVAILABLE):
+                        # Live mode guard
+                        if EXECUTION_MODE == "live" and not LIVE_CONFIRM:
+                            logger.warning(
+                                f"LIVE MODE: LIVE_CONFIRM=false — {symbol} işlem açılmadı!"
+                            )
+                        else:
+                            legacy_signal = {
+                                "symbol": sig.symbol, "direction": sig.direction,
+                                "entry": sig.entry_zone, "sl": sig.stop_loss,
+                                "tp1": sig.tp1, "tp2": sig.tp2,
+                                "runner_target": sig.tp3, "rr": sig.rr,
+                                "score": sig.final_score, "confidence": sig.confidence,
+                            }
+                            ax_result = {
+                                "decision": "ALLOW", "score": sig.final_score,
+                                "confidence": sig.confidence, "veto_reason": None,
+                            }
+                            trade_id = open_trade(client, legacy_signal, ax_result)
+                            if trade_id:
+                                data_layer.mark_opened(sig, trade_id)
+                                log_trade_event(trade_id, "OPENED",
+                                                price=sig.entry_zone,
+                                                detail=f"score={sig.final_score:.1f}")
+                                logger.info(
+                                    f"✅ TRADE AÇILDI #{trade_id} {symbol} "
+                                    f"{sig.direction} score={sig.final_score:.1f}"
+                                )
 
                 except Exception as e:
                     logger.error(f"Coin işleme hatası {symbol}: {e}", exc_info=True)
+                    if 'sig' in locals():
+                        data_layer.mark_error(sig, str(e))
                     continue
 
             time.sleep(SCAN_INTERVAL)

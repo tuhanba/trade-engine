@@ -256,40 +256,148 @@ def init_db():
             updated_at TEXT DEFAULT (datetime('now'))
         );
 
-        -- ── scalp_signals (Yeni Tek Schema) ──────────────────────────────────
+        -- ── scalp_signals — ana sinyal tablosu (candidate + executed) ─────────
         CREATE TABLE IF NOT EXISTS scalp_signals (
-            id                 TEXT PRIMARY KEY,
-            symbol             TEXT NOT NULL,
-            timestamp          REAL,
-            source             TEXT DEFAULT 'system',
-            timeframe          TEXT DEFAULT '1m',
-            direction          TEXT,
-            coin_score         REAL DEFAULT 0,
-            trend_score        REAL DEFAULT 0,
-            trigger_score      REAL DEFAULT 0,
-            risk_score         REAL DEFAULT 0,
-            final_score        REAL DEFAULT 0,
-            setup_quality      TEXT DEFAULT 'D',
-            entry_zone         REAL DEFAULT 0,
-            stop_loss          REAL DEFAULT 0,
-            tp1                REAL DEFAULT 0,
-            tp2                REAL DEFAULT 0,
-            tp3                REAL DEFAULT 0,
-            rr                 REAL DEFAULT 0,
-            risk_percent       REAL DEFAULT 0,
-            position_size      REAL DEFAULT 0,
-            notional_size      REAL DEFAULT 0,
+            id                  TEXT PRIMARY KEY,
+            symbol              TEXT NOT NULL,
+            timestamp           REAL,
+            source              TEXT DEFAULT 'system',
+            timeframe           TEXT DEFAULT '1m',
+            direction           TEXT,
+
+            -- Scores
+            coin_score          REAL DEFAULT 0,
+            trend_score         REAL DEFAULT 0,
+            trigger_score       REAL DEFAULT 0,
+            risk_score          REAL DEFAULT 0,
+            ai_score            REAL DEFAULT 0,
+            final_score         REAL DEFAULT 0,
+            setup_quality       TEXT DEFAULT 'D',
+            confidence          REAL DEFAULT 0,
+
+            -- Risk & Entry
+            entry_zone          REAL DEFAULT 0,
+            stop_loss           REAL DEFAULT 0,
+            tp1                 REAL DEFAULT 0,
+            tp2                 REAL DEFAULT 0,
+            tp3                 REAL DEFAULT 0,
+            rr                  REAL DEFAULT 0,
+            net_rr              REAL DEFAULT 0,
+            risk_percent        REAL DEFAULT 0,
+            risk_amount         REAL DEFAULT 0,
+            position_size       REAL DEFAULT 0,
+            notional_size       REAL DEFAULT 0,
             leverage_suggestion INTEGER DEFAULT 1,
-            max_loss           REAL DEFAULT 0,
-            invalidation_level REAL DEFAULT 0,
-            confidence         REAL DEFAULT 0,
-            status             TEXT DEFAULT 'pending',
-            reason             TEXT DEFAULT '',
-            telegram_status    TEXT DEFAULT 'pending',
-            dashboard_status   TEXT DEFAULT 'pending',
-            error              TEXT DEFAULT '',
-            created_at         TEXT DEFAULT (datetime('now')),
-            archived_at        TEXT
+            max_loss            REAL DEFAULT 0,
+            estimated_fee       REAL DEFAULT 0,
+            estimated_slippage  REAL DEFAULT 0,
+            invalidation_level  REAL DEFAULT 0,
+
+            -- Status & lifecycle stage
+            status              TEXT DEFAULT 'SCANNED',
+            lifecycle_stage     TEXT DEFAULT 'SCANNED',
+            reason              TEXT DEFAULT '',
+            reject_reason       TEXT DEFAULT '',
+            telegram_status     TEXT DEFAULT 'pending',
+            dashboard_status    TEXT DEFAULT 'pending',
+            error               TEXT DEFAULT '',
+
+            -- Tracking: candidate vs trade
+            approved_for_watchlist  INTEGER DEFAULT 0,
+            approved_for_telegram   INTEGER DEFAULT 0,
+            approved_for_trade      INTEGER DEFAULT 0,
+            linked_trade_id         INTEGER,
+
+            -- Paper outcome tracking (for rejected candidates too)
+            outcome_checked     INTEGER DEFAULT 0,
+            outcome_tp1_reached INTEGER DEFAULT 0,
+            outcome_tp2_reached INTEGER DEFAULT 0,
+            outcome_sl_hit      INTEGER DEFAULT 0,
+            outcome_max_favorable_r REAL DEFAULT 0,
+            outcome_max_adverse_r   REAL DEFAULT 0,
+            outcome_minutes_to_move INTEGER DEFAULT 0,
+            outcome_would_win   INTEGER DEFAULT 0,
+
+            created_at          TEXT DEFAULT (datetime('now')),
+            archived_at         TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_scalp_signals_symbol ON scalp_signals(symbol);
+        CREATE INDEX IF NOT EXISTS idx_scalp_signals_status ON scalp_signals(lifecycle_stage);
+        CREATE INDEX IF NOT EXISTS idx_scalp_signals_created ON scalp_signals(created_at);
+
+        -- ── scanned_coins — scanner geçen/elenip neden elendiği ─────────────
+        CREATE TABLE IF NOT EXISTS scanned_coins (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol                TEXT NOT NULL,
+            price                 REAL,
+            volume_24h            REAL,
+            price_change_24h      REAL,
+            atr_percent           REAL,
+            spread_percent        REAL,
+            funding_rate          REAL,
+            open_interest_change  REAL,
+            volume_score          REAL DEFAULT 0,
+            volatility_score      REAL DEFAULT 0,
+            spread_score          REAL DEFAULT 0,
+            orderbook_depth_score REAL DEFAULT 0,
+            oi_score              REAL DEFAULT 0,
+            funding_score         REAL DEFAULT 0,
+            trend_cleanliness_score REAL DEFAULT 0,
+            pump_dump_penalty     REAL DEFAULT 0,
+            tradeability_score    REAL DEFAULT 0,
+            scanner_status        TEXT DEFAULT 'WATCH',
+            scanner_reason        TEXT,
+            created_at            TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_scanned_coins_sym ON scanned_coins(symbol, created_at);
+
+        -- ── paper_results — watchlist kandidat sinyallerin paper sonuçları ──
+        CREATE TABLE IF NOT EXISTS paper_results (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id           TEXT,
+            trade_id            INTEGER,
+            symbol              TEXT NOT NULL,
+            direction           TEXT,
+            entry               REAL,
+            stop                REAL,
+            tp1                 REAL,
+            tp2                 REAL,
+            final_score         REAL DEFAULT 0,
+            quality             TEXT,
+            environment         TEXT DEFAULT 'paper',
+            open_time           TEXT,
+            close_time          TEXT,
+            close_price         REAL,
+            close_reason        TEXT,
+            gross_pnl           REAL DEFAULT 0,
+            fee_paid            REAL DEFAULT 0,
+            slippage_cost       REAL DEFAULT 0,
+            net_pnl             REAL DEFAULT 0,
+            r_multiple          REAL DEFAULT 0,
+            hold_minutes        REAL DEFAULT 0,
+            tp1_hit             INTEGER DEFAULT 0,
+            tp2_hit             INTEGER DEFAULT 0,
+            max_favorable_excursion REAL DEFAULT 0,
+            max_adverse_excursion   REAL DEFAULT 0,
+            is_candidate_track  INTEGER DEFAULT 0,
+            created_at          TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ── adaptive_stats — öğrenme istatistikleri ─────────────────────────
+        CREATE TABLE IF NOT EXISTS adaptive_stats (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            stat_type       TEXT NOT NULL,
+            dimension       TEXT,
+            dimension_value TEXT,
+            total_count     INTEGER DEFAULT 0,
+            win_count       INTEGER DEFAULT 0,
+            loss_count       INTEGER DEFAULT 0,
+            total_pnl       REAL DEFAULT 0,
+            avg_r           REAL DEFAULT 0,
+            win_rate        REAL DEFAULT 0,
+            profit_factor   REAL DEFAULT 0,
+            updated_at      TEXT DEFAULT (datetime('now')),
+            UNIQUE(stat_type, dimension, dimension_value)
         );
 
         -- ── pattern_memory ───────────────────────────────────────────────────
@@ -305,6 +413,38 @@ def init_db():
             created_at   TEXT DEFAULT (datetime('now'))
         );
 
+        -- ── signal_events — sinyal lifecycle ────────────────────────────────
+        CREATE TABLE IF NOT EXISTS signal_events (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id  TEXT NOT NULL,
+            stage      TEXT NOT NULL,
+            detail     TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_signal_events_signal ON signal_events(signal_id);
+
+        -- ── trade_events — trade durum geçişleri ────────────────────────────
+        CREATE TABLE IF NOT EXISTS trade_events (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id   INTEGER NOT NULL,
+            event      TEXT NOT NULL,
+            price      REAL,
+            pnl        REAL,
+            detail     TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_trade_events_trade ON trade_events(trade_id);
+
+        -- ── telegram_messages — DB-based duplicate engeli ───────────────────
+        CREATE TABLE IF NOT EXISTS telegram_messages (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id  TEXT UNIQUE NOT NULL,
+            symbol     TEXT,
+            direction  TEXT,
+            quality    TEXT,
+            sent_at    TEXT DEFAULT (datetime('now'))
+        );
+
         """)
 
     # ── Eski şemadan yeni kolonlara migration ─────────────────────────────────
@@ -315,7 +455,7 @@ def init_db():
 def _migrate(conn):
     """Eksik kolonları ekle — her çalıştırmada idempotent."""
     migrations = [
-        # trades tablosu — yeni kolonlar
+        # trades
         ("trades", "qty_tp1",            "REAL"),
         ("trades", "qty_tp2",            "REAL"),
         ("trades", "qty_runner",         "REAL"),
@@ -329,7 +469,34 @@ def _migrate(conn):
         ("trades", "ax_mode",            "TEXT DEFAULT 'execute'"),
         ("trades", "environment",        "TEXT DEFAULT 'paper'"),
         ("trades", "close_reason",       "TEXT"),
-        # coin_params tablosu — yeni kolonlar
+        ("trades", "fee_paid",           "REAL DEFAULT 0"),
+        ("trades", "slippage_cost",      "REAL DEFAULT 0"),
+        ("trades", "risk_percent",       "REAL DEFAULT 0"),
+        ("trades", "risk_amount",        "REAL DEFAULT 0"),
+        ("trades", "notional",           "REAL DEFAULT 0"),
+        ("trades", "leverage",           "INTEGER DEFAULT 1"),
+        ("trades", "session",            "TEXT"),
+        # scalp_signals — yeni kolonlar (eski DB'ler için)
+        ("scalp_signals", "ai_score",              "REAL DEFAULT 0"),
+        ("scalp_signals", "net_rr",                "REAL DEFAULT 0"),
+        ("scalp_signals", "risk_amount",           "REAL DEFAULT 0"),
+        ("scalp_signals", "estimated_fee",         "REAL DEFAULT 0"),
+        ("scalp_signals", "estimated_slippage",    "REAL DEFAULT 0"),
+        ("scalp_signals", "lifecycle_stage",       "TEXT DEFAULT 'SCANNED'"),
+        ("scalp_signals", "reject_reason",         "TEXT DEFAULT ''"),
+        ("scalp_signals", "approved_for_watchlist","INTEGER DEFAULT 0"),
+        ("scalp_signals", "approved_for_telegram", "INTEGER DEFAULT 0"),
+        ("scalp_signals", "approved_for_trade",    "INTEGER DEFAULT 0"),
+        ("scalp_signals", "linked_trade_id",       "INTEGER"),
+        ("scalp_signals", "outcome_checked",       "INTEGER DEFAULT 0"),
+        ("scalp_signals", "outcome_tp1_reached",   "INTEGER DEFAULT 0"),
+        ("scalp_signals", "outcome_tp2_reached",   "INTEGER DEFAULT 0"),
+        ("scalp_signals", "outcome_sl_hit",        "INTEGER DEFAULT 0"),
+        ("scalp_signals", "outcome_max_favorable_r","REAL DEFAULT 0"),
+        ("scalp_signals", "outcome_max_adverse_r", "REAL DEFAULT 0"),
+        ("scalp_signals", "outcome_minutes_to_move","INTEGER DEFAULT 0"),
+        ("scalp_signals", "outcome_would_win",     "INTEGER DEFAULT 0"),
+        # coin_params
         ("coin_params", "volatility_profile", "TEXT DEFAULT 'normal'"),
         ("coin_params", "sl_atr_mult",        "REAL DEFAULT 1.3"),
         ("coin_params", "tp_atr_mult",        "REAL DEFAULT 2.0"),
@@ -340,7 +507,7 @@ def _migrate(conn):
         ("coin_params", "min_volume_m",       "REAL DEFAULT 15.0"),
         ("coin_params", "enabled",            "INTEGER DEFAULT 1"),
         ("coin_params", "updated_at",         "TEXT DEFAULT (datetime('now'))"),
-        # paper_account — eski şemada 'paper_balance', yeni şemada 'balance'
+        # paper_account
         ("paper_account", "balance",         "REAL DEFAULT 250.0"),
         ("paper_account", "initial_balance", "REAL DEFAULT 250.0"),
     ]
@@ -348,9 +515,8 @@ def _migrate(conn):
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
         except Exception:
-            pass  # Kolon zaten var
+            pass
 
-    # paper_account: eski paper_balance → yeni balance kolonuna kopyala
     try:
         conn.execute(
             "UPDATE paper_account SET balance = paper_balance "
@@ -802,24 +968,30 @@ def save_pattern(symbol: str, direction: str, session: str, result: str,
 # ─────────────────────────────────────────────────────────────────────────────
 def save_scalp_signal(sig_data: dict):
     """Yeni schema ile sinyali kaydet."""
+    KNOWN_COLS = {
+        "id", "symbol", "timestamp", "source", "timeframe", "direction",
+        "coin_score", "trend_score", "trigger_score", "risk_score", "ai_score",
+        "final_score", "setup_quality", "confidence",
+        "entry_zone", "stop_loss", "tp1", "tp2", "tp3",
+        "rr", "net_rr", "risk_percent", "risk_amount",
+        "position_size", "notional_size", "leverage_suggestion",
+        "max_loss", "estimated_fee", "estimated_slippage", "invalidation_level",
+        "lifecycle_stage", "status", "reason", "reject_reason",
+        "telegram_status", "dashboard_status", "error",
+        "approved_for_watchlist", "approved_for_telegram", "approved_for_trade",
+        "linked_trade_id",
+        "outcome_tp1_reached", "outcome_tp2_reached", "outcome_sl_hit",
+        "outcome_max_favorable_r", "outcome_max_adverse_r",
+        "outcome_minutes_to_move", "outcome_would_win",
+    }
+    row = {k: v for k, v in sig_data.items() if k in KNOWN_COLS}
+    cols = ", ".join(row.keys())
+    placeholders = ", ".join(f":{k}" for k in row.keys())
     with get_conn() as conn:
-        conn.execute("""
-            INSERT OR REPLACE INTO scalp_signals (
-                id, symbol, timestamp, source, timeframe, direction,
-                coin_score, trend_score, trigger_score, risk_score, final_score,
-                setup_quality, entry_zone, stop_loss, tp1, tp2, tp3,
-                rr, risk_percent, position_size, notional_size, leverage_suggestion,
-                max_loss, invalidation_level, confidence, status, reason,
-                telegram_status, dashboard_status, error
-            ) VALUES (
-                :id, :symbol, :timestamp, :source, :timeframe, :direction,
-                :coin_score, :trend_score, :trigger_score, :risk_score, :final_score,
-                :setup_quality, :entry_zone, :stop_loss, :tp1, :tp2, :tp3,
-                :rr, :risk_percent, :position_size, :notional_size, :leverage_suggestion,
-                :max_loss, :invalidation_level, :confidence, :status, :reason,
-                :telegram_status, :dashboard_status, :error
-            )
-        """, sig_data)
+        conn.execute(
+            f"INSERT OR REPLACE INTO scalp_signals ({cols}) VALUES ({placeholders})",
+            row,
+        )
 
 def get_active_scalp_signals(limit: int = 100) -> list:
     """Dashboard için aktif sinyalleri getir (null veri olmadan)."""
@@ -861,3 +1033,383 @@ def get_daily_signal_count() -> dict:
             counts[q] = row["cnt"]
         counts["total"] += row["cnt"]
     return counts
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIGNAL EVENTS — Lifecycle tracking
+# SCANNED → TREND_OK → TRIGGER_OK → RISK_OK → AI_ALLOWED/AI_VETOED
+# → SENT_TELEGRAM → OPENED → MANAGED → CLOSED/ERROR
+# ─────────────────────────────────────────────────────────────────────────────
+
+def log_signal_event(signal_id: str, stage: str, detail: str = None):
+    """Sinyal lifecycle geçişini DB'ye yaz."""
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO signal_events (signal_id, stage, detail) VALUES (?, ?, ?)",
+                (signal_id, stage, detail)
+            )
+    except Exception as e:
+        logger.error(f"signal_event yazma hatası {signal_id} {stage}: {e}")
+
+def get_signal_lifecycle(signal_id: str) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT stage, detail, created_at FROM signal_events WHERE signal_id=? ORDER BY id",
+            (signal_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+def get_signal_funnel_today() -> dict:
+    """Bugünkü sinyal hunisi — kaç sinyal hangi aşamada elenmiş."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT stage, COUNT(*) as cnt
+               FROM signal_events
+               WHERE DATE(created_at)=?
+               GROUP BY stage""",
+            (today,)
+        ).fetchall()
+    return {r["stage"]: r["cnt"] for r in rows}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRADE EVENTS — Trade durum geçişleri
+# ─────────────────────────────────────────────────────────────────────────────
+
+def log_trade_event(trade_id: int, event: str, price: float = None,
+                    pnl: float = None, detail: str = None):
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO trade_events (trade_id, event, price, pnl, detail) VALUES (?, ?, ?, ?, ?)",
+                (trade_id, event, price, pnl, detail)
+            )
+    except Exception as e:
+        logger.error(f"trade_event yazma hatası {trade_id} {event}: {e}")
+
+def get_trade_events(trade_id: int) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT event, price, pnl, detail, created_at FROM trade_events WHERE trade_id=? ORDER BY id",
+            (trade_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TELEGRAM MESSAGES — DB-based duplicate engeli
+# ─────────────────────────────────────────────────────────────────────────────
+
+def is_telegram_sent(signal_id: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM telegram_messages WHERE signal_id=?", (signal_id,)
+        ).fetchone()
+    return row is not None
+
+def mark_telegram_sent(signal_id: str, symbol: str, direction: str, quality: str):
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO telegram_messages
+                   (signal_id, symbol, direction, quality) VALUES (?, ?, ?, ?)""",
+                (signal_id, symbol, direction, quality)
+            )
+    except Exception as e:
+        logger.error(f"telegram_messages yazma hatası: {e}")
+
+def get_telegram_stats_today() -> dict:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT quality, COUNT(*) as cnt FROM telegram_messages WHERE DATE(sent_at)=? GROUP BY quality",
+            (today,)
+        ).fetchall()
+    stats = {"S": 0, "A+": 0, "A": 0, "B": 0, "total": 0}
+    for r in rows:
+        q = r["quality"]
+        if q in stats:
+            stats[q] = r["cnt"]
+        stats["total"] += r["cnt"]
+    return stats
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COIN PROFILES — database.py'de coin_profile tablosuna alias
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_coin_profiles(symbols: list = None) -> list:
+    with get_conn() as conn:
+        if symbols:
+            placeholders = ",".join("?" * len(symbols))
+            rows = conn.execute(
+                f"SELECT * FROM coin_profile WHERE symbol IN ({placeholders})", symbols
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM coin_profile ORDER BY danger_score DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCANNED COINS — Scanner verileri
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_scanned_coin(data: dict):
+    """Tarama verisini kaydet. data dict alanları scanned_coins kolonlarına uygun olmalı."""
+    cols = [
+        "symbol", "price", "volume_24h", "price_change_24h", "atr_percent",
+        "spread_percent", "funding_rate", "open_interest_change",
+        "volume_score", "volatility_score", "spread_score", "orderbook_depth_score",
+        "oi_score", "funding_score", "trend_cleanliness_score", "pump_dump_penalty",
+        "tradeability_score", "scanner_status", "scanner_reason",
+    ]
+    row = {c: data.get(c) for c in cols if c in data or c == "symbol"}
+    placeholders = ", ".join(f":{c}" for c in row)
+    col_list = ", ".join(row.keys())
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                f"INSERT INTO scanned_coins ({col_list}) VALUES ({placeholders})", row
+            )
+    except Exception as e:
+        logger.error(f"scanned_coins yazma hatası {data.get('symbol')}: {e}")
+
+def get_scanned_coins_today(limit: int = 500) -> list:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM scanned_coins
+               WHERE DATE(created_at)=? ORDER BY tradeability_score DESC LIMIT ?""",
+            (today, limit)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+def get_scanner_stats_today() -> dict:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT
+               COUNT(*) as total,
+               SUM(CASE WHEN scanner_status='ELIGIBLE' THEN 1 ELSE 0 END) as eligible,
+               SUM(CASE WHEN scanner_status='WATCH' THEN 1 ELSE 0 END) as watch,
+               SUM(CASE WHEN scanner_status='AVOID' THEN 1 ELSE 0 END) as avoid,
+               AVG(tradeability_score) as avg_score
+               FROM scanned_coins WHERE DATE(created_at)=?""",
+            (today,)
+        ).fetchone()
+    if row:
+        return {
+            "total": row[0] or 0, "eligible": row[1] or 0,
+            "watch": row[2] or 0, "avoid": row[3] or 0,
+            "avg_score": round(row[4] or 0, 2),
+        }
+    return {"total": 0, "eligible": 0, "watch": 0, "avoid": 0, "avg_score": 0}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAPER RESULTS — Paper/candidate outcome tracking
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_paper_result(data: dict) -> int:
+    cols = [
+        "signal_id", "trade_id", "symbol", "direction", "entry", "stop",
+        "tp1", "tp2", "final_score", "quality", "environment",
+        "open_time", "close_time", "close_price", "close_reason",
+        "gross_pnl", "fee_paid", "slippage_cost", "net_pnl", "r_multiple",
+        "hold_minutes", "tp1_hit", "tp2_hit",
+        "max_favorable_excursion", "max_adverse_excursion", "is_candidate_track",
+    ]
+    row = {c: data.get(c) for c in cols}
+    placeholders = ", ".join(f":{c}" for c in row)
+    col_list = ", ".join(row.keys())
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"INSERT INTO paper_results ({col_list}) VALUES ({placeholders})", row
+        )
+        return cur.lastrowid
+
+def update_paper_result(result_id: int, fields: dict):
+    if not fields:
+        return
+    sets = ", ".join(f"{k}=?" for k in fields)
+    vals = list(fields.values()) + [result_id]
+    with get_conn() as conn:
+        conn.execute(f"UPDATE paper_results SET {sets} WHERE id=?", vals)
+
+def get_open_paper_results() -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM paper_results WHERE close_time IS NULL ORDER BY open_time"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+def get_paper_stats(days: int = 30) -> dict:
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT net_pnl, r_multiple, is_candidate_track, tp1_hit, tp2_hit
+               FROM paper_results WHERE close_time IS NOT NULL AND open_time >= ?""",
+            (cutoff,)
+        ).fetchall()
+    if not rows:
+        return {"total": 0, "wins": 0, "win_rate": 0, "avg_r": 0, "total_pnl": 0}
+    rows = [dict(r) for r in rows]
+    wins = [r for r in rows if (r.get("net_pnl") or 0) > 0]
+    return {
+        "total":    len(rows),
+        "wins":     len(wins),
+        "win_rate": round(len(wins) / len(rows), 4) if rows else 0,
+        "avg_r":    round(sum(r.get("r_multiple") or 0 for r in rows) / len(rows), 4),
+        "total_pnl": round(sum(r.get("net_pnl") or 0 for r in rows), 4),
+        "candidates": sum(1 for r in rows if r.get("is_candidate_track")),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ADAPTIVE STATS — Coin/saat/setup bazlı öğrenme istatistikleri
+# ─────────────────────────────────────────────────────────────────────────────
+
+def upsert_adaptive_stat(stat_type: str, dimension: str, dimension_value: str,
+                          is_win: bool, pnl: float, r_multiple: float):
+    """Bir istatistiği güncelle (coin bazlı, saat bazlı, setup bazlı vb.)"""
+    try:
+        with get_conn() as conn:
+            existing = conn.execute(
+                "SELECT id, total_count, win_count, loss_count, total_pnl FROM adaptive_stats "
+                "WHERE stat_type=? AND dimension=? AND dimension_value=?",
+                (stat_type, dimension, dimension_value)
+            ).fetchone()
+            if existing:
+                total = existing["total_count"] + 1
+                wins  = existing["win_count"] + (1 if is_win else 0)
+                losses = existing["loss_count"] + (0 if is_win else 1)
+                tot_pnl = (existing["total_pnl"] or 0) + pnl
+                conn.execute(
+                    """UPDATE adaptive_stats SET
+                       total_count=?, win_count=?, loss_count=?, total_pnl=?,
+                       win_rate=?, avg_r=?, updated_at=datetime('now')
+                       WHERE id=?""",
+                    (total, wins, losses, tot_pnl,
+                     round(wins / total, 4),
+                     round(tot_pnl / total, 4),
+                     existing["id"])
+                )
+            else:
+                wins = 1 if is_win else 0
+                conn.execute(
+                    """INSERT INTO adaptive_stats
+                       (stat_type, dimension, dimension_value, total_count, win_count, loss_count,
+                        total_pnl, win_rate, avg_r)
+                       VALUES (?,?,?,1,?,?,?,?,?)""",
+                    (stat_type, dimension, dimension_value, wins, 1-wins, pnl,
+                     float(is_win), round(pnl, 4))
+                )
+    except Exception as e:
+        logger.error(f"adaptive_stat upsert hatası: {e}")
+
+def get_adaptive_stats(stat_type: str, dimension: str, min_count: int = 5) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM adaptive_stats
+               WHERE stat_type=? AND dimension=? AND total_count >= ?
+               ORDER BY win_rate DESC""",
+            (stat_type, dimension, min_count)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIGNAL FUNNEL — Dashboard için sinyal hunisi
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_signal_funnel_today() -> dict:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        # signal_events tablosundan lifecycle stage sayıları
+        rows = conn.execute(
+            """SELECT stage, COUNT(DISTINCT signal_id) as cnt
+               FROM signal_events WHERE DATE(created_at)=? GROUP BY stage""",
+            (today,)
+        ).fetchall()
+        funnel_events = {r["stage"]: r["cnt"] for r in rows}
+
+        # scalp_signals tablosundan doğrudan sayılar
+        row = conn.execute(
+            """SELECT
+               COUNT(*) as total_candidates,
+               SUM(approved_for_watchlist) as watchlist,
+               SUM(approved_for_telegram) as telegram,
+               SUM(approved_for_trade) as trade,
+               SUM(CASE WHEN lifecycle_stage='REJECTED' THEN 1 ELSE 0 END) as rejected
+               FROM scalp_signals WHERE DATE(created_at)=?""",
+            (today,)
+        ).fetchone()
+
+    funnel = {
+        "scanned":    get_scanner_stats_today().get("total", 0),
+        "candidates": row[0] or 0 if row else 0,
+        "watchlist":  row[1] or 0 if row else 0,
+        "telegram":   row[2] or 0 if row else 0,
+        "trade":      row[3] or 0 if row else 0,
+        "rejected":   row[4] or 0 if row else 0,
+    }
+    funnel.update(funnel_events)
+    return funnel
+
+def get_candidate_signals(limit: int = 100, stage: str = None,
+                          approved_only: bool = False) -> list:
+    sql = "SELECT * FROM scalp_signals WHERE direction IS NOT NULL AND entry_zone > 0"
+    params = []
+    if stage:
+        sql += " AND lifecycle_stage=?"
+        params.append(stage)
+    if approved_only:
+        sql += " AND approved_for_watchlist=1"
+    sql += " ORDER BY final_score DESC LIMIT ?"
+    params.append(limit)
+    with get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+def update_signal_lifecycle(signal_id: str, stage: str, fields: dict = None):
+    """Sinyal lifecycle stage'ini güncelle ve event logla."""
+    try:
+        updates = {"lifecycle_stage": stage}
+        if fields:
+            updates.update(fields)
+        sets = ", ".join(f"{k}=?" for k in updates)
+        vals = list(updates.values()) + [signal_id]
+        with get_conn() as conn:
+            conn.execute(f"UPDATE scalp_signals SET {sets} WHERE id=?", vals)
+        log_signal_event(signal_id, stage, fields.get("reject_reason") if fields else None)
+    except Exception as e:
+        logger.error(f"lifecycle güncelleme hatası {signal_id}: {e}")
+
+def update_signal_outcome(signal_id: str, outcome: dict):
+    """Elenen/watchlist sinyallerin sonucunu güncelle."""
+    fields = {
+        "outcome_checked": 1,
+        **{k: v for k, v in outcome.items() if k.startswith("outcome_")}
+    }
+    sets = ", ".join(f"{k}=?" for k in fields)
+    vals = list(fields.values()) + [signal_id]
+    with get_conn() as conn:
+        conn.execute(f"UPDATE scalp_signals SET {sets} WHERE id=?", vals)
+
+def get_missed_opportunities(days: int = 7) -> list:
+    """Reddedilmiş ama aslında kazandıracak sinyaller."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT symbol, direction, final_score, setup_quality, reject_reason,
+               outcome_tp1_reached, outcome_tp2_reached, outcome_max_favorable_r,
+               outcome_would_win
+               FROM scalp_signals
+               WHERE lifecycle_stage='REJECTED' AND outcome_checked=1
+               AND outcome_would_win=1 AND created_at >= ?
+               ORDER BY outcome_max_favorable_r DESC LIMIT 50""",
+            (cutoff,)
+        ).fetchall()
+    return [dict(r) for r in rows]

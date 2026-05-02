@@ -526,6 +526,121 @@ def api_health():
         return jsonify({"ok": False, "status": "unhealthy", "error": str(e)}), 500
 
 
+# ── /api/funnel ───────────────────────────────────────────────────────────────
+@app.route("/api/funnel")
+def api_funnel():
+    """Sinyal hunisi: Scanned → Candidate → Watchlist → Telegram → Trade → Win/Loss"""
+    try:
+        from database import (
+            get_signal_funnel_today, get_scanner_stats_today,
+            get_telegram_stats_today,
+        )
+        funnel        = get_signal_funnel_today()
+        scanner_stats = get_scanner_stats_today()
+        tg_stats      = get_telegram_stats_today()
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with get_conn() as conn:
+            row = conn.execute(
+                """SELECT
+                   COUNT(*) as total_trades,
+                   SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) as wins,
+                   SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END) as losses
+                   FROM trades WHERE DATE(close_time)=? AND close_time IS NOT NULL""",
+                (today,)
+            ).fetchone()
+            trade_stats = dict(row) if row else {"total_trades": 0, "wins": 0, "losses": 0}
+
+        return jsonify({"ok": True, "data": {
+            "funnel":      funnel,
+            "scanner":     scanner_stats,
+            "telegram":    tg_stats,
+            "trades_today":trade_stats,
+            "date":        today,
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
+
+
+# ── /api/candidates ───────────────────────────────────────────────────────────
+@app.route("/api/candidates")
+def api_candidates():
+    """Candidate sinyaller — watchlist/telegram/trade onay durumları ile."""
+    try:
+        from database import get_candidate_signals
+        stage = request.args.get("stage")
+        limit = int(request.args.get("limit", 50))
+        data  = get_candidate_signals(limit=limit, stage=stage)
+        return jsonify({"ok": True, "data": data, "total": len(data)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/missed_opportunities ─────────────────────────────────────────────────
+@app.route("/api/missed_opportunities")
+def api_missed_opportunities():
+    """Reddedilen ama aslında kazandıracak sinyaller."""
+    try:
+        from database import get_missed_opportunities
+        days = int(request.args.get("days", 7))
+        data = get_missed_opportunities(days=days)
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/adaptive_stats ───────────────────────────────────────────────────────
+@app.route("/api/adaptive_stats")
+def api_adaptive_stats():
+    """Coin/saat/setup bazlı öğrenme istatistikleri."""
+    try:
+        from database import get_adaptive_stats
+        stat_type  = request.args.get("type", "coin")
+        dimension  = request.args.get("dim", "symbol")
+        min_count  = int(request.args.get("min", 5))
+        data       = get_adaptive_stats(stat_type, dimension, min_count)
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/paper_results ────────────────────────────────────────────────────────
+@app.route("/api/paper_results")
+def api_paper_results():
+    """Paper sonuçları — gerçekçi fee/slippage dahil."""
+    try:
+        from database import get_paper_stats
+        days  = int(request.args.get("days", 30))
+        stats = get_paper_stats(days=days)
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT symbol, direction, quality, close_reason,
+                   net_pnl, r_multiple, fee_paid, tp1_hit, tp2_hit,
+                   hold_minutes, is_candidate_track
+                   FROM paper_results WHERE close_time IS NOT NULL
+                   ORDER BY id DESC LIMIT 100"""
+            ).fetchall()
+        return jsonify({"ok": True, "data": {
+            "stats":   stats,
+            "results": [dict(r) for r in rows],
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
+
+
+# ── /api/scanned_coins ────────────────────────────────────────────────────────
+@app.route("/api/scanned_coins")
+def api_scanned_coins():
+    """Bugün taranan coinler — tradeability score ile."""
+    try:
+        from database import get_scanned_coins_today
+        limit = int(request.args.get("limit", 100))
+        data  = get_scanned_coins_today(limit=limit)
+        return jsonify({"ok": True, "data": data, "total": len(data)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     socketio.run(

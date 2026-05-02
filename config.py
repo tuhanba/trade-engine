@@ -131,3 +131,35 @@ COIN_UNIVERSE = [
 LOG_DIR      = os.getenv("LOG_DIR", "/root/trade_engine/logs")
 LOG_MAX_DAYS = int(os.getenv("LOG_MAX_DAYS", "7"))
 LOG_MAX_MB   = int(os.getenv("LOG_MAX_MB", "50"))
+
+# ── Sinyal Eşikleri (3 katmanlı) ─────────────────────────────────────────────
+# DATA_THRESHOLD   : ≥ bu skor → DB'ye candidate olarak kaydet (veri toplama)
+# WATCHLIST_THRESHOLD: ≥ bu skor → dashboard watchlist'e ekle
+# TELEGRAM_THRESHOLD : ≥ bu skor → Telegram'a gönder
+# TRADE_THRESHOLD    : ≥ bu skor → paper/live trade açılır
+DATA_THRESHOLD       = int(os.getenv("DATA_THRESHOLD", "45"))
+WATCHLIST_THRESHOLD  = int(os.getenv("WATCHLIST_THRESHOLD", "65"))
+TELEGRAM_THRESHOLD   = int(os.getenv("TELEGRAM_THRESHOLD", "75"))
+TRADE_THRESHOLD      = int(os.getenv("TRADE_THRESHOLD", "82"))
+
+# ── Adaptive Learning Minimumlari ────────────────────────────────────────────
+# Yeterli veri olmadan parametre değişikliği yapılmasın
+MIN_CANDIDATES_FOR_COIN_LEARNING     = int(os.getenv("MIN_CANDIDATES_FOR_COIN_LEARNING", "30"))
+MIN_TRADES_FOR_RISK_UPDATE           = int(os.getenv("MIN_TRADES_FOR_RISK_UPDATE", "50"))
+MIN_CANDIDATES_FOR_THRESHOLD_UPDATE  = int(os.getenv("MIN_CANDIDATES_FOR_THRESHOLD_UPDATE", "100"))
+
+# ── Paper Tracking Ayarları ───────────────────────────────────────────────────
+# Reddedilen ve watchlist sinyallerinin de sonucunu takip et
+PAPER_TRACK_REJECTED_CANDIDATES = os.getenv("PAPER_TRACK_REJECTED_CANDIDATES", "true").lower() == "true"
+PAPER_TRACK_WATCHLIST           = os.getenv("PAPER_TRACK_WATCHLIST", "true").lower() == "true"
+
+# ── Fee & Slippage Sabitleri ─────────────────────────────────────────────────
+TAKER_FEE_PCT   = float(os.getenv("TAKER_FEE_PCT", "0.04"))    # %0.04 per side
+SLIPPAGE_PCT    = float(os.getenv("SLIPPAGE_PCT", "0.05"))      # %0.05 ortalama
+
+# ── Safety / Live Guard ───────────────────────────────────────────────────────
+# EXECUTION_MODE=live olsa bile LIVE_CONFIRM=true olmadan emir açılmaz
+LIVE_CONFIRM         = os.getenv("LIVE_CONFIRM", "false").lower() == "true"
+MAX_SPREAD_PCT       = float(os.getenv("MAX_SPREAD_PCT", "0.1"))     # maks spread %0.1
+MAX_LEVERAGE_ALLOWED = int(os.getenv("MAX_LEVERAGE_ALLOWED", "20"))
+MAX_CORRELATED_TRADES= int(os.getenv("MAX_CORRELATED_TRADES", "2"))  # aynı anda max korelasyon
