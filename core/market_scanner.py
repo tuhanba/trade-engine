@@ -74,12 +74,17 @@ class MarketScanner:
                 if price_change > 30.0:
                     status = "Avoid"
                     score = 0
-                elif volume > 50_000_000 and 2.0 < price_change < 15.0:
+                elif volume > 20_000_000 and 1.0 < price_change < 20.0:
+                    # Eligible: hacim >20M USDT ve anlamlı hareket
                     status = "Eligible"
-                    score = min(10, (volume / 10_000_000) * 0.5 + price_change * 0.5)
+                    score = min(10, (volume / 10_000_000) * 0.4 + price_change * 0.4 + 2.0)
+                elif volume > 10_000_000 and price_change > 0.5:
+                    # Watch: orta hacim, küçük hareket
+                    status = "Watch"
+                    score = min(7, (volume / 10_000_000) * 0.3 + price_change * 0.3 + 1.0)
                 else:
                     status = "Watch"
-                    score = 5
+                    score = 3
                     
                 if status != "Avoid":
                     candidates.append({

@@ -240,19 +240,19 @@ class AIDecisionEngine:
         base_confidence = max(0.0, min(1.0, final_score / 10.0))
         confidence = (base_confidence * 0.6) + ((ml_score / 100.0) * 0.4)
 
-        # S  için eşik: 6.5 — Composite skor ≥10, en güvenilir setup
-        # A+ için eşik: 7.0 — Backtest kanıtlı, yüksek kalite
-        # A  hâlâ kapalı — ALLOWED_QUALITIES'de yok (backtest: A PF=0.78)
-        # B  hâlâ kapalı — ALLOWED_QUALITIES'de yok
-        if final_score >= 6.5 and signal_data.setup_quality == "S":
+        # S  için eşik: 5.5 — Composite skor ≥10, en güvenilir setup
+        # A+ için eşik: 6.0 — Backtest kanıtlı, yüksek kalite
+        # Not: base_score max=10.0, ai_adj tipik -2.5 ile +1.5 arasında
+        # Yeni DB'de veri yok → ai_adj ≈ 0.0 → base_score 6.0+ yeterli
+        if final_score >= 5.5 and signal_data.setup_quality == "S":
             decision = "ALLOW"
             reason = "S-class composite setup with AI approval"
-        elif final_score >= 7.0 and signal_data.setup_quality == "A+":
+        elif final_score >= 6.0 and signal_data.setup_quality == "A+":
             decision = "ALLOW"
             reason = "A+ setup with AI approval"
         else:
             decision = "VETO"
-            reason = "Low AI score or dangerous profile"
+            reason = f"Low AI score ({final_score:.1f}) or dangerous profile"
 
         if decision == "ALLOW":
             self.daily_signals += 1

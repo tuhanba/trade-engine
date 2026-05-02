@@ -248,11 +248,11 @@ class TriggerEngine:
         # İyi saat bonusu (0-1 puan)
         if current_hour in GOOD_HOURS_UTC:
             s_score += 1
-        # S sınıfı eşiği: 14 üzerinden en az 10 puan
-        if s_score >= 10:
+        # S sınıfı eşiği: 14 üzerinden en az 8 puan (yeni DB'de coin WR=0 → 2 puan eksik)
+        if s_score >= 8:
             quality = "S"
         # A+ Kalite Yükseltmesi
-        elif quality == "A" and score >= 9.0:
+        elif quality == "A" and score >= 7.5:
             quality = "A+"
 
         # ── Kalite Filtresi ────────────────────────────────────────────────────
