@@ -64,7 +64,7 @@ BREAKEVEN_OFFSET_PCT = float(os.getenv("BREAKEVEN_OFFSET_PCT", "0.05"))
 # ── Sinyal Kalite Filtresi ───────────────────────────────────────────────────
 # v2.4: "A+" → "A+,A" — A kalite sinyaller de işlenir (trade sayısı ~2x artar)
 # A+ win rate: ~%62 | A win rate: ~%52 | B win rate: ~%38 (B hâlâ kapalı)
-ALLOWED_QUALITIES = os.getenv("ALLOWED_QUALITIES", "A+").split(",")
+ALLOWED_QUALITIES = os.getenv("ALLOWED_QUALITIES", "S,A+").split(",")
 
 # ── Saat Filtresi (UTC) ──────────────────────────────────────────────────────
 # v2.4: 13 saat → 10 saat (UTC 2, 8, 15, 18 açıldı — daha fazla aktif pencere)
