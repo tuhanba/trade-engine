@@ -535,17 +535,6 @@ def _migrate(conn):
         ("paper_results", "skip_decision_correct", "INTEGER DEFAULT 1"),
         ("paper_results", "final_score_snap", "REAL DEFAULT 0"),
         ("paper_results", "reject_reason_snap", "TEXT"),
-        # system_state schema migration - PRIMARY KEY sutunlar ALTER ile eklenemez
-        # Bu tablo icin init_db sonunda ayri migration yapiliyor
-        # weekly_summary schema migration
-        ("weekly_summary", "trade_count", "INTEGER DEFAULT 0"),
-        ("weekly_summary", "win_count",   "INTEGER DEFAULT 0"),
-        ("weekly_summary", "loss_count",  "INTEGER DEFAULT 0"),
-        ("weekly_summary", "win_rate",    "REAL DEFAULT 0"),
-        ("weekly_summary", "net_pnl",     "REAL DEFAULT 0"),
-        ("weekly_summary", "avg_r",       "REAL DEFAULT 0"),
-        ("weekly_summary", "best_day",    "TEXT"),
-        ("weekly_summary", "worst_day",   "TEXT"),
     ]
     for table, col, col_type in migrations:
         try:
@@ -561,21 +550,6 @@ def _migrate(conn):
         )
     except Exception:
         pass
-    # system_state: eski sema ile uyumsuzsa tabloyu yeniden olustur
-    try:
-        conn.execute("SELECT key, value FROM system_state LIMIT 1")
-    except Exception:
-        try:
-            conn.execute("DROP TABLE IF EXISTS system_state")
-            conn.execute("""
-                CREATE TABLE system_state (
-                    key        TEXT PRIMARY KEY,
-                    value      TEXT,
-                    updated_at TEXT DEFAULT (datetime('now'))
-                )
-            """)
-        except Exception:
-            pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -583,20 +557,11 @@ def _migrate(conn):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def init_paper_account(initial: float = 250.0):
-    import time as _time
-    for _attempt in range(10):
-        try:
-            with get_conn() as conn:
-                conn.execute(
-                    "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
-                    (initial, initial)
-                )
-            return
-        except sqlite3.OperationalError as _e:
-            if "locked" in str(_e).lower():
-                _time.sleep(1)
-            else:
-                raise
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
+            (initial, initial)
+        )
 
 def get_paper_balance() -> float:
     with get_conn() as conn:
@@ -689,25 +654,13 @@ def update_trade(trade_id: int, fields: dict):
 def close_trade(trade_id: int, close_price: float, net_pnl: float,
                 reason: str, hold_minutes: float = 0):
     now = datetime.now(timezone.utc).isoformat()
-    # Status'u reason ve pnl'e göre belirle
-    _r = (reason or "").upper()
-    if _r in ("SL", "SL/BE"):
-        _status = "sl"
-    elif _r == "TIMEOUT":
-        _status = "timeout"
-    elif _r == "TRAIL":
-        _status = "trail"
-    elif net_pnl > 0:
-        _status = "closed_win"
-    else:
-        _status = "closed_loss"
     with get_conn() as conn:
         conn.execute(
             """UPDATE trades SET
-                status=?, close_price=?, net_pnl=?, close_reason=?,
+                status='closed', close_price=?, net_pnl=?, close_reason=?,
                 hold_minutes=?, close_time=?
                WHERE id=?""",
-            (_status, close_price, net_pnl, reason, hold_minutes, now, trade_id)
+            (close_price, net_pnl, reason, hold_minutes, now, trade_id)
         )
 
 def get_trade(trade_id: int) -> dict | None:
