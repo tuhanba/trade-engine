@@ -535,9 +535,8 @@ def _migrate(conn):
         ("paper_results", "skip_decision_correct", "INTEGER DEFAULT 1"),
         ("paper_results", "final_score_snap", "REAL DEFAULT 0"),
         ("paper_results", "reject_reason_snap", "TEXT"),
-        # system_state schema migration
-        ("system_state", "value",      "TEXT"),
-        ("system_state", "updated_at", "TEXT DEFAULT (datetime('now'))"),
+        # system_state schema migration - PRIMARY KEY sutunlar ALTER ile eklenemez
+        # Bu tablo icin init_db sonunda ayri migration yapiliyor
         # weekly_summary schema migration
         ("weekly_summary", "trade_count", "INTEGER DEFAULT 0"),
         ("weekly_summary", "win_count",   "INTEGER DEFAULT 0"),
@@ -562,6 +561,18 @@ def _migrate(conn):
         )
     except Exception:
         pass
+    # system_state: eski sema ile uyumsuzsa tabloyu yeniden olustur
+    try:
+        conn.execute("SELECT key, value FROM system_state LIMIT 1")
+    except Exception:
+        conn.execute("DROP TABLE IF EXISTS system_state")
+        conn.execute("""
+            CREATE TABLE system_state (
+                key        TEXT PRIMARY KEY,
+                value      TEXT,
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
