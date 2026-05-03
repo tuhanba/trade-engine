@@ -7,7 +7,7 @@ import logging
 import sqlite3
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class AIDecisionEngine:
         self.daily_signals = 0
         self.max_daily_signals = 40  # Backtest: kalite > miktar
         self.recent_coins = []
-        self.last_reset_date = datetime.utcnow().date()
+        self.last_reset_date = datetime.now(timezone.utc).date()
         self.thresholds = {
             "data": DATA_THRESHOLD,
             "watchlist": WATCHLIST_THRESHOLD,
@@ -110,8 +110,8 @@ class AIDecisionEngine:
             logger.error(f"Parametre yükleme hatası: {e}")
 
     def _check_daily_reset(self):
-        """Gece yarısı günlük sayacı sıfırlar."""
-        current_date = datetime.utcnow().date()
+        """Gece yarısı UTC'de günlük sayıcı sıfırlar."""
+        current_date = datetime.now(timezone.utc).date()
         if current_date > self.last_reset_date:
             self.daily_signals = 0
             self.recent_coins = []
@@ -146,7 +146,7 @@ class AIDecisionEngine:
                     except:
                         pass
                 
-                current_hour = datetime.utcnow().hour
+                current_hour = datetime.now(timezone.utc).hour
                 if current_hour in by_hour and len(by_hour[current_hour]) >= 3:
                     results = by_hour[current_hour]
                     wr = len([r for r in results if r == "WIN"]) / len(results)
@@ -156,7 +156,7 @@ class AIDecisionEngine:
             logger.error(f"Heatmap hesaplama hatası: {e}")
             
         # Fallback — Backtest bulgularına göre kalibre edildi
-        current_hour = datetime.utcnow().hour
+        current_hour = datetime.now(timezone.utc).hour
         if current_hour in _BAD_HOURS:  return -2.5  # WR %13-22 — ağır ceza
         if current_hour in _GOOD_HOURS: return +1.5  # WR %44-51 — bonus
         return 0.0
