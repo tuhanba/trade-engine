@@ -940,23 +940,29 @@ def get_stats(hours: int = 720) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_state(key: str, default=None):
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT value FROM system_state WHERE key=?", (key,)
-        ).fetchone()
-        if row is None:
-            return default
-        try:
-            return json.loads(row["value"])
-        except Exception:
-            return row["value"]
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM system_state WHERE key=?", (key,)
+            ).fetchone()
+            if row is None:
+                return default
+            try:
+                return json.loads(row["value"])
+            except Exception:
+                return row["value"]
+    except Exception:
+        return default
 
 def set_state(key: str, value):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO system_state (key, value, updated_at) VALUES (?, ?, datetime('now'))",
-            (key, json.dumps(value))
-        )
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO system_state (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+                (key, json.dumps(value))
+            )
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
