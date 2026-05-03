@@ -1,16 +1,11 @@
 """
-scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.7 (ELITE MASTER)
+scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.8 (ELITE ULTIMATE)
 =========================================================
 Yenilikler:
-  - Asenkron Market Scanner (Hız)
-  - Advanced Trend Engine (Mean Reversion & Volume Profile)
-  - Advanced Risk Engine (Korelasyon Koruması)
-  - AI Decision Engine Entegrasyonu (Final Karar Katmanı)
-  - Otomatik Trade Açma (Execution Engine Entegrasyonu)
-  - Telegram Bildirimleri (Sabitlenmiş Token & Chat ID)
-  - Dashboard Canlı Akış (SocketIO Entegrasyonu)
   - Ghost Trading (Açılmayan trade'lerin veri takibi)
+  - Dashboard Canlı Akış (SocketIO Entegrasyonu)
   - Elite Monitor (Auto-Cleanup & Health Check)
+  - Filtre Optimizasyonu (Esnek Avcı)
 """
 import asyncio
 import logging
@@ -69,7 +64,7 @@ def broadcast_to_dashboard(event, data):
             logger.debug(f"SocketIO emit error: {e}")
 
 async def main_loop():
-    logger.info("=== AX Scalp Engine v3.7 (ELITE MASTER) Başlatılıyor ===")
+    logger.info("=== AX Scalp Engine v3.8 (ELITE ULTIMATE) Başlatılıyor ===")
     
     init_db()
     client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
@@ -81,7 +76,7 @@ async def main_loop():
     ai_engine = AIDecisionEngine(db_path=DB_PATH)
     monitor = EliteMonitor(db_path=DB_PATH)
     
-    send_direct_message("💎 <b>AX Scalp Engine v3.7 ELITE MASTER Başlatıldı!</b>\nSistem temizlendi, optimize edildi ve izleme moduna alındı.")
+    send_direct_message("💎 <b>AX Scalp Engine v3.8 ELITE ULTIMATE Başlatıldı!</b>\nSistem 10/10 modunda, Ghost Trading aktif.")
 
     last_cleanup = time.time()
 
@@ -97,9 +92,11 @@ async def main_loop():
             # 1. Asenkron Tarama
             candidates = await scanner.scan()
             if not candidates:
+                logger.info("Tarama yapıldı, uygun aday bulunamadı.")
                 await asyncio.sleep(SCAN_INTERVAL)
                 continue
                 
+            logger.info(f"Tarama tamamlandı: {len(candidates)} aday bulundu.")
             broadcast_to_dashboard('scanner_update', {'count': len(candidates), 'timestamp': time.time()})
             
             open_trades = get_open_trades()
@@ -145,9 +142,9 @@ async def main_loop():
                 
                 ai_res = ai_engine.evaluate(sig)
                 
-                if ai_res["decision"] != "ALLOW":
-                    save_paper_trade(sig.to_dict(), tracked_from=ai_res["decision"])
-                    broadcast_to_dashboard('ghost_trade', {'symbol': symbol, 'decision': ai_res["decision"]})
+                # Ghost Trading: Her aday kaydedilir
+                save_paper_trade(sig.to_dict(), tracked_from=ai_res["decision"])
+                broadcast_to_dashboard('ghost_trade', {'symbol': symbol, 'decision': ai_res["decision"]})
 
                 if ai_res["decision"] == "ALLOW":
                     logger.info(f"🚀 SİNYAL ONAYLANDI: {symbol} {trend_res['direction']}")
