@@ -117,14 +117,24 @@ def evaluate_signal(signal: dict, open_trades: list, balance: float,
     if is_coin_in_cooldown(symbol):
         return veto("coin_cooldown", -20)
 
-    # ── Günlük kayıp limiti ──────────────────────────────────────────────────
-    stats = get_stats(hours=24)
-    daily_loss = abs(min(stats.get("total_pnl", 0), 0))
+    # ── Günlük kayıp limiti (UTC tarihine göre — gece yarısı otomatik sıfırlanır) ──────────────────────────────────────────────────────────────────────────────────────
+    try:
+        _today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with get_conn() as _conn:
+            _row = _conn.execute(
+                "SELECT COALESCE(SUM(net_pnl), 0) FROM trades "
+                "WHERE DATE(close_time) = ? AND close_time IS NOT NULL",
+                (_today_utc,)
+            ).fetchone()
+        _today_pnl = float(_row[0]) if _row else 0.0
+    except Exception:
+        _today_pnl = 0.0
+    daily_loss = abs(min(_today_pnl, 0))
     daily_loss_limit = balance * DAILY_MAX_LOSS_PCT / 100
     if daily_loss >= daily_loss_limit:
         return veto("daily_loss_limit", -30)
 
-    # ── Skor düzeltmeleri (VETO değil, sadece skor) ──────────────────────────
+    # ── Skor düzeltmeleri (VETO değil, sadece skor) ──────────────────────────────────────────────────────────────────────────────────────
     score_adj = 0.0
 
     # Ardışık kayıp
