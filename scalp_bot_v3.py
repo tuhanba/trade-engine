@@ -1,10 +1,11 @@
 """
-scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.3
+scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.4 (MASTER)
 =========================================================
 Yenilikler:
   - Asenkron Market Scanner (Hız)
   - Advanced Trend Engine (Mean Reversion & Volume Profile)
   - Advanced Risk Engine (Korelasyon Koruması)
+  - AI Decision Engine Entegrasyonu (Final Karar Katmanı)
   - Otomatik Trade Açma (Execution Engine Entegrasyonu)
   - Telegram Bildirimleri (Sabitlenmiş Token & Chat ID)
   - Dashboard Entegrasyonu (Data Layer & DB Kaydı)
@@ -21,7 +22,8 @@ from core.async_market_scanner import AsyncMarketScanner
 from core.advanced_trend_engine import AdvancedTrendEngine
 from core.trigger_engine import TriggerEngine
 from core.advanced_risk_engine import AdvancedRiskEngine
-from database import init_db, get_paper_balance, get_open_trades, save_scalp_signal
+from core.ai_decision_engine import AIDecisionEngine
+from database import init_db, get_paper_balance, get_open_trades, save_scalp_signal, save_ai_log
 from core.data_layer import SignalData, data_layer
 from telegram_delivery import deliver_signal, send_trade_open
 
@@ -47,7 +49,7 @@ def send_direct_message(text):
         logger.error(f"Telegram direct message error: {e}")
 
 async def main_loop():
-    logger.info("=== AX Scalp Engine v3.3 (Modernized) Başlatılıyor ===")
+    logger.info("=== AX Scalp Engine v3.4 (MASTER) Başlatılıyor ===")
     
     init_db()
     client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
@@ -56,12 +58,13 @@ async def main_loop():
     trend = AdvancedTrendEngine(client)
     trigger = TriggerEngine(client)
     risk = AdvancedRiskEngine(client, db_path=DB_PATH)
+    ai_engine = AIDecisionEngine(db_path=DB_PATH)
     
     # Filtreleri gevşet (Test için A ve B kalitelerine izin ver)
     current_allowed = ALLOWED_QUALITIES + ["A", "B"]
     logger.info(f"İzin verilen kaliteler: {current_allowed}")
     
-    send_direct_message("🚀 <b>AX Scalp Engine v3.3 Modernize Sürüm Başlatıldı!</b>\nSinyaller taranıyor...")
+    send_direct_message("🚀 <b>AX Scalp Engine v3.4 MASTER Sürüm Başlatıldı!</b>\nAI Decision Engine ve Dashboard entegrasyonu aktif.")
 
     while True:
         try:
@@ -87,8 +90,6 @@ async def main_loop():
                 
                 # 3. Tetikleyici Kontrolü
                 trigger_res = trigger.analyze(symbol, trend_res["direction"], trend_res.get("btc_trend", "NEUTRAL"))
-                
-                # Eğer kalite D ise veya çok düşük skorluysa geç
                 if trigger_res["quality"] == "D" and trigger_res["score"] < 4: continue
                 
                 # 4. Gelişmiş Risk ve Korelasyon Kontrolü
@@ -97,34 +98,48 @@ async def main_loop():
                     trigger_res["quality"], balance, open_trades
                 )
                 
-                # Sinyal Onay Mantığı
-                if risk_res["valid"] or (trigger_res["score"] > 6):
-                    logger.info(f"🚀 SİNYAL ONAYLANDI: {symbol} {trend_res['direction']} | Kalite: {trigger_res['quality']} | Skor: {trend_res['score']}")
+                # 5. AI Decision Engine Değerlendirmesi
+                # SignalData objesi oluştur (AI değerlendirmesi için)
+                sig = SignalData(
+                    id=str(uuid.uuid4())[:8],
+                    symbol=symbol,
+                    timestamp=time.time(),
+                    direction=trend_res["direction"],
+                    entry_zone=trigger_res["entry"],
+                    stop_loss=risk_res.get("sl", trigger_res["entry"] * 0.98),
+                    tp1=risk_res.get("tp1", trigger_res["entry"] * 1.02),
+                    tp2=risk_res.get("tp2", trigger_res["entry"] * 1.04),
+                    tp3=risk_res.get("tp3", trigger_res["entry"] * 1.06),
+                    setup_quality=trigger_res["quality"],
+                    coin_score=coin["tradeability_score"],
+                    trend_score=trend_res["score"],
+                    trigger_score=trigger_res["score"],
+                    risk_score=risk_res.get("score", 5),
+                    ml_score=trigger_res.get("ml_score", 50),
+                    rr=risk_res.get("rr", 1.5),
+                    risk_percent=risk_res.get("risk_pct", 1.0),
+                    position_size=risk_res.get("position_size", 0),
+                    notional_size=risk_res.get("notional", 0),
+                    leverage_suggestion=risk_res.get("leverage", 10),
+                    confidence=trigger_res.get("ml_score", 50) / 100.0,
+                    reason=f"Trend: {trend_res['direction']}, Score: {trend_res['score']}"
+                )
+                
+                ai_res = ai_engine.evaluate(sig)
+                
+                # AI Onayı veya Yüksek Skor (Test Modu)
+                if ai_res["decision"] in ["ALLOW", "WATCH"] or trigger_res["score"] > 7:
+                    logger.info(f"🚀 SİNYAL ONAYLANDI ({ai_res['decision']}): {symbol} {trend_res['direction']} | Skor: {trigger_res['score']}")
                     
-                    # SignalData objesi oluştur
-                    sig = SignalData(
-                        id=str(uuid.uuid4())[:8],
+                    # AI Log Kaydı
+                    save_ai_log(
+                        event="signal_evaluation",
                         symbol=symbol,
-                        timestamp=time.time(),
-                        direction=trend_res["direction"],
-                        entry_zone=trigger_res["entry"],
-                        stop_loss=risk_res.get("sl", trigger_res["entry"] * 0.98),
-                        tp1=risk_res.get("tp1", trigger_res["entry"] * 1.02),
-                        tp2=risk_res.get("tp2", trigger_res["entry"] * 1.04),
-                        tp3=risk_res.get("tp3", trigger_res["entry"] * 1.06),
-                        setup_quality=trigger_res["quality"],
-                        coin_score=coin["tradeability_score"],
-                        trend_score=trend_res["score"],
-                        trigger_score=trigger_res["score"],
-                        risk_score=risk_res.get("score", 5),
-                        final_score=(trend_res["score"] + trigger_res["score"] + risk_res.get("score", 5)) * 3.3,
-                        rr=risk_res.get("rr", 1.5),
-                        risk_percent=risk_res.get("risk_pct", 1.0),
-                        position_size=risk_res.get("position_size", 0),
-                        notional_size=risk_res.get("notional", 0),
-                        leverage_suggestion=risk_res.get("leverage", 10),
-                        confidence=trigger_res.get("ml_score", 50) / 100.0,
-                        reason=f"Trend: {trend_res['direction']}, Score: {trend_res['score']}"
+                        decision=ai_res["decision"],
+                        score=trigger_res["score"],
+                        confidence=sig.confidence,
+                        reason=ai_res.get("reason", "score_threshold_passed"),
+                        data=str(trend_res)
                     )
                     
                     # 1. Data Layer'a ekle (Dashboard için)
@@ -136,8 +151,8 @@ async def main_loop():
                     # 3. Telegram'a gönder
                     deliver_signal(sig)
                     
-                    # 4. Trade aç
-                    if EXECUTION_AVAILABLE:
+                    # 4. Trade aç (Sadece ALLOW ise)
+                    if ai_res["decision"] == "ALLOW" and EXECUTION_AVAILABLE:
                         try:
                             trade_info = open_trade(client, sig.to_dict())
                             if trade_info:
