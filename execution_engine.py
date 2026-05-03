@@ -382,15 +382,42 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     # ── CoinLibrary Öğrenme Döngüsü ──────────────────────────────────────────
     try:
         from coin_library import update_coin_stats
+        from database import get_conn
         entry_p = t.get("entry", 0)
         sl_p    = t.get("sl", 0)
         sl_dist = abs(entry_p - sl_p) if sl_p else 1e-10
         r_mult  = round(net_pnl / (sl_dist * t.get("qty", 1) + 1e-10), 3)
+        # trade_postmortem tablosundan MFE/MAE oku (post_trade_analysis yazmış olabilir)
+        mfe_r_val = 0.0
+        mae_r_val = 0.0
+        try:
+            with get_conn() as _conn:
+                _pm = _conn.execute(
+                    "SELECT mfe_r, mae_r FROM trade_postmortem WHERE trade_id=?",
+                    (trade_id,)
+                ).fetchone()
+                if _pm:
+                    mfe_r_val = float(_pm["mfe_r"] or 0)
+                    mae_r_val = float(_pm["mae_r"] or 0)
+        except Exception:
+            pass
+        # post_trade_analysis async çalıştığı için postmortem henüz yazılmamış olabilir;
+        # bu durumda entry/sl/close_price üzerinden anlık hesapla
+        if mfe_r_val == 0 and mae_r_val == 0 and sl_dist > 0:
+            direction_val = (t.get("direction") or "").upper()
+            if direction_val == "LONG":
+                mfe_r_val = round(max(0, close_price - entry_p) / sl_dist, 3)
+                mae_r_val = round(max(0, entry_p - close_price) / sl_dist, 3)
+            elif direction_val == "SHORT":
+                mfe_r_val = round(max(0, entry_p - close_price) / sl_dist, 3)
+                mae_r_val = round(max(0, close_price - entry_p) / sl_dist, 3)
         update_coin_stats(
             symbol    = t["symbol"],
             result    = result,
             net_pnl   = net_pnl,
             r_multiple= r_mult,
+            mfe_r     = mfe_r_val,
+            mae_r     = mae_r_val,
             direction = t.get("direction"),
         )
     except Exception as e:
