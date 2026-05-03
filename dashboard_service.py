@@ -36,7 +36,7 @@ def compute_daily(date_str: str | None = None) -> dict | None:
                 """
                 SELECT net_pnl, close_reason, entry, sl
                 FROM trades
-                WHERE DATE(close_time) = ? AND status IN ('closed_win','closed_loss','sl','trail','timeout','tp1_hit','runner','open','closed')
+                WHERE DATE(close_time) = ? AND status IN ('closed','closed_win','closed_loss','sl','trail','timeout','tp1_hit','runner','SL','TP2','SL/BE')
                   AND close_time IS NOT NULL
                 """,
                 (date_str,),

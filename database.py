@@ -654,13 +654,25 @@ def update_trade(trade_id: int, fields: dict):
 def close_trade(trade_id: int, close_price: float, net_pnl: float,
                 reason: str, hold_minutes: float = 0):
     now = datetime.now(timezone.utc).isoformat()
+    # Status'u reason ve pnl'e göre belirle
+    _r = (reason or "").upper()
+    if _r in ("SL", "SL/BE"):
+        _status = "sl"
+    elif _r == "TIMEOUT":
+        _status = "timeout"
+    elif _r == "TRAIL":
+        _status = "trail"
+    elif net_pnl > 0:
+        _status = "closed_win"
+    else:
+        _status = "closed_loss"
     with get_conn() as conn:
         conn.execute(
             """UPDATE trades SET
-                status='closed', close_price=?, net_pnl=?, close_reason=?,
+                status=?, close_price=?, net_pnl=?, close_reason=?,
                 hold_minutes=?, close_time=?
                WHERE id=?""",
-            (close_price, net_pnl, reason, hold_minutes, now, trade_id)
+            (_status, close_price, net_pnl, reason, hold_minutes, now, trade_id)
         )
 
 def get_trade(trade_id: int) -> dict | None:

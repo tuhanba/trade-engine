@@ -228,6 +228,9 @@ def main():
                     send_message(f"✅ Finish modu tamamlandı. Bakiye: ${get_paper_balance():.2f}")
                     logger.info("Finish modu tamamlandı.")
                     break
+                # Açık trade'leri izlemeye devam et — kapanmadan çıkma
+                if EXECUTION_AVAILABLE:
+                    exec_monitor(client)
                 time.sleep(10)
                 continue
 

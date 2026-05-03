@@ -113,7 +113,8 @@ def api_stats():
 @app.route("/api/pnl_chart")
 def api_pnl_chart():
     try:
-        trades = get_trades(limit=200, status="closed")
+        trades = get_trades(limit=200)  # tüm trade'ler — açık olanları filtrele
+        trades = [t for t in trades if t.get("close_time")]
         cumulative = 0
         points = []
         for t in reversed(trades):
@@ -141,7 +142,8 @@ def api_trades():
         page  = int(request.args.get("page", 1))
         # Frontend hem "limit" hem "per_page" gönderebilir
         limit = int(request.args.get("limit", request.args.get("per_page", 10)))
-        all_trades  = get_trades(limit=10000, status="closed")
+        all_trades  = get_trades(limit=10000)
+        all_trades  = [t for t in all_trades if t.get("close_time")]  # sadece kapananlar
         total_count = len(all_trades)
         total_pages = max(1, (total_count + limit - 1) // limit)
         page   = max(1, min(page, total_pages))
@@ -207,8 +209,8 @@ def api_live():
                     "hold_str": hold_str, "hold_min": hold_min,
                 })
 
-        closed         = get_trades(limit=500, status="closed")
-        total_realized = sum(t["net_pnl"] or 0 for t in closed)
+        closed         = get_trades(limit=500)
+        total_realized = sum(t["net_pnl"] or 0 for t in closed if t.get("close_time"))
 
         return jsonify({"ok": True, "data": {
             "live":             live,
@@ -287,12 +289,14 @@ def api_ml_status():
 # ── /api/logs ─────────────────────────────────────────────────────────────────
 @app.route("/api/logs")
 def api_logs():
+    _app_dir = os.path.dirname(os.path.abspath(__file__))
     LOG_PATHS = [
+        os.path.join(_app_dir, "logs", "ax_bot.log"),
+        os.path.join(_app_dir, "logs", "bot.log"),
+        os.path.join(_app_dir, "ax_bot.log"),
+        os.path.join(_app_dir, "scalp_bot.log"),
         "/root/trade_engine/logs/ax_bot.log",
         "/root/trade_engine/logs/bot.log",
-        "/root/trade_engine/bot.log",
-        "/root/trade_engine/scalp_bot.log",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "ax_bot.log"),
     ]
     n = min(int(request.args.get("n", 80)), 300)
     lines_out = []
