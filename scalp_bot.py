@@ -258,7 +258,7 @@ def main():
             try:
                 from core.paper_tracker import process_pending_paper_results
 
-                done_p = process_pending_paper_results(client, limit=30)
+                done_p = process_pending_paper_results(client, limit=50)  # 30→50: %67 daha fazla finalize/döngü
                 if done_p:
                     logger.info(f"[paper_tracker] finalize {done_p} satır tamamlandı")
             except Exception as _pte:
@@ -658,7 +658,7 @@ def main():
             time.sleep(SCAN_INTERVAL)
             # ── AI Brain Periyodik Adaptasyon (30 dakikada bir) ─────────────
             _now_ts = time.time()
-            if AI_BRAIN_AVAILABLE and (_now_ts - _last_ai_adapt) >= 1800:
+            if AI_BRAIN_AVAILABLE and (_now_ts - _last_ai_adapt) >= 900:  # 1800→900sn: 2x adaptasyon frekansı
                 try:
                     from ai_brain import analyze_and_adapt
                     threading.Thread(target=analyze_and_adapt, daemon=True).start()

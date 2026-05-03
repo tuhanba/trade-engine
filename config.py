@@ -107,14 +107,14 @@ SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "60"))   # saniye
 
 # ── Adaptive Engine Örneklem Eşikleri ─────────────────────────────────────────
 MIN_CANDIDATES_FOR_COIN_LEARNING = int(os.getenv("MIN_CANDIDATES_FOR_COIN_LEARNING", "30"))
-MIN_TRADES_FOR_RISK_UPDATE = int(os.getenv("MIN_TRADES_FOR_RISK_UPDATE", "50"))
+MIN_TRADES_FOR_RISK_UPDATE = int(os.getenv("MIN_TRADES_FOR_RISK_UPDATE", "20"))  # 50→20: parametre optimizasyonu daha erken başlar
 MIN_CANDIDATES_FOR_THRESHOLD_UPDATE = int(os.getenv("MIN_CANDIDATES_FOR_THRESHOLD_UPDATE", "100"))
 
 # ── Paper Tracking ─────────────────────────────────────────────────────────────
 PAPER_TRACK_REJECTED_CANDIDATES = os.getenv("PAPER_TRACK_REJECTED_CANDIDATES", "true").lower() == "true"
 PAPER_TRACK_WATCHLIST = os.getenv("PAPER_TRACK_WATCHLIST", "true").lower() == "true"
 PAPER_TRACK_TELEGRAM_GAPS = os.getenv("PAPER_TRACK_TELEGRAM_GAPS", "true").lower() == "true"
-PAPER_TRACK_HORIZON_HOURS = float(os.getenv("PAPER_TRACK_HORIZON_HOURS", "8"))
+PAPER_TRACK_HORIZON_HOURS = float(os.getenv("PAPER_TRACK_HORIZON_HOURS", "4"))  # 8→4: finalize gecikmesi yarıya indi
 
 # ── Scanner genişliği (kalite filtresini gevşetmeden daha fazla tarama) ────────
 SCAN_INCLUDE_WATCH = os.getenv("SCAN_INCLUDE_WATCH", "true").lower() == "true"
