@@ -1,5 +1,5 @@
 """
-Telegram Delivery — AX Scalp Engine v4.0 (ULTIMATE ELITE)
+Telegram Delivery — AX Scalp Engine v4.1 (ULTIMATE ELITE)
 =========================================================
 Sinyal formatı: Ultra-detaylı, AI destekli, profesyonel.
 """
@@ -80,6 +80,32 @@ def format_signal(sig):
 
 def deliver_signal(sig):
     _queue.push(format_signal(sig))
+
+def send_trade_open(trade):
+    symbol = trade.get('symbol', 'Unknown')
+    direction = trade.get('direction', 'Unknown')
+    entry = trade.get('entry', 0)
+    msg = (
+        f"✅ <b>TRADE AÇILDI</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🪙 <b>{symbol}</b> | {direction}\n"
+        f"📌 Giriş: <code>{entry:.6f}</code>\n"
+        f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+    )
+    _queue.push(msg)
+
+def send_trade_close(trade, pnl, reason):
+    symbol = trade.get('symbol', 'Unknown')
+    result = "WIN 🟢" if pnl > 0 else "LOSS 🔴"
+    msg = (
+        f"{'🟢' if pnl > 0 else '🔴'} <b>TRADE KAPANDI — {result}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🪙 <b>{symbol}</b>\n"
+        f"💰 PnL: <b>{pnl:.2f}$</b>\n"
+        f"📋 Neden: {reason}\n"
+        f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+    )
+    _queue.push(msg)
 
 def send_message(text):
     _queue.push(text)
