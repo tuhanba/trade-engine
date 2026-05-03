@@ -508,6 +508,7 @@ def _migrate(conn):
         ("trades", "ax_mode",            "TEXT DEFAULT 'execute'"),
         ("trades", "environment",        "TEXT DEFAULT 'paper'"),
         ("trades", "close_reason",       "TEXT"),
+        ("trades", "session",            "TEXT"),
         # coin_params tablosu — yeni kolonlar
         ("coin_params", "volatility_profile", "TEXT DEFAULT 'normal'"),
         ("coin_params", "sl_atr_mult",        "REAL DEFAULT 1.3"),

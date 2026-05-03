@@ -164,11 +164,12 @@ def format_trade_close(trade, pnl, reason):
         f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
     )
 
-_sent_ids = set()
+_sent_ids: deque = deque(maxlen=1000)
+_sent_ids_set: set = set()
 
 def deliver_signal(sig):
     try:
-        if sig.id in _sent_ids:
+        if sig.id in _sent_ids_set:
             logger.debug(f"Duplicate sinyal engellendi: {sig.symbol}")
             return False
         if (sig.final_score or 0) < TELEGRAM_THRESHOLD:
@@ -182,7 +183,10 @@ def deliver_signal(sig):
         if not save_telegram_message(sig.id, sig.symbol, dedupe_key, msg, status="queued"):
             return False
         _queue.push(msg, "HTML", dedupe_key)
-        _sent_ids.add(sig.id)
+        if len(_sent_ids) >= 1000:
+            _sent_ids_set.discard(_sent_ids[0])
+        _sent_ids.append(sig.id)
+        _sent_ids_set.add(sig.id)
         sig.telegram_status = "sent"
         logger.info(
             f"Telegram gönderildi: {sig.symbol} {sig.direction} "

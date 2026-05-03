@@ -80,10 +80,10 @@ def atr(df: pd.DataFrame, period: int = 14) -> float:
 
 def adx(df: pd.DataFrame, period: int = 14) -> tuple:
     h, l, c = df["high"], df["low"], df["close"]
-    plus_dm  = h.diff().clip(lower=0)
-    minus_dm = (-l.diff()).clip(lower=0)
-    plus_dm[plus_dm  < minus_dm] = 0
-    minus_dm[minus_dm < plus_dm] = 0
+    raw_plus  = h.diff().clip(lower=0)
+    raw_minus = (-l.diff()).clip(lower=0)
+    plus_dm  = raw_plus.where(raw_plus  >= raw_minus, 0.0)
+    minus_dm = raw_minus.where(raw_minus >= raw_plus,  0.0)
     tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
     atr14    = tr.rolling(period).mean()
     plus_di  = 100 * (plus_dm.rolling(period).mean()  / (atr14 + 1e-10))

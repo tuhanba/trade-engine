@@ -331,7 +331,7 @@ def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> flo
         ], axis=1).max(axis=1)
         return float(tr.rolling(period).mean().iloc[-1])
     except Exception:
-        return float(df["close"].iloc[-1]) * 0.005 if "df" in dir() else 0.01
+        return 0.01
 
 
 def _finalize(trade_id: int, close_price: float, net_pnl: float,
@@ -351,9 +351,6 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
 
     # Live Tracker Postmortem Analizi
     try:
-        import sys
-        import os
-        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
         from live_tracker import record_close
         record_close(trade_id, close_price, reason)
     except Exception as e:

@@ -1,9 +1,9 @@
 """
 filter_debug.py — Hangi filtrede kaç coin düşüyor analiz et
 """
-import sys, requests, pandas as pd, numpy as np
+import sys, os, requests, pandas as pd, numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
-sys.path.insert(0, "/home/ubuntu/trade-engine")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import COIN_UNIVERSE, ADX_MIN_THRESHOLD, SL_ATR_MULT, MIN_RR
 
 def ema(s, p): return s.ewm(span=p, adjust=False).mean()

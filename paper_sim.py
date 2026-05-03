@@ -4,7 +4,11 @@ Mevcut app.py dashboard'una entegre çalışır.
 trading.db'ye yazar — dashboard otomatik okur.
 """
 import time, os, sys, threading
-os.environ.setdefault("DB_PATH", "/home/ubuntu/trade-engine/trading.db")
+
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BASE_DIR not in sys.path:
+    sys.path.insert(0, _BASE_DIR)
+
 import numpy as np
 import requests
 import pandas as pd
@@ -12,8 +16,6 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
 warnings.filterwarnings("ignore")
-
-sys.path.insert(0, "/home/ubuntu/trade-engine")
 from config import (
     COIN_UNIVERSE, BAD_HOURS_UTC,
     ADX_MIN_THRESHOLD, SL_ATR_MULT, MIN_RR, RISK_PCT,

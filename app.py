@@ -14,22 +14,32 @@ from database import (
     init_db, get_trades, get_stats, get_current_params,
     get_open_trades, get_paper_balance, get_conn,
 )
-from binance.client import Client
 import dashboard_service as dash_svc
 
 load_dotenv()
+
+_static_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+os.makedirs(_static_folder, exist_ok=True)
+
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "scalp2026")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 if N8N_AVAILABLE:
     app.register_blueprint(n8n_bp)
 
-client = Client(os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_API_SECRET", ""))
+try:
+    from binance.client import Client as _BinanceClient
+    client = _BinanceClient(
+        os.getenv("BINANCE_API_KEY", ""),
+        os.getenv("BINANCE_API_SECRET", ""),
+    )
+except Exception as _e:
+    import logging as _logging
+    _logging.getLogger(__name__).warning(f"Binance client başlatılamadı: {_e}")
+    client = None
 
 init_db()
 dash_svc.start()
-
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
 
 
 def _fmt_duration(open_time_str, close_time_str=None):
@@ -178,6 +188,8 @@ def api_live():
             hold_str, hold_min = _fmt_duration(t.get("open_time"))
 
             try:
+                if client is None:
+                    raise RuntimeError("Binance client kullanılamıyor")
                 ticker = client.futures_symbol_ticker(symbol=symbol)
                 mark   = float(ticker["price"])
                 raw_pnl = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
@@ -443,23 +455,13 @@ def api_signal_stats():
     try:
         days = int(request.args.get("days", 1))
         with get_conn() as conn:
-            # 'decision' sütununu dene, yoksa 'ax_decision' sütununu dene
-            try:
-                rows = conn.execute(
-                    "SELECT decision, COUNT(*) as cnt "
-                    "FROM signal_candidates "
-                    "WHERE created_at >= datetime('now', ?) "
-                    "GROUP BY decision",
-                    (f"-{days} days",),
-                ).fetchall()
-            except Exception:
-                rows = conn.execute(
-                    "SELECT ax_decision, COUNT(*) as cnt "
-                    "FROM signal_candidates "
-                    "WHERE created_at >= datetime('now', ?) "
-                    "GROUP BY ax_decision",
-                    (f"-{days} days",),
-                ).fetchall()
+            rows = conn.execute(
+                "SELECT decision, COUNT(*) as cnt "
+                "FROM signal_candidates "
+                "WHERE created_at >= datetime('now', ?) "
+                "GROUP BY decision",
+                (f"-{days} days",),
+            ).fetchall()
         stats = {"ALLOW": 0, "VETO": 0, "WATCH": 0, "total": 0}
         for dec, cnt in rows:
             if dec in stats:
