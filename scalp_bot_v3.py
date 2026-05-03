@@ -1,16 +1,19 @@
 """
-scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.1
+scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.2
 =========================================================
 Yenilikler:
   - Asenkron Market Scanner (Hız)
   - Advanced Trend Engine (Mean Reversion & Volume Profile)
   - Advanced Risk Engine (Korelasyon Koruması)
   - Otomatik Trade Açma (Execution Engine Entegrasyonu)
+  - Telegram Bildirimleri (Sinyal & İşlem Bildirimleri)
+  - Dashboard Entegrasyonu (Data Layer & DB Kaydı)
 """
 import asyncio
 import logging
 import time
 import os
+import uuid
 from binance.client import Client
 from config import BINANCE_API_KEY, BINANCE_API_SECRET, SCAN_INTERVAL, DB_PATH, ALLOWED_QUALITIES
 from core.async_market_scanner import AsyncMarketScanner
@@ -18,7 +21,8 @@ from core.advanced_trend_engine import AdvancedTrendEngine
 from core.trigger_engine import TriggerEngine
 from core.advanced_risk_engine import AdvancedRiskEngine
 from database import init_db, get_paper_balance, get_open_trades, save_scalp_signal
-from core.data_layer import SignalData
+from core.data_layer import SignalData, data_layer
+from telegram_delivery import deliver_signal, send_trade_open, send_message
 
 # Execution Engine import
 try:
@@ -31,7 +35,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(
 logger = logging.getLogger("scalp_bot_v3")
 
 async def main_loop():
-    logger.info("=== AX Scalp Engine v3.1 (Modernized) Başlatılıyor ===")
+    logger.info("=== AX Scalp Engine v3.2 (Modernized) Başlatılıyor ===")
     
     init_db()
     client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
@@ -44,6 +48,8 @@ async def main_loop():
     # Filtreleri geçici olarak gevşet (Test için A ve B kalitelerine izin ver)
     current_allowed = ALLOWED_QUALITIES + ["A", "B"]
     logger.info(f"İzin verilen kaliteler: {current_allowed}")
+    
+    send_message("🚀 <b>AX Scalp Engine v3.2 Modernize Sürüm Başlatıldı!</b>\nSinyaller taranıyor...")
 
     while True:
         try:
@@ -68,7 +74,6 @@ async def main_loop():
                 if trend_res["direction"] == "NO TRADE": continue
                 
                 # 3. Tetikleyici Kontrolü
-                # Manuel kalite kontrolü (ALLOWED_QUALITIES bypass)
                 trigger_res = trigger.analyze(symbol, trend_res["direction"], trend_res.get("btc_trend", "NEUTRAL"))
                 
                 # Eğer kalite D ise veya çok düşük skorluysa geç
@@ -80,31 +85,52 @@ async def main_loop():
                     trigger_res["quality"], balance, open_trades
                 )
                 
-                if risk_res["valid"] or (trigger_res["score"] > 6): # Skor yüksekse risk valid olmasa da dene (test için)
+                # Sinyal Onay Mantığı
+                if risk_res["valid"] or (trigger_res["score"] > 6):
                     logger.info(f"🚀 SİNYAL ONAYLANDI: {symbol} {trend_res['direction']} | Kalite: {trigger_res['quality']} | Skor: {trend_res['score']}")
                     
-                    # SignalData objesi oluştur
+                    # SignalData objesi oluştur (Dashboard ve Telegram için tam veri)
                     sig = SignalData(
+                        id=str(uuid.uuid4())[:8],
                         symbol=symbol,
+                        timestamp=time.time(),
                         direction=trend_res["direction"],
-                        entry=trigger_res["entry"],
-                        sl=risk_res.get("sl", trigger_res["entry"] * 0.98),
+                        entry_zone=trigger_res["entry"],
+                        stop_loss=risk_res.get("sl", trigger_res["entry"] * 0.98),
                         tp1=risk_res.get("tp1", trigger_res["entry"] * 1.02),
-                        quality=trigger_res["quality"],
+                        tp2=risk_res.get("tp2", trigger_res["entry"] * 1.04),
+                        tp3=risk_res.get("tp3", trigger_res["entry"] * 1.06),
+                        setup_quality=trigger_res["quality"],
                         coin_score=coin["tradeability_score"],
                         trend_score=trend_res["score"],
                         trigger_score=trigger_res["score"],
-                        risk_score=risk_res.get("score", 5)
+                        risk_score=risk_res.get("score", 5),
+                        final_score=(trend_res["score"] + trigger_res["score"] + risk_res.get("score", 5)) * 3.3,
+                        rr=risk_res.get("rr", 1.5),
+                        risk_percent=risk_res.get("risk_pct", 1.0),
+                        position_size=risk_res.get("position_size", 0),
+                        notional_size=risk_res.get("notional", 0),
+                        leverage_suggestion=risk_res.get("leverage", 10),
+                        confidence=trigger_res.get("ml_score", 50) / 100.0,
+                        reason=f"Trend: {trend_res['direction']}, Score: {trend_res['score']}"
                     )
                     
-                    # DB'ye kaydet
+                    # 1. Data Layer'a ekle (Dashboard için)
+                    data_layer.add_signal(sig)
+                    
+                    # 2. DB'ye kaydet
                     save_scalp_signal(sig.to_dict())
                     
-                    # Trade aç
+                    # 3. Telegram'a gönder
+                    deliver_signal(sig)
+                    
+                    # 4. Trade aç
                     if EXECUTION_AVAILABLE:
                         try:
-                            open_trade(client, sig.to_dict())
-                            logger.info(f"✅ Trade açıldı: {symbol}")
+                            trade_info = open_trade(client, sig.to_dict())
+                            if trade_info:
+                                send_trade_open(trade_info)
+                                logger.info(f"✅ Trade açıldı: {symbol}")
                         except Exception as e:
                             logger.error(f"❌ Trade açma hatası ({symbol}): {e}")
                 
