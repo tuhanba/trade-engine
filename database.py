@@ -565,14 +565,17 @@ def _migrate(conn):
     try:
         conn.execute("SELECT key, value FROM system_state LIMIT 1")
     except Exception:
-        conn.execute("DROP TABLE IF EXISTS system_state")
-        conn.execute("""
-            CREATE TABLE system_state (
-                key        TEXT PRIMARY KEY,
-                value      TEXT,
-                updated_at TEXT DEFAULT (datetime('now'))
-            )
-        """)
+        try:
+            conn.execute("DROP TABLE IF EXISTS system_state")
+            conn.execute("""
+                CREATE TABLE system_state (
+                    key        TEXT PRIMARY KEY,
+                    value      TEXT,
+                    updated_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+        except Exception:
+            pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
