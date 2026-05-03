@@ -215,8 +215,8 @@ def get_weekly_data(weeks: int = 8) -> list[dict]:
                 "win_count":   r[3] or 0,
                 "loss_count":  r[4] or 0,
                 "win_rate":    round((r[5] or 0) * 100, 1),
-                "best_day":    round(r[6] or 0, 4),   # weekly_summary.best_day
-                "worst_day":   round(r[7] or 0, 4),   # weekly_summary.worst_day
+                "best_day":    r[6] or None,   # TEXT — tarih string (YYYY-MM-DD)
+                "worst_day":   r[7] or None,   # TEXT — tarih string (YYYY-MM-DD)
             }
             for r in reversed(rows)
         ]
