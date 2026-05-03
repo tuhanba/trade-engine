@@ -535,6 +535,15 @@ def _migrate(conn):
         ("paper_results", "skip_decision_correct", "INTEGER DEFAULT 1"),
         ("paper_results", "final_score_snap", "REAL DEFAULT 0"),
         ("paper_results", "reject_reason_snap", "TEXT"),
+        # weekly_summary schema migration
+        ("weekly_summary", "trade_count", "INTEGER DEFAULT 0"),
+        ("weekly_summary", "win_count",   "INTEGER DEFAULT 0"),
+        ("weekly_summary", "loss_count",  "INTEGER DEFAULT 0"),
+        ("weekly_summary", "win_rate",    "REAL DEFAULT 0"),
+        ("weekly_summary", "net_pnl",     "REAL DEFAULT 0"),
+        ("weekly_summary", "avg_r",       "REAL DEFAULT 0"),
+        ("weekly_summary", "best_day",    "TEXT"),
+        ("weekly_summary", "worst_day",   "TEXT"),
     ]
     for table, col, col_type in migrations:
         try:
