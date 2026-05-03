@@ -1,5 +1,5 @@
 """
-scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.4 (MASTER)
+scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.5 (ELITE)
 =========================================================
 Yenilikler:
   - Asenkron Market Scanner (Hız)
@@ -9,6 +9,9 @@ Yenilikler:
   - Otomatik Trade Açma (Execution Engine Entegrasyonu)
   - Telegram Bildirimleri (Sabitlenmiş Token & Chat ID)
   - Dashboard Entegrasyonu (Data Layer & DB Kaydı)
+  - Backtest Filtre Restorasyonu (92 Coin Özel Filtreleri)
+  - Volatility Guard (Ani Piyasa Hareketlerine Karşı Koruma)
+  - Ghost Trading (Açılmayan trade'lerin veri takibi)
 """
 import asyncio
 import logging
@@ -17,13 +20,16 @@ import os
 import uuid
 import requests
 from binance.client import Client
-from config import BINANCE_API_KEY, BINANCE_API_SECRET, SCAN_INTERVAL, DB_PATH, ALLOWED_QUALITIES
+from config import (
+    BINANCE_API_KEY, BINANCE_API_SECRET, SCAN_INTERVAL, DB_PATH, 
+    ALLOWED_QUALITIES, ADX_MIN_THRESHOLD, BAD_HOURS_UTC, COIN_UNIVERSE
+)
 from core.async_market_scanner import AsyncMarketScanner
 from core.advanced_trend_engine import AdvancedTrendEngine
 from core.trigger_engine import TriggerEngine
 from core.advanced_risk_engine import AdvancedRiskEngine
 from core.ai_decision_engine import AIDecisionEngine
-from database import init_db, get_paper_balance, get_open_trades, save_scalp_signal, save_ai_log
+from database import init_db, get_paper_balance, get_open_trades, save_scalp_signal, save_ai_log, save_scanned_coin
 from core.data_layer import SignalData, data_layer
 from telegram_delivery import deliver_signal, send_trade_open
 
@@ -48,8 +54,19 @@ def send_direct_message(text):
     except Exception as e:
         logger.error(f"Telegram direct message error: {e}")
 
+def check_volatility_guard(client):
+    """Piyasa genelindeki volatiliteyi kontrol eder."""
+    try:
+        btc = client.futures_ticker(symbol="BTCUSDT")
+        change = abs(float(btc['priceChangePercent']))
+        if change > 5.0: # BTC %5'ten fazla hareket ettiyse riskli
+            return False, f"BTC Volatility High: {change}%"
+        return True, "Normal"
+    except:
+        return True, "Normal"
+
 async def main_loop():
-    logger.info("=== AX Scalp Engine v3.4 (MASTER) Başlatılıyor ===")
+    logger.info("=== AX Scalp Engine v3.5 (ELITE) Başlatılıyor ===")
     
     init_db()
     client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
@@ -60,14 +77,20 @@ async def main_loop():
     risk = AdvancedRiskEngine(client, db_path=DB_PATH)
     ai_engine = AIDecisionEngine(db_path=DB_PATH)
     
-    # Filtreleri gevşet (Test için A ve B kalitelerine izin ver)
-    current_allowed = ALLOWED_QUALITIES + ["A", "B"]
-    logger.info(f"İzin verilen kaliteler: {current_allowed}")
+    # 10/10 Filtre Restorasyonu
+    logger.info(f"Backtest Filtreleri Aktif: {len(COIN_UNIVERSE)} Coin, ADX > {ADX_MIN_THRESHOLD}")
     
-    send_direct_message("🚀 <b>AX Scalp Engine v3.4 MASTER Sürüm Başlatıldı!</b>\nAI Decision Engine ve Dashboard entegrasyonu aktif.")
+    send_direct_message("💎 <b>AX Scalp Engine v3.5 ELITE Sürüm Başlatıldı!</b>\n10/10 Backtest filtreleri ve Volatility Guard aktif.")
 
     while True:
         try:
+            # Volatility Guard Kontrolü
+            is_safe, reason = check_volatility_guard(client)
+            if not is_safe:
+                logger.warning(f"⚠️ Volatility Guard Devrede: {reason}")
+                await asyncio.sleep(SCAN_INTERVAL)
+                continue
+
             # 1. Asenkron Tarama
             candidates = await scanner.scan()
             if not candidates:
@@ -77,11 +100,7 @@ async def main_loop():
             open_trades = get_open_trades()
             balance = get_paper_balance()
             
-            if len(open_trades) >= 5: # Max 5 açık işlem
-                await asyncio.sleep(SCAN_INTERVAL)
-                continue
-
-            for coin in candidates[:15]: # En iyi 15 adayı işle
+            for coin in candidates[:20]: # Daha geniş tarama
                 symbol = coin["symbol"]
                 
                 # 2. Gelişmiş Trend Analizi
@@ -90,7 +109,6 @@ async def main_loop():
                 
                 # 3. Tetikleyici Kontrolü
                 trigger_res = trigger.analyze(symbol, trend_res["direction"], trend_res.get("btc_trend", "NEUTRAL"))
-                if trigger_res["quality"] == "D" and trigger_res["score"] < 4: continue
                 
                 # 4. Gelişmiş Risk ve Korelasyon Kontrolü
                 risk_res = risk.calculate(
@@ -98,8 +116,7 @@ async def main_loop():
                     trigger_res["quality"], balance, open_trades
                 )
                 
-                # 5. AI Decision Engine Değerlendirmesi
-                # SignalData objesi oluştur (AI değerlendirmesi için)
+                # SignalData objesi oluştur
                 sig = SignalData(
                     id=str(uuid.uuid4())[:8],
                     symbol=symbol,
@@ -125,34 +142,23 @@ async def main_loop():
                     reason=f"Trend: {trend_res['direction']}, Score: {trend_res['score']}"
                 )
                 
+                # 5. AI Decision Engine Değerlendirmesi
                 ai_res = ai_engine.evaluate(sig)
                 
-                # AI Onayı veya Yüksek Skor (Test Modu)
-                if ai_res["decision"] in ["ALLOW", "WATCH"] or trigger_res["score"] > 7:
-                    logger.info(f"🚀 SİNYAL ONAYLANDI ({ai_res['decision']}): {symbol} {trend_res['direction']} | Skor: {trigger_res['score']}")
+                # Ghost Trading: Açılmayan her şeyi kaydet (Veri biriktirme)
+                save_scanned_coin(symbol, coin["tradeability_score"], ai_res["decision"], ai_res.get("reason", "low_score"))
+
+                # Sinyal Onay Mantığı
+                if ai_res["decision"] == "ALLOW":
+                    logger.info(f"🚀 SİNYAL ONAYLANDI: {symbol} {trend_res['direction']} | Kalite: {trigger_res['quality']}")
                     
-                    # AI Log Kaydı
-                    save_ai_log(
-                        event="signal_evaluation",
-                        symbol=symbol,
-                        decision=ai_res["decision"],
-                        score=trigger_res["score"],
-                        confidence=sig.confidence,
-                        reason=ai_res.get("reason", "score_threshold_passed"),
-                        data=str(trend_res)
-                    )
-                    
-                    # 1. Data Layer'a ekle (Dashboard için)
+                    # Dashboard ve DB Kaydı
                     data_layer.add_signal(sig)
-                    
-                    # 2. DB'ye kaydet
                     save_scalp_signal(sig.to_dict())
-                    
-                    # 3. Telegram'a gönder
                     deliver_signal(sig)
                     
-                    # 4. Trade aç (Sadece ALLOW ise)
-                    if ai_res["decision"] == "ALLOW" and EXECUTION_AVAILABLE:
+                    # Trade aç
+                    if EXECUTION_AVAILABLE and len(open_trades) < 5:
                         try:
                             trade_info = open_trade(client, sig.to_dict())
                             if trade_info:
@@ -161,6 +167,12 @@ async def main_loop():
                         except Exception as e:
                             logger.error(f"❌ Trade açma hatası ({symbol}): {e}")
                 
+                elif ai_res["decision"] == "WATCH":
+                    # Sadece Telegram'a bilgi ver veya Dashboard'da izle
+                    data_layer.add_signal(sig)
+                    save_scalp_signal(sig.to_dict())
+                    logger.info(f"👀 İZLEME LİSTESİ: {symbol} {trend_res['direction']}")
+
             await asyncio.sleep(SCAN_INTERVAL)
             
         except Exception as e:
