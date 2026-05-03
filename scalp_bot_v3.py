@@ -1,12 +1,12 @@
 """
-scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.2
+scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.3
 =========================================================
 Yenilikler:
   - Asenkron Market Scanner (Hız)
   - Advanced Trend Engine (Mean Reversion & Volume Profile)
   - Advanced Risk Engine (Korelasyon Koruması)
   - Otomatik Trade Açma (Execution Engine Entegrasyonu)
-  - Telegram Bildirimleri (Sinyal & İşlem Bildirimleri)
+  - Telegram Bildirimleri (Sabitlenmiş Token & Chat ID)
   - Dashboard Entegrasyonu (Data Layer & DB Kaydı)
 """
 import asyncio
@@ -14,6 +14,7 @@ import logging
 import time
 import os
 import uuid
+import requests
 from binance.client import Client
 from config import BINANCE_API_KEY, BINANCE_API_SECRET, SCAN_INTERVAL, DB_PATH, ALLOWED_QUALITIES
 from core.async_market_scanner import AsyncMarketScanner
@@ -22,7 +23,11 @@ from core.trigger_engine import TriggerEngine
 from core.advanced_risk_engine import AdvancedRiskEngine
 from database import init_db, get_paper_balance, get_open_trades, save_scalp_signal
 from core.data_layer import SignalData, data_layer
-from telegram_delivery import deliver_signal, send_trade_open, send_message
+from telegram_delivery import deliver_signal, send_trade_open
+
+# Sabitlenmiş Telegram Bilgileri
+TG_TOKEN = "8404489471:AAEU3uk-i_IWj4EcHXlf4Zt8-PkpIPAAc54"
+TG_CHAT_ID = "958182551"
 
 # Execution Engine import
 try:
@@ -34,8 +39,15 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("scalp_bot_v3")
 
+def send_direct_message(text):
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    try:
+        requests.post(url, json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
+    except Exception as e:
+        logger.error(f"Telegram direct message error: {e}")
+
 async def main_loop():
-    logger.info("=== AX Scalp Engine v3.2 (Modernized) Başlatılıyor ===")
+    logger.info("=== AX Scalp Engine v3.3 (Modernized) Başlatılıyor ===")
     
     init_db()
     client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
@@ -45,11 +57,11 @@ async def main_loop():
     trigger = TriggerEngine(client)
     risk = AdvancedRiskEngine(client, db_path=DB_PATH)
     
-    # Filtreleri geçici olarak gevşet (Test için A ve B kalitelerine izin ver)
+    # Filtreleri gevşet (Test için A ve B kalitelerine izin ver)
     current_allowed = ALLOWED_QUALITIES + ["A", "B"]
     logger.info(f"İzin verilen kaliteler: {current_allowed}")
     
-    send_message("🚀 <b>AX Scalp Engine v3.2 Modernize Sürüm Başlatıldı!</b>\nSinyaller taranıyor...")
+    send_direct_message("🚀 <b>AX Scalp Engine v3.3 Modernize Sürüm Başlatıldı!</b>\nSinyaller taranıyor...")
 
     while True:
         try:
@@ -89,7 +101,7 @@ async def main_loop():
                 if risk_res["valid"] or (trigger_res["score"] > 6):
                     logger.info(f"🚀 SİNYAL ONAYLANDI: {symbol} {trend_res['direction']} | Kalite: {trigger_res['quality']} | Skor: {trend_res['score']}")
                     
-                    # SignalData objesi oluştur (Dashboard ve Telegram için tam veri)
+                    # SignalData objesi oluştur
                     sig = SignalData(
                         id=str(uuid.uuid4())[:8],
                         symbol=symbol,
