@@ -585,8 +585,9 @@ def api_health():
 
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    port = int(os.environ.get("DASHBOARD_PORT", 5001))
     socketio.run(
-        app, host="0.0.0.0", port=5000,
+        app, host="0.0.0.0", port=port,
         debug=False, use_reloader=False,
         allow_unsafe_werkzeug=True,
     )
