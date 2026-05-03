@@ -1,5 +1,5 @@
 """
-scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.6 (ULTIMATE)
+scalp_bot_v3.py — AX Scalp Engine Modernize Edilmiş Sürüm v3.7 (ELITE MASTER)
 =========================================================
 Yenilikler:
   - Asenkron Market Scanner (Hız)
@@ -10,7 +10,7 @@ Yenilikler:
   - Telegram Bildirimleri (Sabitlenmiş Token & Chat ID)
   - Dashboard Canlı Akış (SocketIO Entegrasyonu)
   - Ghost Trading (Açılmayan trade'lerin veri takibi)
-  - Filtre Optimizasyonu (Daha fazla veri toplama için esnetilmiş eşikler)
+  - Elite Monitor (Auto-Cleanup & Health Check)
 """
 import asyncio
 import logging
@@ -28,6 +28,7 @@ from core.advanced_trend_engine import AdvancedTrendEngine
 from core.trigger_engine import TriggerEngine
 from core.advanced_risk_engine import AdvancedRiskEngine
 from core.ai_decision_engine import AIDecisionEngine
+from core.elite_monitor import EliteMonitor
 from database import init_db, get_paper_balance, get_open_trades, save_scalp_signal, save_ai_log, save_scanned_coin, save_paper_trade
 from core.data_layer import SignalData, data_layer
 from telegram_delivery import deliver_signal, send_trade_open
@@ -61,7 +62,6 @@ def send_direct_message(text):
         logger.error(f"Telegram direct message error: {e}")
 
 def broadcast_to_dashboard(event, data):
-    """Dashboard'a canlı veri gönderir."""
     if DASHBOARD_SOCKET:
         try:
             DASHBOARD_SOCKET.emit(event, data, namespace='/')
@@ -69,7 +69,7 @@ def broadcast_to_dashboard(event, data):
             logger.debug(f"SocketIO emit error: {e}")
 
 async def main_loop():
-    logger.info("=== AX Scalp Engine v3.6 (ULTIMATE) Başlatılıyor ===")
+    logger.info("=== AX Scalp Engine v3.7 (ELITE MASTER) Başlatılıyor ===")
     
     init_db()
     client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
@@ -79,40 +79,45 @@ async def main_loop():
     trigger = TriggerEngine(client)
     risk = AdvancedRiskEngine(client, db_path=DB_PATH)
     ai_engine = AIDecisionEngine(db_path=DB_PATH)
+    monitor = EliteMonitor(db_path=DB_PATH)
     
-    send_direct_message("👑 <b>AX Scalp Engine v3.6 ULTIMATE Sürüm Başlatıldı!</b>\nCanlı Dashboard akışı ve Ghost Trading aktif.")
+    send_direct_message("💎 <b>AX Scalp Engine v3.7 ELITE MASTER Başlatıldı!</b>\nSistem temizlendi, optimize edildi ve izleme moduna alındı.")
+
+    last_cleanup = time.time()
 
     while True:
         try:
+            # Periyodik Temizlik ve Sağlık Kontrolü (Her 6 saatte bir)
+            if time.time() - last_cleanup > 21600:
+                monitor.auto_cleanup()
+                health = monitor.get_system_health()
+                logger.info(f"🏥 Sistem Sağlığı: {health}")
+                last_cleanup = time.time()
+
             # 1. Asenkron Tarama
             candidates = await scanner.scan()
             if not candidates:
                 await asyncio.sleep(SCAN_INTERVAL)
                 continue
                 
-            # Dashboard'a tarama sonuçlarını gönder
             broadcast_to_dashboard('scanner_update', {'count': len(candidates), 'timestamp': time.time()})
             
             open_trades = get_open_trades()
             balance = get_paper_balance()
             
-            for coin in candidates[:25]: # Daha fazla veri için tarama genişletildi
+            for coin in candidates[:25]:
                 symbol = coin["symbol"]
                 
-                # 2. Gelişmiş Trend Analizi
                 trend_res = trend.analyze(symbol)
                 if trend_res["direction"] == "NO TRADE": continue
                 
-                # 3. Tetikleyici Kontrolü
                 trigger_res = trigger.analyze(symbol, trend_res["direction"], trend_res.get("btc_trend", "NEUTRAL"))
                 
-                # 4. Gelişmiş Risk ve Korelasyon Kontrolü
                 risk_res = risk.calculate(
                     symbol, trend_res["direction"], trigger_res["entry"], 
                     trigger_res["quality"], balance, open_trades
                 )
                 
-                # SignalData objesi oluştur
                 sig = SignalData(
                     id=str(uuid.uuid4())[:8],
                     symbol=symbol,
@@ -138,26 +143,18 @@ async def main_loop():
                     reason=f"Trend: {trend_res['direction']}, Score: {trend_res['score']}"
                 )
                 
-                # 5. AI Decision Engine Değerlendirmesi
                 ai_res = ai_engine.evaluate(sig)
                 
-                # Ghost Trading: Girilmeyen her şeyi "Paper Trade" olarak kaydet (Veri biriktirme)
                 if ai_res["decision"] != "ALLOW":
                     save_paper_trade(sig.to_dict(), tracked_from=ai_res["decision"])
                     broadcast_to_dashboard('ghost_trade', {'symbol': symbol, 'decision': ai_res["decision"]})
 
-                # Sinyal Onay Mantığı
                 if ai_res["decision"] == "ALLOW":
                     logger.info(f"🚀 SİNYAL ONAYLANDI: {symbol} {trend_res['direction']}")
-                    
-                    # Dashboard Canlı Bildirim
                     broadcast_to_dashboard('new_signal', sig.to_dict())
-                    
-                    # DB ve Telegram
                     save_scalp_signal(sig.to_dict())
                     deliver_signal(sig)
                     
-                    # Trade aç
                     if EXECUTION_AVAILABLE and len(open_trades) < 5:
                         try:
                             trade_info = open_trade(client, sig.to_dict())
@@ -169,7 +166,6 @@ async def main_loop():
                             logger.error(f"❌ Trade açma hatası ({symbol}): {e}")
                 
                 elif ai_res["decision"] == "WATCH":
-                    # İzleme listesi bildirimi
                     broadcast_to_dashboard('watchlist_update', sig.to_dict())
                     logger.info(f"👀 İZLEME LİSTESİ: {symbol} {trend_res['direction']}")
 
