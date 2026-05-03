@@ -535,6 +535,9 @@ def _migrate(conn):
         ("paper_results", "skip_decision_correct", "INTEGER DEFAULT 1"),
         ("paper_results", "final_score_snap", "REAL DEFAULT 0"),
         ("paper_results", "reject_reason_snap", "TEXT"),
+        # system_state schema migration
+        ("system_state", "value",      "TEXT"),
+        ("system_state", "updated_at", "TEXT DEFAULT (datetime('now'))"),
         # weekly_summary schema migration
         ("weekly_summary", "trade_count", "INTEGER DEFAULT 0"),
         ("weekly_summary", "win_count",   "INTEGER DEFAULT 0"),
