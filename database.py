@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -566,11 +566,20 @@ def _migrate(conn):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def init_paper_account(initial: float = 250.0):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
-            (initial, initial)
-        )
+    import time as _time
+    for _attempt in range(10):
+        try:
+            with get_conn() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
+                    (initial, initial)
+                )
+            return
+        except sqlite3.OperationalError as _e:
+            if "locked" in str(_e).lower():
+                _time.sleep(1)
+            else:
+                raise
 
 def get_paper_balance() -> float:
     with get_conn() as conn:
