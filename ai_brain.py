@@ -194,51 +194,10 @@ def evaluate_signal(signal: dict, open_trades: list, balance: float,
 # ═══════════════════════════════════════════════════════════
 
 def db():
-    conn = sqlite3.connect(DB_PATH, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("""CREATE TABLE IF NOT EXISTS coin_cooldown (
-        symbol TEXT PRIMARY KEY,
-        blacklisted_until TEXT,
-        reason TEXT,
-        consec_losses INTEGER DEFAULT 0)""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS daily_summary (
-        date TEXT PRIMARY KEY,
-        total INTEGER, wins INTEGER, losses INTEGER,
-        pnl REAL, win_rate REAL,
-        best_coin TEXT, worst_coin TEXT,
-        sent INTEGER DEFAULT 0)""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS trade_postmortem (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        trade_id INTEGER UNIQUE,
-        symbol TEXT, direction TEXT,
-        entry REAL, exit_price REAL, sl REAL, tp REAL,
-        mfe REAL, mae REAL,
-        efficiency REAL, sl_tightness REAL,
-        opt_tp REAL, missed_gain REAL, actual_pnl REAL,
-        created_at TEXT)""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS best_params (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        params_json TEXT,
-        win_rate REAL, profit_factor REAL, total_pnl REAL,
-        saved_at TEXT)""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS coin_profile (
-        symbol TEXT PRIMARY KEY,
-        trade_count INTEGER DEFAULT 0,
-        win_rate REAL DEFAULT 0,
-        avg_rr REAL DEFAULT 0,
-        avg_efficiency REAL DEFAULT 0,
-        avg_hold_min REAL DEFAULT 0,
-        best_rsi_min REAL DEFAULT 30,
-        best_rsi_max REAL DEFAULT 70,
-        best_rv_min REAL DEFAULT 1.2,
-        danger_score REAL DEFAULT 0,
-        sl_tight_rate REAL DEFAULT 0,
-        long_wr REAL DEFAULT 0,
-        short_wr REAL DEFAULT 0,
-        preferred_direction TEXT DEFAULT 'BOTH',
-        last_updated TEXT)""")
-    conn.commit()
-    return conn
+    """Geriye uyumluluk için — artık database.get_conn() kullanır.
+    Eski şema CREATE TABLE çağrıları kaldırıldı; tüm tablolar database.init_db() tarafından yönetilir.
+    """
+    return get_conn()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -249,36 +208,42 @@ def get_current_params(conn):
     r = conn.execute("SELECT * FROM params ORDER BY id DESC LIMIT 1").fetchone()
     return dict(r) if r else {}
 
+_CLOSED_STATUSES = "('closed','closed_win','closed_loss','sl','tp1_hit','runner','trail','timeout')"
+
 def get_trades(conn, hours=48, limit=300, symbol=None):
-    cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    """Kapanmış trade'leri getirir. status!='open' yerine kapatılmış statü listesi kullanılır."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
     if symbol:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status!='OPEN' AND symbol=? "
+            f"SELECT * FROM trades WHERE status IN {_CLOSED_STATUSES} AND symbol=? "
             "AND close_time>=? ORDER BY close_time DESC LIMIT ?",
             (symbol, cutoff, limit)).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status!='OPEN' AND close_time>=? "
+            f"SELECT * FROM trades WHERE status IN {_CLOSED_STATUSES} AND close_time>=? "
             "ORDER BY close_time DESC LIMIT ?",
             (cutoff, limit)).fetchall()
     return [dict(r) for r in rows]
 
 def get_all_trades(conn, limit=800):
+    """Tüm kapanmış trade'leri getirir."""
     rows = conn.execute(
-        "SELECT * FROM trades WHERE status!='OPEN' ORDER BY close_time DESC LIMIT ?",
+        f"SELECT * FROM trades WHERE status IN {_CLOSED_STATUSES} ORDER BY close_time DESC LIMIT ?",
         (limit,)).fetchall()
     return [dict(r) for r in rows]
 
 def get_last_n_trades(conn, n=20):
+    """Son N kapanmış trade'i getirir."""
     rows = conn.execute(
-        "SELECT * FROM trades WHERE status!='OPEN' ORDER BY close_time DESC LIMIT ?",
+        f"SELECT * FROM trades WHERE status IN {_CLOSED_STATUSES} ORDER BY close_time DESC LIMIT ?",
         (n,)).fetchall()
     return [dict(r) for r in rows]
 
 def get_today_trades(conn):
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    """Bugün kapanan trade'leri getirir."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     rows  = conn.execute(
-        "SELECT * FROM trades WHERE status!='OPEN' AND close_time LIKE ? "
+        f"SELECT * FROM trades WHERE status IN {_CLOSED_STATUSES} AND close_time LIKE ? "
         "ORDER BY close_time DESC", (f"{today}%",)).fetchall()
     return [dict(r) for r in rows]
 
@@ -323,7 +288,7 @@ def calc_stats(trades):
         else:
             cur_cl = 0
 
-    sl_hits  = len([t for t in trades if (t.get("status", "") or "").upper() in ("LOSS", "SL")])
+    sl_hits  = len([t for t in trades if (t.get("status", "") or "").lower() in ("sl", "closed_loss")])
     longs    = [t for t in trades if t.get("direction", "").upper() == "LONG"]
     shorts   = [t for t in trades if t.get("direction", "").upper() == "SHORT"]
     long_wr  = len([t for t in longs  if t.get("net_pnl", 0) > 0]) / len(longs)  if longs  else 0
@@ -403,7 +368,7 @@ def update_coin_profiles(conn, all_trades):
         best_rv_min = max(0.8, (sum(win_rv) / len(win_rv)) * 0.8) if win_rv else 1.2
 
         # SL sıkılığı: kaybedilen trade'lerde SL ne kadar yakındı
-        sl_hits = len([t for t in losses if (t.get("status", "") or "").upper() in ("LOSS", "SL")])
+        sl_hits = len([t for t in losses if (t.get("status", "") or "").lower() in ("sl", "closed_loss")])
         sl_tight_rate = sl_hits / len(losses) if losses else 0
 
         # Yön tercihi
@@ -446,15 +411,14 @@ def update_coin_profiles(conn, all_trades):
         if avg_rr < 0.7:   danger += 2
         if avg_eff < 40:   danger += 1
 
+        # database.py şemasıyla uyumlu sütun isimleri kullanılıyor
         conn.execute("""INSERT OR REPLACE INTO coin_profile
-            (symbol, trade_count, win_rate, avg_rr, avg_efficiency, avg_hold_min,
-             best_rsi_min, best_rsi_max, best_rv_min, danger_score,
-             sl_tight_rate, long_wr, short_wr, preferred_direction, last_updated)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-            sym, len(trades), wr, avg_rr, avg_eff, avg_dur,
-            best_rsi_min, best_rsi_max, best_rv_min, danger,
-            sl_tight_rate, long_wr, short_wr, preferred,
-            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            (symbol, trade_count, win_rate, avg_r, danger_score,
+             preferred_direction, updated_at)
+            VALUES (?,?,?,?,?,?,?)""", (
+            sym, len(trades), wr, avg_rr, danger,
+            preferred,
+            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         ))
 
     conn.commit()
@@ -469,7 +433,7 @@ def get_coin_profiles(conn, min_trades=3):
 def get_dangerous_coins(conn, danger_threshold=4):
     """Tehlike skoru yüksek coinleri döndürür."""
     rows = conn.execute(
-        "SELECT symbol, danger_score, win_rate, avg_rr FROM coin_profile "
+        "SELECT symbol, danger_score, win_rate, avg_r FROM coin_profile "
         "WHERE danger_score>=? AND trade_count>=3 ORDER BY danger_score DESC",
         (danger_threshold,)).fetchall()
     return [dict(r) for r in rows]
@@ -477,9 +441,9 @@ def get_dangerous_coins(conn, danger_threshold=4):
 def get_best_coins(conn):
     """Win rate ve RR bazında en iyi coinleri döndürür."""
     rows = conn.execute(
-        "SELECT symbol, win_rate, avg_rr, preferred_direction FROM coin_profile "
+        "SELECT symbol, win_rate, avg_r, preferred_direction FROM coin_profile "
         "WHERE trade_count>=3 AND danger_score<=2 AND win_rate>=0.5 "
-        "ORDER BY win_rate DESC, avg_rr DESC LIMIT 5").fetchall()
+        "ORDER BY win_rate DESC, avg_r DESC LIMIT 5").fetchall()
     return [dict(r) for r in rows]
 
 
@@ -548,19 +512,23 @@ def get_market_regime(trades):
 # ═══════════════════════════════════════════════════════════
 
 def update_coin_cooldowns(conn, sym_stats):
-    now = datetime.utcnow()
+    """Coin cooldown'larını güncelle. database.py şemasıyla uyumlu (until, reason, created_at)."""
+    now = datetime.now(timezone.utc)
     for sym, s in sym_stats.items():
         if s.get("recent_consec_loss", 0) >= 3:
             until = (now + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
-            conn.execute("""INSERT OR REPLACE INTO coin_cooldown
-                (symbol, blacklisted_until, reason, consec_losses)
-                VALUES (?, ?, ?, ?)""",
-                (sym, until, "3+ ardisik kayip", s["recent_consec_loss"]))
-    conn.execute("DELETE FROM coin_cooldown WHERE blacklisted_until < ?",
-                 (now.strftime("%Y-%m-%d %H:%M:%S"),))
+            conn.execute(
+                """INSERT OR REPLACE INTO coin_cooldown (symbol, reason, until)
+                   VALUES (?, ?, ?)""",
+                (sym, f"3+ ardışık kayıp ({s['recent_consec_loss']})", until)
+            )
+    # Süresi dolan cooldown'ları temizle
+    conn.execute(
+        "DELETE FROM coin_cooldown WHERE until < ?",
+        (now.strftime("%Y-%m-%d %H:%M:%S"),)
+    )
     conn.commit()
-    rows = conn.execute(
-        "SELECT symbol, consec_losses FROM coin_cooldown").fetchall()
+    rows = conn.execute("SELECT symbol, reason FROM coin_cooldown").fetchall()
     return [dict(r) for r in rows]
 
 
@@ -569,7 +537,7 @@ def update_coin_cooldowns(conn, sym_stats):
 # ═══════════════════════════════════════════════════════════
 
 def is_drought(conn, hours=3):
-    cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
     r = conn.execute(
         "SELECT COUNT(*) as c FROM trades WHERE open_time>=?", (cutoff,)).fetchone()
     return (r["c"] if r else 0) == 0
@@ -599,7 +567,7 @@ def is_win_streak(trades, n=3):
     return c >= n
 
 def is_overtrading(conn, limit=8):
-    cutoff = (datetime.utcnow() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     r = conn.execute(
         "SELECT COUNT(*) as c FROM trades WHERE open_time>=?", (cutoff,)).fetchone()
     count = r["c"] if r else 0
@@ -776,7 +744,7 @@ def save_best_params_if_better(conn, current_params, stats):
             (params_json, win_rate, profit_factor, total_pnl, saved_at)
             VALUES (?, ?, ?, ?, ?)""", (
             json.dumps(current_params), wr, pf, stats["total_pnl"],
-            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
 
 def try_rollback_to_best(conn, last20_stats):
@@ -939,7 +907,7 @@ def save_params(conn, p, reason, changes):
         p.get("rsi1_min",       35), p.get("rsi1_max",       72),
         p.get("vol_ratio_min",  1.2), p.get("min_volume_m", 10.0),
         p.get("min_change_pct", 2.0), p.get("risk_pct",     1.5),
-        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         (reason or "AI Brain")[:500]
     ))
     conn.commit()
@@ -950,7 +918,7 @@ def log_analysis(conn, stats, insight, changes):
     conn.execute("""INSERT INTO ai_logs
         (created_at, trades_analyzed, win_rate, avg_rr, insight, changes)
         VALUES (?, ?, ?, ?, ?, ?)""", (
-        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         stats.get("total", 0), stats.get("win_rate", 0),
         stats.get("avg_rr",   0), insight[:1000],
         json.dumps(changes, ensure_ascii=False)
@@ -963,8 +931,8 @@ def log_analysis(conn, stats, insight, changes):
 # ═══════════════════════════════════════════════════════════
 
 def check_eod_summary(conn, today_trades):
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    if datetime.utcnow().hour not in (21, 22, 23):
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if datetime.now(timezone.utc).hour not in (21, 22, 23):
         return None
     already = conn.execute(
         "SELECT sent FROM daily_summary WHERE date=?", (today,)).fetchone()

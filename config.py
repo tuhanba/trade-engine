@@ -125,7 +125,9 @@ MAX_COINS_PER_SCAN_LOOP = int(os.getenv("MAX_COINS_PER_SCAN_LOOP", "80"))
 MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "40.0"))
 
 # ── Veritabanı ───────────────────────────────────────────────────────────────
-DB_PATH = os.getenv("DB_PATH", "/root/trade_engine/trading.db")
+# DB_PATH: Önce ortam değişkeni, yoksa proje dizinindeki trading.db
+_PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.getenv("DB_PATH", os.path.join(_PROJECT_DIR, "trading.db"))
 
 # ── Market Scanner Filtreler ─────────────────────────────────────────────────
 MIN_VOLUME_USD     = float(os.getenv("MIN_VOLUME_USD", "10000000"))   # 10M
@@ -158,6 +160,6 @@ COIN_UNIVERSE = [
 ]
 
 # ── Log ──────────────────────────────────────────────────────────────────────
-LOG_DIR      = os.getenv("LOG_DIR", "/root/trade_engine/logs")
+LOG_DIR      = os.getenv("LOG_DIR", os.path.join(_PROJECT_DIR, "logs"))
 LOG_MAX_DAYS = int(os.getenv("LOG_MAX_DAYS", "7"))
 LOG_MAX_MB   = int(os.getenv("LOG_MAX_MB", "50"))

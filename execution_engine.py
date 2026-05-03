@@ -406,6 +406,32 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
         ).start()
     except Exception as e:
         logger.warning(f"AI Brain post_trade_analysis hatası: {e}")
+    # ── Telegram Kapatılma Bildirimi ──────────────────────────────────────────
+    try:
+        from telegram_delivery import send_message as tg_send
+        emoji = "✅" if net_pnl > 0 else "🔴"
+        tg_send(
+            f"{emoji} <b>Trade Kapandı</b>\n"
+            f"{t.get('symbol','')} {t.get('direction','')} | {reason.upper()}\n"
+            f"PnL: <b>{net_pnl:+.3f}$</b> | Süre: {hold_min:.0f}dk"
+        )
+    except Exception as _tg_e:
+        logger.warning(f"Trade kapanış Telegram bildirimi hatası: {_tg_e}")
+    # ── n8n Trade Kapatılma Webhook ────────────────────────────────────────────
+    try:
+        from n8n_bridge import notify_trade_close
+        from database import get_paper_balance as _get_bal
+        notify_trade_close(
+            symbol=t.get("symbol", ""),
+            direction=t.get("direction", ""),
+            result="WIN" if net_pnl > 0 else "LOSS",
+            net_pnl=net_pnl,
+            exit_price=close_price,
+            hold_minutes=hold_min,
+            balance=_get_bal(),
+        )
+    except Exception as _n8n_e:
+        logger.debug(f"n8n trade_close bildirimi: {_n8n_e}")
     logger.info(
         f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
         f"{reason.upper()} pnl={net_pnl:+.3f}$ hold={hold_min:.0f}dk"

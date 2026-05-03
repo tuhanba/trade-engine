@@ -68,6 +68,12 @@ try:
     TG_MANAGER_AVAILABLE = True
 except ImportError:
     TG_MANAGER_AVAILABLE = False
+try:
+    from n8n_bridge import register_bot as n8n_register_bot
+    N8N_BRIDGE_AVAILABLE = True
+except ImportError:
+    N8N_BRIDGE_AVAILABLE = False
+    def n8n_register_bot(*args, **kwargs): pass
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LOGGING
@@ -179,6 +185,20 @@ def main():
             tg_manager.start()
         except Exception as e:
             logger.warning(f"TelegramManager başlatılamadı: {e}")
+
+    # n8n Bridge: bot referanslarını kaydet (pause/resume/status endpoint'leri için)
+    try:
+        from ai_brain import analyze_and_adapt
+        n8n_register_bot(
+            tg_manager=tg_manager,
+            get_balance_fn=get_paper_balance,
+            get_open_trades_fn=get_open_trades,
+            run_ai_brain_fn=analyze_and_adapt,
+        )
+        if N8N_BRIDGE_AVAILABLE:
+            logger.info("[n8n_bridge] Bot referansları kaydedildi.")
+    except Exception as _n8n_e:
+        logger.warning(f"n8n_bridge register_bot hatası: {_n8n_e}")
 
     consecutive_losses = 0
     _last_ai_adapt = 0  # AI Brain periyodik adaptasyon (30 dakikada bir)
@@ -341,7 +361,8 @@ def main():
                         })
                         save_signal_event(sig.id, "APPROVED_FOR_WATCHLIST", symbol=symbol, reason="quality_c_watchlist")
                         if PAPER_TRACK_WATCHLIST:
-                            prv_c = risk.preview_for_paper(symbol, trend_result["direction"], trigger_result["entry"], balance)
+                            _balance_c = get_paper_balance()  # C kalitesi bloğu için güvenli balance okuma
+                            prv_c = risk.preview_for_paper(symbol, trend_result["direction"], trigger_result["entry"], _balance_c)
                             if prv_c.get("valid"):
                                 save_paper_result({
                                     "signal_id": sig.id,
