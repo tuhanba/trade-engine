@@ -176,14 +176,34 @@ async def main_loop():
                         logger.warning(f"[Bot] open_trade basarisiz: {symbol}")
 
                 elif decision == "WATCH":
-                    # WATCH: sadece sinyal gonder, trade acma
-                    logger.info(f"👀 WATCH: {symbol} - sinyal gonderildi, trade acilmadi")
+                    # WATCH: sinyal gonder, trade acma, ghost-track et
+                    logger.info(f"👀 WATCH: {symbol} - sinyal gonderildi, ghost-track basladi")
                     save_scalp_signal(sig_dict)
                     deliver_signal(sig)
+                    try:
+                        from database import save_paper_result as _spr
+                        _spr({"candidate_id": sig.id, "symbol": symbol,
+                              "direction": trend_res["direction"],
+                              "entry": entry, "sl": sl,
+                              "tp1": tp1, "tp2": tp2, "tp3": tp3,
+                              "horizon_minutes": 480.0}, tracked_from="watchlist")
+                        logger.info(f"[Ghost] WATCH kaydedildi: {symbol}")
+                    except Exception as _ge:
+                        logger.debug(f"[Ghost] WATCH hata: {_ge}")
 
                 elif decision == "VETO":
-                    # REJECT: sadece logla
+                    # VETO: logla + ghost-track et (AI ogrenmesi icin)
                     logger.info(f"❌ VETO/REJECT: {symbol} - reason: {ai_res.get('reason', '')}")
+                    try:
+                        from database import save_paper_result as _spr2
+                        _spr2({"candidate_id": sig.id, "symbol": symbol,
+                               "direction": trend_res["direction"],
+                               "entry": entry, "sl": sl,
+                               "tp1": tp1, "tp2": tp2, "tp3": tp3,
+                               "horizon_minutes": 480.0}, tracked_from="candidate")
+                        logger.debug(f"[Ghost] VETO kaydedildi: {symbol}")
+                    except Exception as _ge:
+                        logger.debug(f"[Ghost] VETO hata: {_ge}")
 
             await asyncio.sleep(SCAN_INTERVAL)
         except Exception as e:

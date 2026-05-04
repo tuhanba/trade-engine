@@ -320,12 +320,24 @@ def _ensure_paper_results_table():
                     tp1 REAL,
                     tp2 REAL,
                     tp3 REAL,
+                    preview_entry REAL,
+                    preview_sl REAL,
+                    preview_tp1 REAL,
+                    horizon_minutes REAL DEFAULT 480.0,
                     result TEXT DEFAULT 'pending',
+                    first_touch TEXT,
                     close_price REAL,
                     net_pnl REAL DEFAULT 0,
+                    hit_tp INTEGER DEFAULT 0,
+                    hit_stop_first INTEGER DEFAULT 0,
+                    setup_worked INTEGER DEFAULT 0,
+                    would_have_won INTEGER DEFAULT 0,
+                    skip_decision_correct INTEGER DEFAULT 0,
+                    time_to_move_minutes REAL DEFAULT 0,
                     max_favorable_excursion REAL DEFAULT 0,
                     max_adverse_excursion REAL DEFAULT 0,
                     hold_minutes REAL DEFAULT 0,
+                    finalized_at TEXT,
                     tracked_from TEXT DEFAULT 'ghost',
                     status TEXT DEFAULT 'pending',
                     created_at TEXT DEFAULT (datetime('now')),
@@ -372,26 +384,82 @@ def update_paper_result(row_id: int, updates: dict):
 
 
 def save_paper_result(sig_dict: dict, tracked_from: str = "ghost") -> int:
-    """Yeni paper result kaydi olusturur."""
+    """Yeni paper result kaydi olusturur. paper_tracker ile uyumlu."""
     try:
+        entry  = sig_dict.get("entry")  or sig_dict.get("preview_entry")
+        sl     = sig_dict.get("sl")     or sig_dict.get("preview_sl")
+        tp1    = sig_dict.get("tp1")    or sig_dict.get("preview_tp1")
         with get_conn() as conn:
             cur = conn.execute("""
                 INSERT INTO paper_results
-                    (candidate_id, symbol, direction, entry, sl, tp1, tp2, tp3,
+                    (candidate_id, symbol, direction,
+                     entry, sl, tp1, tp2, tp3,
+                     preview_entry, preview_sl, preview_tp1,
+                     horizon_minutes,
                      tracked_from, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))
             """, (
                 sig_dict.get("candidate_id"),
                 sig_dict.get("symbol"),
                 sig_dict.get("direction"),
-                sig_dict.get("entry"),
-                sig_dict.get("sl"),
-                sig_dict.get("tp1"),
+                entry, sl, tp1,
                 sig_dict.get("tp2"),
                 sig_dict.get("tp3"),
+                entry, sl, tp1,
+                float(sig_dict.get("horizon_minutes") or 480.0),
                 tracked_from,
             ))
             return cur.lastrowid
     except Exception as e:
         logger.warning(f"save_paper_result hatasi: {e}")
         return 0
+
+
+def reset_paper_data(initial_balance: float = 250.0, keep_ai_learning: bool = True):
+    """
+    Kasa ve trade gecmisini sifirlar.
+    - trades tablosu temizlenir
+    - signal_candidates tablosu temizlenir
+    - paper_results tablosu temizlenir
+    - live_tracker tablosu temizlenir
+    - trade_postmortem tablosu temizlenir
+    - paper_account bakiyesi sifirlanir
+    - daily_summary / weekly_summary temizlenir
+    - AI ogrenme verileri (ai_learning, coin_profiles, ai_postmortem) KORUNUR
+      (keep_ai_learning=False ise onlar da silinir)
+    """
+    try:
+        with get_conn() as conn:
+            conn.execute("DELETE FROM trades")
+            conn.execute("DELETE FROM signal_candidates")
+            conn.execute("DELETE FROM trade_postmortem")
+            conn.execute("DELETE FROM daily_summary")
+            conn.execute("DELETE FROM weekly_summary")
+            try:
+                conn.execute("DELETE FROM paper_results")
+            except Exception:
+                pass
+            try:
+                conn.execute("DELETE FROM live_tracker")
+            except Exception:
+                pass
+            # Kasa sifirla
+            conn.execute(
+                "UPDATE paper_account SET balance=?, initial_balance=? WHERE id=1",
+                (initial_balance, initial_balance)
+            )
+            if not keep_ai_learning:
+                try:
+                    conn.execute("DELETE FROM ai_learning")
+                    conn.execute("DELETE FROM coin_profiles")
+                    conn.execute("DELETE FROM ai_postmortem")
+                except Exception:
+                    pass
+        logger.info(
+            f"[Reset] Paper data sifirlandı. Bakiye: {initial_balance}$ | "
+            f"AI learning korundu: {keep_ai_learning}"
+        )
+        return True
+    except Exception as e:
+        logger.error(f"reset_paper_data hatasi: {e}")
+        return False

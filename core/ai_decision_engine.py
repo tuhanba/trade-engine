@@ -350,3 +350,73 @@ class AIDecisionEngine:
         except Exception as e:
             logger.error(f"get_brain_stats hatasi: {e}")
             return {"total_learned": 0, "win_rate": 0, "avg_pnl": 0}
+
+    def learn_from_paper_outcome(
+        self,
+        symbol: str,
+        tracked_from: str,
+        would_have_won: int,
+        mfe_r: float = 0.0,
+        mae_r: float = 0.0,
+        first_touch: str = "neither_horizon",
+        skip_correct: int = 0,
+    ):
+        """
+        Ghost-tracker (WATCH/VETO) sinyallerinden ogrenme.
+        Trade yapilmamis ama fiyat yolu simule edilmis sinyallerden veri toplar.
+        Bu sayede sadece yapilan trade'lerden degil, yapilmayan trade'lerden de ogrenilir.
+        """
+        result = "WIN" if would_have_won else "LOSS"
+        # pnl: simule (mfe_r = kazanc potansiyeli, mae_r = risk)
+        sim_pnl = round(mfe_r * 0.01, 4) if would_have_won else round(-mae_r * 0.01, 4)
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    """INSERT INTO ai_learning
+                           (symbol, trade_result, pnl, setup_quality, created_at)
+                       VALUES (?, ?, ?, ?, datetime('now'))""",
+                    (symbol, f"GHOST_{result}", sim_pnl, tracked_from)
+                )
+                # coin_profiles guncelle (ghost sinyaller daha az agirlik tasir)
+                row = conn.execute(
+                    "SELECT total_trades, win_rate, total_pnl FROM coin_profiles WHERE symbol=?",
+                    (symbol,)
+                ).fetchone()
+                if row:
+                    total = (row[0] or 0) + 1
+                    wins  = conn.execute(
+                        """SELECT COUNT(*) FROM ai_learning
+                           WHERE symbol=? AND trade_result IN ('WIN','GHOST_WIN')""",
+                        (symbol,)
+                    ).fetchone()[0] or 0
+                    wr    = round(wins / total * 100, 1)
+                    t_pnl = (row[2] or 0) + sim_pnl
+                    recent = conn.execute(
+                        """SELECT trade_result FROM ai_learning
+                           WHERE symbol=? ORDER BY created_at DESC LIMIT 5""",
+                        (symbol,)
+                    ).fetchall()
+                    loss_count = sum(1 for r in recent if "LOSS" in r[0])
+                    danger = min(100, max(0, loss_count * 20 - 20))
+                    conn.execute(
+                        """UPDATE coin_profiles
+                           SET win_rate=?, total_trades=?, total_pnl=?,
+                               danger_score=?, updated_at=datetime('now')
+                           WHERE symbol=?""",
+                        (wr, total, round(t_pnl, 4), danger, symbol)
+                    )
+                else:
+                    wr = 100.0 if would_have_won else 0.0
+                    conn.execute(
+                        """INSERT INTO coin_profiles
+                               (symbol, win_rate, total_trades, total_pnl, danger_score)
+                           VALUES (?, ?, 1, ?, 0)""",
+                        (symbol, wr, round(sim_pnl, 4))
+                    )
+                conn.commit()
+            logger.info(
+                f"[AI Ghost Learn] {symbol} {tracked_from} {result} "
+                f"mfe={mfe_r:.2f}R mae={mae_r:.2f}R skip_ok={skip_correct}"
+            )
+        except Exception as e:
+            logger.error(f"learn_from_paper_outcome hatasi: {e}")

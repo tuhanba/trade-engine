@@ -253,6 +253,26 @@ def api_history():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+
+@app.route("/api/reset", methods=["POST"])
+def api_reset():
+    """Kasa ve trade gecmisini sifirla. AI learning korunur."""
+    try:
+        from database import reset_paper_data
+        data = request.get_json(silent=True) or {}
+        initial_balance = float(data.get("initial_balance", 250.0))
+        keep_ai = bool(data.get("keep_ai_learning", True))
+        ok = reset_paper_data(initial_balance=initial_balance, keep_ai_learning=keep_ai)
+        if ok:
+            return jsonify({
+                "ok": True,
+                "message": f"Reset tamamlandi. Bakiye: {initial_balance}$",
+                "keep_ai_learning": keep_ai
+            })
+        return jsonify({"ok": False, "error": "Reset basarisiz"}), 500
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @socketio.on('connect')
 def handle_connect():
     print('Client connected to Elite Dashboard')
