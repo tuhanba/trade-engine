@@ -207,7 +207,9 @@ def open_trade(client, signal, ax_decision, risk_pct=None):
     balance  = get_paper_balance()
     rp       = risk_pct or RISK_PCT
     filters  = _get_filters(client, symbol)
-    lev = PAPER_LEVERAGE  # Simule kaldirach (default 10x)
+    # Signal'dan gelen dinamik kaldirach (AI Brain tarafindan belirlenir)
+    # Yoksa config.py PAPER_LEVERAGE default degeri kullanilir
+    lev = signal.get("leverage", PAPER_LEVERAGE)
     qty = _calc_qty(balance, entry, sl, rp,
                     filters["step_size"], filters["min_qty"], filters["min_notional"],
                     leverage=lev)

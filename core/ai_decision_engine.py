@@ -420,3 +420,170 @@ class AIDecisionEngine:
             )
         except Exception as e:
             logger.error(f"learn_from_paper_outcome hatasi: {e}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # DİNAMİK KALDIRAC KARAR MOTORU
+    # ─────────────────────────────────────────────────────────────────────────
+    def decide_leverage(self, signal_data, ai_result: dict) -> int:
+        """
+        Her trade için dinamik kaldıraç belirler (5x - 20x arası).
+
+        Kaldıraç Mantığı:
+        ─────────────────
+        Baz kaldıraç: 10x
+        Artıran faktörler:
+          - Setup kalitesi S/A+  → +4x
+          - Setup kalitesi A     → +2x
+          - AI skoru >= 85       → +3x
+          - Coin win_rate >= 65  → +2x
+          - 3 üst üste WIN       → +2x
+        Azaltan faktörler:
+          - Setup kalitesi C     → -3x
+          - AI skoru < 75        → -2x
+          - Coin danger >= 40    → -3x
+          - Coin danger >= 60    → -5x (toplam)
+          - 3 üst üste LOSS      → -3x
+          - Volatilite yüksek    → -2x (sl_dist > %4)
+        Sınırlar: min 5x, max 20x
+        """
+        symbol  = signal_data.symbol
+        quality = getattr(signal_data, "setup_quality", "B")
+        final_score = ai_result.get("final_score", 70)
+
+        coin_stats = self._get_coin_stats(symbol)
+        danger     = coin_stats.get("danger_score", 0)
+        win_rate   = coin_stats.get("win_rate", 0)
+        total_tr   = coin_stats.get("total_trades", 0)
+
+        # SL mesafesi (volatilite proxy)
+        entry = getattr(signal_data, "entry_zone", 0) or 0
+        sl    = getattr(signal_data, "stop_loss",  0) or 0
+        sl_dist_pct = abs(entry - sl) / (entry + 1e-12) * 100 if entry > 0 else 3.0
+
+        # Baz kaldıraç
+        lev = 10
+
+        # Setup kalitesi
+        if quality in ("S", "A+"):
+            lev += 4
+        elif quality == "A":
+            lev += 2
+        elif quality == "C":
+            lev -= 3
+
+        # AI skoru
+        if final_score >= 85:
+            lev += 3
+        elif final_score < 75:
+            lev -= 2
+
+        # Coin geçmişi (en az 5 trade varsa)
+        if total_tr >= 5:
+            if win_rate >= 65:
+                lev += 2
+            elif win_rate <= 35:
+                lev -= 3
+
+        # Danger score
+        if danger >= 60:
+            lev -= 5
+        elif danger >= 40:
+            lev -= 3
+
+        # Markov (son 3 trade)
+        recent = self._get_recent_results(symbol, n=3)
+        if len(recent) == 3:
+            if all(r == "WIN" for r in recent):
+                lev += 2
+            elif all("LOSS" in r for r in recent):
+                lev -= 3
+
+        # Volatilite (SL mesafesi)
+        if sl_dist_pct > 4.0:
+            lev -= 2   # Geniş SL = yüksek volatilite = düşük kaldıraç
+        elif sl_dist_pct < 1.5:
+            lev += 1   # Dar SL = düşük volatilite = biraz daha kaldıraç
+
+        # Sınırla
+        lev = max(5, min(20, lev))
+
+        logger.info(
+            f"[AI Leverage] {symbol} → {lev}x | "
+            f"quality={quality} score={final_score:.0f} "
+            f"danger={danger:.0f} win_rate={win_rate:.0f}% "
+            f"sl_dist={sl_dist_pct:.1f}%"
+        )
+        return lev
+
+    def decide_tp_sl_ratios(self, leverage: int, signal_data) -> dict:
+        """
+        Kaldıraca göre TP/SL mesafelerini ayarlar.
+
+        Mantık:
+        ───────
+        Yüksek kaldıraç → SL daha sıkı (küçük hareket büyük etki)
+        Düşük kaldıraç  → SL daha geniş (daha fazla nefes alanı)
+
+        TP oranları da kaldıraca göre değişir:
+          - 20x: TP1 %1.5, TP2 %3.0, TP3 %5.0
+          - 10x: TP1 %3.0, TP2 %5.0, TP3 %8.0
+          -  5x: TP1 %5.0, TP2 %8.0, TP3 %12.0
+
+        Returns:
+            {
+                "sl_multiplier":  float,  # SL mesafesine çarpan
+                "tp1_pct": float, "tp2_pct": float, "tp3_pct": float,
+                "rr_min":  float,         # Min risk/reward oranı
+            }
+        """
+        entry = getattr(signal_data, "entry_zone", 0) or 0
+        sl    = getattr(signal_data, "stop_loss",  0) or 0
+        sl_dist_pct = abs(entry - sl) / (entry + 1e-12) * 100 if entry > 0 else 3.0
+
+        if leverage >= 18:
+            # 18-20x: Çok sıkı SL, hızlı TP
+            sl_mult = 0.70   # SL mesafesini %30 daralt
+            tp1_pct = 1.2
+            tp2_pct = 2.5
+            tp3_pct = 4.0
+            rr_min  = 1.5
+        elif leverage >= 14:
+            # 14-17x: Sıkı SL
+            sl_mult = 0.80
+            tp1_pct = 1.8
+            tp2_pct = 3.5
+            tp3_pct = 6.0
+            rr_min  = 1.8
+        elif leverage >= 10:
+            # 10-13x: Standart
+            sl_mult = 1.00
+            tp1_pct = 3.0
+            tp2_pct = 5.0
+            tp3_pct = 8.0
+            rr_min  = 2.0
+        elif leverage >= 7:
+            # 7-9x: Geniş SL
+            sl_mult = 1.20
+            tp1_pct = 4.0
+            tp2_pct = 7.0
+            tp3_pct = 11.0
+            rr_min  = 2.0
+        else:
+            # 5-6x: En geniş SL
+            sl_mult = 1.40
+            tp1_pct = 5.0
+            tp2_pct = 8.5
+            tp3_pct = 13.0
+            rr_min  = 2.2
+
+        logger.info(
+            f"[AI TP/SL] leverage={leverage}x → "
+            f"sl_mult={sl_mult} tp1={tp1_pct}% tp2={tp2_pct}% tp3={tp3_pct}%"
+        )
+        return {
+            "sl_multiplier": sl_mult,
+            "tp1_pct":       tp1_pct,
+            "tp2_pct":       tp2_pct,
+            "tp3_pct":       tp3_pct,
+            "rr_min":        rr_min,
+        }

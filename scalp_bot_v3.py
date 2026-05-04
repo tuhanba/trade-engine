@@ -164,40 +164,64 @@ async def main_loop_with_client(client):
                     if len(_sent_signals) > 100:
                         _sent_signals.clear()
 
-                    logger.info(f"🚀 ALLOW: {symbol} - execution_engine.open_trade cagrilıyor")
+                    # ── AI Dinamik Kaldıraç Kararı ──────────────────────────
+                    dyn_lev = ai_engine.decide_leverage(sig, ai_res)
+                    tp_sl   = ai_engine.decide_tp_sl_ratios(dyn_lev, sig)
+
+                    # Kaldıraca göre TP/SL yeniden hesapla
+                    direction_str = trend_res["direction"]
+                    sl_dist = abs(entry - sl)
+                    new_sl_dist = sl_dist * tp_sl["sl_multiplier"]
+                    if direction_str == "LONG":
+                        dyn_sl  = round(entry - new_sl_dist, 8)
+                        dyn_tp1 = round(entry * (1 + tp_sl["tp1_pct"] / 100), 8)
+                        dyn_tp2 = round(entry * (1 + tp_sl["tp2_pct"] / 100), 8)
+                        dyn_tp3 = round(entry * (1 + tp_sl["tp3_pct"] / 100), 8)
+                    else:  # SHORT
+                        dyn_sl  = round(entry + new_sl_dist, 8)
+                        dyn_tp1 = round(entry * (1 - tp_sl["tp1_pct"] / 100), 8)
+                        dyn_tp2 = round(entry * (1 - tp_sl["tp2_pct"] / 100), 8)
+                        dyn_tp3 = round(entry * (1 - tp_sl["tp3_pct"] / 100), 8)
+
+                    logger.info(
+                        f"🚀 ALLOW: {symbol} {dyn_lev}x | "
+                        f"sl={dyn_sl:.6f} tp1={dyn_tp1:.6f} tp2={dyn_tp2:.6f} tp3={dyn_tp3:.6f}"
+                    )
                     save_scalp_signal(sig_dict)
                     deliver_signal(sig)
-
                     signal_for_exec = {
-                        "symbol": symbol,
-                        "direction": trend_res["direction"],
-                        "entry": entry,
-                        "sl": sl,
-                        "tp1": tp1,
-                        "tp2": tp2,
-                        "runner_target": runner_target,
-                        "tp3": tp3,
-                        "atr": atr,
-                        "confidence": 0.8,
-                        "score": ai_res.get("final_score", 0),
+                        "symbol":        symbol,
+                        "direction":     direction_str,
+                        "entry":         entry,
+                        "sl":            dyn_sl,
+                        "tp1":           dyn_tp1,
+                        "tp2":           dyn_tp2,
+                        "runner_target": dyn_tp3,
+                        "tp3":           dyn_tp3,
+                        "atr":           atr,
+                        "leverage":      dyn_lev,
+                        "confidence":    0.8,
+                        "score":         ai_res.get("final_score", 0),
                         "setup_quality": trigger_res["quality"],
-                        "candidate_id": sig.id,
+                        "candidate_id":  sig.id,
                     }
                     trade_id = execution_engine.open_trade(client, signal_for_exec, ai_res)
                     if trade_id:
                         send_trade_open({
-                            "symbol": symbol,
-                            "direction": trend_res["direction"],
-                            "entry": entry,
-                            "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
-                            "leverage": signal_for_exec.get("leverage", 10),
+                            "symbol":        symbol,
+                            "direction":     direction_str,
+                            "entry":         entry,
+                            "sl":            dyn_sl,
+                            "tp1":           dyn_tp1,
+                            "tp2":           dyn_tp2,
+                            "tp3":           dyn_tp3,
+                            "leverage":      dyn_lev,
                             "notional_size": signal_for_exec.get("notional_size", 0),
                             "position_size": signal_for_exec.get("position_size", 0),
                         })
-                        logger.info(f"[Bot] PAPER TRADE ACILDI #{trade_id} {symbol}")
+                        logger.info(f"[Bot] PAPER TRADE ACILDI #{trade_id} {symbol} {dyn_lev}x")
                     else:
                         logger.warning(f"[Bot] open_trade basarisiz: {symbol}")
-
                 elif decision == "WATCH":
                     logger.info(f"👀 WATCH: {symbol} - sinyal gonderildi, ghost-track basladi")
                     save_scalp_signal(sig_dict)
