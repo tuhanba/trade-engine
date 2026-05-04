@@ -66,6 +66,24 @@ class UltimateEliteEngine:
             tp3 = entry * 1.08 if direction == "LONG" else entry * 0.92
             return sl, tp1, tp2, tp3, 0.0
 
+async def ghost_tracker_loop(client):
+    """
+    Ghost-tracker dongusu: WATCH/VETO sinyallerini simule eder ve AI'a ogretir.
+    Her 5 dakikada bir bekleyen paper_results kayitlarini isler.
+    Bu sayede bot girmedigii trade'lerden de ogrenebilir.
+    """
+    logger.info("[Ghost] Ghost-tracker dongusu basladi - WATCH/VETO sinyalleri izleniyor")
+    await asyncio.sleep(30)  # Bot basladiktan 30 sn sonra ilk calisma
+    while True:
+        try:
+            from core.paper_tracker import process_pending_paper_results
+            done = process_pending_paper_results(client, limit=35)
+            if done > 0:
+                logger.info(f"[Ghost] {done} WATCH/VETO sinyali simule edildi ve AI'a ogretildi")
+        except Exception as e:
+            logger.warning(f"[Ghost] paper_tracker hatasi: {e}")
+        await asyncio.sleep(300)  # Her 5 dakikada bir
+
 async def monitor_loop(client):
     """Acik trade'leri izler: TP1/TP2/SL/Trail kontrolu yapar. Her 15 saniyede calisir."""
     logger.info("[Monitor] AI Execution monitor dongusu basladi")
@@ -84,6 +102,7 @@ async def main():
     await asyncio.gather(
         main_loop_with_client(client),
         monitor_loop(client),
+        ghost_tracker_loop(client),
     )
 
 async def main_loop_with_client(client):
