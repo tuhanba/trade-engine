@@ -61,8 +61,18 @@ def api_live():
             # Binance'ten guncel fiyat al
             current_price = trade.get("current_price") or 0
             try:
-                ticker = client.futures_ticker(symbol=symbol)
-                current_price = float(ticker["lastPrice"])
+                import requests as _req
+                _resp = _req.get(
+                    "https://fapi.binance.com/fapi/v1/ticker/price",
+                    params={"symbol": symbol}, timeout=5
+                )
+                if _resp.status_code == 200:
+                    _p = float(_resp.json().get("price", 0))
+                    if _p > 0:
+                        current_price = _p
+                if not current_price:
+                    ticker = client.futures_ticker(symbol=symbol)
+                    current_price = float(ticker["lastPrice"])
                 _last_price_update["time"] = datetime.now(timezone.utc).isoformat()
             except Exception as pe:
                 error_msg = str(pe)
