@@ -1,4 +1,4 @@
-import os, json, sqlite3, re
+import os, json, sqlite3, re, time
 from datetime import datetime, timezone
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO
@@ -9,18 +9,18 @@ from database import (
 )
 from binance.client import Client
 import dashboard_service as dash_svc
-
 load_dotenv()
-
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "scalp2026")
-
-# Eventlet desteği ile SocketIO
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 client = Client(os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_API_SECRET", ""))
-
 init_db()
 dash_svc.start()
+
+# Health durumu icin son hata kaydedici
+_last_error = {"msg": "", "time": ""}
+_last_signal_time = {"time": ""}
+_last_price_update = {"time": ""}
 
 @app.route("/")
 def index():
@@ -44,9 +44,148 @@ def api_live():
     try:
         open_trades = get_open_trades()
         live = []
+        total_unrealized = 0.0
+        error_msg = None
+
         for t in open_trades:
-            live.append({**t, "ai_confidence": t.get("confidence", 0.8)})
-        return jsonify({"ok": True, "data": {"live": live, "open_count": len(live)}})
+            trade = dict(t)
+            symbol = trade.get("symbol", "")
+            entry  = trade.get("entry", 0) or 0
+            sl     = trade.get("sl", 0) or 0
+            tp1    = trade.get("tp1", 0) or 0
+            tp2    = trade.get("tp2", 0) or 0
+            tp3    = trade.get("tp3", 0) or 0
+            direction = (trade.get("direction") or "").upper()
+            qty    = trade.get("qty", 0) or 0
+
+            # Binance'ten guncel fiyat al
+            current_price = trade.get("current_price") or 0
+            try:
+                ticker = client.futures_ticker(symbol=symbol)
+                current_price = float(ticker["lastPrice"])
+                _last_price_update["time"] = datetime.now(timezone.utc).isoformat()
+            except Exception as pe:
+                error_msg = str(pe)
+                _last_error["msg"] = str(pe)
+                _last_error["time"] = datetime.now(timezone.utc).isoformat()
+
+            # PnL hesapla
+            unrealized_pnl = 0.0
+            pnl_percent = 0.0
+            if current_price and entry and qty:
+                if direction == "LONG":
+                    unrealized_pnl = (current_price - entry) * qty
+                elif direction == "SHORT":
+                    unrealized_pnl = (entry - current_price) * qty
+                pnl_percent = round((unrealized_pnl / (entry * qty)) * 100, 2) if entry * qty else 0
+
+            # Mesafe hesapla
+            def dist_pct(target):
+                if not target or not current_price:
+                    return None
+                return round(abs(current_price - target) / current_price * 100, 2)
+
+            # Trade stage ve active target
+            status = trade.get("status", "open")
+            trade_stage = trade.get("trade_stage") or status
+            active_target = trade.get("active_target") or "tp1"
+
+            enriched = {
+                **trade,
+                "current_price":      round(current_price, 6) if current_price else None,
+                "unrealized_pnl":     round(unrealized_pnl, 4),
+                "unrealized_pct":     pnl_percent,
+                "tp3":                tp3,
+                "runner_target":      trade.get("runner_target"),
+                "trade_stage":        trade_stage,
+                "active_target":      active_target,
+                "tp1_hit":            trade.get("tp1_hit", 0),
+                "tp2_hit":            trade.get("tp2_hit", 0),
+                "distance_to_sl":     dist_pct(sl),
+                "distance_to_tp1":    dist_pct(tp1),
+                "distance_to_tp2":    dist_pct(tp2),
+                "distance_to_tp3":    dist_pct(tp3),
+                "ai_confidence":      trade.get("confidence", 0.8),
+                "error":              error_msg,
+            }
+            total_unrealized += unrealized_pnl
+            live.append(enriched)
+
+            # DB'ye current_price ve unrealized_pnl yaz
+            if current_price:
+                try:
+                    from database import update_trade
+                    update_trade(trade["id"], {
+                        "current_price": round(current_price, 6),
+                        "unrealized_pnl": round(unrealized_pnl, 4),
+                    })
+                except Exception:
+                    pass
+
+        return jsonify({
+            "ok": True,
+            "data": {
+                "live": live,
+                "open_count": len(live),
+                "total_unrealized": round(total_unrealized, 4),
+                "error": error_msg,
+            }
+        })
+    except Exception as e:
+        _last_error["msg"] = str(e)
+        _last_error["time"] = datetime.now(timezone.utc).isoformat()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/health")
+def api_health():
+    try:
+        # DB durumu
+        db_status = "ok"
+        open_trade_count = 0
+        try:
+            with get_conn() as conn:
+                open_trade_count = conn.execute(
+                    "SELECT COUNT(*) FROM trades WHERE status NOT IN ('closed','closed_win','closed_loss','sl','trail','timeout')"
+                ).fetchone()[0]
+        except Exception as e:
+            db_status = f"error: {e}"
+
+        # Binance durumu
+        binance_status = "ok"
+        try:
+            client.ping()
+        except Exception as e:
+            binance_status = f"error: {e}"
+
+        # Telegram durumu
+        telegram_status = "ok"
+        try:
+            from config import TELEGRAM_BOT_TOKEN
+            import requests as req
+            r = req.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe", timeout=5)
+            if r.status_code != 200:
+                telegram_status = f"error: HTTP {r.status_code}"
+        except Exception as e:
+            telegram_status = f"error: {e}"
+
+        # Scanner durumu
+        scanner_status = "running" if dash_svc._running else "stopped"
+
+        return jsonify({
+            "ok": True,
+            "data": {
+                "db_status":             db_status,
+                "binance_status":        binance_status,
+                "telegram_status":       telegram_status,
+                "scanner_status":        scanner_status,
+                "open_trade_count":      open_trade_count,
+                "last_signal_time":      _last_signal_time.get("time", ""),
+                "last_price_update_time": _last_price_update.get("time", ""),
+                "last_error":            _last_error.get("msg", ""),
+                "last_error_time":       _last_error.get("time", ""),
+                "timestamp":             datetime.now(timezone.utc).isoformat(),
+            }
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -62,7 +201,6 @@ def api_ax_status():
 def api_daily_pnl():
     try:
         data = dash_svc.get_calendar_data()
-        # Convert list to dict for frontend compatibility
         pnl_dict = {d['date']: d['net_pnl'] for d in data}
         return jsonify({"ok": True, "data": pnl_dict})
     except Exception as e:
@@ -93,9 +231,14 @@ def api_history():
         limit = 20
         offset = (page - 1) * limit
         with get_conn() as conn:
-            rows = conn.execute("SELECT * FROM trades WHERE status != 'open' ORDER BY close_time DESC LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE status NOT IN ('open','tp1_hit','runner') ORDER BY close_time DESC LIMIT ? OFFSET ?",
+                (limit, offset)
+            ).fetchall()
             trades = [dict(r) for r in rows]
-            total = conn.execute("SELECT COUNT(*) FROM trades WHERE status != 'open'").fetchone()[0]
+            total = conn.execute(
+                "SELECT COUNT(*) FROM trades WHERE status NOT IN ('open','tp1_hit','runner')"
+            ).fetchone()[0]
         return jsonify({"ok": True, "data": trades, "total": total, "page": page, "pages": (total // limit) + 1})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

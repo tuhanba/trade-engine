@@ -124,11 +124,23 @@ def open_trade(client, signal: dict, ax_decision: dict,
         "sl":             sl,
         "tp1":            tp1,
         "tp2":            tp2,
+        "tp3":            signal.get("tp3", runner),
+        "runner_target":  runner,
         "trail_stop":     None,
         "qty":            qty,
         "qty_tp1":        qty_tp1,
         "qty_tp2":        qty_tp2,
         "qty_runner":     qty_runner,
+        "trade_stage":    "open",
+        "active_target":  "tp1",
+        "tp1_hit":        0,
+        "tp2_hit":        0,
+        "confidence":     signal.get("confidence", 0.8),
+        "score":          ax_decision.get("final_score", signal.get("score", 0)),
+        "setup_quality":  signal.get("setup_quality", "B"),
+        "risk_percent":   rp,
+        "position_size":  qty * entry,
+        "notional_size":  qty * entry,
         "linked_candidate_id": None,
         "linked_candidate_uuid": signal.get("candidate_id"),
         "open_time":      datetime.now(timezone.utc).isoformat(),
@@ -234,12 +246,23 @@ def _check_trade(client, t: dict) -> bool:
                 "tp1_hit":      1,
                 "realized_pnl": pnl_tp1,
                 "sl":           round(new_sl, 6),   # Breakeven SL
+                "trade_stage":  "tp1_hit",
+                "active_target": "tp2",
             })
             update_paper_balance(pnl_tp1)
             logger.info(
                 f"[Execution] TP1 #{trade_id} {symbol} +{pnl_tp1:.3f}$ "
                 f"| Breakeven SL → {new_sl:.6f}"
             )
+            try:
+                from telegram_delivery import send_message as tg_send
+                tg_send(
+                    f"🎯 <b>TP1 HIT</b>\n"
+                    f"{symbol} {direction} | +{pnl_tp1:.3f}$\n"
+                    f"Breakeven SL → {new_sl:.6f} | Runner devam ediyor"
+                )
+            except Exception as _tg_e:
+                logger.warning(f"TP1 Telegram bildirimi hatasi: {_tg_e}")
             return False
 
     # ── TP2 Kontrolü ────────────────────────────────────────────────────────
@@ -260,9 +283,20 @@ def _check_trade(client, t: dict) -> bool:
                 "realized_pnl": realized,
                 "trail_stop":   new_trail,
                 "sl":           entry,
+                "trade_stage":  "runner",
+                "active_target": "runner",
             })
             update_paper_balance(pnl_tp2)
             logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ → RUNNER trail={new_trail:.6f}")
+            try:
+                from telegram_delivery import send_message as tg_send
+                tg_send(
+                    f"🎯 <b>TP2 HIT — RUNNER BASLADI</b>\n"
+                    f"{symbol} {direction} | +{pnl_tp2:.3f}$\n"
+                    f"Trail Stop: {new_trail:.6f}"
+                )
+            except Exception as _tg_e:
+                logger.warning(f"TP2 Telegram bildirimi hatasi: {_tg_e}")
             return False
 
     # ── Runner: Trailing Stop ────────────────────────────────────────────────

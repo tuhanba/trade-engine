@@ -47,3 +47,12 @@ SCAN_INTERVAL = 60
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
 MIN_VOLUME_USD = 5000000 # 10M -> 5M
 COIN_UNIVERSE = [] # Tüm coinleri tara
+
+# ── Execution Sabitleri ───────────────────────────────────────────────────────
+TP1_CLOSE_PCT        = float(os.getenv("TP1_CLOSE_PCT", "40"))    # TP1'de kapatılacak % miktar
+TP2_CLOSE_PCT        = float(os.getenv("TP2_CLOSE_PCT", "40"))    # TP2'de kapatılacak % miktar
+RUNNER_CLOSE_PCT     = float(os.getenv("RUNNER_CLOSE_PCT", "20")) # Runner % miktar
+TRAIL_ATR_MULT       = float(os.getenv("TRAIL_ATR_MULT", "1.5"))  # Trailing stop ATR çarpanı
+BREAKEVEN_ENABLED    = os.getenv("BREAKEVEN_ENABLED", "true").lower() == "true"
+BREAKEVEN_OFFSET_PCT = float(os.getenv("BREAKEVEN_OFFSET_PCT", "0.05"))
+ENABLE_LIVE_TRADING  = os.getenv("ENABLE_LIVE_TRADING", "false").lower() == "true"

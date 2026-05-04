@@ -760,8 +760,39 @@ async function loadPositions(){
     const wrap=document.getElementById("posList");
     if(!pos.length){wrap.innerHTML="<div class='empty'>— Acik Pozisyon Yok —</div>";return}
     wrap.innerHTML=pos.map(p=>{
-      const isL=(p.direction||"").toUpperCase()==="LONG",pnl=p.unrealized_pnl||0,bar=Math.min(Math.abs(p.sl_distance_pct||0),100);
-      return "<div class='pos "+(isL?"long-p":"short-p")+"'><div class='pos-top'><div><div class='pos-sym'>"+p.symbol+"</div><span class='pos-dir "+(isL?"long":"short")+"'>"+p.direction+" x"+(p.leverage||"—")+"</span></div><div class='pos-pnl'><div class='pos-pnl-val "+(pnl>=0?"pos-c":"neg-c")+"'>"+fp(pnl)+"</div><div class='pos-pnl-pct'>"+(pnl>=0?"+":"")+f(p.unrealized_pct,2)+"%</div></div></div><div class='pos-levels'><div><div class='pl-lbl'>Entry</div><div class='pl-val entry'>"+f(p.entry,5)+"</div></div><div><div class='pl-lbl'>Stop</div><div class='pl-val stop'>"+f(p.sl,4)+"</div></div><div><div class='pl-lbl'>Target</div><div class='pl-val target'>"+f(p.tp,4)+"</div></div><div><div class='pl-lbl'>RR</div><div class='pl-val rr'>"+f(p.current_rr,2)+"R</div></div></div><div class='pos-bar-bg'><div class='pos-bar-fill "+(isL?"long":"short")+"' style='width:"+bar+"%'></div></div><div class='pos-foot'><span>Mark: "+f(p.current_price,5)+"</span><span>SL: "+f(p.sl_distance_pct,1)+"%</span></div></div>";
+      const isL=(p.direction||"").toUpperCase()==="LONG";
+      const pnl=p.unrealized_pnl||0;
+      const cp=p.current_price;
+      const sl=p.sl||0,tp1=p.tp1||0,tp2=p.tp2||0,tp3=p.tp3||0;
+      const stage=p.trade_stage||p.status||"open";
+      const activeT=p.active_target||"tp1";
+      const tp1Hit=p.tp1_hit?'✅ ':'';
+      const tp2Hit=p.tp2_hit?'✅ ':'';
+      const stageColor=stage==='runner'?'var(--cyan-br)':stage==='tp1_hit'?'var(--green-br)':'var(--text-muted)';
+      const distSL=p.distance_to_sl!=null?p.distance_to_sl.toFixed(1)+'%':'—';
+      const distTP1=p.distance_to_tp1!=null?p.distance_to_tp1.toFixed(1)+'%':'—';
+      return "<div class='pos "+(isL?"long-p":"short-p")+"'>"
+        +"<div class='pos-top'>"
+          +"<div><div class='pos-sym'>"+p.symbol+"</div>"
+          +"<span class='pos-dir "+(isL?"long":"short")+"'>"+p.direction+"</span>"
+          +"<span style='font-size:8px;color:"+stageColor+";margin-left:6px'>"+stage.toUpperCase()+"</span></div>"
+          +"<div class='pos-pnl'><div class='pos-pnl-val "+(pnl>=0?"pos-c":"neg-c")+"'>"+fp(pnl)+"</div>"
+          +"<div class='pos-pnl-pct'>"+(pnl>=0?"+":"")+f(p.unrealized_pct||0,2)+"%</div></div>"
+        +"</div>"
+        +"<div class='pos-levels'>"
+          +"<div><div class='pl-lbl'>Entry</div><div class='pl-val entry'>"+f(p.entry,5)+"</div></div>"
+          +"<div><div class='pl-lbl'>Mark</div><div class='pl-val' style='color:var(--cyan-br)'>"+( cp?f(cp,5):'—')+"</div></div>"
+          +"<div><div class='pl-lbl'>Stop</div><div class='pl-val stop'>"+f(sl,5)+"</div></div>"
+          +"<div><div class='pl-lbl'>"+tp1Hit+"TP1</div><div class='pl-val target'>"+f(tp1,5)+"</div></div>"
+          +(tp2?"<div><div class='pl-lbl'>"+tp2Hit+"TP2</div><div class='pl-val target'>"+f(tp2,5)+"</div></div>":"")
+          +(tp3?"<div><div class='pl-lbl'>TP3</div><div class='pl-val target' style='color:var(--cyan-br)'>"+f(tp3,5)+"</div></div>":"")
+        +"</div>"
+        +"<div class='pos-foot'>"
+          +"<span>Active: <b>"+activeT.toUpperCase()+"</b></span>"
+          +"<span>SL Dist: "+distSL+"</span>"
+          +"<span>TP1 Dist: "+distTP1+"</span>"
+        +"</div>"
+      +"</div>";
     }).join("");
   }catch(e){console.error(e)}
 }
@@ -898,13 +929,37 @@ async function loadCoinProfiles(){
 }
 
 // INIT & REFRESH
+async function loadHealth(){
+  try{
+    const j=await(await fetch(BASE+"/api/health")).json();
+    if(!j.ok)return;
+    const d=j.data;
+    const hEl=document.getElementById("healthBox");
+    if(!hEl)return;
+    const statusColor=(s)=>s==="ok"||s==="running"?"var(--green-br)":"var(--red-br)";
+    hEl.innerHTML=
+      "<div style='display:flex;flex-wrap:wrap;gap:8px;font-size:9px;font-family:var(--orb)'>"
+      +"<span>DB: <b style='color:"+statusColor(d.db_status)+"'>"+d.db_status+"</b></span>"
+      +"<span>Binance: <b style='color:"+statusColor(d.binance_status)+"'>"+d.binance_status+"</b></span>"
+      +"<span>Telegram: <b style='color:"+statusColor(d.telegram_status)+"'>"+d.telegram_status+"</b></span>"
+      +"<span>Scanner: <b style='color:"+statusColor(d.scanner_status)+"'>"+d.scanner_status+"</b></span>"
+      +"<span>Open Trades: <b>"+d.open_trade_count+"</b></span>"
+      +(d.last_error?"<span style='color:var(--red-br)'>Last Error: "+d.last_error.substring(0,60)+"</span>":"")
+      +"</div>";
+  }catch(e){console.error("health",e)}
+}
 async function refreshAll(){
-  await Promise.allSettled([loadStats(),loadChart(),loadPositions(),loadHistory(curPage),loadAxStatus(),loadCalendar(),loadWeekly(),loadCoinProfiles()]);
+  await Promise.allSettled([loadStats(),loadChart(),loadPositions(),loadHistory(curPage),loadAxStatus(),loadCalendar(),loadWeekly(),loadCoinProfiles(),loadHealth()]);
 }
 refreshAll();
 setInterval(()=>{loadPositions();loadAxStatus();},8000);
 setInterval(()=>{loadStats();loadChart();loadHistory(curPage);loadWeekly();},30000);
 setInterval(()=>{loadCoinProfiles();loadCalendar();},120000);
+setInterval(()=>{loadHealth();},15000);
 </script>
+<div id="healthBox" style="position:fixed;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(10,10,20,0.92);border:1px solid rgba(100,200,255,0.15);border-radius:8px;padding:8px 16px;z-index:9999;min-width:320px;max-width:90vw;text-align:center;">
+  <div style="font-size:8px;color:var(--text-muted);font-family:var(--orb);letter-spacing:0.1em;margin-bottom:4px">⚙ SYSTEM HEALTH</div>
+  <div style="color:var(--text-muted);font-size:9px">Yukleniyor...</div>
+</div>
 </body>
 </html>
