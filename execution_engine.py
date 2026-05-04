@@ -204,6 +204,15 @@ def open_trade(client, signal, ax_decision, risk_pct=None):
     runner    = signal.get("runner_target", signal.get("tp3", tp2))
     if not direction or not entry or not sl:
         return None
+    # MAX_OPEN_TRADES kontrolu
+    try:
+        from config import MAX_OPEN_TRADES
+        open_trades = get_open_trades()
+        if len(open_trades) >= MAX_OPEN_TRADES:
+            logger.info(f"[Execution] MAX_OPEN_TRADES={MAX_OPEN_TRADES} doldu, {symbol} atlandi")
+            return None
+    except Exception:
+        pass
     balance  = get_paper_balance()
     rp       = risk_pct or RISK_PCT
     filters  = _get_filters(client, symbol)
@@ -213,6 +222,10 @@ def open_trade(client, signal, ax_decision, risk_pct=None):
     qty = _calc_qty(balance, entry, sl, rp,
                     filters["step_size"], filters["min_qty"], filters["min_notional"],
                     leverage=lev)
+    if qty <= 0:
+        logger.warning(f"[Execution] {symbol} qty=0 hesaplandi, trade acilmiyor. "
+                       f"balance={balance:.2f} entry={entry} sl={sl} lev={lev}")
+        return None
     if qty <= 0:
         logger.warning(f"[Execution] {symbol} qty hesaplanamadi")
         return None
@@ -274,15 +287,44 @@ def open_trade(client, signal, ax_decision, risk_pct=None):
 # ─────────────────────────────────────────────────────────────────────────────
 def monitor_open_trades(client):
     """Tum acik tradeleri kontrol et. Kapanan trade ID'lerini doner."""
+    from datetime import datetime, timezone, timedelta
     trades = get_open_trades()
     closed = []
     for t in trades:
         try:
+            # TIMEOUT kontrolu: TRADE_TIMEOUT_HOURS saati gecen trade'leri kapat
+            try:
+                from config import TRADE_TIMEOUT_HOURS
+                timeout_h = TRADE_TIMEOUT_HOURS
+            except ImportError:
+                timeout_h = 24
+            open_time_str = t.get("open_time")
+            if open_time_str and timeout_h > 0:
+                try:
+                    open_dt = datetime.fromisoformat(open_time_str.replace("Z", "+00:00"))
+                    if open_dt.tzinfo is None:
+                        open_dt = open_dt.replace(tzinfo=timezone.utc)
+                    age_h = (datetime.now(timezone.utc) - open_dt).total_seconds() / 3600
+                    if age_h >= timeout_h:
+                        price = _get_price(client, t["symbol"])
+                        if price:
+                            qty_all = t.get("qty", 0)
+                            realized = t.get("realized_pnl") or 0
+                            pnl_now = _calc_pnl(t["direction"], t["entry"], price, qty_all)
+                            net_pnl = realized + pnl_now
+                            _finalize(t["id"], price, net_pnl, "timeout", t)
+                            closed.append(t["id"])
+                            logger.info(f"[Monitor] TIMEOUT #{t['id']} {t['symbol']} {age_h:.1f}h pnl={net_pnl:+.3f}$")
+                            continue
+                except Exception as _te:
+                    logger.debug(f"[Monitor] Timeout kontrol hatasi: {_te}")
             result = _check_trade(client, t)
             if result:
                 closed.append(t["id"])
         except Exception as e:
             logger.error(f"[Execution] Monitor hata {t['id']}: {e}")
+    if trades:
+        logger.info(f"[Monitor] {len(trades)} acik trade kontrol edildi, {len(closed)} kapandi")
     return closed
 
 

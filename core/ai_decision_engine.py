@@ -43,7 +43,7 @@ class AIDecisionEngine:
     def __init__(self, db_path="trading.db"):
         self.db_path = db_path
         self.daily_signals   = 0
-        self.max_daily_signals = 40
+        self.max_daily_signals = 100  # 40 -> 100 (filtreler gevsetilince limit arttirildi)
         self.recent_coins    = []
         self.last_reset_date = datetime.now(timezone.utc).date()
         self.thresholds = {

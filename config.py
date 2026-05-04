@@ -22,7 +22,7 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "958182551")
 
 # ── Risk ─────────────────────────────────────────────────────────────────────
 RISK_PCT                = float(os.getenv("RISK_PCT", "1.0"))
-MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "5")) # 2 -> 5
+MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "15")) # 2->5->15
 DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "5.0"))
 CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "5"))
 CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "60"))
@@ -57,3 +57,5 @@ TRAIL_ATR_MULT       = float(os.getenv("TRAIL_ATR_MULT", "1.5"))  # Trailing sto
 BREAKEVEN_ENABLED    = os.getenv("BREAKEVEN_ENABLED", "true").lower() == "true"
 BREAKEVEN_OFFSET_PCT = float(os.getenv("BREAKEVEN_OFFSET_PCT", "0.05"))
 ENABLE_LIVE_TRADING  = os.getenv("ENABLE_LIVE_TRADING", "false").lower() == "true"
+
+TRADE_TIMEOUT_HOURS     = int(os.getenv("TRADE_TIMEOUT_HOURS", "24"))  # 24 saat sonra zorla kapat
