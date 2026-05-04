@@ -28,10 +28,10 @@ except ImportError:
     _BAD_HOURS   = [5, 6, 14, 20]
     _GOOD_HOURS  = [0, 2, 3, 7, 15]
     _ALLOWED_QUAL = ["S", "A+", "A", "B"]
-    DATA_THRESHOLD = 45
-    WATCHLIST_THRESHOLD = 65
-    TELEGRAM_THRESHOLD = 75
-    TRADE_THRESHOLD = 82
+    DATA_THRESHOLD = 30
+    WATCHLIST_THRESHOLD = 50
+    TELEGRAM_THRESHOLD = 60
+    TRADE_THRESHOLD = 70
 
 class AIDecisionEngine:
     def __init__(self, db_path="trading.db"):

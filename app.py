@@ -11,11 +11,12 @@ from binance.client import Client
 import dashboard_service as dash_svc
 
 load_dotenv()
+
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "scalp2026")
+
 # Eventlet desteği ile SocketIO
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
-
 client = Client(os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_API_SECRET", ""))
 
 init_db()
@@ -30,7 +31,7 @@ def api_stats():
     try:
         stats = get_stats()
         with get_conn() as conn:
-            row = conn.execute("SELECT COUNT(*) FROM paper_trades").fetchone()
+            row = conn.execute("SELECT COUNT(*) FROM trades").fetchone()
             stats["ghost_trades_count"] = row[0] if row else 0
             row_sentiment = conn.execute("SELECT value FROM state WHERE key='market_sentiment'").fetchone()
             stats["market_sentiment"] = float(row_sentiment[0]) if row_sentiment else 50.0
@@ -49,10 +50,59 @@ def api_live():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route("/api/ax_status")
+def api_ax_status():
+    try:
+        status = dash_svc.get_ax_status()
+        return jsonify({"ok": True, "data": status})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/daily_pnl")
+def api_daily_pnl():
+    try:
+        data = dash_svc.get_calendar_data()
+        # Convert list to dict for frontend compatibility
+        pnl_dict = {d['date']: d['net_pnl'] for d in data}
+        return jsonify({"ok": True, "data": pnl_dict})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/weekly")
+def api_weekly():
+    try:
+        data = dash_svc.get_weekly_data()
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/coin_profiles")
+def api_coin_profiles():
+    try:
+        with get_conn() as conn:
+            rows = conn.execute("SELECT * FROM coin_profiles ORDER BY win_rate DESC").fetchall()
+            data = [dict(r) for r in rows]
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/history")
+def api_history():
+    try:
+        page = int(request.args.get("page", 1))
+        limit = 20
+        offset = (page - 1) * limit
+        with get_conn() as conn:
+            rows = conn.execute("SELECT * FROM trades WHERE status != 'open' ORDER BY close_time DESC LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+            trades = [dict(r) for r in rows]
+            total = conn.execute("SELECT COUNT(*) FROM trades WHERE status != 'open'").fetchone()[0]
+        return jsonify({"ok": True, "data": trades, "total": total, "page": page, "pages": (total // limit) + 1})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @socketio.on('connect')
 def handle_connect():
     print('Client connected to Elite Dashboard')
 
 if __name__ == "__main__":
-    # Gunicorn veya eventlet ile çalıştırmak için uygun yapı
     socketio.run(app, host="0.0.0.0", port=5000, debug=False)

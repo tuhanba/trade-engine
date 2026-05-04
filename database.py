@@ -1,15 +1,9 @@
-"""
-database.py — AX Merkezi Veritabanı v4.2 (ULTIMATE ELITE)
-=========================================================
-Dashboard ve Bot için gerekli tüm fonksiyonlar eklendi.
-"""
 import sqlite3
 import json
 import logging
 import os
 from datetime import datetime, timezone
 
-# Config'den DB_PATH al
 try:
     from config import DB_PATH
 except ImportError:
@@ -57,6 +51,37 @@ def init_db():
             key TEXT PRIMARY KEY,
             value TEXT
         );
+        CREATE TABLE IF NOT EXISTS daily_summary (
+            date TEXT PRIMARY KEY, 
+            trade_count INTEGER, 
+            win_count INTEGER, 
+            loss_count INTEGER, 
+            win_rate REAL, 
+            gross_pnl REAL, 
+            net_pnl REAL, 
+            avg_r REAL, 
+            max_drawdown REAL, 
+            balance_eod REAL
+        );
+        CREATE TABLE IF NOT EXISTS weekly_summary (
+            week_start TEXT PRIMARY KEY, 
+            trade_count INTEGER, 
+            win_count INTEGER, 
+            loss_count INTEGER, 
+            win_rate REAL, 
+            net_pnl REAL, 
+            avg_r REAL, 
+            best_day TEXT, 
+            worst_day TEXT
+        );
+        CREATE TABLE IF NOT EXISTS coin_profiles (
+            symbol TEXT PRIMARY KEY, 
+            win_rate REAL DEFAULT 0, 
+            total_trades INTEGER DEFAULT 0, 
+            total_pnl REAL DEFAULT 0, 
+            danger_score REAL DEFAULT 0, 
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """)
 
 def get_trades(limit=50):
@@ -77,7 +102,7 @@ def get_stats():
         return {
             "total_trades": total,
             "total_pnl": round(pnl, 2),
-            "win_rate": 0 # Basitleştirilmiş
+            "win_rate": 0
         }
 
 def get_paper_balance():
@@ -94,9 +119,7 @@ def get_state(key):
         return row[0] if row else None
 
 def save_scalp_signal(data):
-    with get_conn() as conn:
-        # Basitleştirilmiş kayıt
-        pass
+    pass
 
 def save_paper_trade(sig_dict, tracked_from="ghost"):
     with get_conn() as conn:
@@ -104,3 +127,23 @@ def save_paper_trade(sig_dict, tracked_from="ghost"):
             INSERT INTO signal_candidates (symbol, direction, entry, sl, tp1, score, decision, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
         """, (sig_dict['symbol'], sig_dict['direction'], sig_dict['entry_zone'], sig_dict['stop_loss'], sig_dict['tp1'], sig_dict.get('final_score', 0), tracked_from))
+
+def save_daily_summary(data):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO daily_summary (date, trade_count, win_count, loss_count, win_rate, gross_pnl, net_pnl, avg_r, max_drawdown, balance_eod)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (data['date'], data['trade_count'], data['win_count'], data['loss_count'], data['win_rate'], data['gross_pnl'], data['net_pnl'], data['avg_r'], data['max_drawdown'], data['balance_eod']))
+
+def save_weekly_summary(data):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO weekly_summary (week_start, trade_count, win_count, loss_count, win_rate, net_pnl, avg_r, best_day, worst_day)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (data['week_start'], data['trade_count'], data['win_count'], data['loss_count'], data['win_rate'], data['net_pnl'], data['avg_r'], data['best_day'], data['worst_day']))
+
+def save_market_snapshot(data):
+    pass
+
+def save_scanned_coin(data):
+    pass

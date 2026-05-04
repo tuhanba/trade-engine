@@ -22,7 +22,7 @@ except ImportError:
 class AsyncMarketScanner:
     def __init__(self, db_path="trade_engine.db"):
         self.db_path = db_path
-        self.min_volume = 10_000_000
+        self.min_volume = 5_000_000
         self.min_price = 0.001
         self.coin_universe = set(COIN_UNIVERSE)
         self.base_url = "https://fapi.binance.com"

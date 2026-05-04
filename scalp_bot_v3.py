@@ -1,53 +1,34 @@
-"""
-scalp_bot_v3.py — AX Scalp Engine v3.9 (ULTIMATE ELITE FINAL)
-=========================================================
-Yenilikler:
-  - Sentiment Analysis (Market Momentum & Volume Speed)
-  - Adaptive SL/TP (ATR tabanlı dinamik hedefler)
-  - AI Post-Mortem (Kapanan işlem analizi)
-  - Ghost Trading & Canlı Dashboard
-"""
 import asyncio
 import logging
 import time
-import os
 import uuid
 import requests
 import pandas as pd
 from binance.client import Client
-from config import (
-    BINANCE_API_KEY, BINANCE_API_SECRET, SCAN_INTERVAL, DB_PATH, 
-    ALLOWED_QUALITIES, ADX_MIN_THRESHOLD, COIN_UNIVERSE
-)
+from config import BINANCE_API_KEY, BINANCE_API_SECRET, DB_PATH, SCAN_INTERVAL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from core.async_market_scanner import AsyncMarketScanner
 from core.advanced_trend_engine import AdvancedTrendEngine
 from core.trigger_engine import TriggerEngine
 from core.advanced_risk_engine import AdvancedRiskEngine
 from core.ai_decision_engine import AIDecisionEngine
 from core.elite_monitor import EliteMonitor
-from database import init_db, get_paper_balance, get_open_trades, save_scalp_signal, save_paper_trade
+from database import init_db, get_paper_balance, get_open_trades, save_scalp_signal, save_paper_trade, get_conn
 from core.data_layer import SignalData
 from telegram_delivery import deliver_signal, send_trade_open
-
-# Sabitlenmiş Telegram Bilgileri
-TG_TOKEN = "8404489471:AAEU3uk-i_IWj4EcHXlf4Zt8-PkpIPAAc54"
-TG_CHAT_ID = "958182551"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("scalp_bot_v3")
 
 def send_direct_message(text):
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
-        requests.post(url, json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
+        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
     except Exception: pass
 
 class UltimateEliteEngine:
     def __init__(self, client):
         self.client = client
-
     def get_sentiment(self):
-        """Piyasa duyarlılığını ölçer (Momentum & Volume)."""
         try:
             tickers = self.client.get_ticker()
             up = len([t for t in tickers if float(t['priceChangePercent']) > 0])
@@ -55,18 +36,14 @@ class UltimateEliteEngine:
             sentiment_score = (up / total) * 100
             return round(sentiment_score, 2)
         except: return 50.0
-
     def calculate_adaptive_targets(self, symbol, entry, direction):
-        """ATR bazlı dinamik SL/TP hesaplar."""
         try:
             klines = self.client.futures_klines(symbol=symbol, interval="1h", limit=20)
             df = pd.DataFrame(klines, columns=['t','o','h','l','c','v','ct','q','n','tb','tq','i'])
             df['h'], df['l'], df['c'] = df['h'].astype(float), df['l'].astype(float), df['c'].astype(float)
             atr = (df['h'] - df['l']).mean()
-            
             sl_dist = atr * 1.5
             tp_dist = atr * 2.5
-            
             sl = entry - sl_dist if direction == "LONG" else entry + sl_dist
             tp = entry + tp_dist if direction == "LONG" else entry - tp_dist
             return sl, tp
@@ -86,7 +63,6 @@ async def main_loop():
     elite = UltimateEliteEngine(client)
     
     send_direct_message("👑 <b>AX ULTIMATE ELITE Sürüm Başlatıldı!</b>\nSentiment, Adaptive SL/TP ve AI Post-Mortem aktif.")
-
     while True:
         try:
             sentiment = elite.get_sentiment()
@@ -97,16 +73,12 @@ async def main_loop():
                 await asyncio.sleep(SCAN_INTERVAL)
                 continue
             
-            balance = get_paper_balance()
-            open_trades = get_open_trades()
-            
             for coin in candidates[:20]:
                 symbol = coin["symbol"]
                 trend_res = trend.analyze(symbol)
                 if trend_res["direction"] == "NO TRADE": continue
                 
-                # Sentiment Filtresi: Piyasa çok kötüyse Long açma
-                if sentiment < 30 and trend_res["direction"] == "LONG": continue
+                if sentiment < 20 and trend_res["direction"] == "LONG": continue
                 
                 trigger_res = trigger.analyze(symbol, trend_res["direction"])
                 sl, tp = elite.calculate_adaptive_targets(symbol, trigger_res["entry"], trend_res["direction"])
@@ -124,11 +96,19 @@ async def main_loop():
                 
                 ai_res = ai_engine.evaluate(sig)
                 save_paper_trade(sig.to_dict(), tracked_from=ai_res["decision"])
-
-                if ai_res["decision"] == "ALLOW":
-                    logger.info(f"🚀 ELITE SİNYAL: {symbol}")
+                
+                if ai_res["decision"] in ["ALLOW", "WATCH"]:
+                    logger.info(f"🚀 ELITE SİNYAL: {symbol} ({ai_res['decision']})")
                     save_scalp_signal(sig.to_dict())
                     deliver_signal(sig)
+                    
+                    # Trade açma mantığı (Paper)
+                    if ai_res["decision"] == "ALLOW":
+                        with get_conn() as conn:
+                            conn.execute("""
+                                INSERT INTO trades (symbol, direction, entry, sl, tp1, status, environment, open_time)
+                                VALUES (?, ?, ?, ?, ?, 'open', 'paper', datetime('now'))
+                            """, (symbol, trend_res["direction"], trigger_res["entry"], sl, tp))
             
             await asyncio.sleep(SCAN_INTERVAL)
         except Exception as e:

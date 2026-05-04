@@ -110,7 +110,7 @@ def compute_weekly(week_start: str | None = None) -> dict | None:
         week_start_date = today - timedelta(days=today.weekday())
         week_start = week_start_date.isoformat()
 
-    week_start_date = datetime.fromisoformat(week_start).date()
+    week_start_date = datetime.strptime(week_start, "%Y-%m-%d").date()
     week_end_date = week_start_date + timedelta(days=6)
 
     try:
