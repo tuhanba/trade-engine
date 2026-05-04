@@ -119,23 +119,26 @@ def send_trade_open(trade):
     tp2       = trade.get('tp2', 0)
     tp3       = trade.get('tp3', 0)
     sl        = trade.get('sl', 0)
-
-    tp2_line = f"🎯 TP2: <code>{tp2:.6f}</code>\n" if tp2 else ""
-    tp3_line = f"🎯 TP3: <code>{tp3:.6f}</code>\n" if tp3 else ""
-
+    leverage  = trade.get('leverage', 10)
+    notional  = trade.get('notional_size', 0)
+    margin    = trade.get('position_size', 0)
+    tp2_line = f"\U0001f3af TP2: <code>{tp2:.6f}</code>\n" if tp2 else ""
+    tp3_line = f"\U0001f3af TP3: <code>{tp3:.6f}</code>\n" if tp3 else ""
+    notional_line = (f"\U0001f4bc Pozisyon: <code>{notional:.2f}$</code> ({leverage}x) | "
+                     f"Teminat: <code>{margin:.2f}$</code>\n") if notional else ""
     msg = (
-        f"✅ <b>PAPER TRADE OPENED</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🪙 <b>{symbol}</b> | {direction}\n"
-        f"📌 Giriş: <code>{entry:.6f}</code>\n"
-        f"🛑 Stop:  <code>{sl:.6f}</code>\n"
-        f"🎯 TP1:   <code>{tp1:.6f}</code>\n"
+        f"\u2705 <b>PAPER TRADE OPENED</b>\n"
+        f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+        f"\U0001fa99 <b>{symbol}</b> | {direction} | \u26a1 {leverage}x\n"
+        f"\U0001f4cc Giris: <code>{entry:.6f}</code>\n"
+        f"\U0001f6d1 Stop:  <code>{sl:.6f}</code>\n"
+        f"\U0001f3af TP1:   <code>{tp1:.6f}</code>\n"
         f"{tp2_line}"
         f"{tp3_line}"
-        f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+        f"{notional_line}"
+        f"\u23f0 {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
     )
     _queue.push(msg)
-
 def send_trade_close(trade, pnl, reason):
     symbol = trade.get('symbol', 'Unknown')
     direction = trade.get('direction', '')

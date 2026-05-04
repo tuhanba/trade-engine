@@ -28,6 +28,7 @@ CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "5"))
 CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "60"))
 MAX_CORRELATED_TRADES   = int(os.getenv("MAX_CORRELATED_TRADES", "3"))
 MAX_LEVERAGE            = int(os.getenv("MAX_LEVERAGE", "20"))
+PAPER_LEVERAGE          = int(os.getenv("PAPER_LEVERAGE", "10"))   # Paper trade simule kaldiraci (default 10x)
 
 # ── Sinyal Geçitleri (ESNETİLDİ) ──────────────────────────────────────────────
 DATA_THRESHOLD      = 30.0 # 45 -> 30

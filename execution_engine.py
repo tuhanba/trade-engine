@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from config import (
     RISK_PCT, TP1_CLOSE_PCT, TP2_CLOSE_PCT, RUNNER_CLOSE_PCT,
     TRAIL_ATR_MULT, EXECUTION_MODE,
-    BREAKEVEN_ENABLED, BREAKEVEN_OFFSET_PCT,
+    BREAKEVEN_ENABLED, BREAKEVEN_OFFSET_PCT, PAPER_LEVERAGE,
 )
 from database import (
     save_trade, update_trade, close_trade as db_close_trade,
@@ -77,22 +77,28 @@ def _get_filters(client, symbol):
     return {"step_size": 0.001, "min_qty": 0.001, "tick_size": 0.01, "min_notional": 5.0}
 
 
-def _calc_qty(balance, entry, sl, risk_pct, step_size, min_qty, min_notional):
-    """Risk bazli miktar hesabi."""
+def _calc_qty(balance, entry, sl, risk_pct, step_size, min_qty, min_notional, leverage=1):
+    """Kaldirach paper trade miktar hesabi.
+    Ornek: 250$ bakiye, %1 risk, 10x kaldirach:
+      risk_usd = 2.5$, pozisyon = 25$, qty = 25 / entry
+    """
     risk_usd = balance * risk_pct / 100
     sl_dist  = abs(entry - sl)
     if sl_dist <= 0:
         return 0.0
-    qty = risk_usd / sl_dist
+    # Kaldirach ile qty: risk_usd * leverage / sl_dist
+    qty = (risk_usd * leverage) / sl_dist
     qty = _floor(qty, step_size)
     qty = max(qty, min_qty)
     if qty * entry < min_notional:
-        qty = _floor(min_notional / entry * 1.01, step_size)
+        qty = _floor(min_notional / entry * 1.01 * leverage, step_size)
     return round(qty, 8)
 
 
 def _calc_pnl(direction, entry, price, qty):
-    """Tek yonlu PnL hesabi."""
+    """PnL hesabi. Kaldirach zaten qty icinde yansitilmistir.
+    qty = risk_usd * leverage / sl_dist oldugu icin leverage burada tekrar uygulanmaz.
+    """
     if direction == "LONG":
         return round((price - entry) * qty, 6)
     else:
@@ -201,8 +207,10 @@ def open_trade(client, signal, ax_decision, risk_pct=None):
     balance  = get_paper_balance()
     rp       = risk_pct or RISK_PCT
     filters  = _get_filters(client, symbol)
+    lev = PAPER_LEVERAGE  # Simule kaldirach (default 10x)
     qty = _calc_qty(balance, entry, sl, rp,
-                    filters["step_size"], filters["min_qty"], filters["min_notional"])
+                    filters["step_size"], filters["min_qty"], filters["min_notional"],
+                    leverage=lev)
     if qty <= 0:
         logger.warning(f"[Execution] {symbol} qty hesaplanamadi")
         return None
@@ -234,8 +242,9 @@ def open_trade(client, signal, ax_decision, risk_pct=None):
         "score":                ax_decision.get("final_score", signal.get("score", 0)),
         "setup_quality":        signal.get("setup_quality", "B"),
         "risk_percent":         rp,
-        "position_size":        qty * entry,
-        "notional_size":        qty * entry,
+        "leverage":             lev,
+        "position_size":        qty * entry / lev,  # Gercek teminat
+        "notional_size":        qty * entry,         # Kaldirach dahil pozisyon
         "linked_candidate_id":  None,
         "linked_candidate_uuid": signal.get("candidate_id"),
         "open_time":            datetime.now(timezone.utc).isoformat(),

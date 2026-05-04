@@ -185,7 +185,15 @@ async def main_loop_with_client(client):
                     }
                     trade_id = execution_engine.open_trade(client, signal_for_exec, ai_res)
                     if trade_id:
-                        send_trade_open({"symbol": symbol, "direction": trend_res["direction"], "entry": entry})
+                        send_trade_open({
+                            "symbol": symbol,
+                            "direction": trend_res["direction"],
+                            "entry": entry,
+                            "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
+                            "leverage": signal_for_exec.get("leverage", 10),
+                            "notional_size": signal_for_exec.get("notional_size", 0),
+                            "position_size": signal_for_exec.get("position_size", 0),
+                        })
                         logger.info(f"[Bot] PAPER TRADE ACILDI #{trade_id} {symbol}")
                     else:
                         logger.warning(f"[Bot] open_trade basarisiz: {symbol}")
