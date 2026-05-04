@@ -775,6 +775,7 @@ async function loadPositions(){
         +"<div class='pos-top'>"
           +"<div><div class='pos-sym'>"+p.symbol+"</div>"
           +"<span class='pos-dir "+(isL?"long":"short")+"'>"+p.direction+"</span>"
+          +(p.leverage?"<span style='font-size:9px;color:var(--cyan-br);margin-left:4px'>⚡"+p.leverage+"x</span>":"")
           +"<span style='font-size:8px;color:"+stageColor+";margin-left:6px'>"+stage.toUpperCase()+"</span></div>"
           +"<div class='pos-pnl'><div class='pos-pnl-val "+(pnl>=0?"pos-c":"neg-c")+"'>"+fp(pnl)+"</div>"
           +"<div class='pos-pnl-pct'>"+(pnl>=0?"+":"")+f(p.unrealized_pct||0,2)+"%</div></div>"

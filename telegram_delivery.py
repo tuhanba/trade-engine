@@ -88,10 +88,11 @@ def format_signal(sig):
     tp2_line = f"🎯 TP2:    <code>{sig.tp2:.6f}</code>\n" if sig.tp2 else ""
     tp3_line = f"🎯 TP3:    <code>{sig.tp3:.6f}</code>\n" if sig.tp3 else ""
 
+    lev = getattr(sig, 'leverage', None) or getattr(sig, 'leverage_suggestion', 10) or 10
     return (
         f"💎 <b>AX ELITE MASTER SİNYAL</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🪙 <b>{sig.symbol}</b> | {dir_emoji}\n"
+        f"🪙 <b>{sig.symbol}</b> | {dir_emoji} | ⚡ <b>{lev}x</b>\n"
         f"📊 Kalite: <b>{sig.setup_quality}</b> | Skor: <b>{sig.coin_score}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📌 Giriş:  <code>{sig.entry_zone:.6f}</code>\n"

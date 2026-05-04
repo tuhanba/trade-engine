@@ -131,6 +131,8 @@ def _run_migration():
         ("trades", "qty_runner",       "REAL DEFAULT 0"),
         ("trades", "position_size",    "REAL DEFAULT 0"),
         ("trades", "notional_size",    "REAL DEFAULT 0"),
+        ("trades", "leverage",         "REAL DEFAULT 10"),
+        ("trades", "position_size",    "REAL DEFAULT 0"),
         ("trades", "risk_percent",     "REAL DEFAULT 1.0"),
         ("trades", "confidence",       "REAL DEFAULT 0.8"),
         ("trades", "score",            "REAL DEFAULT 0"),

@@ -207,6 +207,11 @@ async def main_loop_with_client(client):
                         f"sl={dyn_sl:.6f} tp1={dyn_tp1:.6f} tp2={dyn_tp2:.6f} tp3={dyn_tp3:.6f}"
                     )
                     save_scalp_signal(sig_dict)
+                    # Sig objesine dinamik kaldıraç ata (Telegram formatı için)
+                    try:
+                        sig.leverage = dyn_lev
+                    except Exception:
+                        pass
                     deliver_signal(sig)
                     signal_for_exec = {
                         "symbol":        symbol,

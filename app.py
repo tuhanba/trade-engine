@@ -57,6 +57,12 @@ def api_live():
             tp3    = trade.get("tp3", 0) or 0
             direction = (trade.get("direction") or "").upper()
             qty    = trade.get("qty", 0) or 0
+            lev    = trade.get("leverage", 10) or 10
+            # qty=0 ise notional_size'dan hesapla
+            if qty == 0 and entry > 0:
+                notional = trade.get("notional_size", 0) or 0
+                if notional > 0:
+                    qty = notional / entry
 
             # Binance'ten guncel fiyat al
             current_price = trade.get("current_price") or 0
@@ -116,6 +122,9 @@ def api_live():
                 "distance_to_tp2":    dist_pct(tp2),
                 "distance_to_tp3":    dist_pct(tp3),
                 "ai_confidence":      trade.get("confidence", 0.8),
+                "leverage":           lev,
+                "notional_size":      trade.get("notional_size", 0),
+                "position_size":      trade.get("position_size", 0),
                 "error":              error_msg,
             }
             total_unrealized += unrealized_pnl
