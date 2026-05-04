@@ -66,10 +66,29 @@ class UltimateEliteEngine:
             tp3 = entry * 1.08 if direction == "LONG" else entry * 0.92
             return sl, tp1, tp2, tp3, 0.0
 
-async def main_loop():
-    logger.info("=== AX Scalp Engine v3.9 (ULTIMATE ELITE) Baslatiliyor ===")
+async def monitor_loop(client):
+    """Acik trade'leri izler: TP1/TP2/SL/Trail kontrolu yapar. Her 15 saniyede calisir."""
+    logger.info("[Monitor] AI Execution monitor dongusu basladi")
+    while True:
+        try:
+            execution_engine.monitor_open_trades(client)
+        except Exception as e:
+            logger.error(f"[Monitor] Hata: {e}")
+        await asyncio.sleep(15)  # Her 15 saniyede bir kontrol
+
+async def main():
+    """Ana giris noktasi: sinyal tarama + trade monitoring paralel calisir."""
     init_db()
     client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
+    # Her iki dongu ayni client ile paralel calisir
+    await asyncio.gather(
+        main_loop_with_client(client),
+        monitor_loop(client),
+    )
+
+async def main_loop_with_client(client):
+    """main_loop'un client parametreli versiyonu."""
+    logger.info("=== AX Scalp Engine v3.9 (ULTIMATE ELITE) Baslatiliyor ===")
 
     scanner = AsyncMarketScanner(db_path=DB_PATH)
     trend = AdvancedTrendEngine(client)
@@ -78,7 +97,7 @@ async def main_loop():
     ai_engine = AIDecisionEngine(db_path=DB_PATH)
     elite = UltimateEliteEngine(client)
 
-    send_direct_message("👑 <b>AX ULTIMATE ELITE Surumu Baslatildi!</b>\nSentiment, Adaptive SL/TP ve AI Post-Mortem aktif.")
+    send_direct_message("👑 <b>AX ULTIMATE ELITE + AI Execution Monitor Aktif!</b>\nTP1/TP2/SL/Trail otomatik izleniyor.")
 
     while True:
         try:
@@ -102,7 +121,7 @@ async def main_loop():
                 trigger_res = trigger.analyze(symbol, trend_res["direction"])
                 entry = trigger_res["entry"]
                 sl, tp1, tp2, tp3, atr = elite.calculate_adaptive_targets(symbol, entry, trend_res["direction"])
-                runner_target = tp3  # Runner hedef = TP3
+                runner_target = tp3
 
                 sig = SignalData(
                     id=str(uuid.uuid4())[:8],
@@ -132,19 +151,16 @@ async def main_loop():
                 ai_res = ai_engine.evaluate(sig)
                 decision = ai_res["decision"]
 
-                # Sinyal DB'ye kaydet
                 sig_dict = sig.to_dict()
                 sig_dict["decision"] = decision
                 save_paper_trade(sig_dict, tracked_from=decision)
 
                 if decision == "ALLOW":
-                    # Duplicate engeli
                     sig_key = f"{symbol}_{round(entry, 6)}_{trend_res['direction']}"
                     if sig_key in _sent_signals:
                         logger.info(f"[Bot] Duplicate sinyal atildi: {symbol}")
                         continue
                     _sent_signals.add(sig_key)
-                    # 100 kayittan fazla olunca eski entryleri temizle
                     if len(_sent_signals) > 100:
                         _sent_signals.clear()
 
@@ -152,7 +168,6 @@ async def main_loop():
                     save_scalp_signal(sig_dict)
                     deliver_signal(sig)
 
-                    # execution_engine.open_trade ile paper trade ac (manuel SQL yok)
                     signal_for_exec = {
                         "symbol": symbol,
                         "direction": trend_res["direction"],
@@ -176,7 +191,6 @@ async def main_loop():
                         logger.warning(f"[Bot] open_trade basarisiz: {symbol}")
 
                 elif decision == "WATCH":
-                    # WATCH: sinyal gonder, trade acma, ghost-track et
                     logger.info(f"👀 WATCH: {symbol} - sinyal gonderildi, ghost-track basladi")
                     save_scalp_signal(sig_dict)
                     deliver_signal(sig)
@@ -192,7 +206,6 @@ async def main_loop():
                         logger.debug(f"[Ghost] WATCH hata: {_ge}")
 
                 elif decision == "VETO":
-                    # VETO: logla + ghost-track et (AI ogrenmesi icin)
                     logger.info(f"❌ VETO/REJECT: {symbol} - reason: {ai_res.get('reason', '')}")
                     try:
                         from database import save_paper_result as _spr2
@@ -211,4 +224,4 @@ async def main_loop():
             await asyncio.sleep(10)
 
 if __name__ == "__main__":
-    asyncio.run(main_loop())
+    asyncio.run(main())
