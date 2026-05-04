@@ -37,7 +37,7 @@ TELEGRAM_THRESHOLD  = 60.0 # 75 -> 60
 TRADE_THRESHOLD     = 70.0 # 82 -> 70
 
 # ── Filtreler ────────────────────────────────────────────────────────────────
-ADX_MIN_THRESHOLD = 20 # 28 -> 20
+ADX_MIN_THRESHOLD = 15  # 28->20->15 (hard filtre yok, skora katki)
 ALLOWED_QUALITIES = ["S", "A+", "A", "B", "C"] # C eklendi
 BAD_HOURS_UTC = [] # Tüm saatlere izin ver
 GOOD_HOURS_UTC = list(range(24))
