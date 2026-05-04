@@ -304,3 +304,94 @@ def save_market_snapshot(data):
 
 def save_scanned_coin(data):
     pass
+
+def _ensure_paper_results_table():
+    """paper_results tablosunu idempotent olarak olusturur."""
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS paper_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    candidate_id TEXT,
+                    symbol TEXT,
+                    direction TEXT,
+                    entry REAL,
+                    sl REAL,
+                    tp1 REAL,
+                    tp2 REAL,
+                    tp3 REAL,
+                    result TEXT DEFAULT 'pending',
+                    close_price REAL,
+                    net_pnl REAL DEFAULT 0,
+                    max_favorable_excursion REAL DEFAULT 0,
+                    max_adverse_excursion REAL DEFAULT 0,
+                    hold_minutes REAL DEFAULT 0,
+                    tracked_from TEXT DEFAULT 'ghost',
+                    status TEXT DEFAULT 'pending',
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+    except Exception as e:
+        logger.warning(f"_ensure_paper_results_table hatasi: {e}")
+
+_ensure_paper_results_table()
+
+
+def get_pending_paper_results(limit: int = 35) -> list:
+    """Sonucu henuz belirlenmemis paper trade kayitlarini doner."""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM paper_results
+                   WHERE status='pending'
+                   ORDER BY created_at ASC
+                   LIMIT ?""",
+                (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning(f"get_pending_paper_results hatasi: {e}")
+        return []
+
+
+def update_paper_result(row_id: int, updates: dict):
+    """Paper result kaydini gunceller."""
+    if not updates:
+        return
+    try:
+        with get_conn() as conn:
+            set_parts = ", ".join(f"{k}=?" for k in updates)
+            vals = list(updates.values()) + [row_id]
+            conn.execute(
+                f"UPDATE paper_results SET {set_parts}, updated_at=datetime('now') WHERE id=?",
+                vals
+            )
+    except Exception as e:
+        logger.warning(f"update_paper_result hatasi: {e}")
+
+
+def save_paper_result(sig_dict: dict, tracked_from: str = "ghost") -> int:
+    """Yeni paper result kaydi olusturur."""
+    try:
+        with get_conn() as conn:
+            cur = conn.execute("""
+                INSERT INTO paper_results
+                    (candidate_id, symbol, direction, entry, sl, tp1, tp2, tp3,
+                     tracked_from, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))
+            """, (
+                sig_dict.get("candidate_id"),
+                sig_dict.get("symbol"),
+                sig_dict.get("direction"),
+                sig_dict.get("entry"),
+                sig_dict.get("sl"),
+                sig_dict.get("tp1"),
+                sig_dict.get("tp2"),
+                sig_dict.get("tp3"),
+                tracked_from,
+            ))
+            return cur.lastrowid
+    except Exception as e:
+        logger.warning(f"save_paper_result hatasi: {e}")
+        return 0
