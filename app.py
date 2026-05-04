@@ -13,14 +13,13 @@ import dashboard_service as dash_svc
 load_dotenv()
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "scalp2026")
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+# Eventlet desteği ile SocketIO
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 client = Client(os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_API_SECRET", ""))
 
 init_db()
 dash_svc.start()
-
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
 
 @app.route("/")
 def index():
@@ -30,14 +29,11 @@ def index():
 def api_stats():
     try:
         stats = get_stats()
-        # Elite verilerini ekle
         with get_conn() as conn:
             row = conn.execute("SELECT COUNT(*) FROM paper_trades").fetchone()
             stats["ghost_trades_count"] = row[0] if row else 0
-            
             row_sentiment = conn.execute("SELECT value FROM state WHERE key='market_sentiment'").fetchone()
             stats["market_sentiment"] = float(row_sentiment[0]) if row_sentiment else 50.0
-            
         return jsonify({"ok": True, "data": stats})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -48,17 +44,15 @@ def api_live():
         open_trades = get_open_trades()
         live = []
         for t in open_trades:
-            # Elite verilerini ekle (AI Confidence vb.)
             live.append({**t, "ai_confidence": t.get("confidence", 0.8)})
-        
         return jsonify({"ok": True, "data": {"live": live, "open_count": len(live)}})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-# SocketIO Events for Real-time Elite Updates
 @socketio.on('connect')
 def handle_connect():
     print('Client connected to Elite Dashboard')
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000)
+    # Gunicorn veya eventlet ile çalıştırmak için uygun yapı
+    socketio.run(app, host="0.0.0.0", port=5000, debug=False)

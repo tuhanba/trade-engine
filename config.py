@@ -1,165 +1,49 @@
 """
-config.py — AX Sistem Sabitleri v3.0
-======================================
-Tüm sabitler buradan okunur. Hiçbir dosya doğrudan os.getenv kullanmaz.
-v3.0 (Restore + S Sınıfı + Temizlik):
-  - COIN_UNIVERSE: 92 coin — 207 coin paralel backtest (PF≥1.0, ≥5 trade)
-  - SL_ATR_MULT: 1.2 (backtest: SL çıkışı -$1005, daha sıkı SL gerekli)
-  - TP1=1.0R, TP2=2.0R, TP3=3.0R — backtest kanıtlı parametreler
-  - ADX_MIN_THRESHOLD: 28 (trend gücü filtresi)
-  - BAD_HOURS_UTC: 13 saat (backtest WR<%25)
-  - ALLOWED_QUALITIES: S,A+ (S sınıfı: composite skor ≥10, WR %55.6, PF 2.11x)
-  - DAILY_MAX_LOSS_PCT: %3 (risk yönetimi)
-  - Dinamik risk: S=%2.0, A+=%1.5, A=%1.0, B=%0.5
+config.py — AX Sistem Sabitleri v4.0 (ULTIMATE ELITE)
+======================================================
+Filtreler esnetildi, trade frekansı artırıldı.
 """
 import os
 from dotenv import load_dotenv
 load_dotenv()
 
 # ── Mod ──────────────────────────────────────────────────────────────────────
-AX_MODE        = os.getenv("AX_MODE", "execute")      # execute | observe
-EXECUTION_MODE = os.getenv("EXECUTION_MODE", "paper") # paper | live
+AX_MODE        = os.getenv("AX_MODE", "execute")
+EXECUTION_MODE = os.getenv("EXECUTION_MODE", "paper")
 PAPER_MODE     = EXECUTION_MODE == "paper"
-LIVE_MODE_DEFAULT = os.getenv("LIVE_MODE_DEFAULT", "false").lower() == "true"
-LIVE_CONFIRM = os.getenv("LIVE_CONFIRM", "false").lower() == "true"
 
 # ── API ──────────────────────────────────────────────────────────────────────
 BINANCE_API_KEY    = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 
 # ── Telegram ─────────────────────────────────────────────────────────────────
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8404489471:AAEU3uk-i_IWj4EcHXlf4Zt8-PkpIPAAc54")
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "958182551")
 
 # ── Risk ─────────────────────────────────────────────────────────────────────
 RISK_PCT                = float(os.getenv("RISK_PCT", "1.0"))
-MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "2"))
-DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "3.0"))
-CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "3"))
-CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "120"))
-MAX_CORRELATED_TRADES   = int(os.getenv("MAX_CORRELATED_TRADES", "2"))
+MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "5")) # 2 -> 5
+DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "5.0"))
+CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "5"))
+CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "60"))
+MAX_CORRELATED_TRADES   = int(os.getenv("MAX_CORRELATED_TRADES", "3"))
 MAX_LEVERAGE            = int(os.getenv("MAX_LEVERAGE", "20"))
-MAX_SPREAD_PCT          = float(os.getenv("MAX_SPREAD_PCT", "0.10"))
 
-# ── Sinyal ───────────────────────────────────────────────────────────────────
-MIN_RR             = float(os.getenv("MIN_RR", "1.5"))
-# Backtest: SL çıkışı 106 trade, -$1005 zarar. Daha sıkı SL → daha küçük kayıp
-SL_ATR_MULT        = float(os.getenv("SL_ATR_MULT", "1.2"))   # 1.5 → 1.2
-MIN_EXPECTED_MFE_R = float(os.getenv("MIN_EXPECTED_MFE_R", "1.0"))
+# ── Sinyal Geçitleri (ESNETİLDİ) ──────────────────────────────────────────────
+DATA_THRESHOLD      = 30.0 # 45 -> 30
+WATCHLIST_THRESHOLD = 50.0 # 65 -> 50
+TELEGRAM_THRESHOLD  = 60.0 # 75 -> 60
+TRADE_THRESHOLD     = 70.0 # 82 -> 70
 
-# ── Multi-threshold Sinyal Geçitleri ──────────────────────────────────────────
-DATA_THRESHOLD      = float(os.getenv("DATA_THRESHOLD", "45"))
-WATCHLIST_THRESHOLD = float(os.getenv("WATCHLIST_THRESHOLD", "65"))
-TELEGRAM_THRESHOLD  = float(os.getenv("TELEGRAM_THRESHOLD", "75"))
-TRADE_THRESHOLD     = float(os.getenv("TRADE_THRESHOLD", "82"))
-
-# ── ADX Trend Gücü Filtresi ──────────────────────────────────────────────────
-# Backtest: ADX < 25 olan sinyallerde WR düşük, trend gücü zayıf
-ADX_MIN_THRESHOLD = int(os.getenv("ADX_MIN_THRESHOLD", "28"))
-
-# ── TP ───────────────────────────────────────────────────────────────────────
-TP1_R            = float(os.getenv("TP1_R", "1.0"))
-TP1_CLOSE_PCT    = float(os.getenv("TP1_CLOSE_PCT", "30"))    # 40 → 30 (TP2'ye daha fazla bırak)
-TP2_R            = float(os.getenv("TP2_R", "2.0"))
-# Backtest: TP2 çıkışı tüm kârın kaynağı (+$1186). Oranı artır.
-TP2_CLOSE_PCT    = float(os.getenv("TP2_CLOSE_PCT", "50"))    # 30 → 50
-TP3_R            = float(os.getenv("TP3_R", "3.0"))
-RUNNER_CLOSE_PCT = float(os.getenv("RUNNER_CLOSE_PCT", "20")) # 30 → 20 (daha az runner)
-TRAIL_ATR_MULT   = float(os.getenv("TRAIL_ATR_MULT", "1.0"))
-
-# ── Breakeven Mekanizması ─────────────────────────────────────────────────────
-# Backtest: Max Loss serisi 17, Loss→Loss %80.2. TP1 sonrası SL entry'e çek.
-BREAKEVEN_ENABLED    = os.getenv("BREAKEVEN_ENABLED", "true").lower() == "true"
-BREAKEVEN_TRIGGER_R  = float(os.getenv("BREAKEVEN_TRIGGER_R", "1.0"))  # TP1 tetiklenince
-BREAKEVEN_OFFSET_PCT = float(os.getenv("BREAKEVEN_OFFSET_PCT", "0.05")) # entry + %0.05 buffer
-
-# ── Sinyal Kalite Filtresi ───────────────────────────────────────────────────
-# Backtest: A+ kalite kârlı (PF=1.20, ROI=+20%), B kalite zararlı (PF=0.78)
-# S sınıfı: Composite skor ≥10 — en güvenilir setup (WR %55.6, PF 2.11x)
-ALLOWED_QUALITIES = os.getenv("ALLOWED_QUALITIES", "S,A+").split(",")
-
-# ── Saat Filtresi (UTC) ──────────────────────────────────────────────────────
-# Backtest genişletilmiş analiz: WR<%25 olan tüm saatler engellendi
-# Orijinal: [5,6,14,20] → Genişletilmiş: 13 saat
-BAD_HOURS_UTC = [int(h) for h in os.getenv(
-    "BAD_HOURS_UTC",
-    "1,4,5,6,10,11,12,13,14,16,19,20,21,22"   # Backtest WR<%25
-).split(",")]
-
-# Backtest: En iyi saatler — WR>%50
-GOOD_HOURS_UTC = [int(h) for h in os.getenv(
-    "GOOD_HOURS_UTC",
-    "0,3,7,9,17,23"   # WR: %55, %48, %80, %56, %100, %62
-).split(",")]
-
-# ── Yön Filtresi ─────────────────────────────────────────────────────────────
-# Backtest: SHORT sinyalleri BULLISH piyasada -$399 zarar verdi
-SHORT_REQUIRES_BTC_BEARISH = os.getenv("SHORT_REQUIRES_BTC_BEARISH", "true").lower() == "true"
-BTC_TREND_INTERVAL         = os.getenv("BTC_TREND_INTERVAL", "4h")
-
-# ── Sinyal Frekansı ──────────────────────────────────────────────────────────
-MAX_DAILY_SIGNALS = int(os.getenv("MAX_DAILY_SIGNALS", "40"))
-TARGET_DAILY_MIN  = int(os.getenv("TARGET_DAILY_MIN", "5"))   # Saat filtresi sonrası daha az
-TARGET_DAILY_MAX  = int(os.getenv("TARGET_DAILY_MAX", "12"))  # Kalite > Miktar
+# ── Filtreler ────────────────────────────────────────────────────────────────
+ADX_MIN_THRESHOLD = 20 # 28 -> 20
+ALLOWED_QUALITIES = ["S", "A+", "A", "B", "C"] # C eklendi
+BAD_HOURS_UTC = [] # Tüm saatlere izin ver
+GOOD_HOURS_UTC = list(range(24))
+SHORT_REQUIRES_BTC_BEARISH = False # BTC trendine bakma
 
 # ── Tarama ───────────────────────────────────────────────────────────────────
-SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "60"))   # saniye
-
-# ── Adaptive Engine Örneklem Eşikleri ─────────────────────────────────────────
-MIN_CANDIDATES_FOR_COIN_LEARNING = int(os.getenv("MIN_CANDIDATES_FOR_COIN_LEARNING", "30"))
-MIN_TRADES_FOR_RISK_UPDATE = int(os.getenv("MIN_TRADES_FOR_RISK_UPDATE", "20"))  # 50→20: parametre optimizasyonu daha erken başlar
-MIN_CANDIDATES_FOR_THRESHOLD_UPDATE = int(os.getenv("MIN_CANDIDATES_FOR_THRESHOLD_UPDATE", "100"))
-
-# ── Paper Tracking ─────────────────────────────────────────────────────────────
-PAPER_TRACK_REJECTED_CANDIDATES = os.getenv("PAPER_TRACK_REJECTED_CANDIDATES", "true").lower() == "true"
-PAPER_TRACK_WATCHLIST = os.getenv("PAPER_TRACK_WATCHLIST", "true").lower() == "true"
-PAPER_TRACK_TELEGRAM_GAPS = os.getenv("PAPER_TRACK_TELEGRAM_GAPS", "true").lower() == "true"
-PAPER_TRACK_HORIZON_HOURS = float(os.getenv("PAPER_TRACK_HORIZON_HOURS", "4"))  # 8→4: finalize gecikmesi yarıya indi
-
-# ── Scanner genişliği (kalite filtresini gevşetmeden daha fazla tarama) ────────
-SCAN_INCLUDE_WATCH = os.getenv("SCAN_INCLUDE_WATCH", "true").lower() == "true"
-WATCHLIST_MIN_SCAN_SCORE = float(os.getenv("WATCHLIST_MIN_SCAN_SCORE", "5.5"))
-MAX_COINS_PER_SCAN_LOOP = int(os.getenv("MAX_COINS_PER_SCAN_LOOP", "80"))
-
-# ── Portfolio / korelasyon ───────────────────────────────────────────────────
-MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "40.0"))
-
-# ── Veritabanı ───────────────────────────────────────────────────────────────
-# DB_PATH: Önce ortam değişkeni, yoksa proje dizinindeki trading.db
-_PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.getenv("DB_PATH", os.path.join(_PROJECT_DIR, "trading.db"))
-
-# ── Market Scanner Filtreler ─────────────────────────────────────────────────
-MIN_VOLUME_USD     = float(os.getenv("MIN_VOLUME_USD", "10000000"))   # 10M
-MIN_PRICE          = float(os.getenv("MIN_PRICE", "0.001"))
-MAX_PRICE_CHANGE   = float(os.getenv("MAX_PRICE_CHANGE", "30.0"))    # pump/dump filtresi
-
-# ── Coin Evreni ──────────────────────────────────────────────────────────────
-# v2.3: 207 coin backtest ile genişletildi — 92 coin, PF ≥ 1.0, ≥5 trade
-# Test tarihi: 2026-05-01 | BTC 4H: BULLISH | Paralel backtest
-COIN_UNIVERSE = [
-    "ALLOUSDT", "DYDXUSDT", "SNDKUSDT", "FLUIDUSDT", "ZEREBROUSDT",
-    "HOODUSDT", "GWEIUSDT", "REZUSDT", "TACUSDT", "ARBUSDT",
-    "ADAUSDT", "EIGENUSDT", "1000FLOKIUSDT", "1000SHIBUSDT", "FARTCOINUSDT",
-    "AEROUSDT", "EWYUSDT", "FLOWUSDT", "PENDLEUSDT", "BZUSDT",
-    "BASUSDT", "TIAUSDT", "PIPPINUSDT", "OPUSDT", "BCHUSDT",
-    "XPTUSDT", "MASKUSDT", "UNIUSDT", "SIRENUSDT", "DASHUSDT",
-    "MAGMAUSDT", "MSFTUSDT", "CRCLUSDT", "ENAUSDT", "ICPUSDT",
-    "STRKUSDT", "WLFIUSDT", "MOODENGUSDT", "CLUSDT", "AIOTUSDT",
-    "1000PEPEUSDT", "SPXUSDT", "SOONUSDT", "TRADOORUSDT", "XAGUSDT",
-    "AIGENSYNUSDT", "WIFUSDT", "MSTRUSDT", "DRIFTUSDT", "RAYSOLUSDT",
-    "ETHUSDT", "HUSDT", "USTCUSDT", "COMPUSDT", "BIOUSDT",
-    "APTUSDT", "CHZUSDT", "AXSUSDT", "NEIROUSDT", "BLUAIUSDT",
-    "CRVUSDT", "RENDERUSDT", "NAORISUSDT", "BEATUSDT", "DOTUSDT",
-    "CGPTUSDT", "TAOUSDT", "PIEVERSEUSDT", "LINEAUSDT", "SKYAIUSDT",
-    "AXLUSDT", "PUMPUSDT", "ARCUSDT", "POLUSDT", "ACHUSDT",
-    "HBARUSDT", "ASTERUSDT", "BSBUSDT", "ZBTUSDT", "BERAUSDT",
-    "FILUSDT", "PENGUUSDT", "1000BONKUSDT", "CFXUSDT", "ETHFIUSDT",
-    "AIXBTUSDT", "B2USDT", "HUMAUSDT", "ATOMUSDT", "LITUSDT",
-    "ZECUSDT", "GOOGLUSDT",
-]
-
-# ── Log ──────────────────────────────────────────────────────────────────────
-LOG_DIR      = os.getenv("LOG_DIR", os.path.join(_PROJECT_DIR, "logs"))
-LOG_MAX_DAYS = int(os.getenv("LOG_MAX_DAYS", "7"))
-LOG_MAX_MB   = int(os.getenv("LOG_MAX_MB", "50"))
+SCAN_INTERVAL = 60
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
+MIN_VOLUME_USD = 5000000 # 10M -> 5M
+COIN_UNIVERSE = [] # Tüm coinleri tara
