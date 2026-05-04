@@ -419,6 +419,9 @@ def _check_trade(client, t):
                 trail = new_trail
                 update_trade(trade_id, {"trail_stop": round(trail, 6)})
 
+        # Trail None guard: trail_stop DB'ye yazıldı ama local değişken güncellenmeli
+        if trail is None:
+            trail = new_trail
         trail_hit = trail and ((is_long and price <= trail) or (not is_long and price >= trail))
         if trail_hit:
             pnl_runner = _calc_pnl(direction, entry, price, qty_runner)
@@ -451,7 +454,16 @@ def _finalize(trade_id, close_price, net_pnl, reason, t):
         hold_min = 0
 
     db_close_trade(trade_id, close_price, net_pnl, reason, hold_min)
-    update_paper_balance(net_pnl - (t.get("realized_pnl") or 0))
+    # DB'den taze realized_pnl oku (TP1/TP2 sonrası t dict güncellenmemiş olabilir)
+    try:
+        from database import get_conn as _gc
+        with _gc() as _c:
+            _row = _c.execute("SELECT realized_pnl FROM trades WHERE id=?", (trade_id,)).fetchone()
+            already_paid = float(_row[0] or 0) if _row else (t.get("realized_pnl") or 0)
+    except Exception:
+        already_paid = t.get("realized_pnl") or 0
+    remaining_pnl = net_pnl - already_paid
+    update_paper_balance(remaining_pnl)
     result = "WIN" if net_pnl > 0 else "LOSS"
 
     try:

@@ -202,13 +202,16 @@ def update_trade(trade_id: int, updates: dict):
         conn.execute(f"UPDATE trades SET {set_clause} WHERE id=?", vals)
 
 def close_trade(trade_id: int, close_price: float, net_pnl: float, reason: str, hold_min: float = 0):
+    # reason: 'sl', 'trail', 'tp3', 'timeout' gibi degerler
+    # status = reason olarak set edilir, dashboard ve get_stats bunu okur
+    final_status = reason if reason in ('sl', 'trail', 'tp3', 'timeout') else 'closed'
     with get_conn() as conn:
         conn.execute("""
             UPDATE trades SET
-                status='closed', close_reason=?, close_time=?, net_pnl=?,
+                status=?, close_reason=?, close_time=?, net_pnl=?,
                 current_price=?, trade_stage='closed', updated_at=?
             WHERE id=?
-        """, (reason, datetime.now(timezone.utc).isoformat(), net_pnl,
+        """, (final_status, reason, datetime.now(timezone.utc).isoformat(), net_pnl,
               close_price, datetime.now(timezone.utc).isoformat(), trade_id))
 
 def update_paper_balance(delta: float):
@@ -230,14 +233,14 @@ def get_trades(limit=50):
 def get_open_trades():
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status NOT IN ('closed','closed_win','closed_loss','sl','trail','timeout')"
+            "SELECT * FROM trades WHERE status NOT IN ('closed','closed_win','closed_loss','sl','trail','tp3','timeout')"
         ).fetchall()
         return [dict(r) for r in rows]
 
 def get_stats():
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT COUNT(*), SUM(net_pnl) FROM trades WHERE status NOT IN ('open','tp1_hit','runner')"
+            "SELECT COUNT(*), SUM(net_pnl) FROM trades WHERE status NOT IN ('open','tp1_hit','runner') AND close_time IS NOT NULL"
         ).fetchone()
         total = row[0] or 0
         pnl = row[1] or 0
@@ -384,6 +387,7 @@ def get_pending_paper_results(limit: int = 35) -> list:
             rows = conn.execute(
                 """SELECT * FROM paper_results
                    WHERE status='pending'
+                   AND datetime(created_at, '+' || CAST(CAST(horizon_minutes AS INTEGER) AS TEXT) || ' minutes') <= datetime('now')
                    ORDER BY created_at ASC
                    LIMIT ?""",
                 (limit,)

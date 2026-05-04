@@ -21,6 +21,15 @@ def _init_table():
     try:
         with _conn() as c:
             c.execute("""
+                CREATE TABLE IF NOT EXISTS trade_postmortem (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_id INTEGER UNIQUE,
+                    mfe_r REAL DEFAULT 0,
+                    mae_r REAL DEFAULT 0,
+                    created_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            c.execute("""
                 CREATE TABLE IF NOT EXISTS ai_postmortem (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     trade_id INTEGER UNIQUE,
