@@ -18,6 +18,11 @@ from config import (
     TRAIL_ATR_MULT, BREAKEVEN_ENABLED, BREAKEVEN_OFFSET_PCT,
     TRADE_TIMEOUT_HOURS, ENABLE_LIVE_TRADING, DB_PATH
 )
+# Timeout sabitleri (config'de yoksa varsayılan)
+import os as _os
+MAX_TRADE_MINUTES     = int(_os.getenv("MAX_TRADE_MINUTES",     "240"))  # 4 saat
+TP1_TIMEOUT_MINUTES   = int(_os.getenv("TP1_TIMEOUT_MINUTES",   "90"))   # TP1'e 90dk'da ulaşamazsa kapat
+NO_PROGRESS_MINUTES   = int(_os.getenv("NO_PROGRESS_MINUTES",   "60"))   # 60dk fiyat entry±%0.3'te sıkışırsa kapat
 from database import (
     save_trade, update_trade, close_trade,
     update_paper_balance, save_postmortem, save_partial_close,
@@ -129,10 +134,14 @@ def _calc_qty(balance: float, risk_pct: float, entry: float,
     if sl_dist < entry * 0.0005:   # SL cok yakin (<0.05%) → gecersiz
         return 0.0
     risk_usd = balance * (risk_pct / 100.0)
-    # qty: kac adet coin alinir
-    # Teminat = risk_usd, pozisyon = risk_usd * leverage
-    # qty = pozisyon / entry
-    qty_raw = (risk_usd * leverage) / entry
+    # Doğru formül: max_loss = qty * sl_dist → qty = risk_usd / sl_dist
+    # Kaldıraç burada qty'yi artırmaz; sadece teminat gereksinimini azaltır.
+    # qty * sl_dist = risk_usd → qty = risk_usd / sl_dist
+    qty_raw = risk_usd / sl_dist
+    # Güvenlik: max_loss kontrolü (min_notional nedeniyle risk aşılmasın)
+    max_loss_check = qty_raw * sl_dist
+    if max_loss_check > risk_usd * 1.05:  # %5 tolerans
+        qty_raw = risk_usd / sl_dist
     return qty_raw
 
 
@@ -254,7 +263,9 @@ def open_trade(signal, client=None, ai_engine=None) -> dict:
             pass
 
         notional = qty * entry
+        sl_dist_val = abs(entry - sl)
         risk_usd = balance * RISK_PCT / 100.0
+        max_loss_usd = qty * sl_dist_val  # gerçek max kayıp
 
         # Gercek fiyati al (entry dogrulama)
         live_price = _get_price(symbol, client)
@@ -279,6 +290,8 @@ def open_trade(signal, client=None, ai_engine=None) -> dict:
             "leverage":       leverage,
             "notional_size":  notional,
             "risk_usd":       risk_usd,
+            "sl_dist":        sl_dist_val,
+            "max_loss_usd":   max_loss_usd,
             "setup_quality":  quality,
             "score":          score,
             "trade_stage":    "open",
@@ -393,6 +406,19 @@ def _check_trade(t: dict, client=None, ai_engine=None):
                 logger.info(f"[Monitor] #{trade_id} {symbol} TIMEOUT ({elapsed_h:.1f}h)")
                 _finalize(t, price, qty, "timeout", realized + upnl, ai_engine)
                 return
+            # TP1 timeout: TP1'e ulaşamadan MAX_TRADE_MINUTES geçtiyse kapat
+            elapsed_min = elapsed_h * 60
+            if stage == "open" and elapsed_min >= TP1_TIMEOUT_MINUTES:
+                logger.info(f"[Monitor] #{trade_id} {symbol} TP1_TIMEOUT ({elapsed_min:.0f}dk)")
+                _finalize(t, price, qty, "tp1_timeout", realized + upnl, ai_engine)
+                return
+            # No-progress timeout: fiyat entry ±%0.3 içinde NO_PROGRESS_MINUTES dk sıkışmışsa kapat
+            if stage == "open" and entry > 0 and elapsed_min >= NO_PROGRESS_MINUTES:
+                price_range_pct = abs(price - entry) / entry * 100
+                if price_range_pct < 0.3:
+                    logger.info(f"[Monitor] #{trade_id} {symbol} NO_PROGRESS_TIMEOUT ({price_range_pct:.2f}%)")
+                    _finalize(t, price, qty, "no_progress", realized + upnl, ai_engine)
+                    return
         except Exception:
             pass
 
@@ -599,9 +625,13 @@ def _finalize(t: dict, close_price: float, qty: float,
     # WIN/LOSS belirle (net PnL bazli)
     result = "WIN" if net_pnl > 0 else "LOSS"
 
+    # R-multiple hesapla: net_pnl / risk_usd
+    risk_usd_trade = float(t.get("risk_usd") or 0)
+    r_multiple = round(net_pnl / risk_usd_trade, 2) if risk_usd_trade > 0 else 0.0
+
     # DB kapat (result=WIN/LOSS, hold_minutes de yaziliyor)
     try:
-        close_trade(trade_id, close_price, net_pnl, reason, hold_min=hold_minutes)
+        close_trade(trade_id, close_price, net_pnl, reason, hold_min=hold_minutes, r_multiple=r_multiple)
     except Exception as e:
         logger.error(f"[Finalize] close_trade hatasi: {e}")
 

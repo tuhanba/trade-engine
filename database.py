@@ -59,6 +59,10 @@ def init_db():
             hold_minutes REAL DEFAULT 0,
             leverage INTEGER DEFAULT 10,
             risk_usd REAL DEFAULT 0,
+            r_multiple REAL DEFAULT 0,
+            sl_dist REAL DEFAULT 0,
+            max_loss_usd REAL DEFAULT 0,
+            exit_price REAL DEFAULT 0,
             updated_at TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS signal_candidates (
@@ -228,6 +232,10 @@ def _run_migration():
         ("paper_results", "tracked_from",             "TEXT DEFAULT 'ghost'"),
         ("paper_results", "status",                   "TEXT DEFAULT 'pending'"),
         ("paper_results", "updated_at",               "TEXT DEFAULT (datetime('now'))"),
+        ("trades", "r_multiple",   "REAL DEFAULT 0"),
+        ("trades", "sl_dist",      "REAL DEFAULT 0"),
+        ("trades", "max_loss_usd", "REAL DEFAULT 0"),
+        ("trades", "exit_price",   "REAL DEFAULT 0"),
     ]
     with get_conn() as conn:
         for table, col, col_type in new_columns:
@@ -254,19 +262,20 @@ def update_trade(trade_id: int, updates: dict):
     with get_conn() as conn:
         conn.execute(f"UPDATE trades SET {set_clause} WHERE id=?", vals)
 
-def close_trade(trade_id: int, close_price: float, net_pnl: float, reason: str, hold_min: float = 0):
-    """Trade'i kapat. result=WIN/LOSS, close_price, net_pnl, status yazar."""
+def close_trade(trade_id: int, close_price: float, net_pnl: float, reason: str,
+                hold_min: float = 0, r_multiple: float = 0):
+    """Trade'i kapat. result=WIN/LOSS, close_price, net_pnl, r_multiple, exit_price yazar."""
     final_status = reason if reason in ('sl', 'trail', 'tp3', 'timeout') else 'closed'
     result = 'WIN' if net_pnl > 0 else 'LOSS'
     with get_conn() as conn:
         conn.execute("""
             UPDATE trades SET
                 status=?, close_reason=?, close_time=?, net_pnl=?,
-                current_price=?, close_price=?, result=?,
-                hold_minutes=?, trade_stage='closed', updated_at=?
+                current_price=?, close_price=?, exit_price=?, result=?,
+                hold_minutes=?, r_multiple=?, trade_stage='closed', updated_at=?
             WHERE id=?
         """, (final_status, reason, datetime.now(timezone.utc).isoformat(), net_pnl,
-              close_price, close_price, result, hold_min,
+              close_price, close_price, close_price, result, hold_min, r_multiple,
               datetime.now(timezone.utc).isoformat(), trade_id))
 
 def update_paper_balance(delta: float):
@@ -307,20 +316,54 @@ def get_open_trades():
         return [dict(r) for r in rows]
 
 def get_stats():
+    """Dashboard istatistiklerini hesapla. Tek kaynak: trades tablosu."""
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*), SUM(net_pnl) FROM trades WHERE status NOT IN ('open','tp1_hit','runner') AND close_time IS NOT NULL"
-        ).fetchone()
-        total = row[0] or 0
-        pnl = row[1] or 0
-        wins = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE net_pnl > 0 AND status NOT IN ('open','tp1_hit','runner')"
-        ).fetchone()[0] or 0
-        win_rate = round((wins / total * 100), 1) if total > 0 else 0
+        # Kapanmış trade'ler (status closed veya sl/trail/tp3/timeout)
+        closed = conn.execute(
+            """SELECT net_pnl, realized_pnl, r_multiple, result
+               FROM trades
+               WHERE close_time IS NOT NULL
+                 AND status NOT IN ('open','tp1_hit','runner')"""
+        ).fetchall()
+        # Açık trade'ler
+        open_rows = conn.execute(
+            "SELECT unrealized_pnl FROM trades WHERE status IN ('open','tp1_hit','runner')"
+        ).fetchall()
+        # Bakiye
+        bal_row = conn.execute("SELECT balance, initial_balance FROM paper_account WHERE id=1").fetchone()
+        balance = bal_row[0] if bal_row else 300.0
+        initial_balance = bal_row[1] if bal_row else 300.0
+
+        total = len(closed)
+        wins = sum(1 for r in closed if (r[0] or 0) > 0)
+        losses = total - wins
+        win_rate = round(wins / total * 100, 1) if total > 0 else 0.0
+        gross_profit = sum((r[0] or 0) for r in closed if (r[0] or 0) > 0)
+        gross_loss   = sum((r[0] or 0) for r in closed if (r[0] or 0) <= 0)
+        net_pnl      = gross_profit + gross_loss
+        profit_factor = round(gross_profit / abs(gross_loss), 2) if gross_loss != 0 else (99.0 if gross_profit > 0 else 0.0)
+        avg_pnl      = round(net_pnl / total, 3) if total > 0 else 0.0
+        avg_r        = round(sum((r[2] or 0) for r in closed) / total, 2) if total > 0 else 0.0
+        unrealized   = sum((r[0] or 0) for r in open_rows)
+        open_count   = len(open_rows)
+
         return {
-            "total_trades": total,
-            "total_pnl": round(pnl, 2),
-            "win_rate": win_rate
+            "total_trades":   total,
+            "open_trades":    open_count,
+            "wins":           wins,
+            "losses":         losses,
+            "win_rate":       win_rate,
+            "gross_profit":   round(gross_profit, 2),
+            "gross_loss":     round(gross_loss, 2),
+            "net_pnl":        round(net_pnl, 2),
+            "total_pnl":      round(net_pnl, 2),
+            "profit_factor":  profit_factor,
+            "avg_pnl":        avg_pnl,
+            "avg_r":          avg_r,
+            "unrealized_pnl": round(unrealized, 2),
+            "balance":        round(balance, 2),
+            "initial_balance":round(initial_balance, 2),
+            "return_pct":     round((balance - initial_balance) / initial_balance * 100, 2) if initial_balance else 0.0,
         }
 
 def get_paper_balance():

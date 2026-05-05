@@ -31,8 +31,6 @@ def api_stats():
     try:
         stats = get_stats()
         with get_conn() as conn:
-            row = conn.execute("SELECT COUNT(*) FROM trades").fetchone()
-            stats["ghost_trades_count"] = row[0] if row else 0
             row_sentiment = conn.execute("SELECT value FROM state WHERE key='market_sentiment'").fetchone()
             stats["market_sentiment"] = float(row_sentiment[0]) if row_sentiment else 50.0
             # 10/10 kalite dağılımı
@@ -275,14 +273,21 @@ def api_history():
         offset = (page - 1) * limit
         with get_conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM trades WHERE status NOT IN ('open','tp1_hit','runner') ORDER BY close_time DESC LIMIT ? OFFSET ?",
+                """SELECT id, symbol, direction, status, result, entry, close_price, exit_price,
+                          net_pnl, realized_pnl, r_multiple, hold_minutes, leverage,
+                          risk_usd, max_loss_usd, sl_dist, setup_quality, score,
+                          open_time, close_time, close_reason, trade_stage, tp1_hit, tp2_hit
+                   FROM trades
+                   WHERE close_time IS NOT NULL
+                     AND status NOT IN ('open','tp1_hit','runner')
+                   ORDER BY close_time DESC LIMIT ? OFFSET ?""",
                 (limit, offset)
             ).fetchall()
             trades = [dict(r) for r in rows]
             total = conn.execute(
-                "SELECT COUNT(*) FROM trades WHERE status NOT IN ('open','tp1_hit','runner')"
+                "SELECT COUNT(*) FROM trades WHERE close_time IS NOT NULL AND status NOT IN ('open','tp1_hit','runner')"
             ).fetchone()[0]
-        return jsonify({"ok": True, "data": trades, "total": total, "page": page, "pages": (total // limit) + 1})
+        return jsonify({"ok": True, "data": trades, "total": total, "page": page, "pages": max(1,(total + limit - 1) // limit)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
