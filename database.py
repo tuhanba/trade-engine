@@ -95,7 +95,7 @@ def init_db():
             balance REAL DEFAULT 300.0,
             initial_balance REAL DEFAULT 300.0
         );
-        INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, 300.0, 300.0);
+        INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, 500.0, 500.0);
         CREATE TABLE IF NOT EXISTS state (
             key TEXT PRIMARY KEY,
             value TEXT
@@ -611,7 +611,7 @@ def save_paper_result(sig_dict: dict, tracked_from: str = "ghost") -> int:
         return 0
 
 
-def reset_paper_data(initial_balance: float = 300.0, keep_ai_learning: bool = True):
+def reset_paper_data(initial_balance: float = 500.0, keep_ai_learning: bool = True):
     """
     Kasa ve trade gecmisini sifirlar.
     - trades tablosu temizlenir
@@ -637,6 +637,10 @@ def reset_paper_data(initial_balance: float = 300.0, keep_ai_learning: bool = Tr
                 pass
             try:
                 conn.execute("DELETE FROM live_tracker")
+            except Exception:
+                pass
+            try:
+                conn.execute("DELETE FROM partial_closes")
             except Exception:
                 pass
             # Kasa sifirla

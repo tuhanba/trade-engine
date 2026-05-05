@@ -502,7 +502,7 @@ def api_reset():
     try:
         from database import reset_paper_data
         data = request.get_json(silent=True) or {}
-        initial_balance = float(data.get("initial_balance", 300.0))
+        initial_balance = float(data.get("initial_balance", 500.0))
         keep_ai = bool(data.get("keep_ai_learning", True))
         ok = reset_paper_data(initial_balance=initial_balance, keep_ai_learning=keep_ai)
         if ok:
