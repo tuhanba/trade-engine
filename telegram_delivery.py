@@ -154,11 +154,15 @@ def send_trade_close(trade, pnl, reason):
     )
     _queue.push(msg)
 
-def send_tp_hit(symbol, direction, tp_level, pnl):
+def send_tp_hit(symbol, direction, tp_level, pnl, remaining_pct=None):
+    stage_map = {1: "→ Breakeven SL aktif, TP2 bekleniyor", 2: "→ Runner aktif, trailing stop başladı", 3: "→ Trade tamamen kapandı"}
+    stage_note = stage_map.get(tp_level, "")
+    pnl_str = f"+{pnl:.3f}$" if pnl >= 0 else f"{pnl:.3f}$"
     msg = (
         f"🎯 <b>TP{tp_level} HIT</b>\n"
         f"🪙 {symbol} {direction}\n"
-        f"💰 +{pnl:.3f}$\n"
+        f"💰 Kısmi PnL: {pnl_str}\n"
+        f"📌 {stage_note}\n"
         f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
     )
     _queue.push(msg)

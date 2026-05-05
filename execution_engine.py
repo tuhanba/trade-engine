@@ -20,7 +20,7 @@ from config import (
 )
 from database import (
     save_trade, update_trade, close_trade,
-    update_paper_balance, save_postmortem,
+    update_paper_balance, save_postmortem, save_partial_close,
     get_open_trades, get_paper_balance
 )
 import telegram_delivery as tg
@@ -405,96 +405,169 @@ def _check_trade(t: dict, client=None, ai_engine=None):
         _finalize(t, price, qty, "sl", net_pnl, ai_engine)
         return
 
-    # ── TP1 Kontrolu ─────────────────────────────────────────────────────────
-    if stage == "open":
+    # ── TP1 Kısmi Kapanış (%40) + Breakeven SL ──────────────────────────────
+    if stage == "open" and tp1 > 0:
         tp1_hit = (direction == "LONG" and price >= tp1) or \
                   (direction == "SHORT" and price <= tp1)
         if tp1_hit:
-            partial_qty = qty * (TP1_CLOSE_PCT / 100)
+            # TP1_CLOSE_PCT kadar kapat (varsayılan %40)
+            partial_qty = round(qty * (TP1_CLOSE_PCT / 100.0), 6)
+            if partial_qty <= 0:
+                partial_qty = qty
             partial_pnl = _calc_pnl(entry, price, partial_qty, direction, leverage)
-            new_realized = realized + partial_pnl
-            # Breakeven SL
+            remaining_qty = round(qty - partial_qty, 6)
+            new_realized = round(realized + partial_pnl, 4)
+
+            # Breakeven SL: entry + küçük offset (ücretsiz trade)
             new_sl = sl
-            if BREAKEVEN_ENABLED:
-                offset = entry * BREAKEVEN_OFFSET_PCT / 100
-                new_sl = (entry + offset) if direction == "LONG" else (entry - offset)
+            if BREAKEVEN_ENABLED and entry > 0:
+                offset = entry * (BREAKEVEN_OFFSET_PCT / 100.0)
+                new_sl = round(
+                    (entry + offset) if direction == "LONG" else (entry - offset),
+                    8
+                )
+                # SL hiçbir zaman entry'nin kötü tarafına geçmesin
+                if direction == "LONG" and new_sl < entry:
+                    new_sl = round(entry, 8)
+                elif direction == "SHORT" and new_sl > entry:
+                    new_sl = round(entry, 8)
+
+            # Bakiyeye kısmi kârı yaz
+            try:
+                update_paper_balance(partial_pnl)
+            except Exception as e:
+                logger.warning(f"[TP1] Bakiye güncelleme hatası: {e}")
+
             update_trade(trade_id, {
-                "trade_stage":  "tp1_hit",
+                "trade_stage":   "tp1_hit",
                 "active_target": "TP2",
-                "realized_pnl": round(new_realized, 4),
-                "sl":           round(new_sl, 8),
-                "qty":          round(qty - partial_qty, 6),
+                "realized_pnl":  new_realized,
+                "sl":            new_sl,
+                "breakeven_sl":  new_sl,
+                "qty":           remaining_qty,
+                "tp1_hit":       1,
             })
-            logger.info(f"[Monitor] #{trade_id} {symbol} TP1 HIT +{partial_pnl:.3f}$ breakeven_sl={new_sl:.6f}")
+            try:
+                save_partial_close(
+                    trade_id=trade_id, tp_level=1, close_price=price,
+                    qty=partial_qty, pnl=partial_pnl,
+                    realized_total=new_realized, stage_after="tp1_hit"
+                )
+            except Exception as e:
+                logger.warning(f"[TP1] save_partial_close hatası: {e}")
+            logger.info(
+                f"[Monitor] #{trade_id} {symbol} TP1 HIT @ {price:.6f} "
+                f"partial_pnl=+{partial_pnl:.3f}$ realized={new_realized:.3f}$ "
+                f"remaining_qty={remaining_qty:.6f} breakeven_sl={new_sl:.6f}"
+            )
             try:
                 tg.send_tp_hit(symbol, direction, 1, partial_pnl)
             except Exception:
                 pass
             return
 
-    # ── TP2 Kontrolu ─────────────────────────────────────────────────────────
-    if stage == "tp1_hit":
+    # ── TP2 Kısmi Kapanış (%40) + Trailing Stop Başlat ───────────────────────
+    if stage == "tp1_hit" and tp2 > 0:
         tp2_hit = (direction == "LONG" and price >= tp2) or \
                   (direction == "SHORT" and price <= tp2)
         if tp2_hit:
-            partial_qty = qty * (TP2_CLOSE_PCT / 100)
+            partial_qty = round(qty * (TP2_CLOSE_PCT / 100.0), 6)
+            if partial_qty <= 0:
+                partial_qty = qty
             partial_pnl = _calc_pnl(entry, price, partial_qty, direction, leverage)
-            new_realized = realized + partial_pnl
-            # Trail stop baslat
+            remaining_qty = round(qty - partial_qty, 6)
+            new_realized = round(realized + partial_pnl, 4)
+
+            # ATR bazlı trailing stop başlat
             atr = _get_atr(symbol, client)
-            trail_dist = (atr * TRAIL_ATR_MULT) if atr > 0 else (entry * 0.015)
-            trail_stop = (price - trail_dist) if direction == "LONG" else (price + trail_dist)
+            trail_dist = (atr * TRAIL_ATR_MULT) if atr and atr > 0 else (entry * 0.015)
+            trail_stop = round(
+                (price - trail_dist) if direction == "LONG" else (price + trail_dist),
+                8
+            )
+
+            # Bakiyeye kısmi kârı yaz
+            try:
+                update_paper_balance(partial_pnl)
+            except Exception as e:
+                logger.warning(f"[TP2] Bakiye güncelleme hatası: {e}")
+
             update_trade(trade_id, {
-                "trade_stage":  "runner",
+                "trade_stage":   "runner",
                 "active_target": "TP3",
-                "realized_pnl": round(new_realized, 4),
-                "trail_stop":   round(trail_stop, 8),
-                "qty":          round(qty - partial_qty, 6),
+                "realized_pnl":  new_realized,
+                "trail_stop":    trail_stop,
+                "qty":           remaining_qty,
+                "tp2_hit":       1,
             })
-            logger.info(f"[Monitor] #{trade_id} {symbol} TP2 HIT +{partial_pnl:.3f}$ runner trail={trail_stop:.6f}")
+            try:
+                save_partial_close(
+                    trade_id=trade_id, tp_level=2, close_price=price,
+                    qty=partial_qty, pnl=partial_pnl,
+                    realized_total=new_realized, stage_after="runner"
+                )
+            except Exception as e:
+                logger.warning(f"[TP2] save_partial_close hatası: {e}")
+            logger.info(
+                f"[Monitor] #{trade_id} {symbol} TP2 HIT @ {price:.6f} "
+                f"partial_pnl=+{partial_pnl:.3f}$ realized={new_realized:.3f}$ "
+                f"runner_qty={remaining_qty:.6f} trail={trail_stop:.6f}"
+            )
             try:
                 tg.send_tp_hit(symbol, direction, 2, partial_pnl)
             except Exception:
                 pass
             return
 
-    # ── Runner: Trail Stop ve TP3 ─────────────────────────────────────────────
+    # ── Runner: Trailing Stop Takibi + TP3 Tam Kapanış ───────────────────────
     if stage == "runner":
         trail = float(t.get("trail_stop") or 0)
-        # Trail stop guncelle
+
+        # ATR bazlı trail mesafesi
         atr = _get_atr(symbol, client)
-        trail_dist = (atr * TRAIL_ATR_MULT) if atr > 0 else (entry * 0.015)
+        trail_dist = (atr * TRAIL_ATR_MULT) if atr and atr > 0 else (entry * 0.015)
+
+        # Trail stop'u fiyat lehimize hareket ettikçe güncelle
         if direction == "LONG":
-            new_trail = price - trail_dist
+            new_trail = round(price - trail_dist, 8)
             if new_trail > trail:
                 trail = new_trail
-                update_trade(trade_id, {"trail_stop": round(trail, 8)})
+                update_trade(trade_id, {"trail_stop": trail})
         else:
-            new_trail = price + trail_dist
-            if new_trail < trail or trail == 0:
+            new_trail = round(price + trail_dist, 8)
+            if trail == 0 or new_trail < trail:
                 trail = new_trail
-                update_trade(trade_id, {"trail_stop": round(trail, 8)})
+                update_trade(trade_id, {"trail_stop": trail})
 
-        # Trail hit?
+        # Trail stop vuruldu mu?
         trail_hit = trail > 0 and (
             (direction == "LONG"  and price <= trail) or
             (direction == "SHORT" and price >= trail)
         )
         if trail_hit:
-            net_pnl = realized + _calc_pnl(entry, price, qty, direction, leverage)
-            logger.info(f"[Monitor] #{trade_id} {symbol} TRAIL HIT @ {price:.6f} pnl={net_pnl:.3f}$")
+            runner_pnl = _calc_pnl(entry, price, qty, direction, leverage)
+            net_pnl = round(realized + runner_pnl, 4)
+            logger.info(
+                f"[Monitor] #{trade_id} {symbol} TRAIL HIT @ {price:.6f} "
+                f"runner_pnl={runner_pnl:.3f}$ net_pnl={net_pnl:.3f}$"
+            )
             _finalize(t, price, qty, "trail", net_pnl, ai_engine)
             return
 
-        # TP3 hit?
-        tp3_hit = (direction == "LONG" and price >= tp3) or \
-                  (direction == "SHORT" and price <= tp3)
+        # TP3 vuruldu mu? (runner'ın kalan %20'si tam kapanır)
+        tp3_hit = tp3 > 0 and (
+            (direction == "LONG"  and price >= tp3) or
+            (direction == "SHORT" and price <= tp3)
+        )
         if tp3_hit:
-            net_pnl = realized + _calc_pnl(entry, price, qty, direction, leverage)
-            logger.info(f"[Monitor] #{trade_id} {symbol} TP3 HIT @ {price:.6f} pnl={net_pnl:.3f}$")
+            runner_pnl = _calc_pnl(entry, price, qty, direction, leverage)
+            net_pnl = round(realized + runner_pnl, 4)
+            logger.info(
+                f"[Monitor] #{trade_id} {symbol} TP3 HIT @ {price:.6f} "
+                f"runner_pnl={runner_pnl:.3f}$ net_pnl={net_pnl:.3f}$"
+            )
             _finalize(t, price, qty, "tp3", net_pnl, ai_engine)
             return
-
 
 def _finalize(t: dict, close_price: float, qty: float,
               reason: str, net_pnl: float, ai_engine=None):

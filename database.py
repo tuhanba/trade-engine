@@ -134,6 +134,17 @@ def init_db():
             mae_r REAL DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS partial_closes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id INTEGER NOT NULL,
+            tp_level INTEGER NOT NULL,
+            close_price REAL NOT NULL,
+            qty REAL NOT NULL,
+            pnl REAL NOT NULL,
+            realized_total REAL DEFAULT 0,
+            stage_after TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
         """)
     _run_migration()
 
@@ -261,6 +272,20 @@ def close_trade(trade_id: int, close_price: float, net_pnl: float, reason: str, 
 def update_paper_balance(delta: float):
     with get_conn() as conn:
         conn.execute("UPDATE paper_account SET balance = balance + ? WHERE id=1", (delta,))
+
+def save_partial_close(trade_id: int, tp_level: int, close_price: float,
+                       qty: float, pnl: float, realized_total: float = 0,
+                       stage_after: str = ""):
+    """TP1/TP2 kısmi kapanışlarını partial_closes tablosuna kaydet."""
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO partial_closes
+                (trade_id, tp_level, close_price, qty, pnl, realized_total, stage_after, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            trade_id, tp_level, close_price, qty, pnl, realized_total,
+            stage_after, datetime.now(timezone.utc).isoformat()
+        ))
 
 def save_postmortem(trade_id: int, data: dict):
     with get_conn() as conn:
