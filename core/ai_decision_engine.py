@@ -198,14 +198,15 @@ class AIDecisionEngine:
         ml_score      = getattr(signal_data, "ml_score",      50) or 50
         confidence    = getattr(signal_data, "confidence",    0.8) or 0.8
 
-        # Agirlikli skor (toplam 100)
+        # Agirlikli skor (0-100 arasi)
+        # Her score 0-100, agirliklar toplamda 1.0 (coin:0.10 trend:0.30 trigger:0.30 risk:0.20 ml:0.10)
         base_score = (
             coin_score    * 0.10 +
             trend_score   * 0.30 +
             trigger_score * 0.30 +
             risk_score    * 0.20 +
-            (ml_score / 100) * 10
-        ) * 10
+            ml_score      * 0.10
+        )
 
         # Coin win_rate bonusu (coin-specific ogrenme)
         win_rate = coin_stats["win_rate"]
@@ -458,7 +459,14 @@ class AIDecisionEngine:
         # SL mesafesi (volatilite proxy)
         entry = getattr(signal_data, "entry_zone", 0) or 0
         sl    = getattr(signal_data, "stop_loss",  0) or 0
-        sl_dist_pct = abs(entry - sl) / (entry + 1e-12) * 100 if entry > 0 else 3.0
+        # SL=0 guard: SL yoksa ATR proxy %2 kullan
+        if sl <= 0 and entry > 0:
+            direction = getattr(signal_data, "direction", "LONG")
+            sl = entry * 0.98 if direction == "LONG" else entry * 1.02
+        sl_dist_pct = abs(entry - sl) / (entry + 1e-12) * 100 if entry > 0 else 2.0
+        # Anormal sl_dist guard
+        if sl_dist_pct < 0.1 or sl_dist_pct > 20.0:
+            sl_dist_pct = 2.0
 
         # Baz kaldıraç
         lev = 10
@@ -538,7 +546,14 @@ class AIDecisionEngine:
         """
         entry = getattr(signal_data, "entry_zone", 0) or 0
         sl    = getattr(signal_data, "stop_loss",  0) or 0
-        sl_dist_pct = abs(entry - sl) / (entry + 1e-12) * 100 if entry > 0 else 3.0
+        # SL=0 guard: SL yoksa ATR proxy %2 kullan
+        if sl <= 0 and entry > 0:
+            direction = getattr(signal_data, "direction", "LONG")
+            sl = entry * 0.98 if direction == "LONG" else entry * 1.02
+        sl_dist_pct = abs(entry - sl) / (entry + 1e-12) * 100 if entry > 0 else 2.0
+        # Anormal sl_dist guard
+        if sl_dist_pct < 0.1 or sl_dist_pct > 20.0:
+            sl_dist_pct = 2.0
 
         if leverage >= 18:
             # 18-20x: Çok sıkı SL, hızlı TP

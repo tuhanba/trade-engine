@@ -168,7 +168,18 @@ async def _process_symbol(symbol: str, current_open: int):
                 sig.setup_quality = trigger_res.get("quality", "B")
                 sig.score         = trigger_res.get("score", 5.0)
                 sig.entry_zone    = trigger_res.get("entry", 0) or sig.entry_zone
-                sig.stop_loss     = getattr(sig, "stop_loss", 0) or 0
+                # SL: trigger_engine'den gelen entry + ATR bazlı hesapla
+                entry_price = float(trigger_res.get("entry", 0) or 0)
+                if entry_price > 0:
+                    # ATR proxy: entry'nin %2'si (scalp için makul varsayılan)
+                    # Gerçek ATR trigger_res'te yoksa bu fallback kullanılır
+                    atr_pct = 0.02
+                    if direction == "LONG":
+                        sig.stop_loss = round(entry_price * (1 - atr_pct), 8)
+                    else:
+                        sig.stop_loss = round(entry_price * (1 + atr_pct), 8)
+                else:
+                    sig.stop_loss = getattr(sig, "stop_loss", 0) or 0
 
                 # trigger_res alanlarini AI score alanlarına map et
                 raw_score = trigger_res.get("score", 5.0)  # 0-10 arasi
