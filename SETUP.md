@@ -47,7 +47,7 @@ BINANCE_API_SECRET=buraya_binance_api_secret
 TELEGRAM_BOT_TOKEN=buraya_telegram_bot_token
 TELEGRAM_CHAT_ID=buraya_telegram_chat_id
 SECRET_KEY=scalp2026
-PAPER_BALANCE=250.0
+PAPER_BALANCE=300.0
 RISK_PCT=1.0
 EXECUTION_MODE=paper
 DB_PATH=/root/trade-engine/trading.db
@@ -265,7 +265,7 @@ tail -50 /root/trade-engine/logs/telegram.log
 ```bash
 curl -X POST http://localhost:5000/api/reset \
   -H "Content-Type: application/json" \
-  -d '{"initial_balance": 250, "keep_ai_learning": true}'
+  -d '{"initial_balance: 300, "keep_ai_learning": true}'
 ```
 
 ---

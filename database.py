@@ -88,10 +88,10 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS paper_account (
             id INTEGER PRIMARY KEY CHECK (id = 1),
-            balance REAL DEFAULT 250.0,
-            initial_balance REAL DEFAULT 250.0
+            balance REAL DEFAULT 300.0,
+            initial_balance REAL DEFAULT 300.0
         );
-        INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, 250.0, 250.0);
+        INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, 300.0, 300.0);
         CREATE TABLE IF NOT EXISTS state (
             key TEXT PRIMARY KEY,
             value TEXT
@@ -301,7 +301,7 @@ def get_stats():
 def get_paper_balance():
     with get_conn() as conn:
         row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
-        return row[0] if row else 250.0
+        return row[0] if row else 300.0
 
 def get_current_params():
     return {"version": "4.2 Elite"}
@@ -543,7 +543,7 @@ def save_paper_result(sig_dict: dict, tracked_from: str = "ghost") -> int:
         return 0
 
 
-def reset_paper_data(initial_balance: float = 250.0, keep_ai_learning: bool = True):
+def reset_paper_data(initial_balance: float = 300.0, keep_ai_learning: bool = True):
     """
     Kasa ve trade gecmisini sifirlar.
     - trades tablosu temizlenir
