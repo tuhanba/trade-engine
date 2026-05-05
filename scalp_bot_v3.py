@@ -170,6 +170,43 @@ async def _process_symbol(symbol: str, current_open: int):
                 sig.entry_zone    = trigger_res.get("entry", 0) or sig.entry_zone
                 sig.stop_loss     = getattr(sig, "stop_loss", 0) or 0
 
+                # trigger_res alanlarini AI score alanlarına map et
+                raw_score = trigger_res.get("score", 5.0)  # 0-10 arasi
+
+                # trigger_score: 0-10 → 0-100
+                sig.trigger_score = raw_score * 10.0
+
+                # trend_score: BTC trend + momentum + MACD + saat
+                btc_ok  = 1 if trigger_res.get("btc_trend") in ["UP", "NEUTRAL"] else 0
+                mom     = trigger_res.get("momentum_3c", 0) or 0
+                macd_h  = trigger_res.get("macd_hist", 0) or 0
+                good_hr = 1 if trigger_res.get("good_hour", True) else 0
+                sig.trend_score = min(100.0, max(0.0,
+                    btc_ok * 30
+                    + min(abs(float(mom)) * 200, 30)
+                    + min(abs(float(macd_h)) * 5000, 20)
+                    + good_hr * 20
+                ))
+
+                # risk_score: RSI + funding + ADX
+                rsi5    = float(trigger_res.get("rsi5", 50) or 50)
+                funding = float(trigger_res.get("funding", 0) or 0)
+                adx     = float(trigger_res.get("adx", 20) or 20)
+                rsi_ok  = 1.0 if 30 <= rsi5 <= 70 else (0.5 if 25 <= rsi5 <= 75 else 0.0)
+                fund_ok = 1.0 if abs(funding) < 0.05 else (0.5 if abs(funding) < 0.1 else 0.0)
+                adx_ok  = min(adx / 30.0, 1.0)
+                sig.risk_score = min(100.0, rsi_ok * 40 + fund_ok * 30 + adx_ok * 30)
+
+                # coin_score: AI coin profilinden al (ilk taramalarda 50 default)
+                sig.coin_score = getattr(sig, "coin_score", 50) or 50
+
+                # ml_score: trigger score 0-10 → 0-100
+                sig.ml_score = raw_score * 10.0
+
+                # confidence: kalite bazli
+                _q_conf = {"S": 0.95, "A+": 0.90, "A": 0.85, "B": 0.75, "C": 0.65}
+                sig.confidence = _q_conf.get(sig.setup_quality, 0.75)
+
                 # AI karar
                 ai_res = _ai.evaluate(sig)
                 decision    = ai_res.get("decision", "VETO")
@@ -285,7 +322,7 @@ async def ghost_loop():
     while True:
         try:
             if _tracker:
-                count = _tracker.process_pending_paper_results(_ai)
+                count = _tracker.process_pending()
                 if count and count > 0:
                     logger.info(f"[Ghost] {count} WATCH/VETO sinyali simule edildi ve AI'a ogretildi")
         except Exception as e:
