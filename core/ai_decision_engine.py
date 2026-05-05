@@ -24,6 +24,9 @@ try:
         BAD_HOURS_UTC as _BAD_HOURS,
         GOOD_HOURS_UTC as _GOOD_HOURS,
         ALLOWED_QUALITIES as _ALLOWED_QUAL,
+        TRADE_QUALITIES as _TRADE_QUAL,
+        WATCHLIST_QUALITIES as _WATCH_QUAL,
+        REJECT_QUALITIES as _REJECT_QUAL,
         DATA_THRESHOLD,
         WATCHLIST_THRESHOLD,
         TELEGRAM_THRESHOLD,
@@ -33,17 +36,20 @@ except ImportError:
     _BAD_HOURS   = []
     _GOOD_HOURS  = list(range(24))
     _ALLOWED_QUAL = ["S", "A+", "A", "B", "C"]
+    _TRADE_QUAL   = ["S", "A+", "A"]
+    _WATCH_QUAL   = ["B"]
+    _REJECT_QUAL  = ["C", "D"]
     DATA_THRESHOLD      = 30
     WATCHLIST_THRESHOLD = 50
     TELEGRAM_THRESHOLD  = 60
-    TRADE_THRESHOLD     = 70
+    TRADE_THRESHOLD     = 70  # 10/10 kalite için yükseltildi
 
 
 class AIDecisionEngine:
     def __init__(self, db_path="trading.db"):
         self.db_path = db_path
         self.daily_signals   = 0
-        self.max_daily_signals = 100  # 40 -> 100 (filtreler gevsetilince limit arttirildi)
+        self.max_daily_signals = 40   # Max 40 sinyal/gün — spam engeli
         self.recent_coins    = []
         self.last_reset_date = datetime.now(timezone.utc).date()
         self.thresholds = {
@@ -177,7 +183,13 @@ class AIDecisionEngine:
             return self._veto(f"bad_hour:{current_hour}")
 
         # ── 2. Kalite Filtresi ───────────────────────────────────────────────
-        if quality not in _ALLOWED_QUAL:
+        # 10/10 Kalite filtresi: C/D → veto, B → watchlist (öğrenme), A/A+/S → trade
+        if quality in _REJECT_QUAL:
+            return self._veto(f"quality_rejected:{quality}")
+        if quality in _WATCH_QUAL:
+            # B kalite: trade açma, sadece watchlist ve öğrenme
+            return {"decision": "WATCH", "final_score": 0.0, "reason": f"quality_watchlist:{quality}"}
+        if quality not in _TRADE_QUAL:
             return self._veto(f"quality_filtered:{quality}")
 
         # ── 3. Gunluk Limit ──────────────────────────────────────────────────
@@ -476,8 +488,9 @@ class AIDecisionEngine:
             lev += 4
         elif quality == "A":
             lev += 2
+        # C kalite trade açmaz (watchlist/veto), bu satıra artık gelinmez
         elif quality == "C":
-            lev -= 3
+            lev -= 5
 
         # AI skoru
         if final_score >= 85:

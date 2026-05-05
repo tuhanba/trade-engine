@@ -22,7 +22,7 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "958182551")
 
 # ── Risk Yonetimi ─────────────────────────────────────────────────────────────
 RISK_PCT                = float(os.getenv("RISK_PCT", "1.0"))
-MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "15"))
+MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "10"))
 DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "5.0"))
 CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "5"))
 CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "60"))
@@ -34,14 +34,18 @@ MAX_LEVERAGE   = int(os.getenv("MAX_LEVERAGE", "20"))
 MIN_LEVERAGE   = int(os.getenv("MIN_LEVERAGE", "5"))
 
 # ── Sinyal Esikleri ───────────────────────────────────────────────────────────
-DATA_THRESHOLD      = 30.0
-WATCHLIST_THRESHOLD = 50.0
-TELEGRAM_THRESHOLD  = 55.0
-TRADE_THRESHOLD     = 65.0
+DATA_THRESHOLD      = 40.0
+WATCHLIST_THRESHOLD = 55.0
+TELEGRAM_THRESHOLD  = 62.0
+TRADE_THRESHOLD     = 70.0
 
 # ── Filtreler ─────────────────────────────────────────────────────────────────
 ADX_MIN_THRESHOLD        = 20  # Yuksek ADX = guclu trend
-ALLOWED_QUALITIES          = ["S", "A+", "A", "B", "C"]
+# C ve B kalite trade açmaz — sadece izleme listesine alınır
+ALLOWED_QUALITIES          = ["S", "A+", "A", "B", "C"]  # Tarama için (hepsi taranır)
+TRADE_QUALITIES            = ["S", "A+", "A"]             # Sadece bu kaliteler trade açar
+WATCHLIST_QUALITIES        = ["B"]                        # B: watchlist, öğrenme için izlenir
+REJECT_QUALITIES           = ["C", "D"]                   # C/D: veto edilir
 BAD_HOURS_UTC              = []
 GOOD_HOURS_UTC             = list(range(24))
 SHORT_REQUIRES_BTC_BEARISH = False
@@ -68,4 +72,4 @@ TRADE_TIMEOUT_HOURS  = int(os.getenv("TRADE_TIMEOUT_HOURS", "12"))
 AI_MIN_TRADES_FOR_COIN_LEARNING = 3
 AI_GHOST_HORIZON_MINUTES        = 360
 AI_DANGER_SCORE_VETO_THRESHOLD  = 75
-AI_MAX_DAILY_SIGNALS            = 150
+AI_MAX_DAILY_SIGNALS            = 40   # Max 40 sinyal/gün — spam engeli

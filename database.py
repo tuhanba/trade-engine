@@ -62,8 +62,23 @@ def init_db():
             direction TEXT,
             entry REAL, sl REAL, tp1 REAL, tp2 REAL, tp3 REAL,
             score REAL DEFAULT 0,
+            setup_quality TEXT DEFAULT 'B',
             decision TEXT DEFAULT 'PENDING',
             reject_reason TEXT DEFAULT '',
+            ai_veto_reason TEXT DEFAULT '',
+            risk_reject_reason TEXT DEFAULT '',
+            market_regime TEXT DEFAULT '',
+            session TEXT DEFAULT '',
+            volume REAL DEFAULT 0,
+            volatility REAL DEFAULT 0,
+            rsi_score REAL DEFAULT 0,
+            ema_score REAL DEFAULT 0,
+            trend_score REAL DEFAULT 0,
+            trigger_score REAL DEFAULT 0,
+            risk_score REAL DEFAULT 0,
+            coin_score REAL DEFAULT 0,
+            final_score REAL DEFAULT 0,
+            future_outcome TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS paper_account (
@@ -148,8 +163,23 @@ def _run_migration():
         ("trades", "breakeven_enabled", "INTEGER DEFAULT 1"),
         ("trades", "breakeven_sl",     "REAL"),
         ("trades", "updated_at",       "TEXT DEFAULT (datetime('now'))"),
-        ("signal_candidates", "tp3",   "REAL"),
-        ("signal_candidates", "reject_reason", "TEXT DEFAULT ''"),
+        ("signal_candidates", "tp3",               "REAL"),
+        ("signal_candidates", "reject_reason",      "TEXT DEFAULT ''"),
+        ("signal_candidates", "ai_veto_reason",     "TEXT DEFAULT ''"),
+        ("signal_candidates", "risk_reject_reason", "TEXT DEFAULT ''"),
+        ("signal_candidates", "market_regime",      "TEXT DEFAULT ''"),
+        ("signal_candidates", "session",            "TEXT DEFAULT ''"),
+        ("signal_candidates", "volume",             "REAL DEFAULT 0"),
+        ("signal_candidates", "volatility",         "REAL DEFAULT 0"),
+        ("signal_candidates", "rsi_score",          "REAL DEFAULT 0"),
+        ("signal_candidates", "ema_score",          "REAL DEFAULT 0"),
+        ("signal_candidates", "trend_score",        "REAL DEFAULT 0"),
+        ("signal_candidates", "trigger_score",      "REAL DEFAULT 0"),
+        ("signal_candidates", "risk_score",         "REAL DEFAULT 0"),
+        ("signal_candidates", "coin_score",         "REAL DEFAULT 0"),
+        ("signal_candidates", "final_score",        "REAL DEFAULT 0"),
+        ("signal_candidates", "setup_quality",      "TEXT DEFAULT 'B'"),
+        ("signal_candidates", "future_outcome",     "TEXT DEFAULT ''"),
         # paper_results tablosu - sunucuda eski sema varsa eksik kolonlari ekle
         ("paper_results", "entry",                    "REAL"),
         ("paper_results", "sl",                       "REAL"),
@@ -274,19 +304,38 @@ def set_state(key, value):
         conn.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, str(value)))
 
 def save_scalp_signal(data):
+    """Sinyal adayını signal_candidates tablosuna tam kaydet (öğrenme sistemi)."""
     try:
         with get_conn() as conn:
             conn.execute("""
                 INSERT INTO signal_candidates
-                    (symbol, direction, entry, sl, tp1, tp2, tp3, score, decision, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    (symbol, direction, entry, sl, tp1, tp2, tp3,
+                     score, final_score, setup_quality, decision,
+                     reject_reason, ai_veto_reason, risk_reject_reason,
+                     trend_score, trigger_score, risk_score, coin_score,
+                     rsi_score, volume, volatility, session, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """, (
-                data.get('symbol'), data.get('direction'),
+                data.get('symbol'),
+                data.get('direction'),
                 data.get('entry_zone', data.get('entry', 0)),
                 data.get('stop_loss', data.get('sl', 0)),
                 data.get('tp1', 0), data.get('tp2', 0), data.get('tp3', 0),
+                data.get('score', 0),
                 data.get('final_score', data.get('score', 0)),
-                data.get('decision', 'PENDING')
+                data.get('setup_quality', 'B'),
+                data.get('decision', 'PENDING'),
+                data.get('reject_reason', ''),
+                data.get('ai_veto_reason', ''),
+                data.get('risk_reject_reason', ''),
+                data.get('trend_score', 0),
+                data.get('trigger_score', 0),
+                data.get('risk_score', 0),
+                data.get('coin_score', 0),
+                data.get('rsi_score', 0),
+                data.get('volume', 0),
+                data.get('volatility', 0),
+                data.get('session', ''),
             ))
     except Exception as e:
         logger.warning(f"save_scalp_signal hatasi: {e}")

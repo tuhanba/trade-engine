@@ -224,38 +224,45 @@ async def _process_symbol(symbol: str, current_open: int):
                 final_score = ai_res.get("final_score", 0)
 
                 if decision == "ALLOW":
-                    # Dinamik kaldirach
-                    leverage = _ai.decide_leverage(sig, ai_res)
-                    sig.leverage = leverage
-
-                    # Telegram sinyali gonder
-                    try:
-                        tg.deliver_signal(sig)
-                    except Exception:
-                        pass
-
-                    # Trade ac
-                    result = eng.open_trade(sig, _client, _ai)
-                    if result.get("ok"):
-                        logger.info(
-                            f"[Bot] ALLOW: {symbol} {direction} {leverage}x "
-                            f"score={final_score:.1f} quality={sig.setup_quality}"
-                        )
+                    # 10/10 kalite kontrolü: sadece S/A+/A trade açar
+                    from config import TRADE_QUALITIES as _TQ
+                    if sig.setup_quality not in _TQ:
+                        logger.info(f"[Bot] ALLOW ama kalite düşük ({sig.setup_quality}), watchlist'e alındı")
+                        try:
+                            _save_ghost(sig, "WATCH", final_score)
+                        except Exception:
+                            pass
                     else:
-                        logger.warning(f"[Bot] Trade acilamadi: {result.get('error')}")
+                        # Dinamik kaldirach
+                        leverage = _ai.decide_leverage(sig, ai_res)
+                        sig.leverage = leverage
+
+                        # Telegram sinyali gonder
+                        try:
+                            tg.deliver_signal(sig)
+                        except Exception:
+                            pass
+
+                        # Trade ac
+                        result = eng.open_trade(sig, _client, _ai)
+                        if result.get("ok"):
+                            logger.info(
+                                f"[Bot] ALLOW: {symbol} {direction} {leverage}x "
+                                f"score={final_score:.1f} quality={sig.setup_quality}"
+                            )
+                        else:
+                            logger.warning(f"[Bot] Trade acilamadi: {result.get('error')}")
 
                 elif decision == "WATCH":
-                    logger.info(f"[Bot] WATCH: {symbol} {direction} score={final_score:.1f}")
-                    # Ghost-tracker icin kaydet
+                    logger.info(f"[Bot] WATCH: {symbol} {direction} score={final_score:.1f} quality={sig.setup_quality}")
+                    # Ghost-tracker icin kaydet (B kalite öğrenme için)
                     try:
                         _save_ghost(sig, "WATCH", final_score)
                     except Exception:
                         pass
-                    # Telegram sinyali (sadece WATCH icin de gonder)
-                    try:
-                        tg.deliver_signal(sig)
-                    except Exception:
-                        pass
+                    # Telegram: sadece B kalite watchlist bildirimi (A/A+/S değil)
+                    if sig.setup_quality == "B":
+                        logger.debug(f"[Bot] B kalite watchlist: {symbol} {direction}")
 
                 else:  # VETO
                     logger.debug(f"[Bot] VETO: {symbol} {direction} score={final_score:.1f} reason={ai_res.get('reason','')}")
@@ -272,7 +279,7 @@ async def _process_symbol(symbol: str, current_open: int):
 
 
 def _save_ghost(sig, decision: str, score: float):
-    """WATCH/VETO sinyalini ghost-tracker icin DB'ye kaydet."""
+    """WATCH/VETO sinyalini hem paper_results hem signal_candidates'a kaydet."""
     try:
         entry = float(getattr(sig, "entry_zone", 0) or 0)
         sl    = float(getattr(sig, "stop_loss",  0) or 0)
@@ -281,6 +288,8 @@ def _save_ghost(sig, decision: str, score: float):
         tp3   = float(getattr(sig, "tp3", 0) or 0)
         if not entry:
             return
+
+        # 1) paper_results: ghost-tracker icin (outcome takibi)
         save_paper_result({
             "symbol":          sig.symbol,
             "direction":       getattr(sig, "direction", "LONG"),
@@ -300,8 +309,31 @@ def _save_ghost(sig, decision: str, score: float):
             "horizon_minutes": AI_GHOST_HORIZON_MINUTES,
             "status":          "pending",
         })
+
+        # 2) signal_candidates: ogrenme sistemi icin tam kayit
+        from database import save_scalp_signal
+        save_scalp_signal({
+            "symbol":           sig.symbol,
+            "direction":        getattr(sig, "direction", "LONG"),
+            "entry_zone":       entry,
+            "stop_loss":        sl,
+            "tp1":              tp1,
+            "tp2":              tp2,
+            "tp3":              tp3,
+            "score":            getattr(sig, "score", 0),
+            "final_score":      score,
+            "setup_quality":    getattr(sig, "setup_quality", "B"),
+            "decision":         decision,
+            "reject_reason":    getattr(sig, "reject_reason", ""),
+            "ai_veto_reason":   getattr(sig, "ai_veto_reason", ""),
+            "risk_reject_reason": getattr(sig, "risk_reject_reason", ""),
+            "trend_score":      getattr(sig, "trend_score", 0),
+            "trigger_score":    getattr(sig, "trigger_score", 0),
+            "risk_score":       getattr(sig, "risk_score", 0),
+            "coin_score":       getattr(sig, "coin_score", 0),
+        })
     except Exception as e:
-        logger.warning(f"[Ghost] save_paper_result hatasi {sig.symbol}: {e}")
+        logger.warning(f"[Ghost] save hatasi {sig.symbol}: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

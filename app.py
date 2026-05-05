@@ -35,6 +35,30 @@ def api_stats():
             stats["ghost_trades_count"] = row[0] if row else 0
             row_sentiment = conn.execute("SELECT value FROM state WHERE key='market_sentiment'").fetchone()
             stats["market_sentiment"] = float(row_sentiment[0]) if row_sentiment else 50.0
+            # 10/10 kalite dağılımı
+            quality_rows = conn.execute(
+                """SELECT setup_quality, COUNT(*) cnt,
+                          SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) wins,
+                          ROUND(AVG(net_pnl),3) avg_pnl
+                   FROM trades WHERE result IS NOT NULL
+                   GROUP BY setup_quality ORDER BY cnt DESC"""
+            ).fetchall()
+            stats["quality_distribution"] = [
+                {"quality": r[0] or "?", "count": r[1], "wins": r[2] or 0,
+                 "win_rate": round(100.0 * (r[2] or 0) / r[1], 1) if r[1] else 0,
+                 "avg_pnl": r[3] or 0}
+                for r in quality_rows
+            ]
+            # Watchlist (B kalite) sinyal sayısı
+            watch_row = conn.execute(
+                "SELECT COUNT(*) FROM signal_candidates WHERE decision='WATCH'"
+            ).fetchone()
+            stats["watchlist_count"] = watch_row[0] if watch_row else 0
+            # Veto sayısı
+            veto_row = conn.execute(
+                "SELECT COUNT(*) FROM signal_candidates WHERE decision='VETO'"
+            ).fetchone()
+            stats["veto_count"] = veto_row[0] if veto_row else 0
         return jsonify({"ok": True, "data": stats})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
