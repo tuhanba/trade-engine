@@ -187,6 +187,12 @@ def _run_migration():
         ("trades", "hold_minutes",     "REAL DEFAULT 0"),
         ("trades", "leverage",         "INTEGER DEFAULT 10"),
         ("trades", "risk_usd",         "REAL DEFAULT 0"),
+        ("trades", "sl_dist",          "REAL DEFAULT 0"),
+        ("trades", "margin_used",      "REAL DEFAULT 0"),
+        ("trades", "open_fee",         "REAL DEFAULT 0"),
+        ("trades", "fee_rate",         "REAL DEFAULT 0.0004"),
+        ("trades", "total_fee",        "REAL DEFAULT 0"),
+        ("trades", "remaining_qty",    "REAL DEFAULT 0"),
         ("trades", "updated_at",       "TEXT DEFAULT (datetime('now'))"),
         ("signal_candidates", "tp3",               "REAL"),
         ("signal_candidates", "reject_reason",      "TEXT DEFAULT ''"),
@@ -263,8 +269,9 @@ def update_trade(trade_id: int, updates: dict):
         conn.execute(f"UPDATE trades SET {set_clause} WHERE id=?", vals)
 
 def close_trade(trade_id: int, close_price: float, net_pnl: float, reason: str,
-                hold_min: float = 0, r_multiple: float = 0):
-    """Trade'i kapat. result=WIN/LOSS, close_price, net_pnl, r_multiple, exit_price yazar."""
+                hold_min: float = 0, r_multiple: float = 0, total_fee: float = 0,
+                remaining_qty: float = 0):
+    """Trade'i kapat. result=WIN/LOSS, close_price, net_pnl, r_multiple, total_fee yazar."""
     final_status = reason if reason in ('sl', 'trail', 'tp3', 'timeout') else 'closed'
     result = 'WIN' if net_pnl > 0 else 'LOSS'
     with get_conn() as conn:
@@ -272,11 +279,12 @@ def close_trade(trade_id: int, close_price: float, net_pnl: float, reason: str,
             UPDATE trades SET
                 status=?, close_reason=?, close_time=?, net_pnl=?,
                 current_price=?, close_price=?, exit_price=?, result=?,
-                hold_minutes=?, r_multiple=?, trade_stage='closed', updated_at=?
+                hold_minutes=?, r_multiple=?, total_fee=?,
+                remaining_qty=0, trade_stage='closed', updated_at=?
             WHERE id=?
         """, (final_status, reason, datetime.now(timezone.utc).isoformat(), net_pnl,
               close_price, close_price, close_price, result, hold_min, r_multiple,
-              datetime.now(timezone.utc).isoformat(), trade_id))
+              total_fee, datetime.now(timezone.utc).isoformat(), trade_id))
 
 def update_paper_balance(delta: float):
     with get_conn() as conn:

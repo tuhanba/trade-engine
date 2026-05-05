@@ -29,7 +29,13 @@ from database import (
     get_open_trades, get_paper_balance
 )
 import telegram_delivery as tg
-
+from core.accounting import (
+    calculate_position_size, calculate_max_loss,
+    calculate_unrealized_net_pnl, calculate_close_pnl,
+    calculate_partial_close_pnl, calculate_r_multiple,
+    calculate_breakeven_sl, get_fee_rate,
+    DEFAULT_TAKER_FEE,
+)
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -243,29 +249,39 @@ def open_trade(signal, client=None, ai_engine=None) -> dict:
         rr  = tp_sl["rr"]
 
         # Bakiye al
-        balance = get_paper_balance() or 250.0
+        balance = get_paper_balance() or 500.0
 
-        # Qty hesapla
-        qty = _calc_qty(balance, RISK_PCT, entry, sl, leverage)
-        if qty <= 0:
-            logger.warning(f"[Execution] {symbol} qty=0, trade acilmadi (sl_dist cok kucuk)")
-            return {"ok": False, "error": "qty=0: SL mesafesi cok kucuk"}
+        # Fee oranı (API'den çek, yoksa fallback)
+        fee_rate = get_fee_rate(symbol)
 
-        # Lot filtresi uygula
+        # Lot filtresi
+        symbol_filters = None
         try:
             filters  = _get_filters(symbol, client)
-            lot_step = filters["lot_step"]
-            min_qty  = filters["min_qty"]
-            qty      = _floor(qty, lot_step)
-            if qty < min_qty:
-                qty = min_qty
+            symbol_filters = {
+                "min_qty":      filters.get("min_qty", 0),
+                "step_size":    filters.get("lot_step", 0),
+                "min_notional": filters.get("min_notional", 0),
+            }
         except Exception:
             pass
 
-        notional = qty * entry
-        sl_dist_val = abs(entry - sl)
-        risk_usd = balance * RISK_PCT / 100.0
-        max_loss_usd = qty * sl_dist_val  # gerçek max kayıp
+        # Canonical pozisyon boyutu hesabı
+        pos = calculate_position_size(
+            balance=balance, risk_pct=RISK_PCT, entry=entry, stop=sl,
+            leverage=leverage, taker_fee_rate=fee_rate,
+            symbol_filters=symbol_filters,
+        )
+        qty = pos["qty"]
+        if qty <= 0:
+            logger.warning(f"[Execution] {symbol} qty=0, trade acilmadi")
+            return {"ok": False, "error": "qty=0: SL mesafesi cok kucuk veya min_notional altinda"}
+        notional     = pos["notional_size"]
+        margin_used  = pos["margin_used"]
+        open_fee     = pos["open_fee"]
+        sl_dist_val  = pos["sl_dist"]
+        risk_usd     = pos["risk_usd"]
+        max_loss_usd = pos["max_loss_after_fee"]
 
         # Gercek fiyati al (entry dogrulama)
         live_price = _get_price(symbol, client)
@@ -289,9 +305,14 @@ def open_trade(signal, client=None, ai_engine=None) -> dict:
             "qty":            qty,
             "leverage":       leverage,
             "notional_size":  notional,
+            "margin_used":    margin_used,
             "risk_usd":       risk_usd,
             "sl_dist":        sl_dist_val,
             "max_loss_usd":   max_loss_usd,
+            "open_fee":       open_fee,
+            "fee_rate":       fee_rate,
+            "remaining_qty":  qty,
+            "total_fee":      open_fee,
             "setup_quality":  quality,
             "score":          score,
             "trade_stage":    "open",
@@ -387,10 +408,14 @@ def _check_trade(t: dict, client=None, ai_engine=None):
         return
 
     # Unrealized PnL guncelle
-    upnl = _calc_pnl(entry, price, qty, direction, leverage)
+    fee_rate_t = float(t.get('fee_rate') or DEFAULT_TAKER_FEE)
+    realized_t = float(t.get('realized_pnl') or 0)
+    upnl = calculate_unrealized_net_pnl(entry, price, qty, direction, 0, fee_rate_t)
+    # Net unrealized (realized dahil) dashboard için
+    net_unrealized = calculate_unrealized_net_pnl(entry, price, qty, direction, realized_t, fee_rate_t)
     update_trade(trade_id, {
         "current_price":  price,
-        "unrealized_pnl": round(upnl, 4)
+        "unrealized_pnl": round(net_unrealized, 4)
     })
 
     # ── Timeout Kontrolu ─────────────────────────────────────────────────────
@@ -426,7 +451,10 @@ def _check_trade(t: dict, client=None, ai_engine=None):
     sl_hit = (direction == "LONG" and price <= sl) or \
              (direction == "SHORT" and price >= sl)
     if sl_hit:
-        net_pnl = realized + upnl
+        sl_data = calculate_close_pnl(entry, price, qty, direction, realized,
+                                      float(t.get('open_fee') or 0),
+                                      float(t.get('fee_rate') or DEFAULT_TAKER_FEE))
+        net_pnl = sl_data['net_pnl']
         logger.info(f"[Monitor] #{trade_id} {symbol} SL HIT @ {price:.6f} pnl={net_pnl:.3f}$")
         _finalize(t, price, qty, "sl", net_pnl, ai_engine)
         return
@@ -440,23 +468,20 @@ def _check_trade(t: dict, client=None, ai_engine=None):
             partial_qty = round(qty * (TP1_CLOSE_PCT / 100.0), 6)
             if partial_qty <= 0:
                 partial_qty = qty
-            partial_pnl = _calc_pnl(entry, price, partial_qty, direction, leverage)
+            tp1_data = calculate_partial_close_pnl(entry, price, partial_qty, direction,
+                                                      float(t.get('fee_rate') or DEFAULT_TAKER_FEE))
+            partial_pnl = tp1_data['net_pnl']
             remaining_qty = round(qty - partial_qty, 6)
             new_realized = round(realized + partial_pnl, 4)
 
-            # Breakeven SL: entry + küçük offset (ücretsiz trade)
+            # Breakeven SL: accounting modülünden hesapla
             new_sl = sl
             if BREAKEVEN_ENABLED and entry > 0:
-                offset = entry * (BREAKEVEN_OFFSET_PCT / 100.0)
-                new_sl = round(
-                    (entry + offset) if direction == "LONG" else (entry - offset),
-                    8
+                new_sl = calculate_breakeven_sl(
+                    entry, direction,
+                    taker_fee_rate=float(t.get('fee_rate') or DEFAULT_TAKER_FEE),
+                    offset_pct=BREAKEVEN_OFFSET_PCT,
                 )
-                # SL hiçbir zaman entry'nin kötü tarafına geçmesin
-                if direction == "LONG" and new_sl < entry:
-                    new_sl = round(entry, 8)
-                elif direction == "SHORT" and new_sl > entry:
-                    new_sl = round(entry, 8)
 
             # Bakiyeye kısmi kârı yaz
             try:
@@ -500,7 +525,9 @@ def _check_trade(t: dict, client=None, ai_engine=None):
             partial_qty = round(qty * (TP2_CLOSE_PCT / 100.0), 6)
             if partial_qty <= 0:
                 partial_qty = qty
-            partial_pnl = _calc_pnl(entry, price, partial_qty, direction, leverage)
+            tp2_data = calculate_partial_close_pnl(entry, price, partial_qty, direction,
+                                                      float(t.get('fee_rate') or DEFAULT_TAKER_FEE))
+            partial_pnl = tp2_data['net_pnl']
             remaining_qty = round(qty - partial_qty, 6)
             new_realized = round(realized + partial_pnl, 4)
 
@@ -571,11 +598,13 @@ def _check_trade(t: dict, client=None, ai_engine=None):
             (direction == "SHORT" and price >= trail)
         )
         if trail_hit:
-            runner_pnl = _calc_pnl(entry, price, qty, direction, leverage)
-            net_pnl = round(realized + runner_pnl, 4)
+            runner_data = calculate_close_pnl(entry, price, qty, direction, realized,
+                                              float(t.get('open_fee') or 0),
+                                              float(t.get('fee_rate') or DEFAULT_TAKER_FEE))
+            net_pnl = runner_data['net_pnl']
             logger.info(
                 f"[Monitor] #{trade_id} {symbol} TRAIL HIT @ {price:.6f} "
-                f"runner_pnl={runner_pnl:.3f}$ net_pnl={net_pnl:.3f}$"
+                f"net_pnl={net_pnl:.3f}$"
             )
             _finalize(t, price, qty, "trail", net_pnl, ai_engine)
             return
@@ -586,11 +615,13 @@ def _check_trade(t: dict, client=None, ai_engine=None):
             (direction == "SHORT" and price <= tp3)
         )
         if tp3_hit:
-            runner_pnl = _calc_pnl(entry, price, qty, direction, leverage)
-            net_pnl = round(realized + runner_pnl, 4)
+            runner_data = calculate_close_pnl(entry, price, qty, direction, realized,
+                                              float(t.get('open_fee') or 0),
+                                              float(t.get('fee_rate') or DEFAULT_TAKER_FEE))
+            net_pnl = runner_data['net_pnl']
             logger.info(
                 f"[Monitor] #{trade_id} {symbol} TP3 HIT @ {price:.6f} "
-                f"runner_pnl={runner_pnl:.3f}$ net_pnl={net_pnl:.3f}$"
+                f"net_pnl={net_pnl:.3f}$"
             )
             _finalize(t, price, qty, "tp3", net_pnl, ai_engine)
             return
@@ -627,7 +658,7 @@ def _finalize(t: dict, close_price: float, qty: float,
 
     # R-multiple hesapla: net_pnl / risk_usd
     risk_usd_trade = float(t.get("risk_usd") or 0)
-    r_multiple = round(net_pnl / risk_usd_trade, 2) if risk_usd_trade > 0 else 0.0
+    r_multiple = calculate_r_multiple(net_pnl, risk_usd_trade)
 
     # DB kapat (result=WIN/LOSS, hold_minutes de yaziliyor)
     try:

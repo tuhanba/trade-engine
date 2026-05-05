@@ -7,6 +7,10 @@ from database import (
     init_db, get_trades, get_stats, get_current_params,
     get_open_trades, get_paper_balance, get_conn,
 )
+from core.accounting import (
+    calculate_unrealized_net_pnl, calculate_unrealized_pct,
+    DEFAULT_TAKER_FEE,
+)
 from binance.client import Client
 import dashboard_service as dash_svc
 load_dotenv()
@@ -107,15 +111,23 @@ def api_live():
                 _last_error["msg"] = str(pe)
                 _last_error["time"] = datetime.now(timezone.utc).isoformat()
 
-            # PnL hesapla
-            unrealized_pnl = 0.0
-            pnl_percent = 0.0
-            if current_price and entry and qty:
-                if direction == "LONG":
-                    unrealized_pnl = (current_price - entry) * qty
-                elif direction == "SHORT":
-                    unrealized_pnl = (entry - current_price) * qty
-                pnl_percent = round((unrealized_pnl / (entry * qty)) * 100, 2) if entry * qty else 0
+            # Canonical PnL hesabı (accounting modülü)
+            realized_pnl = float(trade.get('realized_pnl') or 0)
+            fee_rate      = float(trade.get('fee_rate') or DEFAULT_TAKER_FEE)
+            margin_used   = float(trade.get('margin_used') or 0)
+            remaining_qty = float(trade.get('remaining_qty') or qty)
+            if remaining_qty <= 0:
+                remaining_qty = qty
+            unrealized_net = 0.0
+            pnl_percent    = 0.0
+            if current_price and entry and remaining_qty:
+                unrealized_net = calculate_unrealized_net_pnl(
+                    entry, current_price, remaining_qty, direction,
+                    realized_pnl, fee_rate
+                )
+                pnl_percent = calculate_unrealized_pct(unrealized_net, margin_used) if margin_used > 0 \
+                    else round((unrealized_net / (entry * remaining_qty)) * 100, 2) if entry * remaining_qty else 0
+            unrealized_pnl = unrealized_net  # geriye dönük uyumluluk
 
             # Mesafe hesapla
             def dist_pct(target):
@@ -131,7 +143,7 @@ def api_live():
             enriched = {
                 **trade,
                 "current_price":      round(current_price, 6) if current_price else None,
-                "unrealized_pnl":     round(unrealized_pnl, 4),
+                "unrealized_pnl":     round(unrealized_net, 4),
                 "unrealized_pct":     pnl_percent,
                 "tp3":                tp3,
                 "runner_target":      trade.get("runner_target"),
@@ -146,7 +158,14 @@ def api_live():
                 "ai_confidence":      trade.get("confidence", 0.8),
                 "leverage":           lev,
                 "notional_size":      trade.get("notional_size", 0),
-                "position_size":      trade.get("position_size", 0),
+                "margin_used":        margin_used,
+                "risk_usd":           trade.get("risk_usd", 0),
+                "max_loss_usd":       trade.get("max_loss_usd", 0),
+                "open_fee":           trade.get("open_fee", 0),
+                "fee_rate":           fee_rate,
+                "remaining_qty":      remaining_qty,
+                "realized_pnl":       realized_pnl,
+                "qty":                qty,
                 "error":              error_msg,
             }
             total_unrealized += unrealized_pnl
@@ -158,7 +177,7 @@ def api_live():
                     from database import update_trade
                     update_trade(trade["id"], {
                         "current_price": round(current_price, 6),
-                        "unrealized_pnl": round(unrealized_pnl, 4),
+                        "unrealized_pnl": round(unrealized_net, 4),
                     })
                 except Exception:
                     pass
@@ -169,6 +188,7 @@ def api_live():
                 "live": live,
                 "open_count": len(live),
                 "total_unrealized": round(total_unrealized, 4),
+                "total_open": len(live),
                 "error": error_msg,
             }
         })
