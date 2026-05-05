@@ -40,7 +40,7 @@ TELEGRAM_THRESHOLD  = 55.0
 TRADE_THRESHOLD     = 65.0
 
 # ── Filtreler ─────────────────────────────────────────────────────────────────
-ADX_MIN_THRESHOLD          = 12
+ADX_MIN_THRESHOLD        = 20  # Yuksek ADX = guclu trend
 ALLOWED_QUALITIES          = ["S", "A+", "A", "B", "C"]
 BAD_HOURS_UTC              = []
 GOOD_HOURS_UTC             = list(range(24))

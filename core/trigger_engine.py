@@ -3,7 +3,7 @@ Trigger Engine — Profesyonel Sürüm v2
 Giriş onayı, setup kalitesi, çoklu timeframe (5m + 1m), RSI, VWAP, MACD ve momentum.
 
 Düzeltmeler (v2):
-- ADX zorunlu filtre kaldırıldı → ADX skora katkı sağlar ama D vermez
+- ADX_MIN_THRESHOLD=20 → ADX < 20 ise C kalitesi, skora katkı saglar
 - EMA sıralaması zorunlu değil → trend puanına katkı sağlar
 - RSI aralıkları genişletildi (LONG: 25-80, SHORT: 20-75)
 - Funding rate filtresi gevşetildi (0.003'e çıkarıldı)
@@ -32,7 +32,7 @@ except ImportError:
     GOOD_HOURS_UTC           = list(range(24))
     SHORT_REQUIRES_BTC_BEARISH = False
     BTC_TREND_INTERVAL       = "4h"
-    ADX_MIN_THRESHOLD        = 15  # Düşürüldü
+    ADX_MIN_THRESHOLD        = 20  # Guclu trend filtresi
 
 class TriggerEngine:
     def __init__(self, client):

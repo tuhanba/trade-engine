@@ -263,6 +263,110 @@ def api_history():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/trades")
+def api_trades():
+    """Sayfalanmis trade gecmisi - dashboard history icin"""
+    try:
+        page     = int(request.args.get("page", 1))
+        per_page = int(request.args.get("per_page", 10))
+        offset   = (page - 1) * per_page
+        with get_conn() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM trades"
+            ).fetchone()[0]
+            rows = conn.execute(
+                "SELECT * FROM trades ORDER BY open_time DESC LIMIT ? OFFSET ?",
+                (per_page, offset)
+            ).fetchall()
+            trades = [dict(r) for r in rows]
+        return jsonify({
+            "ok": True,
+            "data": trades,
+            "pagination": {
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+                "pages": max(1, (total + per_page - 1) // per_page)
+            }
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/pnl_chart")
+def api_pnl_chart():
+    """Son 30 gunluk kumulatif PnL grafigi icin veri"""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT DATE(close_time) as day,
+                       SUM(COALESCE(realized_pnl,0)) as daily_pnl
+                FROM trades
+                WHERE close_time IS NOT NULL
+                  AND close_time >= datetime('now','-30 days')
+                GROUP BY DATE(close_time)
+                ORDER BY day ASC
+                """
+            ).fetchall()
+        labels  = [r["day"] for r in rows]
+        values  = [round(r["daily_pnl"] or 0, 4) for r in rows]
+        # Kumulatif
+        cumulative = []
+        running = 0.0
+        for v in values:
+            running += v
+            cumulative.append(round(running, 4))
+        return jsonify({"ok": True, "labels": labels, "values": values, "cumulative": cumulative})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/scalp_signal_stats")
+def api_scalp_signal_stats():
+    """AI sinyal istatistikleri - ALLOW/WATCH/VETO dagilimi"""
+    try:
+        with get_conn() as conn:
+            # Toplam trade sayisi ve win/loss
+            total_row = conn.execute(
+                "SELECT COUNT(*) as total, "
+                "SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) as wins, "
+                "SUM(CASE WHEN realized_pnl <= 0 THEN 1 ELSE 0 END) as losses "
+                "FROM trades WHERE close_time IS NOT NULL"
+            ).fetchone()
+            # Ghost tracker istatistikleri
+            ghost_row = conn.execute(
+                "SELECT COUNT(*) as total, "
+                "SUM(would_have_won) as ghost_wins "
+                "FROM paper_results WHERE status='completed'"
+            ).fetchone()
+            # Ortalama leverage
+            lev_row = conn.execute(
+                "SELECT AVG(COALESCE(leverage,10)) as avg_lev FROM trades"
+            ).fetchone()
+        total  = total_row["total"] or 0
+        wins   = total_row["wins"] or 0
+        losses = total_row["losses"] or 0
+        win_rate = round((wins / total * 100), 1) if total > 0 else 0.0
+        ghost_total = ghost_row["total"] or 0
+        ghost_wins  = ghost_row["ghost_wins"] or 0
+        avg_lev     = round(lev_row["avg_lev"] or 10, 1)
+        return jsonify({
+            "ok": True,
+            "data": {
+                "total_trades": total,
+                "wins": wins,
+                "losses": losses,
+                "win_rate": win_rate,
+                "ghost_total": ghost_total,
+                "ghost_wins": ghost_wins,
+                "avg_leverage": avg_lev,
+            }
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/reset", methods=["POST"])
 def api_reset():
     """Kasa ve trade gecmisini sifirla. AI learning korunur."""
