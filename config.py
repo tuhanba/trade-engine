@@ -21,17 +21,17 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8404489471:AAEU3uk-i_IWj4E
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "958182551")
 
 # ── Risk Yonetimi ─────────────────────────────────────────────────────────────
-RISK_PCT                = float(os.getenv("RISK_PCT", "1.0"))
-MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "10"))
-DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "5.0"))
-CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "5"))
+RISK_PCT                = float(os.getenv("RISK_PCT", "3.0"))
+MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "5"))
+DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "8.0"))
+CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "3"))
 CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "60"))
 MAX_CORRELATED_TRADES   = int(os.getenv("MAX_CORRELATED_TRADES", "3"))
 
 # ── Kaldirach ─────────────────────────────────────────────────────────────────
-PAPER_LEVERAGE = int(os.getenv("PAPER_LEVERAGE", "10"))
-MAX_LEVERAGE   = int(os.getenv("MAX_LEVERAGE", "20"))
-MIN_LEVERAGE   = int(os.getenv("MIN_LEVERAGE", "5"))
+PAPER_LEVERAGE = int(os.getenv("PAPER_LEVERAGE", "15"))
+MAX_LEVERAGE   = int(os.getenv("MAX_LEVERAGE", "25"))
+MIN_LEVERAGE   = int(os.getenv("MIN_LEVERAGE", "10"))
 
 # ── Sinyal Esikleri ───────────────────────────────────────────────────────────
 DATA_THRESHOLD      = 40.0

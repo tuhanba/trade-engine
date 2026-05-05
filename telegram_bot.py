@@ -30,6 +30,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# urllib3 / requests timeout loglarını sustur (long-poll normal davranışı)
+logging.getLogger("urllib3").setLevel(logging.CRITICAL)
+logging.getLogger("urllib3.connectionpool").setLevel(logging.CRITICAL)
+logging.getLogger("requests").setLevel(logging.CRITICAL)
+
 try:
     from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 except ImportError:
@@ -61,14 +66,19 @@ def _api(method: str, payload: dict = None, is_poll: bool = False) -> dict:
         # Long-poll normal timeout — hata değil, sadece yeni mesaj yok
         if is_poll:
             return {"result": []}
-        logger.warning(f"Telegram API timeout: {method}")
+        logger.debug(f"Telegram API timeout: {method}")
         return {}
-    except requests.exceptions.ConnectionError as e:
-        logger.warning(f"Telegram bağlantı hatası ({method}): {e}")
-        return {}
+    except requests.exceptions.ConnectTimeout:
+        logger.debug(f"Telegram bağlantı timeout: {method}")
+        return {"result": []} if is_poll else {}
+    except requests.exceptions.ConnectionError:
+        # Geçici ağ kesintisi — sessizce atla
+        return {"result": []} if is_poll else {}
     except Exception as e:
-        logger.error(f"Telegram API hatası ({method}): {e}")
-        return {}
+        # Gerçek beklenmedik hata — sadece bunu logla
+        if "timed out" not in str(e).lower() and "timeout" not in str(e).lower():
+            logger.error(f"Telegram API hatası ({method}): {e}")
+        return {"result": []} if is_poll else {}
 
 
 def _send(chat_id, text: str):
