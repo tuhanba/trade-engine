@@ -1,10 +1,11 @@
-# AURVEX.Ai — Sunucu Kurulum Rehberi
+# AURVEX.Ai — Sunucu Kurulum Rehberi v3.0
 
-> **Sistem:** AX Trading Engine v3.0 | 92 Coin | A+ / S Sınıfı Filtre
+> **Sistem:** AX Trading Engine | 10/10 Kalite Filtresi (S / A+ / A)
+> **Önemli:** Repo dizini `/root/trade-engine` (tire ile) olmalıdır.
 
 ---
 
-## ADIM 0 — Sunucu Gereksinimleri
+## Sunucu Gereksinimleri
 
 | Bileşen | Minimum | Önerilen |
 |---|---|---|
@@ -16,15 +17,7 @@
 
 ---
 
-## ADIM 1 — Sunucuya Bağlan
-
-```bash
-ssh root@SUNUCU_IP
-```
-
----
-
-## ADIM 2 — Sistemi Güncelle
+## ADIM 1 — Sistemi Güncelle
 
 ```bash
 apt-get update -y && apt-get upgrade -y
@@ -33,25 +26,22 @@ apt-get install -y git python3 python3-pip python3-venv nginx curl
 
 ---
 
-## ADIM 3 — Repoyu Klonla
+## ADIM 2 — Repoyu Klonla
 
 ```bash
 cd /root
-git clone https://github.com/tuhanba/trade-engine.git trade_engine
-cd /root/trade_engine
+git clone https://github.com/tuhanba/trade-engine.git trade-engine
+cd /root/trade-engine
 ```
+
+> **Not:** Dizin adı `trade-engine` (tire ile) olmalıdır.
 
 ---
 
-## ADIM 4 — .env Dosyasını Oluştur
+## ADIM 3 — .env Dosyasını Oluştur
 
 ```bash
-nano /root/trade_engine/.env
-```
-
-Aşağıdaki içeriği yapıştır ve kendi değerlerinle doldur:
-
-```env
+cat > /root/trade-engine/.env << 'EOF'
 BINANCE_API_KEY=buraya_binance_api_key
 BINANCE_API_SECRET=buraya_binance_api_secret
 TELEGRAM_BOT_TOKEN=buraya_telegram_bot_token
@@ -60,19 +50,16 @@ SECRET_KEY=scalp2026
 PAPER_BALANCE=250.0
 RISK_PCT=1.0
 EXECUTION_MODE=paper
-DB_PATH=/root/trade_engine/trading.db
+DB_PATH=/root/trade-engine/trading.db
+EOF
 ```
-
-> **Not:** `EXECUTION_MODE=paper` ile başla. Gerçek işlem için `live` yap.
-
-Kaydet: `Ctrl+X` → `Y` → `Enter`
 
 ---
 
-## ADIM 5 — Python Sanal Ortam Kur
+## ADIM 4 — Python Sanal Ortam Kur
 
 ```bash
-cd /root/trade_engine
+cd /root/trade-engine
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
@@ -81,63 +68,26 @@ pip install -r requirements.txt
 
 ---
 
-## ADIM 6 — Veritabanını Sıfırla (Temiz Başlangıç)
+## ADIM 5 — Veritabanını Başlat
 
 ```bash
-cd /root/trade_engine
+cd /root/trade-engine
 source venv/bin/activate
-python3 reset_db.py
-```
-
-Çıktı şöyle görünmeli:
-
-```
-==================================================
-AX SİSTEM SIFIRLAMA
-==================================================
-Bu işlem trade ve sinyal verilerini siler.
-AI Brain öğrenme verileri KORUNUR.
-
-Devam etmek istiyor musunuz? (evet/hayır): evet
-
-[RESET] DB: /root/trade_engine/trading.db
-[RESET] Temizleniyor...
-  ✅ trades temizlendi
-  ✅ signal_candidates temizlendi
-  ✅ scalp_signals temizlendi
-  ✅ daily_summary temizlendi
-  ✅ weekly_summary temizlendi
-  ✅ Bakiye $10,000 olarak sıfırlandı
-  ✅ 92 coin parametresi yüklendi
-
-[RESET] ✅ Tamamlandı
+python3 -c "from database import init_db; init_db(); print('DB hazır')"
 ```
 
 ---
 
-## ADIM 7 — Log Klasörü Oluştur
+## ADIM 6 — Log Klasörü Oluştur
 
 ```bash
-mkdir -p /root/trade_engine/logs
+mkdir -p /root/trade-engine/logs
+touch /root/trade-engine/logs/{bot,dashboard,telegram,watchdog,error}.log
 ```
 
 ---
 
-## ADIM 8 — Systemd Servislerini Kur
-
-```bash
-cp /root/trade_engine/aurvex-bot.service       /etc/systemd/system/
-cp /root/trade_engine/aurvex-dashboard.service /etc/systemd/system/
-cp /root/trade_engine/aurvex-watchdog.service  /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable aurvex-dashboard
-systemctl enable aurvex-bot
-systemctl enable aurvex-watchdog
-```
-
----
-
-## ADIM 9 — nginx Kur ve Yapılandır
+## ADIM 7 — nginx Yapılandır
 
 ```bash
 cat > /etc/nginx/sites-available/aurvex << 'EOF'
@@ -158,15 +108,26 @@ EOF
 
 unlink /etc/nginx/sites-enabled/default 2>/dev/null || true
 ln -sf /etc/nginx/sites-available/aurvex /etc/nginx/sites-enabled/aurvex
-nginx -t
-systemctl enable nginx
-systemctl restart nginx
+nginx -t && systemctl enable nginx && systemctl restart nginx
 ufw allow 80/tcp 2>/dev/null || true
 ```
 
 ---
 
-## ADIM 10 — Servisleri Başlat
+## ADIM 8 — Systemd Servislerini Kur
+
+```bash
+cp /root/trade-engine/aurvex-bot.service       /etc/systemd/system/
+cp /root/trade-engine/aurvex-dashboard.service /etc/systemd/system/
+cp /root/trade-engine/aurvex-watchdog.service  /etc/systemd/system/
+cp /root/trade-engine/aurvex-telegram.service  /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable aurvex-bot aurvex-dashboard aurvex-watchdog aurvex-telegram
+```
+
+---
+
+## ADIM 9 — Servisleri Başlat
 
 ```bash
 systemctl start aurvex-dashboard
@@ -174,80 +135,110 @@ sleep 3
 systemctl start aurvex-bot
 sleep 3
 systemctl start aurvex-watchdog
+sleep 2
+systemctl start aurvex-telegram
 ```
 
 ---
 
-## ADIM 11 — Durum Kontrolü
+## ADIM 10 — Durum Kontrolü
 
 ```bash
-systemctl status aurvex-dashboard --no-pager
-systemctl status aurvex-bot --no-pager
-systemctl status nginx --no-pager
-```
-
-Hepsi `active (running)` göstermeli.
-
-API kontrolü:
-
-```bash
-curl -s http://127.0.0.1:5000/api/ax_status | python3 -m json.tool
-```
-
----
-
-## ADIM 12 — Dashboard'a Eriş
-
-Tarayıcıdan aç:
-
-```
-http://SUNUCU_IP
+systemctl status aurvex-bot.service --no-pager
+systemctl status aurvex-dashboard.service --no-pager
+systemctl status aurvex-telegram.service --no-pager
+curl -s http://127.0.0.1:5000/api/health | python3 -m json.tool
 ```
 
 ---
 
 ## Güncelleme (Sonraki Seferler)
 
-Yeni kod geldiğinde tek komutla güncelle:
-
 ```bash
-cd /root/trade_engine
+cd /root/trade-engine
 git pull origin main
-systemctl restart aurvex-bot aurvex-dashboard
+bash deploy.sh
 ```
+
+> `deploy.sh` otomatik olarak: servisleri durdurur → DB yedekler → migration çalıştırır → servisleri başlatır → 7 API endpoint'i test eder.
 
 ---
 
-## Log Takibi
+## Servisler
 
-```bash
-# Bot logları (canlı)
-journalctl -u aurvex-bot -f
-
-# Dashboard logları (canlı)
-journalctl -u aurvex-dashboard -f
-
-# Dosya bazlı loglar
-tail -f /root/trade_engine/logs/bot.log
-tail -f /root/trade_engine/logs/dashboard.log
-```
+| Servis | Dosya | Log |
+|---|---|---|
+| Scalp Bot | `scalp_bot_v3.py` | `logs/bot.log` |
+| Dashboard | `app.py` | `logs/dashboard.log` |
+| Watchdog | `watchdog.py` | `logs/watchdog.log` |
+| Telegram Bot | `telegram_bot.py` | `logs/telegram.log` |
 
 ---
 
-## Servis Komutları
+## Telegram Komutları
+
+| Komut | Açıklama |
+|---|---|
+| `/status` | Bot, dashboard, DB, Binance durumu |
+| `/live` | Aktif açık tradeler |
+| `/signals` | Son scalp sinyalleri |
+| `/watchlist` | B kalite izleme listesi |
+| `/stats` | Winrate, PnL, sinyal istatistikleri |
+| `/last` | Son kapanan trade |
+| `/risk` | Risk ayarları ve kalite filtreleri |
+| `/health` | Servis sağlık kontrolü |
+| `/restart_info` | Servis durumları |
+| `/help` | Tüm komutlar |
+
+---
+
+## API Endpoint'leri
+
+| Endpoint | Açıklama |
+|---|---|
+| `GET /api/health` | Sistem sağlık durumu |
+| `GET /api/stats` | İstatistikler |
+| `GET /api/live` | Aktif tradeler |
+| `GET /api/scalp_signals` | Son sinyaller |
+| `GET /api/watchlist` | B kalite watchlist |
+| `GET /api/last` | Son kapanan trade |
+| `GET /api/risk` | Risk ayarları |
+| `POST /api/reset` | Kasa sıfırla |
+
+---
+
+## Faydalı Komutlar
 
 ```bash
-# Durdur
-systemctl stop aurvex-bot
-systemctl stop aurvex-dashboard
+# Canlı log takibi
+tail -f /root/trade-engine/logs/bot.log
+tail -f /root/trade-engine/logs/telegram.log
 
-# Yeniden başlat
-systemctl restart aurvex-bot
-systemctl restart aurvex-dashboard
+# Servis logları
+journalctl -u aurvex-bot.service -f
+journalctl -u aurvex-telegram.service -f
+
+# Servis yeniden başlatma
+systemctl restart aurvex-bot.service
+systemctl restart aurvex-telegram.service
 
 # Tüm servisleri yeniden başlat
-systemctl restart aurvex-bot aurvex-dashboard aurvex-watchdog nginx
+systemctl restart aurvex-bot aurvex-dashboard aurvex-watchdog aurvex-telegram
+
+# API testi
+curl http://localhost:5000/api/health | python3 -m json.tool
+curl http://localhost:5000/api/risk   | python3 -m json.tool
 ```
+
+---
+
+## Kalite Sistemi (10/10)
+
+| Kalite | Davranış |
+|---|---|
+| S / A+ / A | Trade açılır |
+| B | Watchlist'e alınır, öğrenme sistemine kaydedilir |
+| C / D | Veto edilir, trade açılmaz |
 
 ---
 
@@ -264,30 +255,31 @@ journalctl -u aurvex-dashboard -n 50 --no-pager
 journalctl -u aurvex-bot -n 100 --no-pager | grep -E "ALLOW|VETO|ERROR|sinyal"
 ```
 
-### DB bozuldu / sıfırla
+### Telegram bot çalışmıyor
 ```bash
-cd /root/trade_engine && source venv/bin/activate
-python3 reset_db.py
-systemctl restart aurvex-bot aurvex-dashboard
+systemctl status aurvex-telegram
+tail -50 /root/trade-engine/logs/telegram.log
 ```
 
-### Tüm sistemi sıfırdan kur
+### DB sıfırla
 ```bash
-bash /root/trade_engine/setup_all.sh
+curl -X POST http://localhost:5000/api/reset \
+  -H "Content-Type: application/json" \
+  -d '{"initial_balance": 250, "keep_ai_learning": true}'
 ```
 
 ---
 
-## Sistem Parametreleri (Özet)
+## Sistem Parametreleri
 
 | Parametre | Değer |
 |---|---|
-| Coin Evreni | 92 coin (backtest kanıtlı) |
-| Sinyal Kalitesi | S ve A+ sınıfı |
-| Stop Loss | 1.2x ATR |
-| TP1 / TP2 / TP3 | 1.0R / 2.0R / 3.0R |
-| ADX Eşiği | 28 |
-| Max Açık Trade | 2 |
-| Günlük Max Kayıp | %3 |
-| Circuit Breaker | 3 kayıp → 120 dk duraklama |
-| AI Brain Adaptasyon | Her 30 dakikada bir |
+| Trade Kalitesi | S, A+, A |
+| Watchlist | B |
+| Veto | C, D |
+| Max Açık Trade | 10 |
+| Risk/Trade | %1 |
+| Günlük Max Kayıp | %5 |
+| Circuit Breaker | 3 kayıp → 60 dk duraklama |
+| Trade Eşiği | 70 |
+| Max Sinyal/Gün | 40 |
