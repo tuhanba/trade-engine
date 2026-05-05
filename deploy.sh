@@ -86,6 +86,8 @@ from database import init_db
 init_db()
 print('Migration OK')
 " && ok "DB migration tamamlandı" || err "DB migration hatası!"
+# Accounting schema migration (yeni kolonlar, eski veri korunur)
+"$PYTHON" scripts/migrate_accounting_schema.py && ok "Accounting schema migration tamamlandı" || err "Accounting schema migration hatası!"
 
 # 8. Syntax kontrolü
 echo ""
@@ -95,6 +97,8 @@ echo "--- Syntax kontrolü ---"
 "$PYTHON" -m py_compile database.py && ok "database.py OK"
 "$PYTHON" -m py_compile execution_engine.py && ok "execution_engine.py OK"
 "$PYTHON" -m py_compile telegram_bot.py && ok "telegram_bot.py OK"
+"$PYTHON" -m py_compile core/accounting.py && ok "core/accounting.py OK"
+"$PYTHON" -m py_compile telegram_delivery.py && ok "telegram_delivery.py OK"
 
 # 9. Servis dosyalarını kopyala
 echo ""
