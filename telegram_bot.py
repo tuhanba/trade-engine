@@ -1,19 +1,16 @@
 """
-telegram_bot.py — AURVEX.Ai Telegram Komut Botu v2.0
+telegram_bot.py — AURVEX.Ai Telegram Komut Botu v3.0
 =====================================================
-Komutlar:
-  /status    → bot, dashboard, DB, Binance bağlantısı, son sinyal
-  /live      → aktif trade/sinyal listesi
-  /signals   → son scalp sinyalleri (DB'den)
-  /watchlist → watchlist'e düşen ama açılmayan sinyaller
-  /stats     → günlük/haftalık winrate, PnL, sinyal sayısı
-  /last      → son kapanan trade
-  /risk      → aktif risk ayarları
-  /health    → servis sağlık kontrolü
-  /restart_info → hangi servislerin aktif olduğunu göster
-  /help      → tüm komutları açıkla
+Düzeltme: requests.Session + doğru long-poll timeout
+  - getUpdates: timeout=(10, 35) — 10s connect, 35s read
+  - Telegram long-poll 30s bekler, 35s read timeout yeterli
+  - ReadTimeout sessiz (normal davranış)
+  - urllib3 log seviyeleri CRITICAL (gürültü yok)
 
-Veri kaynağı: database.py + config.py (dashboard ile aynı)
+Komutlar:
+  /status    /live    /signals    /watchlist
+  /stats     /last    /risk       /health
+  /restart_info       /help
 """
 import os
 import time
@@ -21,8 +18,11 @@ import logging
 import threading
 import subprocess
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from datetime import datetime, timezone
 
+# ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [TelegramBot] %(levelname)s %(message)s",
@@ -30,62 +30,87 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# urllib3 / requests timeout loglarını sustur (long-poll normal davranışı)
+# urllib3 / requests kütüphanesi timeout loglarını tamamen sustur
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.CRITICAL)
+logging.getLogger("requests.packages.urllib3").setLevel(logging.CRITICAL)
 logging.getLogger("requests").setLevel(logging.CRITICAL)
 
+# ── Config ───────────────────────────────────────────────────────────────────
 try:
     from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 except ImportError:
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
-POLL_TIMEOUT = 25          # getUpdates long-poll süresi (saniye)
-API_TIMEOUT  = 20          # sendMessage ve diger API cagrilari icin timeout
-POLL_CONNECT_TIMEOUT = 10  # getUpdates baglanti timeout
-_offset = 0
+# Long-poll: Telegram sunucusu POLL_WAIT saniye bekler
+# read timeout POLL_WAIT'den büyük olmalı (+ 5s buffer)
+POLL_WAIT        = 30   # getUpdates timeout parametresi (Telegram'a gönderilir)
+CONNECT_TIMEOUT  = 10   # TCP bağlantı kurma timeout
+READ_TIMEOUT     = 38   # POLL_WAIT + 8s buffer (urllib3 read timeout)
+SEND_TIMEOUT     = 15   # sendMessage ve diğer API çağrıları
+
+_offset  = 0
 _running = False
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TELEGRAM API
-# ─────────────────────────────────────────────────────────────────────────────
+# ── HTTP Session (bağlantı havuzu + retry) ───────────────────────────────────
+def _make_session() -> requests.Session:
+    """Kalıcı bağlantı havuzlu session oluştur."""
+    session = requests.Session()
+    retry = Retry(
+        total=2,
+        backoff_factor=1,
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=["POST", "GET"],
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(
+        max_retries=retry,
+        pool_connections=2,
+        pool_maxsize=4,
+    )
+    session.mount("https://", adapter)
+    session.mount("http://",  adapter)
+    return session
+
+_session = _make_session()
+
+# ── Telegram API ─────────────────────────────────────────────────────────────
 
 def _api(method: str, payload: dict = None, is_poll: bool = False) -> dict:
-    """Telegram API çağrısı. is_poll=True ise long-poll timeout kullanır."""
+    """
+    Telegram Bot API çağrısı.
+    is_poll=True → getUpdates için uzun read timeout kullanır.
+    """
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{method}"
-    if is_poll:
-        # getUpdates: connect_timeout + read_timeout (POLL_TIMEOUT + buffer)
-        timeout = (POLL_CONNECT_TIMEOUT, POLL_TIMEOUT + 5)
-    else:
-        timeout = API_TIMEOUT
+    timeout = (CONNECT_TIMEOUT, READ_TIMEOUT) if is_poll else SEND_TIMEOUT
     try:
-        r = requests.post(url, json=payload or {}, timeout=timeout)
+        r = _session.post(url, json=payload or {}, timeout=timeout)
+        r.raise_for_status()
         return r.json()
     except requests.exceptions.ReadTimeout:
-        # Long-poll normal timeout — hata değil, sadece yeni mesaj yok
-        if is_poll:
-            return {"result": []}
-        logger.debug(f"Telegram API timeout: {method}")
-        return {}
+        # Long-poll normal sona erişi — hata değil
+        return {"ok": True, "result": []}
     except requests.exceptions.ConnectTimeout:
-        logger.debug(f"Telegram bağlantı timeout: {method}")
-        return {"result": []} if is_poll else {}
+        logger.debug(f"Bağlantı timeout: {method}")
+        return {"ok": False, "result": []}
     except requests.exceptions.ConnectionError:
-        # Geçici ağ kesintisi — sessizce atla
-        return {"result": []} if is_poll else {}
+        # Geçici ağ kesintisi
+        return {"ok": False, "result": []}
+    except requests.exceptions.HTTPError as e:
+        logger.warning(f"HTTP hata ({method}): {e}")
+        return {"ok": False, "result": []}
     except Exception as e:
-        # Gerçek beklenmedik hata — sadece bunu logla
-        if "timed out" not in str(e).lower() and "timeout" not in str(e).lower():
-            logger.error(f"Telegram API hatası ({method}): {e}")
-        return {"result": []} if is_poll else {}
+        msg = str(e).lower()
+        if "timeout" not in msg and "timed out" not in msg:
+            logger.error(f"Telegram API beklenmedik hata ({method}): {e}")
+        return {"ok": False, "result": []}
 
 
 def _send(chat_id, text: str):
-    """HTML parse_mode ile mesaj gönder."""
+    """HTML parse_mode ile mesaj gönder, 4000 karakter parçalara böl."""
     if not text:
         return
-    # Telegram mesaj limiti 4096 karakter
     for chunk in [text[i:i+4000] for i in range(0, len(text), 4000)]:
         _api("sendMessage", {
             "chat_id":    chat_id,
@@ -95,18 +120,16 @@ def _send(chat_id, text: str):
         time.sleep(0.3)
 
 
-def _get_updates():
+def _get_updates() -> list:
     global _offset
     result = _api("getUpdates", {
-        "offset":  _offset,
-        "timeout": POLL_TIMEOUT,
+        "offset":          _offset,
+        "timeout":         POLL_WAIT,
         "allowed_updates": ["message"],
     }, is_poll=True)
     return result.get("result", [])
 
-# ─────────────────────────────────────────────────────────────────────────────
-# VERİ YARDIMCILARI (aynı DB kaynağı)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Veri yardımcıları ─────────────────────────────────────────────────────────
 
 def _db():
     from database import get_conn
@@ -151,14 +174,10 @@ def _fmt_trade(t: dict, show_pnl=False) -> str:
     lines.append(f"  Durum:  {t.get('status','?')} | Kalite: {t.get('setup_quality','?')}")
     return "\n".join(lines)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# KOMUT İŞLEYİCİLER
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Komut işleyiciler ─────────────────────────────────────────────────────────
 
 def cmd_status(chat_id):
     try:
-        from config import TELEGRAM_BOT_TOKEN as TBT
-        # DB
         with _db() as conn:
             open_count = conn.execute(
                 "SELECT COUNT(*) FROM trades WHERE status NOT IN "
@@ -172,22 +191,14 @@ def cmd_status(chat_id):
             ).fetchone()
         last_sig_time = last_sig[0] if last_sig else "—"
         balance = float(balance_row[0]) if balance_row else 0.0
-        # Binance
         try:
             r = requests.get("https://fapi.binance.com/fapi/v1/ping", timeout=5)
             binance = "✅ OK" if r.status_code == 200 else f"❌ HTTP {r.status_code}"
         except Exception:
             binance = "❌ Bağlanamadı"
-        # Telegram
         try:
-            r2 = requests.get(f"https://api.telegram.org/bot{TBT}/getMe", timeout=5)
-            tg_status = "✅ OK" if r2.status_code == 200 else f"❌ HTTP {r2.status_code}"
-        except Exception:
-            tg_status = "❌ Bağlanamadı"
-        # Dashboard
-        try:
-            r3 = requests.get("http://localhost:5000/api/health", timeout=5)
-            dash = "✅ OK" if r3.status_code == 200 else f"❌ HTTP {r3.status_code}"
+            r2 = requests.get("http://localhost:5000/api/health", timeout=5)
+            dash = "✅ OK" if r2.status_code == 200 else f"❌ HTTP {r2.status_code}"
         except Exception:
             dash = "❌ Çalışmıyor"
         msg = (
@@ -196,7 +207,6 @@ def cmd_status(chat_id):
             f"📊 Açık Trade:   <b>{open_count}</b>\n"
             f"💰 Bakiye:       <b>{balance:.2f}$</b>\n"
             f"🔗 Binance:      {binance}\n"
-            f"📱 Telegram:     {tg_status}\n"
             f"🖥 Dashboard:    {dash}\n"
             f"⏰ Son Sinyal:   {last_sig_time}\n"
             f"🕐 Zaman:        {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
@@ -283,13 +293,11 @@ def cmd_watchlist(chat_id):
 def cmd_stats(chat_id):
     try:
         with _db() as conn:
-            # Genel
             total_row = conn.execute(
                 "SELECT COUNT(*), SUM(net_pnl), "
                 "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) "
                 "FROM trades WHERE close_time IS NOT NULL"
             ).fetchone()
-            # Bugün
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             today_row = conn.execute(
                 "SELECT COUNT(*), SUM(net_pnl), "
@@ -297,31 +305,29 @@ def cmd_stats(chat_id):
                 "FROM trades WHERE close_time LIKE ? AND close_time IS NOT NULL",
                 (f"{today}%",)
             ).fetchone()
-            # Bakiye
             bal = conn.execute(
                 "SELECT balance FROM paper_account WHERE id=1"
             ).fetchone()
-            # Sinyal sayısı
             sig_row = conn.execute(
                 "SELECT COUNT(*), "
                 "SUM(CASE WHEN decision='ALLOW' THEN 1 ELSE 0 END), "
                 "SUM(CASE WHEN decision='WATCH' THEN 1 ELSE 0 END), "
-                "SUM(CASE WHEN decision='VETO' THEN 1 ELSE 0 END) "
+                "SUM(CASE WHEN decision='VETO'  THEN 1 ELSE 0 END) "
                 "FROM signal_candidates"
             ).fetchone()
-        total = total_row[0] or 0
-        total_pnl = total_row[1] or 0
+        total      = total_row[0] or 0
+        total_pnl  = total_row[1] or 0
         total_wins = total_row[2] or 0
-        win_rate = round(100.0 * total_wins / total, 1) if total else 0
+        win_rate   = round(100.0 * total_wins / total, 1) if total else 0
         today_total = today_row[0] or 0
-        today_pnl = today_row[1] or 0
-        today_wins = today_row[2] or 0
-        today_wr = round(100.0 * today_wins / today_total, 1) if today_total else 0
-        balance = float(bal[0]) if bal else 0.0
-        sig_total = sig_row[0] or 0
-        sig_allow = sig_row[1] or 0
-        sig_watch = sig_row[2] or 0
-        sig_veto  = sig_row[3] or 0
+        today_pnl   = today_row[1] or 0
+        today_wins  = today_row[2] or 0
+        today_wr    = round(100.0 * today_wins / today_total, 1) if today_total else 0
+        balance     = float(bal[0]) if bal else 0.0
+        sig_total   = sig_row[0] or 0
+        sig_allow   = sig_row[1] or 0
+        sig_watch   = sig_row[2] or 0
+        sig_veto    = sig_row[3] or 0
         msg = (
             f"📈 <b>İSTATİSTİKLER</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -384,17 +390,17 @@ def cmd_risk(chat_id):
         msg = (
             f"⚠️ <b>RİSK AYARLARI</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"Risk/Trade:     %{RISK_PCT}\n"
-            f"Max Açık:       {MAX_OPEN_TRADES} (şu an: {open_count})\n"
+            f"Risk/Trade:       %{RISK_PCT}\n"
+            f"Max Açık:         {MAX_OPEN_TRADES} (şu an: {open_count})\n"
             f"Max Günlük Zarar: %{DAILY_MAX_LOSS_PCT}\n"
-            f"Circuit Breaker: {CIRCUIT_BREAKER_LOSSES} zarar / {CIRCUIT_BREAKER_MINUTES} dk\n"
+            f"Circuit Breaker:  {CIRCUIT_BREAKER_LOSSES} zarar / {CIRCUIT_BREAKER_MINUTES} dk\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"Kaldıraç:       {MIN_LEVERAGE}x–{MAX_LEVERAGE}x (varsayılan {PAPER_LEVERAGE}x)\n"
-            f"Eşik:           {TRADE_THRESHOLD}\n"
-            f"Trade Kalite:   {', '.join(TRADE_QUALITIES)}\n"
-            f"Watchlist:      {', '.join(WATCHLIST_QUALITIES)}\n"
-            f"Veto:           {', '.join(REJECT_QUALITIES)}\n"
-            f"Max Sinyal/Gün: {AI_MAX_DAILY_SIGNALS}"
+            f"Kaldıraç:         {MIN_LEVERAGE}x–{MAX_LEVERAGE}x (varsayılan {PAPER_LEVERAGE}x)\n"
+            f"Eşik:             {TRADE_THRESHOLD}\n"
+            f"Trade Kalite:     {', '.join(TRADE_QUALITIES)}\n"
+            f"Watchlist:        {', '.join(WATCHLIST_QUALITIES)}\n"
+            f"Veto:             {', '.join(REJECT_QUALITIES)}\n"
+            f"Max Sinyal/Gün:   {AI_MAX_DAILY_SIGNALS}"
         )
         _send(chat_id, msg)
     except Exception as e:
@@ -409,10 +415,10 @@ def cmd_health(chat_id):
             msg = (
                 f"🏥 <b>SERVİS SAĞLIĞI</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"DB:       {d.get('db_status','?')}\n"
-                f"Binance:  {d.get('binance_status','?')}\n"
-                f"Telegram: {d.get('telegram_status','?')}\n"
-                f"Scanner:  {d.get('scanner_status','?')}\n"
+                f"DB:         {d.get('db_status','?')}\n"
+                f"Binance:    {d.get('binance_status','?')}\n"
+                f"Telegram:   {d.get('telegram_status','?')}\n"
+                f"Scanner:    {d.get('scanner_status','?')}\n"
                 f"Açık Trade: {d.get('open_trade_count','?')}\n"
                 f"Son Sinyal: {d.get('last_signal_time','—')}\n"
                 f"Son Hata:   {d.get('last_error','—') or '—'}"
@@ -425,8 +431,12 @@ def cmd_health(chat_id):
 
 
 def cmd_restart_info(chat_id):
-    """Servislerin durumunu göster, restart komutu verme."""
-    services = ["aurvex-bot.service", "aurvex-dashboard.service", "aurvex-watchdog.service"]
+    services = [
+        "aurvex-bot.service",
+        "aurvex-dashboard.service",
+        "aurvex-watchdog.service",
+        "aurvex-telegram.service",
+    ]
     lines = ["🔧 <b>SERVİS DURUMU</b>\n━━━━━━━━━━━━━━━━━━━━"]
     for svc in services:
         try:
@@ -440,7 +450,7 @@ def cmd_restart_info(chat_id):
         except Exception:
             lines.append(f"❓ {svc}: kontrol edilemedi")
     lines.append("\n<i>Restart için sunucuda:</i>")
-    lines.append("<code>sudo systemctl restart aurvex-bot.service</code>")
+    lines.append("<code>systemctl restart aurvex-bot.service</code>")
     _send(chat_id, "\n".join(lines))
 
 
@@ -461,9 +471,7 @@ def cmd_help(chat_id):
     )
     _send(chat_id, msg)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# KOMUT YÖNLENDIRICI
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Komut yönlendirici ────────────────────────────────────────────────────────
 
 COMMANDS = {
     "/status":       cmd_status,
@@ -485,51 +493,60 @@ def _handle_update(update: dict):
     if not msg:
         return
     chat_id = msg.get("chat", {}).get("id")
-    text = (msg.get("text") or "").strip()
+    text    = (msg.get("text") or "").strip()
     if not text or not chat_id:
         return
-    # Komut al (@ suffix'ini temizle)
     cmd = text.split()[0].split("@")[0].lower()
     handler = COMMANDS.get(cmd)
     if handler:
         logger.info(f"Komut: {cmd} | chat_id={chat_id}")
-        try:
-            threading.Thread(target=handler, args=(chat_id,), daemon=True).start()
-        except Exception as e:
-            logger.error(f"Komut işleme hatası {cmd}: {e}")
+        threading.Thread(target=handler, args=(chat_id,), daemon=True).start()
     else:
         _send(chat_id, f"❓ Bilinmeyen komut: <code>{cmd}</code>\n/help ile komutları görün.")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ANA DÖNGÜ
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Ana döngü ─────────────────────────────────────────────────────────────────
 
 def run():
-    global _offset, _running
+    global _offset, _running, _session
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN tanımlı değil!")
         return
     _running = True
-    logger.info("Telegram komut botu başladı.")
-    # Bot bilgisini logla
+    logger.info("Telegram komut botu başladı (v3.0 — Session + doğru long-poll timeout)")
     me = _api("getMe")
     if me.get("ok"):
-        bot_name = me["result"].get("username", "?")
-        logger.info(f"Bot: @{bot_name}")
+        bot_name = me.get("result", {}).get("username", "?")
+        logger.info(f"Bot: @{bot_name} | POLL_WAIT={POLL_WAIT}s READ_TIMEOUT={READ_TIMEOUT}s")
+    consecutive_errors = 0
     while _running:
         try:
             updates = _get_updates()
+            consecutive_errors = 0
             for upd in updates:
                 _offset = upd["update_id"] + 1
                 _handle_update(upd)
         except Exception as e:
-            logger.error(f"Polling hatası: {e}")
-            time.sleep(5)
+            consecutive_errors += 1
+            logger.error(f"Polling döngü hatası: {e}")
+            # Çok fazla hata varsa session'ı yenile
+            if consecutive_errors >= 5:
+                logger.warning("Session yenileniyor...")
+                try:
+                    _session.close()
+                except Exception:
+                    pass
+                _session = _make_session()
+                consecutive_errors = 0
+            time.sleep(min(5 * consecutive_errors, 30))
 
 
 def stop():
     global _running
     _running = False
+    try:
+        _session.close()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
