@@ -36,7 +36,9 @@ except ImportError:
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
-POLL_TIMEOUT = 30
+POLL_TIMEOUT = 25          # getUpdates long-poll süresi (saniye)
+API_TIMEOUT  = 20          # sendMessage ve diger API cagrilari icin timeout
+POLL_CONNECT_TIMEOUT = 10  # getUpdates baglanti timeout
 _offset = 0
 _running = False
 
@@ -44,13 +46,28 @@ _running = False
 # TELEGRAM API
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _api(method: str, payload: dict = None) -> dict:
+def _api(method: str, payload: dict = None, is_poll: bool = False) -> dict:
+    """Telegram API çağrısı. is_poll=True ise long-poll timeout kullanır."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{method}"
+    if is_poll:
+        # getUpdates: connect_timeout + read_timeout (POLL_TIMEOUT + buffer)
+        timeout = (POLL_CONNECT_TIMEOUT, POLL_TIMEOUT + 5)
+    else:
+        timeout = API_TIMEOUT
     try:
-        r = requests.post(url, json=payload or {}, timeout=15)
+        r = requests.post(url, json=payload or {}, timeout=timeout)
         return r.json()
+    except requests.exceptions.ReadTimeout:
+        # Long-poll normal timeout — hata değil, sadece yeni mesaj yok
+        if is_poll:
+            return {"result": []}
+        logger.warning(f"Telegram API timeout: {method}")
+        return {}
+    except requests.exceptions.ConnectionError as e:
+        logger.warning(f"Telegram bağlantı hatası ({method}): {e}")
+        return {}
     except Exception as e:
-        logger.error(f"Telegram API hatası: {e}")
+        logger.error(f"Telegram API hatası ({method}): {e}")
         return {}
 
 
@@ -74,7 +91,7 @@ def _get_updates():
         "offset":  _offset,
         "timeout": POLL_TIMEOUT,
         "allowed_updates": ["message"],
-    })
+    }, is_poll=True)
     return result.get("result", [])
 
 # ─────────────────────────────────────────────────────────────────────────────
