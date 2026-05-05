@@ -205,3 +205,35 @@ def process_pending_paper_results(client, limit: int = 35) -> int:
         except Exception as e:
             logger.warning(f"[paper_tracker] finalize hata {row.get('symbol')}: {e}")
     return done
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PaperTracker — scalp_bot_v3.py ile uyumlu wrapper sınıfı
+# ─────────────────────────────────────────────────────────────────────────────
+class PaperTracker:
+    """
+    paper_tracker modülündeki fonksiyonları sınıf arayüzüyle saran wrapper.
+    scalp_bot_v3.py: _tracker = PaperTracker(db_path=DB_PATH)
+    """
+    def __init__(self, db_path: str = None, client=None):
+        self.db_path = db_path
+        self.client  = client
+
+    def set_client(self, client):
+        self.client = client
+
+    def process_pending(self, limit: int = 35) -> int:
+        """Horizon süresi dolan WATCH/VETO sinyallerini simüle et ve AI'a öğret."""
+        try:
+            return process_pending_paper_results(self.client, limit=limit)
+        except Exception as e:
+            logger.error(f"[PaperTracker] process_pending hata: {e}")
+            return 0
+
+    def finalize_row(self, row: dict) -> bool:
+        """Tek bir paper_results satırını simüle et."""
+        try:
+            return finalize_paper_row(self.client, row)
+        except Exception as e:
+            logger.error(f"[PaperTracker] finalize_row hata: {e}")
+            return False
