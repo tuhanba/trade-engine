@@ -54,6 +54,11 @@ def init_db():
             open_time TEXT,
             close_time TEXT,
             close_reason TEXT,
+            close_price REAL,
+            result TEXT DEFAULT '',
+            hold_minutes REAL DEFAULT 0,
+            leverage INTEGER DEFAULT 10,
+            risk_usd REAL DEFAULT 0,
             updated_at TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS signal_candidates (
@@ -162,6 +167,11 @@ def _run_migration():
         ("trades", "linked_candidate_uuid", "TEXT"),
         ("trades", "breakeven_enabled", "INTEGER DEFAULT 1"),
         ("trades", "breakeven_sl",     "REAL"),
+        ("trades", "close_price",      "REAL DEFAULT 0"),
+        ("trades", "result",           "TEXT DEFAULT ''"),
+        ("trades", "hold_minutes",     "REAL DEFAULT 0"),
+        ("trades", "leverage",         "INTEGER DEFAULT 10"),
+        ("trades", "risk_usd",         "REAL DEFAULT 0"),
         ("trades", "updated_at",       "TEXT DEFAULT (datetime('now'))"),
         ("signal_candidates", "tp3",               "REAL"),
         ("signal_candidates", "reject_reason",      "TEXT DEFAULT ''"),
@@ -234,17 +244,19 @@ def update_trade(trade_id: int, updates: dict):
         conn.execute(f"UPDATE trades SET {set_clause} WHERE id=?", vals)
 
 def close_trade(trade_id: int, close_price: float, net_pnl: float, reason: str, hold_min: float = 0):
-    # reason: 'sl', 'trail', 'tp3', 'timeout' gibi degerler
-    # status = reason olarak set edilir, dashboard ve get_stats bunu okur
+    """Trade'i kapat. result=WIN/LOSS, close_price, net_pnl, status yazar."""
     final_status = reason if reason in ('sl', 'trail', 'tp3', 'timeout') else 'closed'
+    result = 'WIN' if net_pnl > 0 else 'LOSS'
     with get_conn() as conn:
         conn.execute("""
             UPDATE trades SET
                 status=?, close_reason=?, close_time=?, net_pnl=?,
-                current_price=?, trade_stage='closed', updated_at=?
+                current_price=?, close_price=?, result=?,
+                hold_minutes=?, trade_stage='closed', updated_at=?
             WHERE id=?
         """, (final_status, reason, datetime.now(timezone.utc).isoformat(), net_pnl,
-              close_price, datetime.now(timezone.utc).isoformat(), trade_id))
+              close_price, close_price, result, hold_min,
+              datetime.now(timezone.utc).isoformat(), trade_id))
 
 def update_paper_balance(delta: float):
     with get_conn() as conn:
@@ -381,10 +393,44 @@ def save_weekly_summary(data):
               data['win_rate'], data['net_pnl'], data['avg_r'], data['best_day'], data['worst_day']))
 
 def save_market_snapshot(data):
-    pass
+    """Piyasa anlık görüntüsünü state tablosuna kaydet."""
+    try:
+        with get_conn() as conn:
+            for key, val in (data or {}).items():
+                conn.execute(
+                    "INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)",
+                    (f"snapshot_{key}", str(val))
+                )
+    except Exception as e:
+        logger.warning(f"save_market_snapshot hatasi: {e}")
+
 
 def save_scanned_coin(data):
-    pass
+    """Taranan coin profilini coin_profiles tablosuna güncelle."""
+    try:
+        symbol = data.get('symbol')
+        if not symbol:
+            return
+        with get_conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM coin_profiles WHERE symbol=?", (symbol,)
+            ).fetchone()
+            if existing:
+                conn.execute("""
+                    UPDATE coin_profiles SET
+                        last_scanned=datetime('now'),
+                        score=COALESCE(?, score),
+                        win_rate=COALESCE(?, win_rate)
+                    WHERE symbol=?
+                """, (data.get('score'), data.get('win_rate'), symbol))
+            else:
+                conn.execute("""
+                    INSERT INTO coin_profiles (symbol, score, win_rate, last_scanned)
+                    VALUES (?, ?, ?, datetime('now'))
+                """, (symbol, data.get('score', 0), data.get('win_rate', 0)))
+    except Exception as e:
+        logger.warning(f"save_scanned_coin hatasi: {e}")
+
 
 def _ensure_paper_results_table():
     """paper_results tablosunu idempotent olarak olusturur."""

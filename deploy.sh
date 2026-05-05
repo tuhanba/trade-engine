@@ -1,48 +1,180 @@
 #!/bin/bash
-# AX Scalp Engine - Modernize Safe Deploy Script v2.2
-# ===================================================
+# ============================================================
+# AURVEX.Ai — Sunucu Deploy & Test Script v3.0
+# Kullanım: bash deploy.sh
+# ============================================================
 set -e
 
-echo "🚀 AX Scalp Engine Güvenli Güncelleme Başlatılıyor..."
+REPO_DIR="/root/trade-engine"
+VENV="$REPO_DIR/venv"
+PYTHON="$VENV/bin/python3"
+PIP="$VENV/bin/pip"
 
-PROJECT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "$PROJECT_DIR"
+SERVICES=(
+  "aurvex-bot.service"
+  "aurvex-dashboard.service"
+  "aurvex-watchdog.service"
+  "aurvex-telegram.service"
+)
 
-# 1. Kodları Güncelle
-echo "[1/5] 📥 Kodlar GitHub'dan çekiliyor..."
-git pull origin main
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-# 2. Bağımlılıkları Kontrol Et
-echo "[2/5] 📦 Kütüphaneler kontrol ediliyor..."
-pip install aiohttp motor psycopg2-binary python-binance ta python-dotenv psutil --break-system-packages > /dev/null 2>&1 || true
+ok()   { echo -e "${GREEN}[OK]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+err()  { echo -e "${RED}[ERR]${NC} $1"; }
 
-# 3. Syntax ve Modül Testi (Safety Guard)
-echo "[3/5] 🔍 Güvenlik kontrolü yapılıyor..."
-python3 -c "
-import sys
-try:
-    import scalp_bot_v3
-    from core.async_market_scanner import AsyncMarketScanner
-    from core.advanced_trend_engine import AdvancedTrendEngine
-    from core.advanced_risk_engine import AdvancedRiskEngine
-    print('✅ Kod yapısı mükemmel (10/10).')
-except Exception as e:
-    print(f'❌ KRİTİK HATA TESPİT EDİLDİ: {e}')
-    sys.exit(1)
-"
+echo "============================================================"
+echo " AURVEX.Ai Deploy Script — $(date '+%Y-%m-%d %H:%M:%S')"
+echo "============================================================"
 
-# 4. Servisleri Yeniden Başlat
-echo "[4/5] 🔄 Servisler yeniden başlatılıyor..."
-pkill -f scalp_bot_v3.py || true
-nohup python3 scalp_bot_v3.py > bot_v3.log 2>&1 &
+# 1. Dizine geç
+cd "$REPO_DIR" || { err "Dizin bulunamadı: $REPO_DIR"; exit 1; }
+ok "Dizin: $REPO_DIR"
 
-# 5. Durum Kontrolü
-echo "[5/5] ✨ Durum kontrolü yapılıyor..."
-sleep 3
-if pgrep -f scalp_bot_v3.py > /dev/null; then
-    echo "✅ SİSTEM AKTİF VE ÇALIŞIYOR!"
+# 2. Servisleri durdur
+echo ""
+echo "--- Servisler durduruluyor ---"
+for svc in "${SERVICES[@]}"; do
+  systemctl stop "$svc" 2>/dev/null && ok "Durduruldu: $svc" || warn "Zaten durmuş: $svc"
+done
+# Eski process'leri de öldür
+pkill -f scalp_bot_v3.py 2>/dev/null || true
+pkill -f "app.py" 2>/dev/null || true
+
+# 3. Yedek al
+echo ""
+echo "--- Yedek alınıyor ---"
+BACKUP_DIR="$REPO_DIR/backups/$(date '+%Y%m%d_%H%M%S')"
+mkdir -p "$BACKUP_DIR"
+[ -f "$REPO_DIR/trading.db" ] && cp "$REPO_DIR/trading.db" "$BACKUP_DIR/trading.db" && ok "DB yedeklendi: $BACKUP_DIR/trading.db"
+[ -f "$REPO_DIR/.env" ] && cp "$REPO_DIR/.env" "$BACKUP_DIR/.env" && ok ".env yedeklendi"
+
+# 4. Git pull
+echo ""
+echo "--- Repo güncelleniyor ---"
+git pull origin main && ok "Git pull tamamlandı" || warn "Git pull başarısız (manuel kontrol et)"
+
+# 5. Log dizini
+echo ""
+echo "--- Log dizini hazırlanıyor ---"
+mkdir -p "$REPO_DIR/logs"
+for log in bot.log dashboard.log telegram.log watchdog.log error.log; do
+  touch "$REPO_DIR/logs/$log"
+done
+ok "Log dosyaları hazır"
+
+# 6. Requirements
+echo ""
+echo "--- Requirements kuruluyor ---"
+if [ -f "$REPO_DIR/requirements.txt" ]; then
+  "$PIP" install -r "$REPO_DIR/requirements.txt" -q && ok "Requirements kuruldu"
 else
-    echo "⚠️ UYARI: Bot başlatılamadı! Lütfen bot_v3.log dosyasını kontrol edin."
+  # Temel paketleri kur
+  "$PIP" install flask flask-socketio eventlet python-binance python-dotenv requests ta --quiet 2>/dev/null || true
+  warn "requirements.txt bulunamadı, temel paketler kuruldu"
 fi
 
-echo "=== Güncelleme Tamamlandı ==="
+# 7. DB Migration
+echo ""
+echo "--- DB migration çalıştırılıyor ---"
+"$PYTHON" -c "
+import sys; sys.path.insert(0, '$REPO_DIR')
+from database import init_db
+init_db()
+print('Migration OK')
+" && ok "DB migration tamamlandı" || err "DB migration hatası!"
+
+# 8. Syntax kontrolü
+echo ""
+echo "--- Syntax kontrolü ---"
+"$PYTHON" -m py_compile scalp_bot_v3.py && ok "scalp_bot_v3.py OK"
+"$PYTHON" -m py_compile app.py && ok "app.py OK"
+"$PYTHON" -m py_compile database.py && ok "database.py OK"
+"$PYTHON" -m py_compile execution_engine.py && ok "execution_engine.py OK"
+"$PYTHON" -m py_compile telegram_bot.py && ok "telegram_bot.py OK"
+
+# 9. Servis dosyalarını kopyala
+echo ""
+echo "--- Servis dosyaları yükleniyor ---"
+for svc in "${SERVICES[@]}"; do
+  if [ -f "$REPO_DIR/$svc" ]; then
+    cp "$REPO_DIR/$svc" "/etc/systemd/system/$svc"
+    ok "Kopyalandı: $svc"
+  else
+    warn "Servis dosyası yok: $svc"
+  fi
+done
+systemctl daemon-reload && ok "systemd reload tamamlandı"
+
+# 10. Servisleri başlat
+echo ""
+echo "--- Servisler başlatılıyor ---"
+for svc in "${SERVICES[@]}"; do
+  systemctl enable "$svc" 2>/dev/null || true
+  systemctl start "$svc" && ok "Başlatıldı: $svc" || err "Başlatılamadı: $svc"
+  sleep 2
+done
+
+# 11. Sağlık kontrolü
+echo ""
+echo "--- Sağlık kontrolü (15sn bekleniyor) ---"
+sleep 15
+
+for svc in "${SERVICES[@]}"; do
+  status=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
+  if [ "$status" = "active" ]; then
+    ok "$svc: active"
+  else
+    err "$svc: $status"
+    echo "  → journalctl -u $svc -n 20"
+  fi
+done
+
+# 12. API testleri
+echo ""
+echo "--- API endpoint testleri ---"
+BASE="http://localhost:5000"
+
+test_endpoint() {
+  local url="$1"
+  local label="$2"
+  result=$(curl -s -o /dev/null -w "%{http_code}" "$url" --max-time 8 2>/dev/null)
+  if [ "$result" = "200" ]; then
+    ok "$label → HTTP $result"
+  else
+    err "$label → HTTP $result"
+  fi
+}
+
+sleep 5
+test_endpoint "$BASE/api/health"        "/api/health"
+test_endpoint "$BASE/api/stats"         "/api/stats"
+test_endpoint "$BASE/api/live"          "/api/live"
+test_endpoint "$BASE/api/scalp_signals" "/api/scalp_signals"
+test_endpoint "$BASE/api/watchlist"     "/api/watchlist"
+test_endpoint "$BASE/api/last"          "/api/last"
+test_endpoint "$BASE/api/risk"          "/api/risk"
+
+# 13. Log kontrol
+echo ""
+echo "--- Son log satırları ---"
+for log in bot.log dashboard.log telegram.log; do
+  echo ""
+  echo ">>> $log (son 5 satır):"
+  tail -5 "$REPO_DIR/logs/$log" 2>/dev/null || echo "(boş)"
+done
+
+echo ""
+echo "============================================================"
+echo " Deploy tamamlandı — $(date '+%Y-%m-%d %H:%M:%S')"
+echo "============================================================"
+echo ""
+echo "Faydalı komutlar:"
+echo "  journalctl -u aurvex-bot.service -f"
+echo "  journalctl -u aurvex-dashboard.service -f"
+echo "  tail -f $REPO_DIR/logs/bot.log"
+echo "  tail -f $REPO_DIR/logs/dashboard.log"
+echo "  curl http://localhost:5000/api/health | python3 -m json.tool"

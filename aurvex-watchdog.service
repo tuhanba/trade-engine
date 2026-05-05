@@ -7,11 +7,13 @@ Wants=aurvex-bot.service aurvex-dashboard.service
 Type=simple
 User=root
 WorkingDirectory=/root/trade-engine
+EnvironmentFile=-/root/trade-engine/.env
 ExecStart=/root/trade-engine/venv/bin/python3 /root/trade-engine/watchdog.py
 Restart=always
 RestartSec=30
-StandardOutput=journal
-StandardError=journal
+StandardOutput=append:/root/trade-engine/logs/watchdog.log
+StandardError=append:/root/trade-engine/logs/watchdog.log
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target

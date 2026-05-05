@@ -391,6 +391,106 @@ def api_scalp_signal_stats():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/scalp_signals")
+def api_scalp_signals():
+    """Son scalp sinyalleri (signal_candidates tablosu)."""
+    try:
+        limit = int(request.args.get("limit", 50))
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT id, symbol, direction, entry, sl, tp1, tp2, tp3,
+                          score, final_score, setup_quality, decision,
+                          reject_reason, ai_veto_reason, trend_score,
+                          trigger_score, risk_score, created_at
+                   FROM signal_candidates
+                   ORDER BY id DESC LIMIT ?""",
+                (limit,)
+            ).fetchall()
+        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/watchlist")
+def api_watchlist():
+    """B kalite watchlist sinyalleri."""
+    try:
+        limit = int(request.args.get("limit", 30))
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT id, symbol, direction, entry, sl, tp1, tp2, tp3,
+                          score, final_score, setup_quality, decision,
+                          reject_reason, created_at
+                   FROM signal_candidates
+                   WHERE decision='WATCH'
+                   ORDER BY id DESC LIMIT ?""",
+                (limit,)
+            ).fetchall()
+        return jsonify({"ok": True, "data": [dict(r) for r in rows], "count": len(rows)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/last")
+def api_last():
+    """Son kapanan trade."""
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                """SELECT * FROM trades
+                   WHERE close_time IS NOT NULL
+                   ORDER BY close_time DESC LIMIT 1"""
+            ).fetchone()
+        if not row:
+            return jsonify({"ok": True, "data": None, "message": "Kapanan trade yok"})
+        t = dict(row)
+        t["result"] = t.get("result") or ("WIN" if (t.get("net_pnl") or 0) > 0 else "LOSS")
+        return jsonify({"ok": True, "data": t})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/risk")
+def api_risk():
+    """Aktif risk ayarları."""
+    try:
+        from config import (
+            RISK_PCT, MAX_OPEN_TRADES, DAILY_MAX_LOSS_PCT,
+            CIRCUIT_BREAKER_LOSSES, CIRCUIT_BREAKER_MINUTES,
+            PAPER_LEVERAGE, MAX_LEVERAGE, MIN_LEVERAGE,
+            TRADE_THRESHOLD, TRADE_QUALITIES, WATCHLIST_QUALITIES,
+            REJECT_QUALITIES, AI_MAX_DAILY_SIGNALS
+        )
+        with get_conn() as conn:
+            open_count = conn.execute(
+                "SELECT COUNT(*) FROM trades WHERE status NOT IN "
+                "('closed','closed_win','closed_loss','sl','trail','tp3','timeout')"
+            ).fetchone()[0]
+            balance_row = conn.execute(
+                "SELECT balance FROM paper_account WHERE id=1"
+            ).fetchone()
+            balance = float(balance_row[0]) if balance_row else 0.0
+        return jsonify({"ok": True, "data": {
+            "risk_pct":               RISK_PCT,
+            "max_open_trades":        MAX_OPEN_TRADES,
+            "open_trades":            open_count,
+            "daily_max_loss_pct":     DAILY_MAX_LOSS_PCT,
+            "circuit_breaker_losses": CIRCUIT_BREAKER_LOSSES,
+            "circuit_breaker_minutes": CIRCUIT_BREAKER_MINUTES,
+            "paper_leverage":         PAPER_LEVERAGE,
+            "max_leverage":           MAX_LEVERAGE,
+            "min_leverage":           MIN_LEVERAGE,
+            "trade_threshold":        TRADE_THRESHOLD,
+            "trade_qualities":        TRADE_QUALITIES,
+            "watchlist_qualities":    WATCHLIST_QUALITIES,
+            "reject_qualities":       REJECT_QUALITIES,
+            "max_daily_signals":      AI_MAX_DAILY_SIGNALS,
+            "balance":                round(balance, 2),
+        }})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/reset", methods=["POST"])
 def api_reset():
     """Kasa ve trade gecmisini sifirla. AI learning korunur."""

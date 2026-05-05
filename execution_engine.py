@@ -526,9 +526,9 @@ def _finalize(t: dict, close_price: float, qty: float,
     # WIN/LOSS belirle (net PnL bazli)
     result = "WIN" if net_pnl > 0 else "LOSS"
 
-    # DB kapat
+    # DB kapat (result=WIN/LOSS, hold_minutes de yaziliyor)
     try:
-        close_trade(trade_id, close_price, net_pnl, reason)
+        close_trade(trade_id, close_price, net_pnl, reason, hold_min=hold_minutes)
     except Exception as e:
         logger.error(f"[Finalize] close_trade hatasi: {e}")
 
@@ -538,10 +538,9 @@ def _finalize(t: dict, close_price: float, qty: float,
     except Exception as e:
         logger.error(f"[Finalize] update_paper_balance hatasi: {e}")
 
-    # Postmortem kaydet
+    # Postmortem kaydet (dogru imza: trade_id, data dict)
     try:
-        save_postmortem({
-            "trade_id":     trade_id,
+        save_postmortem(trade_id, {
             "symbol":       symbol,
             "result":       result,
             "pnl":          net_pnl,

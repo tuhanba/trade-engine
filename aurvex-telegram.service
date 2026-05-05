@@ -1,0 +1,19 @@
+[Unit]
+Description=AURVEX.Ai Telegram Komut Botu
+After=network.target aurvex-bot.service aurvex-dashboard.service
+Wants=aurvex-bot.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/trade-engine
+EnvironmentFile=-/root/trade-engine/.env
+ExecStart=/root/trade-engine/venv/bin/python3 /root/trade-engine/telegram_bot.py
+Restart=always
+RestartSec=15
+StandardOutput=append:/root/trade-engine/logs/telegram.log
+StandardError=append:/root/trade-engine/logs/telegram.log
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
