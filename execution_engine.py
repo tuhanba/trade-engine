@@ -1,598 +1,581 @@
 """
-execution_engine.py — AX Paper Execution Motoru v4.3
+execution_engine.py — AX Execution Engine v5.0 FINAL
 =====================================================
-Trade State:
-  open -> tp1_hit -> runner -> closed_win/closed_loss/closed_trail
-Sorumluluklar:
-  - Paper trade ac (qty hesapla, TP1/TP2/runner bol)
-  - Her mum/tick'te SL ve TP takip et
-  - Trailing stop uygula (runner fazinda)
-  - Trade kapat (DB guncelle, bakiye guncelle)
-  - Binance fiyati: API key gerektirmeyen REST endpoint kullanir
-  - PnL: unrealized_pnl DB'ye yazilir, dashboard okur
+- Crash-proof: her fonksiyon try/except ile sarılı
+- Kaldiraca gore TP/SL: AI decide_tp_sl_ratios kullanir
+- qty=0 guard: qty hesaplanamazsa trade acilmaz
+- Timeout: 12 saat sonra zorla kapanir
+- Monitor: 15 sn'de bir tum acik trade'leri kontrol eder
+- Ogrenme: kapanista AI'a WIN/LOSS ogretilir
 """
-import math
+import time
 import logging
-import requests as _req
-from datetime import datetime, timezone
+import requests
+from datetime import datetime, timezone, timedelta
 from config import (
-    RISK_PCT, TP1_CLOSE_PCT, TP2_CLOSE_PCT, RUNNER_CLOSE_PCT,
-    TRAIL_ATR_MULT, EXECUTION_MODE,
-    BREAKEVEN_ENABLED, BREAKEVEN_OFFSET_PCT, PAPER_LEVERAGE,
+    RISK_PCT, PAPER_LEVERAGE, MAX_LEVERAGE, MIN_LEVERAGE,
+    TP1_CLOSE_PCT, TP2_CLOSE_PCT, RUNNER_CLOSE_PCT,
+    TRAIL_ATR_MULT, BREAKEVEN_ENABLED, BREAKEVEN_OFFSET_PCT,
+    TRADE_TIMEOUT_HOURS, ENABLE_LIVE_TRADING, DB_PATH
 )
 from database import (
-    save_trade, update_trade, close_trade as db_close_trade,
-    get_open_trades, update_paper_balance, get_paper_balance, save_postmortem,
+    save_trade, update_trade, close_trade,
+    update_paper_balance, save_postmortem,
+    get_open_trades, get_paper_balance
 )
+import telegram_delivery as tg
+
 logger = logging.getLogger(__name__)
 
-# Binance Futures REST base URL (API key gerektirmez)
-_FAPI_BASE = "https://fapi.binance.com"
-
 # ─────────────────────────────────────────────────────────────────────────────
-# YARDIMCI
+# YARDIMCI FONKSIYONLAR
 # ─────────────────────────────────────────────────────────────────────────────
-def _floor(val, step):
-    if step <= 0:
-        return val
-    prec = len(str(step).rstrip("0").split(".")[-1]) if "." in str(step) else 0
-    return round(math.floor(val / step) * step, prec)
 
-
-def _get_filters(client, symbol):
-    """LOT_SIZE ve PRICE_FILTER filtrelerini Binance REST API ile al."""
+def _get_price(symbol: str, client=None) -> float:
+    """Binance Futures REST ile fiyat cek (API key gerektirmez)."""
     try:
-        resp = _req.get(f"{_FAPI_BASE}/fapi/v1/exchangeInfo", timeout=10)
-        if resp.status_code == 200:
-            for s in resp.json().get("symbols", []):
-                if s["symbol"] == symbol:
-                    filters = {f["filterType"]: f for f in s["filters"]}
-                    lot = filters.get("LOT_SIZE", {})
-                    price_f = filters.get("PRICE_FILTER", {})
-                    min_notional_f = filters.get("MIN_NOTIONAL", {})
-                    return {
-                        "step_size":    float(lot.get("stepSize", "0.001")),
-                        "min_qty":      float(lot.get("minQty",   "0.001")),
-                        "tick_size":    float(price_f.get("tickSize", "0.01")),
-                        "min_notional": float(min_notional_f.get("notional", "5.0")),
-                    }
-    except Exception as e:
-        logger.debug(f"[Execution] REST exchangeInfo hatasi {symbol}: {e}")
-    # Fallback: client
-    try:
-        info = client.futures_exchange_info()
-        for s in info["symbols"]:
-            if s["symbol"] == symbol:
-                filters = {f["filterType"]: f for f in s["filters"]}
-                lot = filters.get("LOT_SIZE", {})
-                price_f = filters.get("PRICE_FILTER", {})
-                return {
-                    "step_size":    float(lot.get("stepSize", "0.001")),
-                    "min_qty":      float(lot.get("minQty",   "0.001")),
-                    "tick_size":    float(price_f.get("tickSize", "0.01")),
-                    "min_notional": 5.0,
-                }
-    except Exception as e:
-        logger.warning(f"[Execution] Filtre alinamadi {symbol}: {e}")
-    return {"step_size": 0.001, "min_qty": 0.001, "tick_size": 0.01, "min_notional": 5.0}
-
-
-def _calc_qty(balance, entry, sl, risk_pct, step_size, min_qty, min_notional, leverage=1):
-    """Kaldirach paper trade miktar hesabi.
-    Ornek: 250$ bakiye, %1 risk, 10x kaldirach:
-      risk_usd = 2.5$, pozisyon = 25$, qty = 25 / entry
-    """
-    risk_usd = balance * risk_pct / 100
-    sl_dist  = abs(entry - sl)
-    if sl_dist <= 0:
-        return 0.0
-    # Kaldirach ile qty: risk_usd * leverage / sl_dist
-    qty = (risk_usd * leverage) / sl_dist
-    qty = _floor(qty, step_size)
-    qty = max(qty, min_qty)
-    if qty * entry < min_notional:
-        qty = _floor(min_notional / entry * 1.01 * leverage, step_size)
-    return round(qty, 8)
-
-
-def _calc_pnl(direction, entry, price, qty):
-    """PnL hesabi. Kaldirach zaten qty icinde yansitilmistir.
-    qty = risk_usd * leverage / sl_dist oldugu icin leverage burada tekrar uygulanmaz.
-    """
-    if direction == "LONG":
-        return round((price - entry) * qty, 6)
-    else:
-        return round((entry - price) * qty, 6)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# BINANCE FIYAT — API KEY GEREKTIRMEZ
-# ─────────────────────────────────────────────────────────────────────────────
-def _get_price(client, symbol):
-    """
-    Binance Futures fiyatini ceker.
-    1. REST API (API key gerektirmez)
-    2. Fallback: python-binance client
-    3. Son fallback: spot ticker
-    """
-    try:
-        resp = _req.get(
-            f"{_FAPI_BASE}/fapi/v1/ticker/price",
-            params={"symbol": symbol},
-            timeout=5
+        r = requests.get(
+            "https://fapi.binance.com/fapi/v1/ticker/price",
+            params={"symbol": symbol}, timeout=5
         )
-        if resp.status_code == 200:
-            price = float(resp.json().get("price", 0))
-            if price > 0:
-                return price
-    except Exception as e:
-        logger.debug(f"[Execution] REST fiyat hatasi {symbol}: {e}")
-
-    try:
-        ticker = client.futures_ticker(symbol=symbol)
-        return float(ticker["lastPrice"])
-    except Exception as e:
-        logger.debug(f"[Execution] Client futures_ticker hatasi {symbol}: {e}")
-
-    try:
-        resp = _req.get(
-            "https://api.binance.com/api/v3/ticker/price",
-            params={"symbol": symbol},
-            timeout=5
-        )
-        if resp.status_code == 200:
-            return float(resp.json().get("price", 0))
+        if r.status_code == 200:
+            p = float(r.json().get("price", 0))
+            if p > 0:
+                return p
     except Exception:
         pass
-
+    # Fallback: python-binance client
+    if client:
+        try:
+            t = client.futures_ticker(symbol=symbol)
+            return float(t.get("lastPrice", 0))
+        except Exception:
+            pass
     return 0.0
 
 
-def _get_atr(client, symbol, interval="5m", period=14):
-    """Trailing stop icin anlik ATR. REST API ile ceker."""
-    df = None
+def _get_atr(symbol: str, client=None, period: int = 14) -> float:
+    """Binance Futures 15m kline'larindan ATR hesapla."""
     try:
-        import pandas as pd
-        resp = _req.get(
-            f"{_FAPI_BASE}/fapi/v1/klines",
-            params={"symbol": symbol, "interval": interval, "limit": period + 5},
+        r = requests.get(
+            "https://fapi.binance.com/fapi/v1/klines",
+            params={"symbol": symbol, "interval": "15m", "limit": period + 5},
+            timeout=8
+        )
+        if r.status_code != 200:
+            return 0.0
+        klines = r.json()
+        if len(klines) < period:
+            return 0.0
+        trs = []
+        for i in range(1, len(klines)):
+            h = float(klines[i][2])
+            l = float(klines[i][3])
+            pc = float(klines[i - 1][4])
+            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        return sum(trs[-period:]) / period
+    except Exception:
+        return 0.0
+
+
+def _floor(value: float, step: float) -> float:
+    """Lot buyuklugunu adima gore asagi yuvarla."""
+    if step <= 0:
+        return value
+    import math
+    return math.floor(value / step) * step
+
+
+def _get_filters(symbol: str, client=None) -> dict:
+    """Binance Futures exchange info'dan lot/price filtrelerini al."""
+    defaults = {"lot_step": 0.001, "min_qty": 0.001, "price_tick": 0.0001}
+    try:
+        r = requests.get(
+            "https://fapi.binance.com/fapi/v1/exchangeInfo",
             timeout=10
         )
-        if resp.status_code == 200:
-            klines = resp.json()
-        else:
-            klines = client.futures_klines(symbol=symbol, interval=interval, limit=period + 5)
-
-        df = pd.DataFrame(klines, columns=[
-            "time", "open", "high", "low", "close", "volume",
-            "ct", "qav", "nt", "tbbav", "tbqav", "ignore"
-        ])
-        for col in ("high", "low", "close"):
-            df[col] = df[col].astype(float)
-        tr = pd.concat([
-            df["high"] - df["low"],
-            (df["high"] - df["close"].shift()).abs(),
-            (df["low"]  - df["close"].shift()).abs(),
-        ], axis=1).max(axis=1)
-        atr_val = float(tr.rolling(period).mean().iloc[-1])
-        return atr_val if atr_val > 0 else float(df["close"].iloc[-1]) * 0.005
-    except Exception as e:
-        logger.debug(f"[Execution] ATR hesaplama hatasi {symbol}: {e}")
-        if df is not None:
-            try:
-                return float(df["close"].iloc[-1]) * 0.005
-            except Exception:
-                pass
-        return 0.01
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TRADE AC
-# ─────────────────────────────────────────────────────────────────────────────
-def open_trade(client, signal, ax_decision, risk_pct=None):
-    """
-    Paper trade ac.
-    Returns:
-        trade_id (int) ya da None (basarisiz)
-    """
-    symbol    = signal["symbol"]
-    direction = signal["direction"]
-    entry     = signal["entry"]
-    sl        = signal["sl"]
-    tp1       = signal["tp1"]
-    tp2       = signal["tp2"]
-    runner    = signal.get("runner_target", signal.get("tp3", tp2))
-    if not direction or not entry or not sl:
-        return None
-    # MAX_OPEN_TRADES kontrolu
-    try:
-        from config import MAX_OPEN_TRADES
-        open_trades = get_open_trades()
-        if len(open_trades) >= MAX_OPEN_TRADES:
-            logger.info(f"[Execution] MAX_OPEN_TRADES={MAX_OPEN_TRADES} doldu, {symbol} atlandi")
-            return None
+        if r.status_code != 200:
+            return defaults
+        for s in r.json().get("symbols", []):
+            if s["symbol"] == symbol:
+                lot_step = 0.001
+                min_qty  = 0.001
+                price_tick = 0.0001
+                for f in s.get("filters", []):
+                    if f["filterType"] == "LOT_SIZE":
+                        lot_step = float(f.get("stepSize", 0.001))
+                        min_qty  = float(f.get("minQty",  0.001))
+                    elif f["filterType"] == "PRICE_FILTER":
+                        price_tick = float(f.get("tickSize", 0.0001))
+                return {"lot_step": lot_step, "min_qty": min_qty, "price_tick": price_tick}
     except Exception:
         pass
-    balance  = get_paper_balance()
-    rp       = risk_pct or RISK_PCT
-    filters  = _get_filters(client, symbol)
-    # Signal'dan gelen dinamik kaldirach (AI Brain tarafindan belirlenir)
-    # Yoksa config.py PAPER_LEVERAGE default degeri kullanilir
-    lev = signal.get("leverage", PAPER_LEVERAGE)
-    qty = _calc_qty(balance, entry, sl, rp,
-                    filters["step_size"], filters["min_qty"], filters["min_notional"],
-                    leverage=lev)
-    if qty <= 0:
-        logger.warning(f"[Execution] {symbol} qty=0 hesaplandi, trade acilmiyor. "
-                       f"balance={balance:.2f} entry={entry} sl={sl} lev={lev}")
-        return None
-    if qty <= 0:
-        logger.warning(f"[Execution] {symbol} qty hesaplanamadi")
-        return None
-    qty_tp1    = round(qty * TP1_CLOSE_PCT / 100, 8)
-    qty_tp2    = round(qty * TP2_CLOSE_PCT / 100, 8)
-    qty_runner = round(qty - qty_tp1 - qty_tp2, 8)
-    trade = {
-        "symbol":               symbol,
-        "direction":            direction,
-        "status":               "open",
-        "environment":          EXECUTION_MODE,
-        "ax_mode":              "execute",
-        "entry":                entry,
-        "sl":                   sl,
-        "tp1":                  tp1,
-        "tp2":                  tp2,
-        "tp3":                  signal.get("tp3", runner),
-        "runner_target":        runner,
-        "trail_stop":           None,
-        "qty":                  qty,
-        "qty_tp1":              qty_tp1,
-        "qty_tp2":              qty_tp2,
-        "qty_runner":           qty_runner,
-        "trade_stage":          "open",
-        "active_target":        "tp1",
-        "tp1_hit":              0,
-        "tp2_hit":              0,
-        "confidence":           signal.get("confidence", 0.8),
-        "score":                ax_decision.get("final_score", signal.get("score", 0)),
-        "setup_quality":        signal.get("setup_quality", "B"),
-        "risk_percent":         rp,
-        "leverage":             lev,
-        "position_size":        qty * entry / lev,  # Gercek teminat
-        "notional_size":        qty * entry,         # Kaldirach dahil pozisyon
-        "linked_candidate_id":  None,
-        "linked_candidate_uuid": signal.get("candidate_id"),
-        "open_time":            datetime.now(timezone.utc).isoformat(),
+    return defaults
+
+
+def _calc_qty(balance: float, risk_pct: float, entry: float,
+              sl: float, leverage: int) -> float:
+    """
+    Pozisyon buyuklugunu hesapla.
+    risk_usd = bakiye * risk_pct / 100
+    sl_dist  = abs(entry - sl)
+    qty      = (risk_usd * leverage) / (sl_dist * leverage)
+             = risk_usd / sl_dist   (kaldirach sadece pozisyon buyuklugunu arttirir)
+    Gercekte: teminat = risk_usd, pozisyon = risk_usd * leverage / entry
+    """
+    if entry <= 0 or sl <= 0:
+        return 0.0
+    sl_dist = abs(entry - sl)
+    if sl_dist < entry * 0.0005:   # SL cok yakin (<0.05%) → gecersiz
+        return 0.0
+    risk_usd = balance * (risk_pct / 100.0)
+    # qty: kac adet coin alinir
+    # Teminat = risk_usd, pozisyon = risk_usd * leverage
+    # qty = pozisyon / entry
+    qty_raw = (risk_usd * leverage) / entry
+    return qty_raw
+
+
+def _calc_pnl(entry: float, current: float, qty: float,
+              direction: str, leverage: int = 1) -> float:
+    """Unrealized/Realized PnL hesapla (kaldiraç dahil)."""
+    if not (entry and current and qty):
+        return 0.0
+    lev = max(1, int(leverage or 1))
+    if direction == "LONG":
+        raw = (current - entry) * qty
+    elif direction == "SHORT":
+        raw = (entry - current) * qty
+    else:
+        return 0.0
+    return round(raw * lev, 4)
+
+
+def _get_leverage_tp_sl(leverage: int, entry: float, sl_raw: float,
+                        direction: str) -> dict:
+    """
+    Kaldiraca gore TP/SL degerlerini hesapla.
+    Matris: config.py'deki LEVERAGE_TP_SL_MATRIX
+    """
+    # Matris (inline - config import hatasi olmassin)
+    if leverage >= 18:
+        sl_mult, tp1_pct, tp2_pct, tp3_pct = 0.65, 1.0, 2.0, 3.5
+    elif leverage >= 14:
+        sl_mult, tp1_pct, tp2_pct, tp3_pct = 0.75, 1.5, 3.0, 5.0
+    elif leverage >= 10:
+        sl_mult, tp1_pct, tp2_pct, tp3_pct = 0.90, 2.5, 4.5, 7.5
+    elif leverage >= 7:
+        sl_mult, tp1_pct, tp2_pct, tp3_pct = 1.10, 3.5, 6.0, 10.0
+    else:
+        sl_mult, tp1_pct, tp2_pct, tp3_pct = 1.30, 4.5, 7.5, 12.0
+
+    sl_dist = abs(entry - sl_raw)
+    new_sl_dist = sl_dist * sl_mult
+
+    if direction == "LONG":
+        sl  = entry - new_sl_dist
+        tp1 = entry * (1 + tp1_pct / 100)
+        tp2 = entry * (1 + tp2_pct / 100)
+        tp3 = entry * (1 + tp3_pct / 100)
+    else:
+        sl  = entry + new_sl_dist
+        tp1 = entry * (1 - tp1_pct / 100)
+        tp2 = entry * (1 - tp2_pct / 100)
+        tp3 = entry * (1 - tp3_pct / 100)
+
+    rr = (tp1_pct / (new_sl_dist / entry * 100)) if entry > 0 else 2.0
+
+    return {
+        "sl": round(sl, 8), "tp1": round(tp1, 8),
+        "tp2": round(tp2, 8), "tp3": round(tp3, 8),
+        "sl_mult": sl_mult, "tp1_pct": tp1_pct,
+        "tp2_pct": tp2_pct, "tp3_pct": tp3_pct,
+        "rr": round(rr, 2)
     }
-    trade_id = save_trade(trade)
-    logger.info(
-        f"[Execution] ACILDI #{trade_id} {symbol} {direction} "
-        f"entry={entry:.6f} sl={sl:.6f} tp1={tp1:.6f} tp2={tp2:.6f} qty={qty}"
-    )
-    try:
-        from live_tracker import record_open
-        record_open(trade_id, symbol, direction, entry)
-    except Exception as e:
-        logger.debug(f"live_tracker.record_open hatasi: {e}")
-    try:
-        from n8n_bridge import notify_trade_open
-        notify_trade_open({**trade, "id": trade_id})
-    except Exception as e:
-        logger.debug(f"n8n notify_trade_open hatasi: {e}")
-    return trade_id
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TRADE MONITORU
+# TRADE ACMA
 # ─────────────────────────────────────────────────────────────────────────────
-def monitor_open_trades(client):
-    """Tum acik tradeleri kontrol et. Kapanan trade ID'lerini doner."""
-    from datetime import datetime, timezone, timedelta
-    trades = get_open_trades()
-    closed = []
-    for t in trades:
-        try:
-            # TIMEOUT kontrolu: TRADE_TIMEOUT_HOURS saati gecen trade'leri kapat
-            try:
-                from config import TRADE_TIMEOUT_HOURS
-                timeout_h = TRADE_TIMEOUT_HOURS
-            except ImportError:
-                timeout_h = 24
-            open_time_str = t.get("open_time")
-            if open_time_str and timeout_h > 0:
-                try:
-                    open_dt = datetime.fromisoformat(open_time_str.replace("Z", "+00:00"))
-                    if open_dt.tzinfo is None:
-                        open_dt = open_dt.replace(tzinfo=timezone.utc)
-                    age_h = (datetime.now(timezone.utc) - open_dt).total_seconds() / 3600
-                    if age_h >= timeout_h:
-                        price = _get_price(client, t["symbol"])
-                        if price:
-                            qty_all = t.get("qty", 0)
-                            realized = t.get("realized_pnl") or 0
-                            pnl_now = _calc_pnl(t["direction"], t["entry"], price, qty_all)
-                            net_pnl = realized + pnl_now
-                            _finalize(t["id"], price, net_pnl, "timeout", t)
-                            closed.append(t["id"])
-                            logger.info(f"[Monitor] TIMEOUT #{t['id']} {t['symbol']} {age_h:.1f}h pnl={net_pnl:+.3f}$")
-                            continue
-                except Exception as _te:
-                    logger.debug(f"[Monitor] Timeout kontrol hatasi: {_te}")
-            result = _check_trade(client, t)
-            if result:
-                closed.append(t["id"])
-        except Exception as e:
-            logger.error(f"[Execution] Monitor hata {t['id']}: {e}")
-    if trades:
-        logger.info(f"[Monitor] {len(trades)} acik trade kontrol edildi, {len(closed)} kapandi")
-    return closed
 
-
-def _check_trade(client, t):
+def open_trade(signal, client=None, ai_engine=None) -> dict:
     """
-    Tek trade'i kontrol et. Kapandiysa True doner.
-    Ayrica unrealized_pnl'i DB'ye yazar (dashboard icin).
+    Yeni paper trade ac.
+    signal: SignalCandidate nesnesi veya dict
+    Returns: {"ok": True/False, "trade_id": int, "error": str}
     """
-    trade_id   = t["id"]
-    symbol     = t["symbol"]
-    direction  = t["direction"]
-    status     = t["status"]
-    entry      = t["entry"]
-    sl         = t["sl"]
-    tp1        = t["tp1"]
-    tp2        = t["tp2"]
-    trail      = t.get("trail_stop")
-    qty        = t.get("qty") or 0
-    qty_tp1    = t.get("qty_tp1") or (qty * TP1_CLOSE_PCT / 100)
-    qty_tp2    = t.get("qty_tp2") or (qty * TP2_CLOSE_PCT / 100)
-    qty_runner = t.get("qty_runner") or (qty - qty_tp1 - qty_tp2)
+    try:
+        # Signal alanlarini al
+        symbol    = getattr(signal, "symbol",       None) or signal.get("symbol", "")
+        direction = getattr(signal, "direction",    None) or signal.get("direction", "LONG")
+        entry     = float(getattr(signal, "entry_zone",  0) or signal.get("entry", 0) or 0)
+        sl_raw    = float(getattr(signal, "stop_loss",   0) or signal.get("sl", 0) or 0)
+        quality   = getattr(signal, "setup_quality", "B") or signal.get("setup_quality", "B")
+        score     = float(getattr(signal, "score", 70) or signal.get("score", 70) or 70)
+        leverage  = int(getattr(signal, "leverage",  PAPER_LEVERAGE) or
+                        signal.get("leverage", PAPER_LEVERAGE) or PAPER_LEVERAGE)
 
-    price = _get_price(client, symbol)
-    if not price:
-        logger.debug(f"[Execution] {symbol} fiyat alinamadi, atlaniyor")
-        return False
+        if not symbol or entry <= 0:
+            return {"ok": False, "error": "Gecersiz symbol veya entry"}
 
-    is_long = direction == "LONG"
+        # Leverage sinirla
+        leverage = max(MIN_LEVERAGE, min(MAX_LEVERAGE, leverage))
 
-    # Unrealized PnL hesapla ve DB'ye yaz (dashboard icin)
-    if qty > 0:
-        unrealized = _calc_pnl(direction, entry, price, qty)
+        # Kaldiraca gore TP/SL hesapla
+        if sl_raw <= 0:
+            # SL yoksa varsayilan: LONG %2, SHORT %2
+            sl_raw = entry * 0.98 if direction == "LONG" else entry * 1.02
+
+        tp_sl = _get_leverage_tp_sl(leverage, entry, sl_raw, direction)
+        sl  = tp_sl["sl"]
+        tp1 = tp_sl["tp1"]
+        tp2 = tp_sl["tp2"]
+        tp3 = tp_sl["tp3"]
+        rr  = tp_sl["rr"]
+
+        # Bakiye al
+        balance = get_paper_balance() or 250.0
+
+        # Qty hesapla
+        qty = _calc_qty(balance, RISK_PCT, entry, sl, leverage)
+        if qty <= 0:
+            logger.warning(f"[Execution] {symbol} qty=0, trade acilmadi (sl_dist cok kucuk)")
+            return {"ok": False, "error": "qty=0: SL mesafesi cok kucuk"}
+
+        # Lot filtresi uygula
         try:
-            update_trade(trade_id, {
-                "current_price":  round(price, 6),
-                "unrealized_pnl": round(unrealized, 4),
-            })
-        except Exception as e:
-            logger.debug(f"unrealized_pnl yazma hatasi: {e}")
-
-    # ── SL Kontrolu ─────────────────────────────────────────────────────────
-    sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
-    if sl_hit:
-        pnl      = _calc_pnl(direction, entry, price, qty)
-        realized = t.get("realized_pnl") or 0
-        net_pnl  = realized + pnl
-        _finalize(trade_id, price, net_pnl, "sl", t)
-        return True
-
-    # ── TP1 Kontrolu ────────────────────────────────────────────────────────
-    if status == "open":
-        tp1_hit = (is_long and price >= tp1) or (not is_long and price <= tp1)
-        if tp1_hit:
-            pnl_tp1 = _calc_pnl(direction, entry, tp1, qty_tp1)
-            try:
-                be_enabled = t.get("breakeven_enabled", BREAKEVEN_ENABLED)
-                be_sl      = t.get("breakeven_sl")
-                if be_sl is None:
-                    offset = entry * (BREAKEVEN_OFFSET_PCT / 100)
-                    be_sl  = (entry + offset) if is_long else (entry - offset)
-            except Exception:
-                be_enabled = True
-                offset = entry * 0.0005
-                be_sl  = (entry + offset) if is_long else (entry - offset)
-            new_sl = be_sl if be_enabled else entry
-            update_trade(trade_id, {
-                "status":        "tp1_hit",
-                "tp1_hit":       1,
-                "realized_pnl":  pnl_tp1,
-                "sl":            round(new_sl, 6),
-                "trade_stage":   "tp1_hit",
-                "active_target": "tp2",
-            })
-            update_paper_balance(pnl_tp1)
-            logger.info(
-                f"[Execution] TP1 #{trade_id} {symbol} +{pnl_tp1:.3f}$ "
-                f"| Breakeven SL -> {new_sl:.6f}"
-            )
-            try:
-                from telegram_delivery import send_message as tg_send
-                tg_send(
-                    f"\U0001f3af <b>TP1 HIT</b>\n"
-                    f"{symbol} {direction} | +{pnl_tp1:.3f}$\n"
-                    f"Breakeven SL \u2192 {new_sl:.6f} | Runner devam ediyor"
-                )
-            except Exception as _tg_e:
-                logger.warning(f"TP1 Telegram bildirimi hatasi: {_tg_e}")
-            return False
-
-    # ── TP2 Kontrolu ────────────────────────────────────────────────────────
-    if status == "tp1_hit":
-        tp2_hit = (is_long and price >= tp2) or (not is_long and price <= tp2)
-        if tp2_hit:
-            pnl_tp2  = _calc_pnl(direction, entry, tp2, qty_tp2)
-            realized = (t.get("realized_pnl") or 0) + pnl_tp2
-            atr_val  = _get_atr(client, symbol)
-            if is_long:
-                new_trail = tp2 - atr_val * TRAIL_ATR_MULT
-            else:
-                new_trail = tp2 + atr_val * TRAIL_ATR_MULT
-            update_trade(trade_id, {
-                "status":        "runner",
-                "tp2_hit":       1,
-                "realized_pnl":  realized,
-                "trail_stop":    new_trail,
-                "sl":            entry,
-                "trade_stage":   "runner",
-                "active_target": "runner",
-            })
-            update_paper_balance(pnl_tp2)
-            logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ -> RUNNER trail={new_trail:.6f}")
-            try:
-                from telegram_delivery import send_message as tg_send
-                tg_send(
-                    f"\U0001f3af <b>TP2 HIT \u2014 RUNNER BASLADI</b>\n"
-                    f"{symbol} {direction} | +{pnl_tp2:.3f}$\n"
-                    f"Trail Stop: {new_trail:.6f}"
-                )
-            except Exception as _tg_e:
-                logger.warning(f"TP2 Telegram bildirimi hatasi: {_tg_e}")
-            return False
-
-    # ── Runner / Trailing Stop Kontrolu ─────────────────────────────────────
-    if status == "runner":
-        atr_val = _get_atr(client, symbol)
-        if is_long:
-            new_trail = price - atr_val * TRAIL_ATR_MULT
-            if trail is None or new_trail > trail:
-                trail = new_trail
-                update_trade(trade_id, {"trail_stop": round(trail, 6)})
-        else:
-            new_trail = price + atr_val * TRAIL_ATR_MULT
-            if trail is None or new_trail < trail:
-                trail = new_trail
-                update_trade(trade_id, {"trail_stop": round(trail, 6)})
-
-        # Trail None guard: trail_stop DB'ye yazıldı ama local değişken güncellenmeli
-        if trail is None:
-            trail = new_trail
-        trail_hit = trail and ((is_long and price <= trail) or (not is_long and price >= trail))
-        if trail_hit:
-            pnl_runner = _calc_pnl(direction, entry, price, qty_runner)
-            realized   = (t.get("realized_pnl") or 0) + pnl_runner
-            _finalize(trade_id, price, realized, "trail", t)
-            return True
-
-        tp3 = t.get("tp3") or t.get("runner_target")
-        if tp3:
-            tp3_hit = (is_long and price >= tp3) or (not is_long and price <= tp3)
-            if tp3_hit:
-                pnl_runner = _calc_pnl(direction, entry, tp3, qty_runner)
-                realized   = (t.get("realized_pnl") or 0) + pnl_runner
-                _finalize(trade_id, tp3, realized, "tp3", t)
-                return True
-
-    return False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TRADE KAPAT
-# ─────────────────────────────────────────────────────────────────────────────
-def _finalize(trade_id, close_price, net_pnl, reason, t):
-    """Trade'i kapat, bakiyeyi guncelle, tum servisleri bildir."""
-    open_t = t.get("open_time", "")
-    try:
-        opened   = datetime.fromisoformat(open_t.replace("Z", "+00:00"))
-        hold_min = (datetime.now(timezone.utc) - opened).total_seconds() / 60
-    except Exception:
-        hold_min = 0
-
-    db_close_trade(trade_id, close_price, net_pnl, reason, hold_min)
-    # DB'den taze realized_pnl oku (TP1/TP2 sonrası t dict güncellenmemiş olabilir)
-    try:
-        from database import get_conn as _gc
-        with _gc() as _c:
-            _row = _c.execute("SELECT realized_pnl FROM trades WHERE id=?", (trade_id,)).fetchone()
-            already_paid = float(_row[0] or 0) if _row else (t.get("realized_pnl") or 0)
-    except Exception:
-        already_paid = t.get("realized_pnl") or 0
-    remaining_pnl = net_pnl - already_paid
-    update_paper_balance(remaining_pnl)
-    result = "WIN" if net_pnl > 0 else "LOSS"
-
-    try:
-        from live_tracker import record_close
-        record_close(trade_id, close_price, reason)
-    except Exception as e:
-        logger.warning(f"live_tracker.record_close hatasi: {e}")
-
-    try:
-        from core.ai_decision_engine import AIDecisionEngine
-        from config import DB_PATH
-        ai_engine = AIDecisionEngine(db_path=DB_PATH)
-        setup_quality = t.get("setup_quality") or t.get("quality") or "B"
-        ai_engine.learn_from_trade(
-            symbol        = t["symbol"],
-            result        = result,
-            pnl           = net_pnl,
-            setup_quality = setup_quality,
-        )
-    except Exception as e:
-        logger.warning(f"AI learn_from_trade hatasi: {e}")
-
-    try:
-        from coin_library import update_coin_stats
-        from database import get_conn
-        entry_p = t.get("entry", 0)
-        sl_p    = t.get("sl", 0)
-        sl_dist = abs(entry_p - sl_p) if sl_p else 1e-10
-        r_mult  = round(net_pnl / (sl_dist * t.get("qty", 1) + 1e-10), 3)
-        mfe_r_val = 0.0
-        mae_r_val = 0.0
-        try:
-            with get_conn() as _conn:
-                _pm = _conn.execute(
-                    "SELECT mfe_r, mae_r FROM trade_postmortem WHERE trade_id=?",
-                    (trade_id,)
-                ).fetchone()
-                if _pm:
-                    mfe_r_val = float(_pm["mfe_r"] or 0)
-                    mae_r_val = float(_pm["mae_r"] or 0)
+            filters  = _get_filters(symbol, client)
+            lot_step = filters["lot_step"]
+            min_qty  = filters["min_qty"]
+            qty      = _floor(qty, lot_step)
+            if qty < min_qty:
+                qty = min_qty
         except Exception:
             pass
-        if mfe_r_val == 0 and mae_r_val == 0 and sl_dist > 0:
-            direction_val = (t.get("direction") or "").upper()
-            if direction_val == "LONG":
-                mfe_r_val = round(max(0, close_price - entry_p) / sl_dist, 3)
-                mae_r_val = round(max(0, entry_p - close_price) / sl_dist, 3)
-            elif direction_val == "SHORT":
-                mfe_r_val = round(max(0, entry_p - close_price) / sl_dist, 3)
-                mae_r_val = round(max(0, close_price - entry_p) / sl_dist, 3)
-        update_coin_stats(
-            symbol     = t["symbol"],
-            result     = result,
-            net_pnl    = net_pnl,
-            r_multiple = r_mult,
-            mfe_r      = mfe_r_val,
-            mae_r      = mae_r_val,
-            direction  = t.get("direction"),
+
+        notional = qty * entry
+        risk_usd = balance * RISK_PCT / 100.0
+
+        # Gercek fiyati al (entry dogrulama)
+        live_price = _get_price(symbol, client)
+        if live_price > 0:
+            slippage = abs(live_price - entry) / entry
+            if slippage > 0.02:  # %2'den fazla slippage → entry'yi guncelle
+                logger.warning(f"[Execution] {symbol} slippage {slippage:.1%}, entry guncellendi")
+                entry = live_price
+                tp_sl = _get_leverage_tp_sl(leverage, entry, sl_raw, direction)
+                sl, tp1, tp2, tp3 = tp_sl["sl"], tp_sl["tp1"], tp_sl["tp2"], tp_sl["tp3"]
+
+        # Trade kaydet
+        trade = {
+            "symbol":         symbol,
+            "direction":      direction,
+            "entry":          entry,
+            "sl":             sl,
+            "tp1":            tp1,
+            "tp2":            tp2,
+            "tp3":            tp3,
+            "qty":            qty,
+            "leverage":       leverage,
+            "notional_size":  notional,
+            "risk_usd":       risk_usd,
+            "setup_quality":  quality,
+            "score":          score,
+            "trade_stage":    "open",
+            "active_target":  "TP1",
+            "realized_pnl":   0.0,
+            "current_price":  entry,
+            "unrealized_pnl": 0.0,
+            "open_time":      datetime.now(timezone.utc).isoformat(),
+            "status":         "open",
+        }
+
+        trade_id = save_trade(trade)
+        if not trade_id:
+            return {"ok": False, "error": "DB kayit hatasi"}
+
+        trade["id"] = trade_id
+
+        logger.info(
+            f"[Execution] ACILDI #{trade_id} {symbol} {direction} {leverage}x | "
+            f"entry={entry:.6f} sl={sl:.6f} tp1={tp1:.6f} tp2={tp2:.6f} tp3={tp3:.6f} | "
+            f"qty={qty:.4f} notional={notional:.2f}$ risk={risk_usd:.2f}$"
         )
-    except Exception as e:
-        logger.warning(f"CoinLibrary update_coin_stats hatasi: {e}")
 
-    try:
-        import threading
-        from ai_brain import post_trade_analysis
-        threading.Thread(target=post_trade_analysis, args=(trade_id,), daemon=True).start()
-    except Exception as e:
-        logger.warning(f"AI Brain post_trade_analysis hatasi: {e}")
+        # Telegram bildirimi
+        try:
+            tg.send_trade_open(trade)
+        except Exception as e:
+            logger.warning(f"[Execution] Telegram bildirimi hatasi: {e}")
 
+        return {"ok": True, "trade_id": trade_id, "trade": trade}
+
+    except Exception as e:
+        logger.error(f"[Execution] open_trade hatasi: {e}", exc_info=True)
+        return {"ok": False, "error": str(e)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MONITOR DONGUSU
+# ─────────────────────────────────────────────────────────────────────────────
+
+def monitor_open_trades(client=None, ai_engine=None):
+    """
+    Tum acik trade'leri kontrol et.
+    Her 15 sn'de bir cagirilmali.
+    """
     try:
-        from telegram_delivery import send_message as tg_send
-        emoji = "\u2705" if net_pnl > 0 else "\U0001f534"
-        tg_send(
-            f"{emoji} <b>Trade Kapandi</b>\n"
-            f"{t.get('symbol','')} {t.get('direction','')} | {reason.upper()}\n"
-            f"PnL: <b>{net_pnl:+.3f}$</b> | Sure: {hold_min:.0f}dk"
+        trades = get_open_trades()
+        if not trades:
+            return
+
+        closed_count = 0
+        for t in trades:
+            try:
+                _check_trade(dict(t), client, ai_engine)
+                closed_count_before = closed_count
+            except Exception as e:
+                logger.error(f"[Monitor] Trade #{t.get('id')} kontrol hatasi: {e}")
+
+        logger.debug(f"[Monitor] {len(trades)} acik trade kontrol edildi")
+
+    except Exception as e:
+        logger.error(f"[Monitor] monitor_open_trades hatasi: {e}", exc_info=True)
+
+
+def _check_trade(t: dict, client=None, ai_engine=None):
+    """Tek bir trade'i kontrol et: SL/TP/Trail/Timeout."""
+    trade_id  = t.get("id")
+    symbol    = t.get("symbol", "")
+    direction = (t.get("direction") or "LONG").upper()
+    entry     = float(t.get("entry") or 0)
+    sl        = float(t.get("sl") or 0)
+    tp1       = float(t.get("tp1") or 0)
+    tp2       = float(t.get("tp2") or 0)
+    tp3       = float(t.get("tp3") or 0)
+    qty       = float(t.get("qty") or 0)
+    leverage  = int(t.get("leverage") or PAPER_LEVERAGE)
+    stage     = t.get("trade_stage", "open")
+    realized  = float(t.get("realized_pnl") or 0)
+    open_time_str = t.get("open_time") or t.get("created_at") or ""
+
+    if not symbol or entry <= 0:
+        return
+
+    # qty=0 ise notional'dan hesapla
+    if qty <= 0 and entry > 0:
+        notional = float(t.get("notional_size") or 0)
+        if notional > 0:
+            qty = notional / entry
+
+    # Guncel fiyat al
+    price = _get_price(symbol, client)
+    if price <= 0:
+        return
+
+    # Unrealized PnL guncelle
+    upnl = _calc_pnl(entry, price, qty, direction, leverage)
+    update_trade(trade_id, {
+        "current_price":  price,
+        "unrealized_pnl": round(upnl, 4)
+    })
+
+    # ── Timeout Kontrolu ─────────────────────────────────────────────────────
+    if open_time_str:
+        try:
+            if open_time_str.endswith("Z"):
+                open_time_str = open_time_str[:-1] + "+00:00"
+            open_dt = datetime.fromisoformat(open_time_str)
+            if open_dt.tzinfo is None:
+                open_dt = open_dt.replace(tzinfo=timezone.utc)
+            elapsed_h = (datetime.now(timezone.utc) - open_dt).total_seconds() / 3600
+            if elapsed_h >= TRADE_TIMEOUT_HOURS:
+                logger.info(f"[Monitor] #{trade_id} {symbol} TIMEOUT ({elapsed_h:.1f}h)")
+                _finalize(t, price, qty, "timeout", realized + upnl, ai_engine)
+                return
+        except Exception:
+            pass
+
+    # ── SL Kontrolu ──────────────────────────────────────────────────────────
+    sl_hit = (direction == "LONG" and price <= sl) or \
+             (direction == "SHORT" and price >= sl)
+    if sl_hit:
+        net_pnl = realized + upnl
+        logger.info(f"[Monitor] #{trade_id} {symbol} SL HIT @ {price:.6f} pnl={net_pnl:.3f}$")
+        _finalize(t, price, qty, "sl", net_pnl, ai_engine)
+        return
+
+    # ── TP1 Kontrolu ─────────────────────────────────────────────────────────
+    if stage == "open":
+        tp1_hit = (direction == "LONG" and price >= tp1) or \
+                  (direction == "SHORT" and price <= tp1)
+        if tp1_hit:
+            partial_qty = qty * (TP1_CLOSE_PCT / 100)
+            partial_pnl = _calc_pnl(entry, price, partial_qty, direction, leverage)
+            new_realized = realized + partial_pnl
+            # Breakeven SL
+            new_sl = sl
+            if BREAKEVEN_ENABLED:
+                offset = entry * BREAKEVEN_OFFSET_PCT / 100
+                new_sl = (entry + offset) if direction == "LONG" else (entry - offset)
+            update_trade(trade_id, {
+                "trade_stage":  "tp1_hit",
+                "active_target": "TP2",
+                "realized_pnl": round(new_realized, 4),
+                "sl":           round(new_sl, 8),
+                "qty":          round(qty - partial_qty, 6),
+            })
+            logger.info(f"[Monitor] #{trade_id} {symbol} TP1 HIT +{partial_pnl:.3f}$ breakeven_sl={new_sl:.6f}")
+            try:
+                tg.send_tp_hit(symbol, direction, 1, partial_pnl)
+            except Exception:
+                pass
+            return
+
+    # ── TP2 Kontrolu ─────────────────────────────────────────────────────────
+    if stage == "tp1_hit":
+        tp2_hit = (direction == "LONG" and price >= tp2) or \
+                  (direction == "SHORT" and price <= tp2)
+        if tp2_hit:
+            partial_qty = qty * (TP2_CLOSE_PCT / 100)
+            partial_pnl = _calc_pnl(entry, price, partial_qty, direction, leverage)
+            new_realized = realized + partial_pnl
+            # Trail stop baslat
+            atr = _get_atr(symbol, client)
+            trail_dist = (atr * TRAIL_ATR_MULT) if atr > 0 else (entry * 0.015)
+            trail_stop = (price - trail_dist) if direction == "LONG" else (price + trail_dist)
+            update_trade(trade_id, {
+                "trade_stage":  "runner",
+                "active_target": "TP3",
+                "realized_pnl": round(new_realized, 4),
+                "trail_stop":   round(trail_stop, 8),
+                "qty":          round(qty - partial_qty, 6),
+            })
+            logger.info(f"[Monitor] #{trade_id} {symbol} TP2 HIT +{partial_pnl:.3f}$ runner trail={trail_stop:.6f}")
+            try:
+                tg.send_tp_hit(symbol, direction, 2, partial_pnl)
+            except Exception:
+                pass
+            return
+
+    # ── Runner: Trail Stop ve TP3 ─────────────────────────────────────────────
+    if stage == "runner":
+        trail = float(t.get("trail_stop") or 0)
+        # Trail stop guncelle
+        atr = _get_atr(symbol, client)
+        trail_dist = (atr * TRAIL_ATR_MULT) if atr > 0 else (entry * 0.015)
+        if direction == "LONG":
+            new_trail = price - trail_dist
+            if new_trail > trail:
+                trail = new_trail
+                update_trade(trade_id, {"trail_stop": round(trail, 8)})
+        else:
+            new_trail = price + trail_dist
+            if new_trail < trail or trail == 0:
+                trail = new_trail
+                update_trade(trade_id, {"trail_stop": round(trail, 8)})
+
+        # Trail hit?
+        trail_hit = trail > 0 and (
+            (direction == "LONG"  and price <= trail) or
+            (direction == "SHORT" and price >= trail)
         )
-    except Exception as _tg_e:
-        logger.warning(f"Trade kapanis Telegram bildirimi hatasi: {_tg_e}")
+        if trail_hit:
+            net_pnl = realized + _calc_pnl(entry, price, qty, direction, leverage)
+            logger.info(f"[Monitor] #{trade_id} {symbol} TRAIL HIT @ {price:.6f} pnl={net_pnl:.3f}$")
+            _finalize(t, price, qty, "trail", net_pnl, ai_engine)
+            return
 
+        # TP3 hit?
+        tp3_hit = (direction == "LONG" and price >= tp3) or \
+                  (direction == "SHORT" and price <= tp3)
+        if tp3_hit:
+            net_pnl = realized + _calc_pnl(entry, price, qty, direction, leverage)
+            logger.info(f"[Monitor] #{trade_id} {symbol} TP3 HIT @ {price:.6f} pnl={net_pnl:.3f}$")
+            _finalize(t, price, qty, "tp3", net_pnl, ai_engine)
+            return
+
+
+def _finalize(t: dict, close_price: float, qty: float,
+              reason: str, net_pnl: float, ai_engine=None):
+    """Trade'i kapat, bakiyeyi guncelle, AI'a ogret."""
+    trade_id  = t.get("id")
+    symbol    = t.get("symbol", "")
+    direction = t.get("direction", "LONG")
+    entry     = float(t.get("entry") or 0)
+    quality   = t.get("setup_quality", "B")
+    open_time_str = t.get("open_time") or t.get("created_at") or ""
+
+    # Hold suresi
+    hold_minutes = 0
     try:
-        from n8n_bridge import notify_trade_close
-        notify_trade_close(trade={**t, "current_price": close_price}, pnl=net_pnl, reason=reason)
-    except Exception as _n8n_e:
-        logger.debug(f"n8n trade_close bildirimi: {_n8n_e}")
+        if open_time_str:
+            if open_time_str.endswith("Z"):
+                open_time_str = open_time_str[:-1] + "+00:00"
+            open_dt = datetime.fromisoformat(open_time_str)
+            if open_dt.tzinfo is None:
+                open_dt = open_dt.replace(tzinfo=timezone.utc)
+            hold_minutes = int((datetime.now(timezone.utc) - open_dt).total_seconds() / 60)
+    except Exception:
+        pass
+
+    # MFE/MAE (basit tahmin)
+    mfe_r = max(0.0, net_pnl / (abs(entry - float(t.get("sl") or entry)) * qty + 1e-10))
+    mae_r = 0.0
+
+    # WIN/LOSS belirle (net PnL bazli)
+    result = "WIN" if net_pnl > 0 else "LOSS"
+
+    # DB kapat
+    try:
+        close_trade(trade_id, close_price, net_pnl, reason)
+    except Exception as e:
+        logger.error(f"[Finalize] close_trade hatasi: {e}")
+
+    # Bakiye guncelle
+    try:
+        update_paper_balance(net_pnl)
+    except Exception as e:
+        logger.error(f"[Finalize] update_paper_balance hatasi: {e}")
+
+    # Postmortem kaydet
+    try:
+        save_postmortem({
+            "trade_id":     trade_id,
+            "symbol":       symbol,
+            "result":       result,
+            "pnl":          net_pnl,
+            "hold_minutes": hold_minutes,
+            "mfe_r":        mfe_r,
+            "mae_r":        mae_r,
+            "close_reason": reason,
+        })
+    except Exception as e:
+        logger.warning(f"[Finalize] save_postmortem hatasi: {e}")
+
+    # AI'a ogret
+    if ai_engine:
+        try:
+            ai_engine.learn_from_trade(
+                symbol=symbol,
+                result=result,
+                pnl=net_pnl,
+                setup_quality=quality,
+                hold_minutes=hold_minutes,
+                mfe_r=mfe_r,
+                mae_r=mae_r,
+                trade_id=trade_id
+            )
+        except Exception as e:
+            logger.warning(f"[Finalize] AI learn hatasi: {e}")
+
+    # Telegram bildirimi
+    try:
+        tg.send_trade_close(t, net_pnl, reason)
+    except Exception as e:
+        logger.warning(f"[Finalize] Telegram kapanma bildirimi hatasi: {e}")
 
     logger.info(
-        f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
-        f"{reason.upper()} pnl={net_pnl:+.3f}$ hold={hold_min:.0f}dk"
+        f"[Execution] KAPANDI #{trade_id} {symbol} {direction} | "
+        f"reason={reason} pnl={net_pnl:.3f}$ hold={hold_minutes}dk result={result}"
     )

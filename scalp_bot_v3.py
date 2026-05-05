@@ -1,283 +1,319 @@
+"""
+scalp_bot_v3.py — AX Scalp Bot v5.0 FINAL
+==========================================
+3 paralel dongu:
+  1. main_loop       : Coin tarama + sinyal + trade acma (60 sn)
+  2. monitor_loop    : Acik trade'leri izle TP/SL/Trail (15 sn)
+  3. ghost_loop      : WATCH/VETO sinyallerini simule et (5 dk)
+"""
 import asyncio
 import logging
 import time
-import uuid
-import requests
-import pandas as pd
-from binance.client import Client
+from datetime import datetime, timezone
+
 from config import (
-    BINANCE_API_KEY, BINANCE_API_SECRET, DB_PATH, SCAN_INTERVAL,
-    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ENABLE_LIVE_TRADING
+    SCAN_INTERVAL, MAX_OPEN_TRADES, TRADE_THRESHOLD,
+    WATCHLIST_THRESHOLD, TELEGRAM_THRESHOLD,
+    BINANCE_API_KEY, BINANCE_API_SECRET, DB_PATH,
+    AI_MAX_DAILY_SIGNALS, AI_GHOST_HORIZON_MINUTES,
+    MIN_VOLUME_USD, TOP_COINS_SCAN
 )
-from core.async_market_scanner import AsyncMarketScanner
-from core.advanced_trend_engine import AdvancedTrendEngine
-from core.trigger_engine import TriggerEngine
-from core.advanced_risk_engine import AdvancedRiskEngine
+from database import (
+    init_db, get_open_trades, get_paper_balance,
+    save_paper_result, get_conn
+)
+import execution_engine as eng
+import telegram_delivery as tg
+
+# Core moduller
 from core.ai_decision_engine import AIDecisionEngine
-from database import init_db, get_paper_balance, get_open_trades, save_scalp_signal, save_paper_trade
-from core.data_layer import SignalData
-from telegram_delivery import deliver_signal, send_trade_open
-import execution_engine
+from core.trigger_engine      import TriggerEngine
+from core.paper_tracker       import PaperTracker
+from core.data_layer          import DataLayer
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-logger = logging.getLogger("scalp_bot_v3")
+# Logging ayarla
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S"
+)
+logger = logging.getLogger("scalp_bot")
 
-# Duplicate mesaj engeli
-_sent_signals = set()
+# ─────────────────────────────────────────────────────────────────────────────
+# GLOBAL NESNELER
+# ─────────────────────────────────────────────────────────────────────────────
+_client     = None
+_ai         = None
+_trigger    = None
+_tracker    = None
+_data_layer = None
 
-def send_direct_message(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+def _init_modules():
+    """Tum modulleri baslat."""
+    global _client, _ai, _trigger, _tracker, _data_layer
     try:
-        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
-    except Exception:
-        pass
+        from binance.client import Client
+        _client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
+        logger.info("[Init] Binance client baglandi")
+    except Exception as e:
+        logger.warning(f"[Init] Binance client hatasi (paper modda devam): {e}")
+        _client = None
 
-class UltimateEliteEngine:
-    def __init__(self, client):
-        self.client = client
+    _ai      = AIDecisionEngine(db_path=DB_PATH)
+    _trigger = TriggerEngine(_client)
+    _tracker = PaperTracker(db_path=DB_PATH)
+    _data_layer = DataLayer(_client)
+    logger.info("[Init] Tum moduller hazir")
 
-    def get_sentiment(self):
-        try:
-            tickers = self.client.get_ticker()
-            up = len([t for t in tickers if float(t['priceChangePercent']) > 0])
-            total = len(tickers)
-            sentiment_score = (up / total) * 100
-            return round(sentiment_score, 2)
-        except:
-            return 50.0
 
-    def calculate_adaptive_targets(self, symbol, entry, direction):
-        try:
-            klines = self.client.futures_klines(symbol=symbol, interval="1h", limit=20)
-            df = pd.DataFrame(klines, columns=['t','o','h','l','c','v','ct','q','n','tb','tq','i'])
-            df['h'], df['l'], df['c'] = df['h'].astype(float), df['l'].astype(float), df['c'].astype(float)
-            atr = (df['h'] - df['l']).mean()
-            sl_dist = atr * 1.5
-            tp_dist = atr * 2.5
-            sl = entry - sl_dist if direction == "LONG" else entry + sl_dist
-            tp1 = entry + tp_dist if direction == "LONG" else entry - tp_dist
-            tp2 = entry + tp_dist * 1.5 if direction == "LONG" else entry - tp_dist * 1.5
-            tp3 = entry + tp_dist * 2.0 if direction == "LONG" else entry - tp_dist * 2.0
-            return sl, tp1, tp2, tp3, atr
-        except:
-            sl = entry * 0.98 if direction == "LONG" else entry * 1.02
-            tp1 = entry * 1.04 if direction == "LONG" else entry * 0.96
-            tp2 = entry * 1.06 if direction == "LONG" else entry * 0.94
-            tp3 = entry * 1.08 if direction == "LONG" else entry * 0.92
-            return sl, tp1, tp2, tp3, 0.0
+def _get_scan_symbols() -> list:
+    """Taranacak coin listesini al (hacim bazli)."""
+    import requests
+    try:
+        r = requests.get(
+            "https://fapi.binance.com/fapi/v1/ticker/24hr",
+            timeout=10
+        )
+        if r.status_code != 200:
+            return []
+        tickers = r.json()
+        usdt = [
+            t for t in tickers
+            if t["symbol"].endswith("USDT")
+            and not any(x in t["symbol"] for x in ["_", "BUSD"])
+            and float(t.get("quoteVolume", 0)) >= MIN_VOLUME_USD
+        ]
+        # Hacme gore sirala, en iyi TOP_COINS_SCAN al
+        usdt.sort(key=lambda x: float(x.get("quoteVolume", 0)), reverse=True)
+        symbols = [t["symbol"] for t in usdt[:TOP_COINS_SCAN]]
+        logger.info(f"[Scan] {len(symbols)} coin taranacak")
+        return symbols
+    except Exception as e:
+        logger.error(f"[Scan] Symbol listesi hatasi: {e}")
+        return []
 
-async def ghost_tracker_loop(client):
-    """
-    Ghost-tracker dongusu: WATCH/VETO sinyallerini simule eder ve AI'a ogretir.
-    Her 5 dakikada bir bekleyen paper_results kayitlarini isler.
-    Bu sayede bot girmedigii trade'lerden de ogrenebilir.
-    """
-    logger.info("[Ghost] Ghost-tracker dongusu basladi - WATCH/VETO sinyalleri izleniyor")
-    await asyncio.sleep(30)  # Bot basladiktan 30 sn sonra ilk calisma
-    while True:
-        try:
-            from core.paper_tracker import process_pending_paper_results
-            done = process_pending_paper_results(client, limit=35)
-            if done > 0:
-                logger.info(f"[Ghost] {done} WATCH/VETO sinyali simule edildi ve AI'a ogretildi")
-        except Exception as e:
-            logger.warning(f"[Ghost] paper_tracker hatasi: {e}")
-        await asyncio.sleep(300)  # Her 5 dakikada bir
 
-async def monitor_loop(client):
-    """Acik trade'leri izler: TP1/TP2/SL/Trail kontrolu yapar. Her 15 saniyede calisir."""
-    logger.info("[Monitor] AI Execution monitor dongusu basladi")
-    while True:
-        try:
-            execution_engine.monitor_open_trades(client)
-        except Exception as e:
-            logger.error(f"[Monitor] Hata: {e}")
-        await asyncio.sleep(15)  # Her 15 saniyede bir kontrol
+# ─────────────────────────────────────────────────────────────────────────────
+# ANA TARAMA DONGUSU
+# ─────────────────────────────────────────────────────────────────────────────
 
-async def main():
-    """Ana giris noktasi: sinyal tarama + trade monitoring paralel calisir."""
-    init_db()
-    client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
-    # Her iki dongu ayni client ile paralel calisir
-    await asyncio.gather(
-        main_loop_with_client(client),
-        monitor_loop(client),
-        ghost_tracker_loop(client),
-    )
-
-async def main_loop_with_client(client):
-    """main_loop'un client parametreli versiyonu."""
-    logger.info("=== AX Scalp Engine v3.9 (ULTIMATE ELITE) Baslatiliyor ===")
-
-    scanner = AsyncMarketScanner(db_path=DB_PATH)
-    trend = AdvancedTrendEngine(client)
-    trigger = TriggerEngine(client)
-    risk = AdvancedRiskEngine(client, db_path=DB_PATH)
-    ai_engine = AIDecisionEngine(db_path=DB_PATH)
-    elite = UltimateEliteEngine(client)
-
-    send_direct_message("👑 <b>AX ULTIMATE ELITE + AI Execution Monitor Aktif!</b>\nTP1/TP2/SL/Trail otomatik izleniyor.")
+async def main_loop():
+    """Coin tara, sinyal uret, trade ac."""
+    logger.info("[Bot] Ana tarama dongusu basladi")
+    scan_count = 0
 
     while True:
         try:
-            sentiment = elite.get_sentiment()
-            logger.info(f"🌍 Piyasa Duyarliligi: %{sentiment}")
+            scan_count += 1
+            loop_start = time.time()
 
-            candidates = await scanner.scan()
-            if not candidates:
+            # Acik trade sayisi kontrolu
+            open_trades = get_open_trades()
+            open_count  = len(open_trades) if open_trades else 0
+            if open_count >= MAX_OPEN_TRADES:
+                logger.info(f"[Bot] MAX_OPEN_TRADES={MAX_OPEN_TRADES} doldu, tarama atlanıyor")
                 await asyncio.sleep(SCAN_INTERVAL)
                 continue
 
-            for coin in candidates[:20]:
-                symbol = coin["symbol"]
-                trend_res = trend.analyze(symbol)
-                if trend_res["direction"] == "NO TRADE":
+            # Coin listesi al
+            symbols = _get_scan_symbols()
+            if not symbols:
+                await asyncio.sleep(30)
+                continue
+
+            # Her coini tara
+            allowed_this_scan = 0
+            for symbol in symbols:
+                try:
+                    await _process_symbol(symbol, open_count)
+                    # Acik trade sayisini guncelle
+                    open_count = len(get_open_trades() or [])
+                    if open_count >= MAX_OPEN_TRADES:
+                        break
+                except Exception as e:
+                    logger.error(f"[Bot] {symbol} isleme hatasi: {e}")
+                await asyncio.sleep(0.3)  # Rate limit
+
+            elapsed = time.time() - loop_start
+            logger.info(f"[Bot] Tarama #{scan_count} tamamlandi ({elapsed:.1f}s) | Acik: {open_count}")
+
+        except Exception as e:
+            logger.error(f"[Bot] main_loop hatasi: {e}", exc_info=True)
+
+        await asyncio.sleep(SCAN_INTERVAL)
+
+
+async def _process_symbol(symbol: str, current_open: int):
+    """Tek bir coini analiz et ve karar ver."""
+    try:
+        # Zaten bu coinde acik trade var mi?
+        open_trades = get_open_trades() or []
+        if any(t.get("symbol") == symbol for t in open_trades):
+            return
+
+        # Veri cek
+        sig = _data_layer.get_signal_for_symbol(symbol) if _data_layer else None
+        if sig is None:
+            return
+
+        # Trigger analizi
+        for direction in ["LONG", "SHORT"]:
+            try:
+                trigger_res = _trigger.analyze(symbol, direction)
+                if not trigger_res or trigger_res.get("quality") == "D":
                     continue
 
-                if sentiment < 20 and trend_res["direction"] == "LONG":
-                    continue
+                # Signal objesini zenginlestir
+                sig.direction     = direction
+                sig.setup_quality = trigger_res.get("quality", "B")
+                sig.score         = trigger_res.get("score", 5.0)
+                sig.entry_zone    = trigger_res.get("entry", 0) or sig.entry_zone
+                sig.stop_loss     = getattr(sig, "stop_loss", 0) or 0
 
-                trigger_res = trigger.analyze(symbol, trend_res["direction"])
-                entry = trigger_res["entry"]
-                sl, tp1, tp2, tp3, atr = elite.calculate_adaptive_targets(symbol, entry, trend_res["direction"])
-                runner_target = tp3
-
-                sig = SignalData(
-                    id=str(uuid.uuid4())[:8],
-                    symbol=symbol,
-                    timestamp=time.time(),
-                    direction=trend_res["direction"],
-                    entry_zone=entry,
-                    stop_loss=sl,
-                    tp1=tp1,
-                    tp2=tp2,
-                    tp3=tp3,
-                    setup_quality=trigger_res["quality"],
-                    coin_score=coin["tradeability_score"],
-                    trend_score=trend_res["score"],
-                    trigger_score=trigger_res["score"],
-                    risk_score=8,
-                    ml_score=50,
-                    rr=2.0,
-                    risk_percent=1.0,
-                    position_size=100,
-                    notional_size=100,
-                    leverage_suggestion=10,
-                    confidence=0.8,
-                    reason=f"Sentiment: %{sentiment} | Adaptive Targets"
-                )
-
-                ai_res = ai_engine.evaluate(sig)
-                decision = ai_res["decision"]
-
-                sig_dict = sig.to_dict()
-                sig_dict["decision"] = decision
-                save_paper_trade(sig_dict, tracked_from=decision)
+                # AI karar
+                ai_res = _ai.evaluate(sig)
+                decision    = ai_res.get("decision", "VETO")
+                final_score = ai_res.get("final_score", 0)
 
                 if decision == "ALLOW":
-                    sig_key = f"{symbol}_{round(entry, 6)}_{trend_res['direction']}"
-                    if sig_key in _sent_signals:
-                        logger.info(f"[Bot] Duplicate sinyal atildi: {symbol}")
-                        continue
-                    _sent_signals.add(sig_key)
-                    if len(_sent_signals) > 100:
-                        _sent_signals.clear()
+                    # Dinamik kaldirach
+                    leverage = _ai.decide_leverage(sig, ai_res)
+                    sig.leverage = leverage
 
-                    # ── AI Dinamik Kaldıraç Kararı ──────────────────────────
-                    dyn_lev = ai_engine.decide_leverage(sig, ai_res)
-                    tp_sl   = ai_engine.decide_tp_sl_ratios(dyn_lev, sig)
-
-                    # Kaldıraca göre TP/SL yeniden hesapla
-                    direction_str = trend_res["direction"]
-                    sl_dist = abs(entry - sl)
-                    new_sl_dist = sl_dist * tp_sl["sl_multiplier"]
-                    if direction_str == "LONG":
-                        dyn_sl  = round(entry - new_sl_dist, 8)
-                        dyn_tp1 = round(entry * (1 + tp_sl["tp1_pct"] / 100), 8)
-                        dyn_tp2 = round(entry * (1 + tp_sl["tp2_pct"] / 100), 8)
-                        dyn_tp3 = round(entry * (1 + tp_sl["tp3_pct"] / 100), 8)
-                    else:  # SHORT
-                        dyn_sl  = round(entry + new_sl_dist, 8)
-                        dyn_tp1 = round(entry * (1 - tp_sl["tp1_pct"] / 100), 8)
-                        dyn_tp2 = round(entry * (1 - tp_sl["tp2_pct"] / 100), 8)
-                        dyn_tp3 = round(entry * (1 - tp_sl["tp3_pct"] / 100), 8)
-
-                    logger.info(
-                        f"🚀 ALLOW: {symbol} {dyn_lev}x | "
-                        f"sl={dyn_sl:.6f} tp1={dyn_tp1:.6f} tp2={dyn_tp2:.6f} tp3={dyn_tp3:.6f}"
-                    )
-                    save_scalp_signal(sig_dict)
-                    # Sig objesine dinamik kaldıraç ata (Telegram formatı için)
+                    # Telegram sinyali gonder
                     try:
-                        sig.leverage = dyn_lev
+                        tg.deliver_signal(sig)
                     except Exception:
                         pass
-                    deliver_signal(sig)
-                    signal_for_exec = {
-                        "symbol":        symbol,
-                        "direction":     direction_str,
-                        "entry":         entry,
-                        "sl":            dyn_sl,
-                        "tp1":           dyn_tp1,
-                        "tp2":           dyn_tp2,
-                        "runner_target": dyn_tp3,
-                        "tp3":           dyn_tp3,
-                        "atr":           atr,
-                        "leverage":      dyn_lev,
-                        "confidence":    0.8,
-                        "score":         ai_res.get("final_score", 0),
-                        "setup_quality": trigger_res["quality"],
-                        "candidate_id":  sig.id,
-                    }
-                    trade_id = execution_engine.open_trade(client, signal_for_exec, ai_res)
-                    if trade_id:
-                        send_trade_open({
-                            "symbol":        symbol,
-                            "direction":     direction_str,
-                            "entry":         entry,
-                            "sl":            dyn_sl,
-                            "tp1":           dyn_tp1,
-                            "tp2":           dyn_tp2,
-                            "tp3":           dyn_tp3,
-                            "leverage":      dyn_lev,
-                            "notional_size": signal_for_exec.get("notional_size", 0),
-                            "position_size": signal_for_exec.get("position_size", 0),
-                        })
-                        logger.info(f"[Bot] PAPER TRADE ACILDI #{trade_id} {symbol} {dyn_lev}x")
+
+                    # Trade ac
+                    result = eng.open_trade(sig, _client, _ai)
+                    if result.get("ok"):
+                        logger.info(
+                            f"[Bot] ALLOW: {symbol} {direction} {leverage}x "
+                            f"score={final_score:.1f} quality={sig.setup_quality}"
+                        )
                     else:
-                        logger.warning(f"[Bot] open_trade basarisiz: {symbol}")
+                        logger.warning(f"[Bot] Trade acilamadi: {result.get('error')}")
+
                 elif decision == "WATCH":
-                    logger.info(f"👀 WATCH: {symbol} - sinyal gonderildi, ghost-track basladi")
-                    save_scalp_signal(sig_dict)
-                    deliver_signal(sig)
+                    logger.info(f"[Bot] WATCH: {symbol} {direction} score={final_score:.1f}")
+                    # Ghost-tracker icin kaydet
                     try:
-                        from database import save_paper_result as _spr
-                        _spr({"candidate_id": sig.id, "symbol": symbol,
-                              "direction": trend_res["direction"],
-                              "entry": entry, "sl": sl,
-                              "tp1": tp1, "tp2": tp2, "tp3": tp3,
-                              "horizon_minutes": 480.0}, tracked_from="watchlist")
-                        logger.info(f"[Ghost] WATCH kaydedildi: {symbol}")
-                    except Exception as _ge:
-                        logger.debug(f"[Ghost] WATCH hata: {_ge}")
-
-                elif decision == "VETO":
-                    logger.info(f"❌ VETO/REJECT: {symbol} - reason: {ai_res.get('reason', '')}")
+                        _save_ghost(sig, "WATCH", final_score)
+                    except Exception:
+                        pass
+                    # Telegram sinyali (sadece WATCH icin de gonder)
                     try:
-                        from database import save_paper_result as _spr2
-                        _spr2({"candidate_id": sig.id, "symbol": symbol,
-                               "direction": trend_res["direction"],
-                               "entry": entry, "sl": sl,
-                               "tp1": tp1, "tp2": tp2, "tp3": tp3,
-                               "horizon_minutes": 480.0}, tracked_from="candidate")
-                        logger.debug(f"[Ghost] VETO kaydedildi: {symbol}")
-                    except Exception as _ge:
-                        logger.debug(f"[Ghost] VETO hata: {_ge}")
+                        tg.deliver_signal(sig)
+                    except Exception:
+                        pass
 
-            await asyncio.sleep(SCAN_INTERVAL)
+                else:  # VETO
+                    logger.debug(f"[Bot] VETO: {symbol} {direction} score={final_score:.1f} reason={ai_res.get('reason','')}")
+                    try:
+                        _save_ghost(sig, "VETO", final_score)
+                    except Exception:
+                        pass
+
+            except Exception as e:
+                logger.error(f"[Bot] {symbol} {direction} analiz hatasi: {e}")
+
+    except Exception as e:
+        logger.error(f"[Bot] _process_symbol {symbol} hatasi: {e}")
+
+
+def _save_ghost(sig, decision: str, score: float):
+    """WATCH/VETO sinyalini ghost-tracker icin DB'ye kaydet."""
+    try:
+        entry = float(getattr(sig, "entry_zone", 0) or 0)
+        sl    = float(getattr(sig, "stop_loss",  0) or 0)
+        tp1   = float(getattr(sig, "tp1", 0) or 0)
+        tp2   = float(getattr(sig, "tp2", 0) or 0)
+        tp3   = float(getattr(sig, "tp3", 0) or 0)
+        if not entry:
+            return
+        save_paper_result({
+            "symbol":          sig.symbol,
+            "direction":       getattr(sig, "direction", "LONG"),
+            "tracked_from":    decision,
+            "preview_entry":   entry,
+            "preview_sl":      sl,
+            "preview_tp1":     tp1,
+            "preview_tp2":     tp2,
+            "preview_tp3":     tp3,
+            "entry":           entry,
+            "sl":              sl,
+            "tp1":             tp1,
+            "tp2":             tp2,
+            "tp3":             tp3,
+            "score":           score,
+            "setup_quality":   getattr(sig, "setup_quality", "B"),
+            "horizon_minutes": AI_GHOST_HORIZON_MINUTES,
+            "status":          "pending",
+        })
+    except Exception as e:
+        logger.warning(f"[Ghost] save_paper_result hatasi {sig.symbol}: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MONITOR DONGUSU
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def monitor_loop():
+    """Acik trade'leri 15 sn'de bir kontrol et."""
+    logger.info("[Monitor] AI Execution monitor dongusu basladi")
+    await asyncio.sleep(10)  # Bot baslarken biraz bekle
+
+    while True:
+        try:
+            eng.monitor_open_trades(_client, _ai)
         except Exception as e:
-            logger.error(f"Hata: {e}")
-            await asyncio.sleep(10)
+            logger.error(f"[Monitor] monitor_loop hatasi: {e}", exc_info=True)
+        await asyncio.sleep(15)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GHOST-TRACKER DONGUSU
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def ghost_loop():
+    """WATCH/VETO sinyallerini 5 dk'da bir simule et."""
+    logger.info("[Ghost] Ghost-tracker dongusu basladi - WATCH/VETO sinyalleri izleniyor")
+    await asyncio.sleep(60)  # Ilk 1 dk bekle
+
+    while True:
+        try:
+            if _tracker:
+                count = _tracker.process_pending_paper_results(_ai)
+                if count and count > 0:
+                    logger.info(f"[Ghost] {count} WATCH/VETO sinyali simule edildi ve AI'a ogretildi")
+        except Exception as e:
+            logger.error(f"[Ghost] ghost_loop hatasi: {e}", exc_info=True)
+        await asyncio.sleep(300)  # 5 dk
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def main():
+    """Tum donguleri paralel calistir."""
+    init_db()
+    _init_modules()
+
+    logger.info("=" * 50)
+    logger.info("  AX SCALP BOT v5.0 FINAL BASLIYOR")
+    logger.info("=" * 50)
+
+    # 3 donguyu paralel calistir
+    await asyncio.gather(
+        main_loop(),
+        monitor_loop(),
+        ghost_loop(),
+        return_exceptions=True
+    )
+
 
 if __name__ == "__main__":
     asyncio.run(main())
