@@ -110,7 +110,7 @@ async def main_loop():
                 requests_params=req_params if req_params else None,
             )
             mode_str = "TESTNET PUBLIC DATA" if use_testnet else f"PUBLIC MARKET DATA (.{binance_tld})"
-            logger.info(f"Binance public market data bağlantısı kuruldu. {mode_str}")
+            logger.info(f"Binance public market data bağlantısı kuruldu: {mode_str}")
             break
         except Exception as e:
             logger.warning(f"Binance bağlantı denemesi {attempt}/{max_retries} başarısız: {e}")
