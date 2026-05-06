@@ -1,139 +1,159 @@
 """
-scalp_bot_v3.py — AX Scalp Engine v3.9 (ULTIMATE ELITE FINAL)
-=========================================================
-Yenilikler:
-  - Sentiment Analysis (Market Momentum & Volume Speed)
-  - Adaptive SL/TP (ATR tabanlı dinamik hedefler)
-  - AI Post-Mortem (Kapanan işlem analizi)
-  - Ghost Trading & Canlı Dashboard
+scalp_bot_v3.py — AX Scalp Engine v5.0 (LIVE-READY)
+====================================================
+Ana tarama döngüsü. execution_engine üzerinden trade açar.
+Hardcoded token/API key YOKTUR.
 """
 import asyncio
 import logging
 import time
 import os
 import uuid
-import requests
-import pandas as pd
 from binance.client import Client
 from config import (
-    BINANCE_API_KEY, BINANCE_API_SECRET, SCAN_INTERVAL, DB_PATH, 
-    ALLOWED_QUALITIES, ADX_MIN_THRESHOLD, COIN_UNIVERSE
+    BINANCE_API_KEY, BINANCE_API_SECRET, SCAN_INTERVAL, DB_PATH,
+    ALLOWED_QUALITIES, ADX_MIN_THRESHOLD, COIN_UNIVERSE,
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
 )
 from core.async_market_scanner import AsyncMarketScanner
 from core.advanced_trend_engine import AdvancedTrendEngine
 from core.trigger_engine import TriggerEngine
 from core.advanced_risk_engine import AdvancedRiskEngine
 from core.ai_decision_engine import AIDecisionEngine
-from core.elite_monitor import EliteMonitor
-from database import init_db, get_paper_balance, get_open_trades, save_scalp_signal, save_paper_trade
+from database import (
+    init_db, get_paper_balance, get_open_trades,
+    save_signal_candidate, save_paper_trade,
+)
 from core.data_layer import SignalData
-from telegram_delivery import deliver_signal, send_trade_open
-
-# Sabitlenmiş Telegram Bilgileri
-TG_TOKEN = "8404489471:AAEU3uk-i_IWj4EcHXlf4Zt8-PkpIPAAc54"
-TG_CHAT_ID = "958182551"
+from telegram_delivery import deliver_signal, send_message
+from execution_engine import open_trade
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("scalp_bot_v3")
 
-def send_direct_message(text):
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
-    except Exception: pass
-
-class UltimateEliteEngine:
-    def __init__(self, client):
-        self.client = client
-
-    def get_sentiment(self):
-        """Piyasa duyarlılığını ölçer (Momentum & Volume)."""
-        try:
-            tickers = self.client.get_ticker()
-            up = len([t for t in tickers if float(t['priceChangePercent']) > 0])
-            total = len(tickers)
-            sentiment_score = (up / total) * 100
-            return round(sentiment_score, 2)
-        except: return 50.0
-
-    def calculate_adaptive_targets(self, symbol, entry, direction):
-        """ATR bazlı dinamik SL/TP hesaplar."""
-        try:
-            klines = self.client.futures_klines(symbol=symbol, interval="1h", limit=20)
-            df = pd.DataFrame(klines, columns=['t','o','h','l','c','v','ct','q','n','tb','tq','i'])
-            df['h'], df['l'], df['c'] = df['h'].astype(float), df['l'].astype(float), df['c'].astype(float)
-            atr = (df['h'] - df['l']).mean()
-            
-            sl_dist = atr * 1.5
-            tp_dist = atr * 2.5
-            
-            sl = entry - sl_dist if direction == "LONG" else entry + sl_dist
-            tp = entry + tp_dist if direction == "LONG" else entry - tp_dist
-            return sl, tp
-        except:
-            return entry * 0.98, entry * 1.04
 
 async def main_loop():
-    logger.info("=== AX Scalp Engine v3.9 (ULTIMATE ELITE) Başlatılıyor ===")
+    logger.info("=== AX Scalp Engine v5.0 (LIVE-READY) Başlatılıyor ===")
     init_db()
-    client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
-    
+
+    # Binance Client — bağlantı retry
+    client = None
+    max_retries = 5
+    for attempt in range(1, max_retries + 1):
+        try:
+            use_testnet = os.getenv("BINANCE_TESTNET", "").lower() in ("true", "1", "yes")
+            if use_testnet:
+                client = Client(
+                    BINANCE_API_KEY, BINANCE_API_SECRET,
+                    testnet=True
+                )
+                logger.info("Binance TESTNET bağlantısı kuruldu.")
+            else:
+                client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
+                logger.info("Binance LIVE bağlantısı kuruldu.")
+            break
+        except Exception as e:
+            logger.warning(f"Binance bağlantı denemesi {attempt}/{max_retries} başarısız: {e}")
+            if attempt < max_retries:
+                wait = min(30, 5 * attempt)
+                logger.info(f"  {wait}s sonra tekrar denenecek...")
+                await asyncio.sleep(wait)
+            else:
+                logger.error("Binance API'ye bağlanılamadı! VPN gerekli olabilir.")
+                send_message("❌ <b>AX Engine:</b> Binance API bağlantısı kurulamadı!\nVPN aktif mi kontrol edin.")
+                return
+
     scanner = AsyncMarketScanner(db_path=DB_PATH)
     trend = AdvancedTrendEngine(client)
     trigger = TriggerEngine(client)
     risk = AdvancedRiskEngine(client, db_path=DB_PATH)
     ai_engine = AIDecisionEngine(db_path=DB_PATH)
-    elite = UltimateEliteEngine(client)
-    
-    send_direct_message("👑 <b>AX ULTIMATE ELITE Sürüm Başlatıldı!</b>\nSentiment, Adaptive SL/TP ve AI Post-Mortem aktif.")
+
+    send_message("👑 <b>AX Engine v5.0 Başlatıldı!</b>\nLive-Ready mode aktif.")
 
     while True:
         try:
-            sentiment = elite.get_sentiment()
-            logger.info(f"🌍 Piyasa Duyarlılığı: %{sentiment}")
-            
             candidates = await scanner.scan()
             if not candidates:
                 await asyncio.sleep(SCAN_INTERVAL)
                 continue
-            
+
             balance = get_paper_balance()
             open_trades = get_open_trades()
-            
-            for coin in candidates[:20]:
-                symbol = coin["symbol"]
-                trend_res = trend.analyze(symbol)
-                if trend_res["direction"] == "NO TRADE": continue
-                
-                # Sentiment Filtresi: Piyasa çok kötüyse Long açma
-                if sentiment < 30 and trend_res["direction"] == "LONG": continue
-                
-                trigger_res = trigger.analyze(symbol, trend_res["direction"])
-                sl, tp = elite.calculate_adaptive_targets(symbol, trigger_res["entry"], trend_res["direction"])
-                
-                sig = SignalData(
-                    id=str(uuid.uuid4())[:8], symbol=symbol, timestamp=time.time(),
-                    direction=trend_res["direction"], entry_zone=trigger_res["entry"],
-                    stop_loss=sl, tp1=tp, tp2=tp*1.02, tp3=tp*1.04,
-                    setup_quality=trigger_res["quality"], coin_score=coin["tradeability_score"],
-                    trend_score=trend_res["score"], trigger_score=trigger_res["score"],
-                    risk_score=8, ml_score=50, rr=2.0, risk_percent=1.0,
-                    position_size=100, notional_size=100, leverage_suggestion=10,
-                    confidence=0.8, reason=f"Sentiment: %{sentiment} | Adaptive Targets"
-                )
-                
-                ai_res = ai_engine.evaluate(sig)
-                save_paper_trade(sig.to_dict(), tracked_from=ai_res["decision"])
 
-                if ai_res["decision"] == "ALLOW":
-                    logger.info(f"🚀 ELITE SİNYAL: {symbol}")
-                    save_scalp_signal(sig.to_dict())
-                    deliver_signal(sig)
-            
+            for coin in candidates[:30]:
+                symbol = coin["symbol"]
+
+                # Zaten açık trade varsa atla
+                if any(t["symbol"] == symbol for t in open_trades):
+                    continue
+
+                trend_res = trend.analyze(symbol)
+                if trend_res["direction"] == "NO TRADE":
+                    continue
+
+                trigger_res = trigger.analyze(symbol, trend_res["direction"])
+                if trigger_res.get("quality", "D") == "D":
+                    continue
+
+                # Risk kontrolü
+                risk_res = risk.calculate(
+                    symbol, trend_res["direction"],
+                    trigger_res["entry"], trigger_res["quality"],
+                    balance, open_trades
+                )
+
+                # Sinyal oluştur
+                sig_data = {
+                    "id": str(uuid.uuid4())[:8],
+                    "symbol": symbol,
+                    "direction": trend_res["direction"],
+                    "entry": trigger_res["entry"],
+                    "sl": risk_res.get("sl", trigger_res["entry"] * 0.98),
+                    "tp1": risk_res.get("tp1", trigger_res["entry"] * 1.02),
+                    "tp2": risk_res.get("tp2", trigger_res["entry"] * 1.04),
+                    "tp3": risk_res.get("tp2", trigger_res["entry"] * 1.04) * 1.01,
+                    "setup_quality": trigger_res["quality"],
+                    "final_score": trigger_res.get("score", 0),
+                    "confidence": 0.8,
+                    "leverage": risk_res.get("leverage", 10),
+                    "risk_usd": risk_res.get("risk_usd", 0),
+                    "market_regime": trend_res.get("regime"),
+                    "reason": f"Score: {trigger_res.get('score', 0):.1f}",
+                }
+
+                # AI karar
+                decision, reason = ai_engine.decide(sig_data)
+
+                # Sinyal kaydet (her karar için)
+                save_signal_candidate({
+                    **sig_data,
+                    "uuid": sig_data["id"],
+                    "decision": decision,
+                    "reason": reason,
+                })
+
+                # Paper result kaydet (ghost learning için)
+                save_paper_trade(sig_data, tracked_from=decision)
+
+                if decision == "ALLOW":
+                    if risk_res.get("valid", False):
+                        logger.info(f"🚀 TRADE SİNYALİ: {symbol} {trend_res['direction']}")
+                        trade_id = open_trade(client, sig_data)
+                        if trade_id:
+                            open_trades = get_open_trades()  # Güncelle
+                    else:
+                        logger.info(f"⚠️ Risk red: {symbol} - {risk_res.get('reason')}")
+                elif decision == "WATCH":
+                    logger.info(f"👀 WATCH: {symbol} - {reason}")
+                else:
+                    logger.debug(f"🚫 VETO: {symbol} - {reason}")
+
             await asyncio.sleep(SCAN_INTERVAL)
         except Exception as e:
-            logger.error(f"Hata: {e}")
+            logger.error(f"Ana döngü hatası: {e}")
             await asyncio.sleep(10)
+
 
 if __name__ == "__main__":
     asyncio.run(main_loop())

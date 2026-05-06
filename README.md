@@ -1,93 +1,113 @@
-# AX Scalp Engine v2.0
+# 🤖 AX Trade Engine v5.0
 
-**Minimal, sagLam, hizli, profesyonel, yuksek frekanslı ama disiplinli calisan AI scalp trade engine.**
+AI-driven cryptocurrency trade engine for Binance Futures with multi-layered risk management, real-time dashboard, Telegram reporting, and autonomous Ghost Learning.
 
----
+## Features
 
-## Mimari
+- **AI Decision Engine** — ALLOW / WATCH / VETO signal classification
+- **Ghost Learning** — Learns from trades it didn't take (paper outcome tracking)
+- **Coin Personality** — Per-coin win rate, danger score, EMA-based personality updates
+- **Multi-TP Management** — TP1 (40%), TP2 (30%), Runner (30%) with trailing stop
+- **Real-time Dashboard** — Live PnL, open trades, calendar, weekly stats, coin profiles
+- **Telegram Integration** — Trade open/close notifications with PnL breakdown
+- **Circuit Breaker** — Auto-pause after consecutive losses
+- **Comprehensive Audit** — 9-stage PnL consistency verification
 
-```
-Market Scanner
--> Trend Engine
--> Trigger Engine
--> Risk Engine
--> AI Decision Engine
--> Data Layer
--> Dashboard + Telegram
-```
-
-> **Kural:** Dashboard ve Telegram ham veri kullanmaz. Sadece Data Layer'dan validate edilmis veri alir.
-
----
-
-## Moduller
-
-| Modul | Dosya | Gorev |
-|---|---|---|
-| Market Scanner | `core/market_scanner.py` | Binance'den USDT paritelerini ceker, filtreler, Tradeability Score verir |
-| Trend Engine | `core/trend_engine.py` | EMA 20/50/200, market structure, trend yonu ve skoru |
-| Trigger Engine | `core/trigger_engine.py` | Giris onayi, setup kalitesi (A+/A/B/C/D) |
-| Risk Engine | `core/risk_engine.py` | Stop, TP1/2/3, RR, pozisyon buyuklugu, kaldirac |
-| AI Decision Engine | `core/ai_decision_engine.py` | Final karar katmani, gunluk limit, spam engeli |
-| Data Layer | `core/data_layer.py` | Tek schema, validate edilmis veri akisi |
-| Dashboard | `app.py` + `templates/index.html` | Sadece Data Layer'dan beslenir |
-| Telegram Delivery | `telegram_delivery.py` | Sadece Data Layer'dan beslenir, duplicate engeli |
-
----
-
-## Tek Schema (SignalData)
-
-Tum moduller `SignalData` ile calisir:
-
-```
-id, symbol, timestamp, source, timeframe, direction,
-coin_score, trend_score, trigger_score, risk_score, final_score,
-setup_quality, entry_zone, stop_loss, tp1, tp2, tp3,
-rr, risk_percent, position_size, notional_size, leverage_suggestion,
-max_loss, invalidation_level, confidence, status, reason,
-telegram_status, dashboard_status, error
-```
-
----
-
-## Setup Kalitesi
-
-| Kalite | Aciklama | Telegram | Dashboard |
-|---|---|---|---|
-| A+ | En guclu setup | Gonderilir | Gosterilir |
-| A | Guclu setup | Gonderilir | Gosterilir |
-| B | Dusuk riskli aktif scalp | Gonderilir (half size) | Gosterilir |
-| C | Zayif setup | Gonderilmez | Watchlist |
-| D | Elenir | Hayir | Hayir |
-
----
-
-## Sinyal Frekansi
-
-- Normal gun: 25-30 kaliteli firsat
-- Volatil gun: 30-40 kaliteli firsat
-- Maksimum: **40 sinyal/gun**
-
----
-
-## Kurulum
+## Quick Start
 
 ```bash
+# 1. Install dependencies
 pip install -r requirements.txt
+
+# 2. Configure environment
 cp .env.example .env
-# .env dosyasini duzenle
-python scalp_bot.py   # Bot
-python app.py         # Dashboard
+# Edit .env with your API keys
+
+# 3. Initialize database
+python -c "from database import init_db; init_db()"
+
+# 4. Run migration (if upgrading)
+python scripts/migrate_accounting_schema.py
+
+# 5. Run audit
+python scripts/audit_pnl_consistency.py
+
+# 6. Start Dashboard (Terminal 1)
+python app.py
+
+# 7. Start Bot (Terminal 2)
+python scalp_bot_v3.py
 ```
 
----
+## Architecture
 
-## Faz Durumu
+```
+scalp_bot_v3.py          — Main scan loop
+├── core/
+│   ├── async_market_scanner.py   — Async Binance market scanner
+│   ├── advanced_trend_engine.py  — 1h EMA trend + mean reversion
+│   ├── trigger_engine.py         — 5m+1m multi-TF entry confirmation
+│   ├── advanced_risk_engine.py   — Position sizing + safety checks
+│   ├── ai_decision_engine.py     — AI ALLOW/WATCH/VETO + Ghost Learning
+│   ├── accounting.py             — Centralized PnL/Fee/Margin math
+│   ├── paper_tracker.py          — Paper outcome simulation
+│   ├── coin_library.py           — Exchange filter management
+│   ├── data_layer.py             — Signal/Trade data structures
+│   └── elite_monitor.py          — System health + cleanup
+├── execution_engine.py           — Trade lifecycle (open/TP/SL/close)
+├── database.py                   — SQLite with 12+ tables
+├── telegram_delivery.py          — Thread-safe Telegram notifications
+├── dashboard_service.py          — Background stats aggregation
+├── app.py                        — Flask dashboard + 10 API endpoints
+├── config.py                     — All settings from .env
+└── scripts/
+    ├── audit_pnl_consistency.py  — 9-stage system audit
+    ├── backtest_engine.py        — Historical trade replay
+    └── migrate_accounting_schema.py — DB schema migration
+```
 
-- [x] Faz 1 - Market Scanner / Coin Discovery
-- [x] Faz 2 - Trend + Trigger Engine
-- [x] Faz 3 - Risk Engine / Stop / Target
-- [x] AI Decision Engine
-- [x] Data Layer (Tek Schema)
-- [x] Dashboard (Data Layer'dan besleniyor)
-- [x] Telegram Delivery (Data Layer'dan besleniyor)
+## Dashboard
+
+Access at `http://localhost:5000` after starting `app.py`.
+
+### API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/api/live` | Open trades with real-time PnL breakdown |
+| `/api/stats` | Overall performance statistics |
+| `/api/trades` | Paginated trade history |
+| `/api/pnl_chart` | Cumulative PnL chart data |
+| `/api/daily_pnl` | Daily PnL calendar data |
+| `/api/weekly` | Weekly performance summary |
+| `/api/coin_profiles` | Per-coin learning profiles |
+| `/api/ax_status` | System status (circuit breaker, mode, etc.) |
+| `/api/scalp_signal_stats` | Signal quality breakdown |
+
+## Safety Rules
+
+- `EXECUTION_MODE=paper` by default — no real money
+- `LIVE_TRADING_ENABLED=False` by default
+- `DRY_RUN=True` by default
+- Max margin loss check (40%) before every trade
+- Daily max loss circuit breaker (5%)
+- Consecutive loss cooldown
+- Never delete historic trade data
+
+## Audit
+
+Run before any deployment:
+
+```bash
+python scripts/audit_pnl_consistency.py
+```
+
+Must return `0 ERROR` before going live.
+
+## Environment Variables
+
+See `.env.example` for all available configuration options.
+
+## License
+
+Private — All rights reserved.

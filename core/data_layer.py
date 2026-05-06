@@ -69,21 +69,39 @@ class SignalData:
 def calculate_duration(open_time_str, close_time_str=None):
     """
     open_time ve close_time arasındaki süreyi saniye ve formatlı string olarak döner.
+    ISO format ve basit format destekler.
     """
-    fmt = "%Y-%m-%d %H:%M:%S"
+    def _parse_ts(s):
+        if not s:
+            return datetime.utcnow()
+        # ISO format dene (T separator, timezone)
+        try:
+            dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+            return dt.replace(tzinfo=None)  # naive'e çevir
+        except Exception:
+            pass
+        # Basit format dene
+        try:
+            return datetime.strptime(str(s), "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return datetime.utcnow()
+
     try:
-        start = datetime.strptime(open_time_str, fmt)
-        end = datetime.strptime(close_time_str, fmt) if close_time_str else datetime.now()
-        
-        duration_seconds = int((end - start).total_seconds())
-        
-        if duration_seconds < 60:
-            duration_str = f"{duration_seconds}s"
-        else:
+        start = _parse_ts(open_time_str)
+        end = _parse_ts(close_time_str) if close_time_str else datetime.utcnow()
+
+        duration_seconds = max(0, int((end - start).total_seconds()))
+
+        if duration_seconds >= 3600:
+            hours = duration_seconds / 3600
+            duration_str = f"{hours:.1f}sa"
+        elif duration_seconds >= 60:
             minutes = duration_seconds // 60
             seconds = duration_seconds % 60
             duration_str = f"{minutes}dk {seconds}s"
-            
+        else:
+            duration_str = f"{duration_seconds}s"
+
         return duration_seconds, duration_str
     except Exception:
         return 0, "0s"
