@@ -1,5 +1,5 @@
 """
-core/accounting.py — AX Merkezi Muhasebe Modülü v5.0 (LIVE-READY)
+core/accounting.py — AX Merkezi Muhasebe Modülü v5.0 (PAPER-ONLY / LIVE-BLOCKED)
 ==================================================================
 Tüm PnL, Fee, Margin, Risk ve Leverage hesaplamaları burada yapılır.
 execution_engine, dashboard, backtest ve audit bu modülü kullanır.

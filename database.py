@@ -1,5 +1,5 @@
 """
-database.py — AX Merkezi Veritabanı v5.0 (LIVE-READY)
+database.py — AX Merkezi Veritabanı v5.0 (PAPER-ONLY / LIVE-BLOCKED)
 ======================================================
 Tüm tablo tanımları, CRUD fonksiyonları ve migration desteği.
 Eski gerçek veriyi silmez. reset_paper_data varsayılan olarak DELETE yapmaz.

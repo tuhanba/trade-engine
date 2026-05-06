@@ -1,5 +1,5 @@
 """
-scripts/backtest_engine.py — AX Backtest Engine v5.0 (LIVE-READY)
+scripts/backtest_engine.py — AX Backtest Engine v5.0 (PAPER-ONLY / LIVE-BLOCKED)
 =================================================================
 FAZ 13: core/accounting.py fonksiyonlarını kullanarak backtest yapar.
 """

@@ -1,5 +1,5 @@
 """
-core/ai_decision_engine.py — AX AI Brain v5.0 (LIVE-READY)
+core/ai_decision_engine.py — AX AI Brain v5.0 (PAPER-ONLY / LIVE-BLOCKED)
 ===========================================================
 FAZ 10: Ghost Learning + Coin Personality + Expectancy
 

@@ -1,5 +1,5 @@
 """
-config.py — AX Sistem Sabitleri v5.0 (LIVE-READY)
+config.py — AX Sistem Sabitleri v5.0 (PAPER-ONLY / LIVE-BLOCKED)
 ===================================================
 Tüm yapılandırma değerleri .env dosyasından okunur.
 Hardcoded token/API key YOKTUR.

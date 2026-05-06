@@ -1,5 +1,5 @@
 """
-telegram_delivery.py — AX Telegram Raporlama v5.0 (LIVE-READY)
+telegram_delivery.py — AX Telegram Raporlama v5.0 (PAPER-ONLY / LIVE-BLOCKED)
 ===============================================================
 Dashboard ile aynı veriyi gösterir. Duplicate mesaj atmaz.
 PnL = Dashboard PnL = DB PnL.
