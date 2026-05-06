@@ -4,6 +4,14 @@ app.py — AX Dashboard API v5.0 (LIVE-READY)
 Full dashboard API with open trade breakdown, stats, live PnL,
 trade history, calendar, weekly, coin profiles, AX status.
 """
+# ── EVENTLET MONKEY PATCH (Must be first) ──
+try:
+    import eventlet
+    eventlet.monkey_patch()
+    USE_SOCKETIO = True
+except ImportError:
+    USE_SOCKETIO = False
+
 import os
 from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
@@ -23,16 +31,11 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "ax_secret")
 
-# SocketIO opsiyonel — eventlet yoksa Flask düz çalışır
-try:
-    import eventlet
-    eventlet.monkey_patch()
+if USE_SOCKETIO:
     from flask_socketio import SocketIO
     socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
-    USE_SOCKETIO = True
-except ImportError:
+else:
     socketio = None
-    USE_SOCKETIO = False
     logger.info("[App] eventlet/socketio yok — düz Flask modu.")
 
 
