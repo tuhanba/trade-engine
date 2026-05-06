@@ -1,19 +1,17 @@
 [Unit]
 Description=AX Trade Engine - Dashboard API
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
 WorkingDirectory=/root/trade_engine
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/root/trade_engine/.venv/bin/python app.py
+EnvironmentFile=/root/trade_engine/.env
+ExecStart=/root/trade_engine/.venv/bin/python /root/trade_engine/app.py
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=300
-StartLimitBurst=15
-StandardOutput=append:/var/log/ax_dashboard.log
-StandardError=append:/var/log/ax_dashboard.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

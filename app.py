@@ -58,7 +58,12 @@ def api_live():
                 v = t.get(k)
                 return float(v) if v is not None else default
 
-            current_price = safe_num("current_price") or safe_num("entry")
+            current_price = safe_num("current_price")
+            data_quality = "live"
+            if current_price <= 0:
+                current_price = safe_num("entry")
+                data_quality = "fallback"
+                
             mark_price = safe_num("mark_price", current_price)
             entry = safe_num("entry")
             sl = safe_num("sl")
@@ -158,7 +163,8 @@ def api_live():
                 "last_update":           str(t.get("last_update", "-")),
                 "fee_paid":              safe_num("total_fee"),
                 "fee_estimate":          0.0,
-                "source":                str(t.get("source", "bot"))
+                "source":                str(t.get("source", "bot")),
+                "data_quality":          data_quality
             })
 
         return jsonify({
@@ -238,14 +244,17 @@ def api_stats():
         except Exception:
             pass
 
+        open_unrealized = sum(safe_num(t.get("unrealized_pnl")) for t in open_trades)
+        closed_net_pnl = safe_num(stats.get("total_pnl"))
+
         return jsonify({
             "ok": True,
             "data": {
-                "closed_net_pnl":      round(safe_num(stats.get("total_pnl")), 4),
+                "closed_net_pnl":      round(closed_net_pnl, 4),
                 "open_realized_pnl":   round(open_realized, 4),
-                "open_unrealized_pnl": 0.0,
-                "total_net_pnl":       round(safe_num(stats.get("total_pnl")) + open_realized, 4),
-                "total_pnl":           round(safe_num(stats.get("total_pnl")), 4),
+                "open_unrealized_pnl": round(open_unrealized, 4),
+                "total_net_pnl":       round(closed_net_pnl + open_realized + open_unrealized, 4),
+                "total_pnl":           round(closed_net_pnl, 4),
                 "total_fees":          round(safe_num(stats.get("total_fees")), 4),
                 "open_trades":         len(open_trades),
                 "open_count":          len(open_trades),

@@ -1,20 +1,17 @@
 [Unit]
-Description=AX Trade Engine - Scalp Bot v5.1
-After=network.target
-Wants=ax-dashboard.service
+Description=AX Trade Engine - Scalp Bot
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
 WorkingDirectory=/root/trade_engine
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/root/trade_engine/.venv/bin/python scalp_bot_v3.py
+EnvironmentFile=/root/trade_engine/.env
+ExecStart=/root/trade_engine/.venv/bin/python /root/trade_engine/scalp_bot_v3.py
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=300
-StartLimitBurst=10
-StandardOutput=append:/var/log/ax_bot.log
-StandardError=append:/var/log/ax_bot.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

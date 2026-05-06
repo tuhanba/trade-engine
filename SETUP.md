@@ -1,17 +1,14 @@
 # AX Trade Engine v5.x PAPER - Server Setup
 
-This guide provides the definitive steps for deploying the production-grade paper trading engine.
-
 ## 1. Requirements
 - Ubuntu 24.04 LTS or similar
 - Python 3.12+
-- Path must be exactly `/root/trade_engine`
 
 ## 2. Installation
 ```bash
 cd /root
-git clone https://github.com/tuhanba/trade-engine.git
-cd trade_engine
+git clone https://github.com/tuhanba/trade-engine.git trade_engine
+cd /root/trade_engine
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -30,7 +27,7 @@ USE_BINANCE_PRIVATE_API=False
 ```
 
 ## 4. DB Migration & Initial Setup
-**NEVER DELETE trading.db.**
+**NEVER DELETE trading.db. Backup and migrate instead.**
 ```bash
 python -c "from database import init_db; init_db()"
 python scripts/migrate_v6.py || true
@@ -45,7 +42,8 @@ cp systemd/ax-dashboard.service /etc/systemd/system/
 
 systemctl daemon-reload
 systemctl enable ax-bot ax-dashboard
-systemctl restart ax-bot ax-dashboard
+systemctl restart ax-bot
+systemctl restart ax-dashboard
 ```
 
 ## 6. Validation Tests
