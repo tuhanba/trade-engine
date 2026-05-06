@@ -14,8 +14,22 @@ EXECUTION_MODE      = os.getenv("EXECUTION_MODE", "paper")
 PAPER_MODE          = EXECUTION_MODE == "paper"
 LIVE_TRADING_ENABLED = os.getenv("LIVE_TRADING_ENABLED", "False").lower() == "true"
 DRY_RUN             = os.getenv("DRY_RUN", "True").lower() == "true"
+USE_BINANCE_PRIVATE_API = os.getenv("USE_BINANCE_PRIVATE_API", "False").lower() == "true"
+CONFIRM_LIVE_TRADING    = os.getenv("CONFIRM_LIVE_TRADING", "False").lower() == "true"
+
+
+def can_use_live_orders() -> bool:
+    """
+    Canlı emir sadece üç koşul aynı anda sağlanırsa mümkün:
+      LIVE_TRADING_ENABLED=true
+      DRY_RUN=false
+      CONFIRM_LIVE_TRADING=true
+    """
+    return LIVE_TRADING_ENABLED and not DRY_RUN and CONFIRM_LIVE_TRADING
+
 
 # ── API ──────────────────────────────────────────────────────────────────────
+# Paper modda API key/secret ZORUNLU DEĞİLDİR.
 BINANCE_API_KEY    = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 

@@ -18,3 +18,4 @@ __all__ = [
     "calculate_close_pnl", "calculate_r_multiple", "validate_trade_risk",
     "calculate_max_loss_after_fee", "calculate_margin_loss_pct",
 ]
+

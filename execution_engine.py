@@ -1,5 +1,5 @@
 """
-execution_engine.py — AX Paper Execution Motoru v5.0 (LIVE-READY)
+execution_engine.py — AX Paper Execution Motoru v5.1 (PAPER-SAFE)
 =================================================================
 Trade Lifecycle:
   open → tp1_hit → tp2_hit/runner → closed
@@ -11,7 +11,13 @@ KURALLAR:
 - partial_closes ve balance_ledger doğru yazılır.
 - trades.net_pnl = TP1 + TP2 + runner/final net toplamı.
 - duration_seconds = close_time - open_time (saniye).
-- LIVE_TRADING_ENABLED default False. DRY_RUN default True.
+
+PAPER MODE KURALLARI:
+- Binance private endpoint ÇAĞRILMAZ (order, account, position).
+- Binance public endpoint SERBEST (exchangeInfo, ticker, kline).
+- Trade aç/kapat DB'ye simülasyon olarak yazılır.
+- Paper balance local DB (paper_account + balance_ledger) üzerinden.
+- Canlı emir sadece: LIVE_TRADING_ENABLED=true + DRY_RUN=false + CONFIRM_LIVE_TRADING=true
 """
 import math
 import logging
@@ -24,6 +30,7 @@ from config import (
     LIVE_TRADING_ENABLED, DRY_RUN, DEFAULT_FEE_RATE,
     MAX_OPEN_TRADES, MAX_CONSECUTIVE_LOSSES, COIN_COOLDOWN_MINUTES,
     DAILY_MAX_LOSS_PCT, MAX_CORRELATED_TRADES,
+    PAPER_MODE, USE_BINANCE_PRIVATE_API, can_use_live_orders,
 )
 from core.accounting import (
     calculate_pnl, calculate_fee, calculate_notional_and_margin,
@@ -47,23 +54,57 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_filters(client, symbol: str) -> dict:
-    """LOT_SIZE ve PRICE_FILTER filtrelerini Binance'ten al."""
+    """
+    LOT_SIZE ve PRICE_FILTER filtrelerini al.
+    Paper modda: önce DB coin_library'den, yoksa Binance public exchangeInfo.
+    exchangeInfo public endpoint'tir — paper modda kullanılabilir.
+    """
+    defaults = {"step_size": 0.001, "min_qty": 0.001, "tick_size": 0.01, "min_notional": 5.0}
+
+    # 1. DB coin_library'den dene
     try:
-        info = client.futures_exchange_info()
-        for s in info["symbols"]:
-            if s["symbol"] == symbol:
-                filters = {f["filterType"]: f for f in s["filters"]}
-                lot = filters.get("LOT_SIZE", {})
-                price_f = filters.get("PRICE_FILTER", {})
+        from database import get_conn
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT min_qty, step_size, tick_size, min_notional FROM coin_library WHERE symbol = ?",
+                (symbol,)
+            ).fetchone()
+            if row and row[0]:
                 return {
-                    "step_size":    float(lot.get("stepSize", "0.001")),
-                    "min_qty":      float(lot.get("minQty", "0.001")),
-                    "tick_size":    float(price_f.get("tickSize", "0.01")),
-                    "min_notional": float(filters.get("MIN_NOTIONAL", {}).get("notional", "5.0")),
+                    "min_qty": float(row[0]),
+                    "step_size": float(row[1]),
+                    "tick_size": float(row[2]),
+                    "min_notional": float(row[3]) if row[3] else 5.0,
                 }
-    except Exception as e:
-        logger.warning(f"[Execution] Filtre alınamadı {symbol}: {e}")
-    return {"step_size": 0.001, "min_qty": 0.001, "tick_size": 0.01, "min_notional": 5.0}
+    except Exception:
+        pass
+
+    # 2. Binance exchangeInfo (PUBLIC endpoint — paper modda izinli)
+    if client:
+        try:
+            info = client.futures_exchange_info()
+            for s in info["symbols"]:
+                if s["symbol"] == symbol:
+                    filters = {f["filterType"]: f for f in s["filters"]}
+                    lot = filters.get("LOT_SIZE", {})
+                    price_f = filters.get("PRICE_FILTER", {})
+                    result = {
+                        "step_size":    float(lot.get("stepSize", "0.001")),
+                        "min_qty":      float(lot.get("minQty", "0.001")),
+                        "tick_size":    float(price_f.get("tickSize", "0.01")),
+                        "min_notional": float(filters.get("MIN_NOTIONAL", {}).get("notional", "5.0")),
+                    }
+                    # DB'ye kaydet (sonraki kullanımlar için)
+                    try:
+                        from database import save_coin_library
+                        save_coin_library(symbol, result)
+                    except Exception:
+                        pass
+                    return result
+        except Exception as e:
+            logger.warning(f"[Execution] Filtre alınamadı {symbol}: {e}")
+
+    return defaults
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -132,7 +173,13 @@ def open_trade(client, signal: dict, ax_decision: dict = None,
                risk_pct: float = None) -> int | None:
     """
     Paper trade aç. Tüm hesaplamalar core/accounting.py üzerinden.
+    PAPER modda: DB'ye simülasyon yazılır, Binance order endpoint ÇAĞRILMAZ.
     """
+    # ── PAPER GUARD ──
+    if can_use_live_orders():
+        logger.info("[Execution] LIVE MODE — gerçek emir açılacak")
+    else:
+        logger.info("[Execution] PAPER MODE — simülasyon trade")
     symbol    = signal["symbol"]
     direction = signal["direction"]
     entry     = signal["entry"]
@@ -224,12 +271,15 @@ def open_trade(client, signal: dict, ax_decision: dict = None,
     # Telegram açılış bildirimi
     try:
         from telegram_delivery import send_trade_open
-        send_trade_open({
+        msg_data = {
             **trade, "id": trade_id,
             "confidence": signal.get("confidence", 0.8),
             "reason": signal.get("reason", ""),
             "rr": signal.get("rr", 0),
-        })
+        }
+        if not can_use_live_orders():
+            msg_data["reason"] = f"[PAPER/DRY-RUN] {msg_data['reason']}"
+        send_trade_open(msg_data)
     except Exception as e:
         logger.warning(f"[Execution] Telegram open hatası: {e}")
 
