@@ -111,6 +111,7 @@ def send_trade_open(data):
         f"⚙️ Kaldıraç: <b>x{data.get('leverage', 10)}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🧠 AI Güven: {conf_bar} %{conf_pct}\n"
+        f"📝 Not: <i>{data.get('reason', '')}</i>\n"
         f"🎯 Active: TP1\n"
         f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
     )
