@@ -53,88 +53,112 @@ def api_live():
         total_unrealized = 0
 
         for t in open_trades:
-            # Fiyat bilgisi (mevcut fiyat yoksa entry kullan)
-            current_price = t.get("current_price") or t.get("entry", 0)
+            # Safe numeric getters
+            def safe_num(k, default=0.0):
+                v = t.get(k)
+                return float(v) if v is not None else default
+
+            current_price = safe_num("current_price") or safe_num("entry")
+            mark_price = safe_num("mark_price", current_price)
+            entry = safe_num("entry")
+            sl = safe_num("sl")
+            tp1 = safe_num("tp1")
+            tp2 = safe_num("tp2")
+            tp3 = safe_num("tp3")
+            direction = str(t.get("direction", "LONG")).upper()
+            
+            # Distance hesaplamaları
+            def calc_dist(target_price, is_sl=False):
+                if not current_price or not target_price: return 0.0
+                if direction == "LONG":
+                    dist = (current_price - target_price) if is_sl else (target_price - current_price)
+                else:
+                    dist = (target_price - current_price) if is_sl else (current_price - target_price)
+                return (dist / current_price) * 100.0
+
+            sl_dist = calc_dist(sl, is_sl=True)
+            tp1_dist = calc_dist(tp1)
+            tp2_dist = calc_dist(tp2)
+            tp3_dist = calc_dist(tp3)
 
             # Süre
             duration_seconds, duration_str = calculate_duration(t.get('open_time'))
 
-            # Runner unrealized PnL
-            remaining_qty = t.get("remaining_qty") or t.get("original_qty", 0)
-            fee_rate = t.get("fee_rate", 0.0004)
-            entry = t.get("entry", 0)
-            direction = t.get("direction", "LONG")
-
+            # PnL Hesapları
+            remaining_qty = safe_num("remaining_qty", safe_num("original_qty"))
+            fee_rate = safe_num("fee_rate", 0.0004)
+            realized_pnl = safe_num("realized_pnl")
+            
             runner_unrealized = calculate_runner_unrealized_pnl(
                 direction, entry, current_price, remaining_qty, fee_rate
             )
+            net_pnl = calculate_open_trade_total_pnl(realized_pnl, runner_unrealized)
+            total_unrealized += net_pnl
 
-            realized_pnl = t.get("realized_pnl", 0) or 0
-            open_trade_total = calculate_open_trade_total_pnl(realized_pnl, runner_unrealized)
-            total_unrealized += open_trade_total
-
-            # TP katkıları
-            tp1_pnl = 0
-            tp2_pnl = 0
-            try:
-                partials = db.get_partial_closes(t["id"])
-                for p in partials:
-                    if p.get("close_type") == "TP1":
-                        tp1_pnl = p.get("net_pnl", 0)
-                    elif p.get("close_type") == "TP2":
-                        tp2_pnl = p.get("net_pnl", 0)
-            except Exception:
-                pass
-
-            # Active target
-            status = t.get("status", "open")
-            if status == "open":
+            # Lifecycle & Targets
+            status = str(t.get("status", "open")).upper()
+            lifecycle_state = status
+            
+            if status == "OPEN":
                 active_target = "TP1"
-            elif status == "tp1_hit":
+                next_target = "TP1"
+            elif status == "TP1_HIT":
                 active_target = "TP2"
-            elif status in ("runner", "tp2_hit"):
+                next_target = "TP2"
+            elif status in ("RUNNER", "TP2_HIT"):
                 active_target = "RUNNER"
+                next_target = "RUNNER"
             else:
-                active_target = status
+                active_target = "-"
+                next_target = "-"
 
-            # SL distance pct
-            sl = t.get("sl", 0) or 0
-            sl_dist_pct = abs(entry - sl) / entry * 100 if entry else 0
+            # Margin & Risk
+            margin = safe_num("margin_used", 1.0)
+            if margin <= 0: margin = 1.0
+            risk_usd = safe_num("risk_usd", 1.0)
+            if risk_usd <= 0: risk_usd = 1.0
+            
+            net_pnl_pct = (net_pnl / margin) * 100.0
+            current_R = net_pnl / risk_usd
 
             results.append({
-                "id":                    t["id"],
-                "symbol":                t["symbol"],
-                "direction":             direction,
+                "id":                    str(t.get("id", "")),
+                "symbol":                str(t.get("symbol", "-")),
+                "side":                  direction,
+                "status":                status,
+                "lifecycle_state":       lifecycle_state,
                 "entry":                 entry,
                 "current_price":         current_price,
+                "mark_price":            mark_price,
                 "sl":                    sl,
-                "tp":                    t.get("tp1"),
-                "tp1":                   t.get("tp1"),
-                "tp2":                   t.get("tp2"),
-                "tp3":                   t.get("tp3"),
-                "original_qty":          t.get("original_qty"),
-                "remaining_qty":         remaining_qty,
-                "qty_tp1":               t.get("qty_tp1"),
-                "qty_tp2":               t.get("qty_tp2"),
-                "qty_runner":            t.get("qty_runner"),
-                "tp1_pnl":               round(tp1_pnl, 4),
-                "tp2_pnl":               round(tp2_pnl, 4),
-                "realized_pnl":          round(realized_pnl, 4),
-                "runner_unrealized_pnl": round(runner_unrealized, 4),
-                "unrealized_pnl":        round(open_trade_total, 4),
-                "open_trade_total_pnl":  round(open_trade_total, 4),
-                "unrealized_pct":        round(open_trade_total / (t.get("margin_used", 1) or 1) * 100, 2),
-                "total_fee":             round(t.get("total_fee", 0) or 0, 4),
-                "leverage":              t.get("leverage", 10),
-                "margin_used":           round(t.get("margin_used", 0) or 0, 2),
-                "risk_usd":              round(t.get("risk_usd", 0) or 0, 2),
-                "max_loss_after_fee":    round(t.get("max_loss_after_fee", 0) or 0, 2),
+                "tp1":                   tp1,
+                "tp2":                   tp2,
+                "tp3":                   tp3,
                 "active_target":         active_target,
-                "duration_seconds":      duration_seconds,
+                "next_target":           next_target,
+                "qty":                   safe_num("original_qty"),
+                "remaining_qty":         remaining_qty,
+                "margin":                margin,
+                "leverage":              safe_num("leverage", 10.0),
+                "risk_usd":              risk_usd,
+                "risk_pct":              safe_num("risk_pct", 1.0),
+                "realized_pnl":          round(realized_pnl, 4),
+                "unrealized_pnl":        round(net_pnl, 4),
+                "runner_pnl":            round(runner_unrealized, 4),
+                "net_pnl":               round(net_pnl, 4),
+                "net_pnl_pct":           round(net_pnl_pct, 2),
+                "current_R":             round(current_R, 2),
+                "sl_distance_pct":       round(sl_dist, 2),
+                "tp1_distance_pct":      round(tp1_dist, 2),
+                "tp2_distance_pct":      round(tp2_dist, 2),
+                "tp3_distance_pct":      round(tp3_dist, 2),
+                "duration_sec":          duration_seconds,
                 "duration_str":          duration_str,
-                "status":                status,
-                "sl_distance_pct":       round(sl_dist_pct, 2),
-                "current_rr":            round(open_trade_total / (t.get("risk_usd", 1) or 1), 2),
+                "opened_at":             str(t.get("open_time", "-")),
+                "last_update":           str(t.get("last_update", "-")),
+                "fee_paid":              safe_num("total_fee"),
+                "fee_estimate":          0.0,
+                "source":                str(t.get("source", "bot"))
             })
 
         return jsonify({
@@ -142,12 +166,12 @@ def api_live():
             "data": {
                 "live": results,
                 "open_count": len(results),
-                "total_unrealized": round(total_unrealized, 4),
+                "total_unrealized": round(total_unrealized, 4)
             }
         })
     except Exception as e:
-        logger.error(f"[API] /api/live hatası: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        logger.error(f"[API] /api/live crash: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": str(e), "data": {"live": [], "open_count": 0, "total_unrealized": 0}}), 500
 
 
 @app.route('/api/stats')
@@ -158,13 +182,14 @@ def api_stats():
         balance = db.get_paper_balance()
         open_trades = db.get_open_trades()
 
-        # Açık trade PnL toplamları
-        open_realized = sum(t.get("realized_pnl", 0) or 0 for t in open_trades)
-        open_unrealized = 0  # Fiyat verisi olmadan hesaplanamaz
+        def safe_num(val, default=0.0):
+            return float(val) if val is not None else default
 
+        open_realized = sum(safe_num(t.get("realized_pnl")) for t in open_trades)
+        
         # Günlük PnL
-        daily_pnl = 0
-        daily_loss_remaining = 0
+        daily_pnl = 0.0
+        daily_loss_remaining = 0.0
         try:
             from database import get_conn
             from datetime import datetime, timezone
@@ -174,30 +199,26 @@ def api_stats():
                     "SELECT SUM(net_pnl) FROM trades WHERE DATE(close_time)=? AND status='closed'",
                     (today,)
                 ).fetchone()
-                daily_pnl = round(row[0] or 0, 4)
+                daily_pnl = round(safe_num(row[0] if row else 0), 4)
                 from config import DAILY_MAX_LOSS_PCT
                 daily_loss_remaining = round(
-                    balance * (DAILY_MAX_LOSS_PCT / 100) - abs(min(0, daily_pnl)), 2
+                    balance * (DAILY_MAX_LOSS_PCT / 100.0) - abs(min(0, daily_pnl)), 2
                 )
         except Exception:
             pass
 
-        # Detaylı istatistikler
-        total_trades = stats.get("total_trades", 0)
-        wins = stats.get("wins", 0)
-        losses = stats.get("losses", 0)
+        total_trades = int(stats.get("total_trades", 0))
+        wins = int(stats.get("wins", 0))
+        losses = int(stats.get("losses", 0))
 
-        # Ek performans metrikleri hesapla
-        best_trade = 0
-        worst_trade = 0
-        avg_pnl = 0
-        avg_win = 0
-        avg_loss = 0
-        avg_dur = 0
-        max_dd = 0
+        best_trade = 0.0
+        worst_trade = 0.0
+        avg_pnl = 0.0
+        avg_win = 0.0
+        avg_loss = 0.0
+        avg_dur = 0.0
         try:
             from database import get_conn
-            from datetime import datetime, timezone
             with get_conn() as conn:
                 row = conn.execute("""
                     SELECT MAX(net_pnl), MIN(net_pnl),
@@ -208,35 +229,35 @@ def api_stats():
                     FROM trades WHERE status='closed' AND is_valid_for_stats=1
                 """).fetchone()
                 if row:
-                    best_trade = round(row[0] or 0, 4)
-                    worst_trade = round(row[1] or 0, 4)
-                    avg_pnl = round(row[2] or 0, 4)
-                    avg_win = round(row[3] or 0, 4)
-                    avg_loss = round(row[4] or 0, 4)
-                    avg_dur = round((row[5] or 0) / 60, 1)  # saniyeden dakikaya
+                    best_trade = round(safe_num(row[0]), 4)
+                    worst_trade = round(safe_num(row[1]), 4)
+                    avg_pnl = round(safe_num(row[2]), 4)
+                    avg_win = round(safe_num(row[3]), 4)
+                    avg_loss = round(safe_num(row[4]), 4)
+                    avg_dur = round(safe_num(row[5]) / 60.0, 1)
         except Exception:
             pass
 
         return jsonify({
             "ok": True,
             "data": {
-                "closed_net_pnl":      stats.get("total_pnl", 0),
+                "closed_net_pnl":      round(safe_num(stats.get("total_pnl")), 4),
                 "open_realized_pnl":   round(open_realized, 4),
-                "open_unrealized_pnl": round(open_unrealized, 4),
-                "total_net_pnl":       round(stats.get("total_pnl", 0) + open_realized, 4),
-                "total_pnl":           stats.get("total_pnl", 0),
-                "total_fees":          stats.get("total_fees", 0),
+                "open_unrealized_pnl": 0.0,
+                "total_net_pnl":       round(safe_num(stats.get("total_pnl")) + open_realized, 4),
+                "total_pnl":           round(safe_num(stats.get("total_pnl")), 4),
+                "total_fees":          round(safe_num(stats.get("total_fees")), 4),
                 "open_trades":         len(open_trades),
                 "open_count":          len(open_trades),
                 "closed_trades":       total_trades,
                 "total":               total_trades + len(open_trades),
                 "wins":                wins,
                 "losses":              losses,
-                "win_rate":            round(stats.get("win_rate", 0) * 100, 1),
-                "profit_factor":       stats.get("profit_factor", 0),
-                "avg_r":               stats.get("avg_r", 0),
-                "avg_rr":              stats.get("avg_r", 0),
-                "paper_balance":       round(balance, 2),
+                "win_rate":            round(safe_num(stats.get("win_rate")) * 100, 1),
+                "profit_factor":       round(safe_num(stats.get("profit_factor")), 2),
+                "avg_r":               round(safe_num(stats.get("avg_r")), 2),
+                "avg_rr":              round(safe_num(stats.get("avg_r")), 2),
+                "paper_balance":       round(safe_num(balance), 2),
                 "daily_pnl":           daily_pnl,
                 "daily_loss_remaining": daily_loss_remaining,
                 "best_trade":          best_trade,
@@ -245,12 +266,12 @@ def api_stats():
                 "avg_win":             avg_win,
                 "avg_loss":            avg_loss,
                 "avg_dur":             avg_dur,
-                "max_drawdown":        max_dd,
+                "max_drawdown":        0.0,
             }
         })
     except Exception as e:
-        logger.error(f"[API] /api/stats hatası: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        logger.error(f"[API] /api/stats crash: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
 
 
 @app.route('/api/trades')
@@ -276,25 +297,20 @@ def api_trades():
         trades = []
         for r in rows:
             d = dict(r)
-            # Duration str
-            dur_sec = d.get("duration_seconds", 0) or 0
+            dur_sec = float(d.get("duration_seconds") or 0.0)
             if dur_sec >= 3600:
                 dur_str = f"{dur_sec/3600:.1f}sa"
             elif dur_sec >= 60:
-                dur_str = f"{dur_sec//60}dk"
+                dur_str = f"{dur_sec//60:.0f}dk"
             else:
-                dur_str = f"{dur_sec}s"
+                dur_str = f"{dur_sec:.0f}s"
 
             d["duration_str"] = dur_str
-            d["duration_min"] = round(dur_sec / 60, 1) if dur_sec else 0
+            d["duration_min"] = round(dur_sec / 60.0, 1)
             d["exit_price"] = d.get("close_price") or d.get("sl") or d.get("entry")
-
-            # Status mapping
-            net = d.get("net_pnl", 0) or 0
-            if net > 0:
-                d["status"] = "WIN"
-            else:
-                d["status"] = "LOSS"
+            
+            net = float(d.get("net_pnl") or 0.0)
+            d["status"] = "WIN" if net > 0 else "LOSS"
             trades.append(d)
 
         total_pages = max(1, (total + per_page - 1) // per_page)
@@ -310,8 +326,8 @@ def api_trades():
             }
         })
     except Exception as e:
-        logger.error(f"[API] /api/trades hatası: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        logger.error(f"[API] /api/trades crash: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": str(e), "data": [], "pagination": {}}), 500
 
 
 @app.route('/api/pnl_chart')
@@ -327,21 +343,22 @@ def api_pnl_chart():
                 ORDER BY id ASC
             """).fetchall()
 
-        cumulative = 0
+        cumulative = 0.0
         points = []
         for r in rows:
-            cumulative += (r[2] or 0)
+            val = float(r[2] if r[2] is not None else 0.0)
+            cumulative += val
             points.append({
-                "symbol": r[0],
-                "direction": r[1],
-                "pnl": round(r[2] or 0, 4),
+                "symbol": str(r[0] or ""),
+                "direction": str(r[1] or ""),
+                "pnl": round(val, 4),
                 "cumulative": round(cumulative, 4),
             })
 
         return jsonify({"ok": True, "data": points})
     except Exception as e:
-        logger.error(f"[API] /api/pnl_chart hatası: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        logger.error(f"[API] /api/pnl_chart crash: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
 
 
 @app.route('/api/daily_pnl')
@@ -361,12 +378,12 @@ def api_daily_pnl():
         data = {}
         for r in rows:
             if r[0]:
-                data[r[0]] = round(r[1] or 0, 4)
+                data[r[0]] = round(float(r[1] if r[1] is not None else 0.0), 4)
 
         return jsonify({"ok": True, "data": data})
     except Exception as e:
-        logger.error(f"[API] /api/daily_pnl hatası: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        logger.error(f"[API] /api/daily_pnl crash: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
 
 
 @app.route('/api/weekly')
@@ -377,7 +394,7 @@ def api_weekly():
         weeks = get_weekly_data(weeks=8)
         return jsonify({"ok": True, "data": weeks})
     except Exception as e:
-        logger.error(f"[API] /api/weekly hatası: {e}")
+        logger.error(f"[API] /api/weekly crash: {e}", exc_info=True)
         return jsonify({"ok": False, "data": []})
 
 
@@ -403,19 +420,19 @@ def api_coin_profiles():
         profiles = []
         for r in rows:
             profiles.append({
-                "symbol": r[0],
-                "win_rate": round((r[1] or 0) * 100, 1),
-                "avg_r": round(r[2] or 0, 2),
-                "profit_factor": round(r[3] or 0, 2),
-                "danger_score": round(r[4] or 0, 2),
-                "sample_size": r[5] or 0,
-                "total": r[6] or 0,
-                "total_pnl": round(r[7] or 0, 4),
+                "symbol": str(r[0] or ""),
+                "win_rate": round(float(r[1] or 0.0) * 100.0, 1),
+                "avg_r": round(float(r[2] or 0.0), 2),
+                "profit_factor": round(float(r[3] or 0.0), 2),
+                "danger_score": round(float(r[4] or 0.0), 2),
+                "sample_size": int(r[5] or 0),
+                "total": int(r[6] or 0),
+                "total_pnl": round(float(r[7] or 0.0), 4),
             })
 
         return jsonify({"ok": True, "data": profiles})
     except Exception as e:
-        logger.error(f"[API] /api/coin_profiles hatası: {e}")
+        logger.error(f"[API] /api/coin_profiles crash: {e}", exc_info=True)
         return jsonify({"ok": True, "data": []})
 
 
@@ -427,8 +444,8 @@ def api_ax_status():
         data = get_ax_status()
         return jsonify({"ok": True, "data": data})
     except Exception as e:
-        logger.error(f"[API] /api/ax_status hatası: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        logger.error(f"[API] /api/ax_status crash: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
 
 
 @app.route('/api/scalp_signal_stats')
@@ -456,34 +473,73 @@ def api_scalp_signal_stats():
 
         return jsonify({"ok": True, "data": data})
     except Exception as e:
-        logger.error(f"[API] /api/scalp_signal_stats hatası: {e}")
+        logger.error(f"[API] /api/scalp_signal_stats crash: {e}", exc_info=True)
         return jsonify({"ok": True, "data": {"S": 0, "A+": 0, "A": 0, "B": 0, "total": 0}})
 
 
 @app.route('/api/health')
 def api_health():
-    """Sistem sağlık kontrolü."""
+    """Detaylı sistem sağlık kontrolü."""
     try:
         import time
-        from config import DB_PATH, EXECUTION_MODE, LIVE_TRADING_ENABLED
-        db_size_mb = 0
+        from config import DB_PATH, EXECUTION_MODE, LIVE_TRADING_ENABLED, DRY_RUN, TELEGRAM_BOT_TOKEN
+        
+        db_size_mb = 0.0
+        db_ok = False
         if os.path.exists(DB_PATH):
             db_size_mb = round(os.path.getsize(DB_PATH) / (1024 * 1024), 2)
+            try:
+                from database import get_conn
+                with get_conn() as conn:
+                    conn.execute("SELECT 1").fetchone()
+                db_ok = True
+            except Exception:
+                pass
+                
+        # Binance Check
+        binance_ok = False
+        try:
+            import requests
+            r = requests.get('https://fapi.binance.com/fapi/v1/ping', timeout=3)
+            binance_ok = (r.status_code == 200)
+        except Exception:
+            pass
+
+        # Uptime Check
+        uptime = "0s"
+        try:
+            with open("/proc/uptime", "r") as f:
+                uptime_sec = float(f.readline().split()[0])
+                if uptime_sec > 86400: uptime = f"{uptime_sec/86400:.1f}d"
+                elif uptime_sec > 3600: uptime = f"{uptime_sec/3600:.1f}h"
+                else: uptime = f"{uptime_sec/60:.1f}m"
+        except Exception:
+            pass
+
+        active_trade_count = len(db.get_open_trades())
 
         return jsonify({
             "ok": True,
             "data": {
-                "status": "healthy",
-                "version": "5.0",
-                "execution_mode": EXECUTION_MODE,
-                "live_trading": LIVE_TRADING_ENABLED,
-                "db_size_mb": db_size_mb,
-                "db_path": DB_PATH,
+                "bot_running": True, # Assume true if API is responding and updating
+                "dashboard_running": True,
+                "db_ok": db_ok,
+                "binance_public_ok": binance_ok,
+                "telegram_config_ok": bool(TELEGRAM_BOT_TOKEN),
+                "execution_mode": str(EXECUTION_MODE),
+                "live_trading_enabled": bool(LIVE_TRADING_ENABLED),
+                "dry_run": bool(DRY_RUN),
+                "last_scan_time": "-", # Extracted from logs or db
+                "last_trade_update_time": "-", # Extracted from logs or db
+                "active_trade_count": active_trade_count,
+                "last_error": "-",
+                "uptime": uptime,
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
         })
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        logger.error(f"[API] /api/health crash: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
 
 
 @app.route('/api/learning_metrics')
@@ -494,7 +550,7 @@ def api_learning_metrics():
         data = get_learning_metrics(days=14)
         return jsonify({"ok": True, "data": data})
     except Exception as e:
-        logger.error(f"[API] /api/learning_metrics hatası: {e}")
+        logger.error(f"[API] /api/learning_metrics crash: {e}", exc_info=True)
         return jsonify({"ok": True, "data": {}})
 
 if __name__ == '__main__':

@@ -604,9 +604,13 @@ for(let i=0;i<18;i++){
 
 <script>
 const BASE="";let chart=null,curPage=1;const PER=10;
-const f=(v,d=4)=>v==null?"—":Number(v).toFixed(d);
-const fp=(v,d=3)=>v==null?"—":(Number(v)>=0?"+":"")+Number(v).toFixed(d)+"$";
-const fc=(v)=>{const n=Number(v);return n>0?"pos-c":n<0?"neg-c":"dim-c"};
+
+// SAFE FORMATTERS
+const safeNum = (v, d=0) => v == null || isNaN(Number(v)) ? d : Number(v);
+const f = (v, d=4) => v == null || isNaN(Number(v)) ? "—" : Number(v).toFixed(d);
+const fp = (v, d=3) => v == null || isNaN(Number(v)) ? "—" : (Number(v)>=0?"+":"") + Number(v).toFixed(d) + "$";
+const fPct = (v, d=2) => v == null || isNaN(Number(v)) ? "—" : (Number(v)>=0?"+":"") + Number(v).toFixed(d) + "%";
+const fc = (v) => { const n=Number(v); return n>0?"pos-c":n<0?"neg-c":"dim-c"; };
 
 // Clock
 function tick(){const s=new Date().toUTCString().split(" ")[4]+" UTC";document.getElementById("clock").textContent=s;document.getElementById("footTime").textContent=s}
@@ -686,7 +690,7 @@ async function loadStats(){
   try{
     const j=await(await fetch(BASE+"/api/stats")).json();
     if(!j.ok)return;
-    const d=j.data,p=d.params||{};
+    const d=j.data||{},p=d.params||{};
     document.getElementById("stTotal").textContent=d.total||0;
     document.getElementById("stOpen").textContent=(d.open_count||0)+" acik";
     const wrRaw=d.win_rate||0;const wr=wrRaw<=1?wrRaw*100:wrRaw;
@@ -753,17 +757,47 @@ async function loadChart(){
 let lastTradeIds=new Set();
 async function loadPositions(){
   try{
-    const j=await(await fetch(BASE+"/api/live")).json();if(!j.ok)return;
-    const d=j.data,pos=d.live||[],ur=d.total_unrealized||0;
+    const j=await(await fetch(BASE+"/api/live")).json();
+    if(!j.ok) return;
+    const d=j.data||{}, pos=d.live||[], ur=safeNum(d.total_unrealized);
     const urEl=document.getElementById("unreal");
-    urEl.textContent=(ur>=0?"+":"")+ur.toFixed(3)+" USDT";urEl.style.color=ur>=0?"var(--green-br)":"var(--red-br)";
+    urEl.textContent=fp(ur, 3);
+    urEl.style.color=ur>=0?"var(--green-br)":"var(--red-br)";
     const wrap=document.getElementById("posList");
     if(!pos.length){wrap.innerHTML="<div class='empty'>— Acik Pozisyon Yok —</div>";return}
     wrap.innerHTML=pos.map(p=>{
-      const isL=(p.direction||"").toUpperCase()==="LONG",pnl=p.unrealized_pnl||0,bar=Math.min(Math.abs(p.sl_distance_pct||0),100);
-      return "<div class='pos "+(isL?"long-p":"short-p")+"'><div class='pos-top'><div><div class='pos-sym'>"+p.symbol+"</div><span class='pos-dir "+(isL?"long":"short")+"'>"+p.direction+" x"+(p.leverage||"—")+"</span></div><div class='pos-pnl'><div class='pos-pnl-val "+(pnl>=0?"pos-c":"neg-c")+"'>"+fp(pnl)+"</div><div class='pos-pnl-pct'>"+(pnl>=0?"+":"")+f(p.unrealized_pct,2)+"%</div></div></div><div class='pos-levels'><div><div class='pl-lbl'>Entry</div><div class='pl-val entry'>"+f(p.entry,5)+"</div></div><div><div class='pl-lbl'>Stop</div><div class='pl-val stop'>"+f(p.sl,4)+"</div></div><div><div class='pl-lbl'>Target</div><div class='pl-val target'>"+f(p.tp,4)+"</div></div><div><div class='pl-lbl'>RR</div><div class='pl-val rr'>"+f(p.current_rr,2)+"R</div></div></div><div class='pos-bar-bg'><div class='pos-bar-fill "+(isL?"long":"short")+"' style='width:"+bar+"%'></div></div><div class='pos-foot'><span>Mark: "+f(p.current_price,5)+"</span><span>SL: "+f(p.sl_distance_pct,1)+"%</span></div></div>";
+      const isL=(p.side||"").toUpperCase()==="LONG";
+      const pnl=safeNum(p.net_pnl);
+      const pnlPct=safeNum(p.net_pnl_pct);
+      const slDist=safeNum(p.sl_distance_pct);
+      const bar=Math.min(Math.abs(slDist),100);
+      const activeTp=p.active_target==="TP1"?p.tp1:p.active_target==="TP2"?p.tp2:p.tp3;
+      
+      return `<div class='pos ${isL?"long-p":"short-p"}'>
+        <div class='pos-top'>
+          <div>
+            <div class='pos-sym'>${p.symbol||"—"}</div>
+            <span class='pos-dir ${isL?"long":"short"}'>${p.side||"—"} x${p.leverage||"—"}</span>
+          </div>
+          <div class='pos-pnl'>
+            <div class='pos-pnl-val ${pnl>=0?"pos-c":"neg-c"}'>${fp(pnl)}</div>
+            <div class='pos-pnl-pct'>${fPct(pnlPct,2)}</div>
+          </div>
+        </div>
+        <div class='pos-levels'>
+          <div><div class='pl-lbl'>Entry</div><div class='pl-val entry'>${f(p.entry,5)}</div></div>
+          <div><div class='pl-lbl'>Stop</div><div class='pl-val stop'>${f(p.sl,4)}</div></div>
+          <div><div class='pl-lbl'>Target</div><div class='pl-val target'>${f(activeTp,4)}</div></div>
+          <div><div class='pl-lbl'>RR</div><div class='pl-val rr'>${f(p.current_R,2)}R</div></div>
+        </div>
+        <div class='pos-bar-bg'><div class='pos-bar-fill ${isL?"long":"short"}' style='width:${bar}%'></div></div>
+        <div class='pos-foot'>
+          <span>Mark: ${f(p.current_price,5)}</span>
+          <span>SL: ${f(slDist,1)}% | State: ${p.lifecycle_state||"—"} (${p.duration_str||"—"})</span>
+        </div>
+      </div>`;
     }).join("");
-  }catch(e){console.error(e)}
+  }catch(e){console.error("loadPositions Error:", e)}
 }
 
 // HISTORY
