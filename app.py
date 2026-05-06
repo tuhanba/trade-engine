@@ -1,6 +1,6 @@
 """
-app.py — AX Dashboard API v5.0 (LIVE-READY)
-=============================================
+app.py — AX Dashboard v5.1 (PAPER DASHBOARD / LIVE-BLOCKED)
+======================================================
 Full dashboard API with open trade breakdown, stats, live PnL,
 trade history, calendar, weekly, coin profiles, AX status.
 """

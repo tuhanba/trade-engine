@@ -9,11 +9,19 @@
 cd /root
 git clone https://github.com/tuhanba/trade-engine.git trade_engine
 cd /root/trade_engine
-
 python3 -m venv .venv
 source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
 cp .env.example .env
+python -c "from database import init_db; init_db()"
+python scripts/migrate_accounting_schema.py || true
+python scripts/audit_pnl_consistency.py || true
+
+systemctl daemon-reload
+systemctl enable ax-bot ax-dashboard
+systemctl restart ax-bot
+systemctl restart ax-dashboard
 ```
 
 ## 3. Configuration
@@ -26,30 +34,15 @@ CONFIRM_LIVE_TRADING=False
 USE_BINANCE_PRIVATE_API=False
 ```
 
-## 4. DB Migration & Initial Setup
+## 4. DB Migration
 **NEVER DELETE trading.db. Backup and migrate instead.**
-```bash
-python -c "from database import init_db; init_db()"
-python scripts/migrate_v6.py || true
-python scripts/audit_pnl_consistency.py || true
-```
 
-## 5. Systemd Services
-Link the services to systemd:
-```bash
-cp systemd/ax-bot.service /etc/systemd/system/
-cp systemd/ax-dashboard.service /etc/systemd/system/
-
-systemctl daemon-reload
-systemctl enable ax-bot ax-dashboard
-systemctl restart ax-bot
-systemctl restart ax-dashboard
-```
-
-## 6. Validation Tests
+## 5. Validation Tests
 Verify the deployment:
 ```bash
-curl http://127.0.0.1:5000/api/health
-curl http://127.0.0.1:5000/api/live
-curl http://127.0.0.1:5000/api/stats
+systemctl status ax-bot -l --no-pager
+systemctl status ax-dashboard -l --no-pager
+curl -s http://127.0.0.1:5000/api/health
+curl -s http://127.0.0.1:5000/api/live
+curl -s http://127.0.0.1:5000/api/stats
 ```
