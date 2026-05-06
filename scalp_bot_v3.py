@@ -71,7 +71,7 @@ def get_adaptive_interval(base_interval: int, hour_utc: int, open_trades: int) -
 
 async def main_loop():
     global _shutdown_flag
-    logger.info("=== AX Scalp Engine v5.1 — PAPER ENGINE / LIVE-BLOCKED + FALLBACK Başlatılıyor ===")
+    logger.info("=== AX Scalp Engine v5.1 (PAPER ENGINE + FALLBACK) Başlatılıyor ===")
     init_db()
 
     # Signal handlers
@@ -109,7 +109,7 @@ async def main_loop():
                 tld=binance_tld,
                 requests_params=req_params if req_params else None,
             )
-            mode_str = "TESTNET" if use_testnet else f"PUBLIC DATA (.{binance_tld})"
+            mode_str = "TESTNET PUBLIC DATA" if use_testnet else f"PUBLIC MARKET DATA (.{binance_tld})"
             logger.info(f"Binance public market data bağlantısı kuruldu. {mode_str}")
             break
         except Exception as e:

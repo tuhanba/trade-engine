@@ -1,3 +1,5 @@
+# DEPRECATED: This service file is obsolete. Use ax-bot.service and ax-dashboard.service instead.
+
 [Unit]
 Description=AURVEX.Ai Scalp Bot (AX Trading Engine)
 After=network.target
@@ -9,7 +11,7 @@ WorkingDirectory=/root/trade-engine
 EnvironmentFile=-/root/trade-engine/.env
 ExecStart=/root/trade-engine/venv/bin/python3 /root/trade-engine/scalp_bot.py
 Restart=always
-RestartSec=15
+RestartSec=10
 StandardOutput=append:/root/trade-engine/logs/bot.log
 StandardError=append:/root/trade-engine/logs/bot.log
 Environment=PYTHONUNBUFFERED=1
