@@ -1,11 +1,12 @@
 """
-Data Layer — Tek Schema
-Tüm modüller bu schema ile çalışır.
+Data Layer — Tek Schema v4.5
+Tüm modüller bu schema ile çalışır. Aşama 5: Zaman ve Süre eklendi.
 """
 import time
 import uuid
 from dataclasses import dataclass, asdict, field
 from typing import Optional, Dict, Any
+from datetime import datetime
 
 @dataclass
 class SignalData:
@@ -64,6 +65,28 @@ class SignalData:
         if self.setup_quality in ["D", ""]:
             return False
         return True
+
+def calculate_duration(open_time_str, close_time_str=None):
+    """
+    open_time ve close_time arasındaki süreyi saniye ve formatlı string olarak döner.
+    """
+    fmt = "%Y-%m-%d %H:%M:%S"
+    try:
+        start = datetime.strptime(open_time_str, fmt)
+        end = datetime.strptime(close_time_str, fmt) if close_time_str else datetime.now()
+        
+        duration_seconds = int((end - start).total_seconds())
+        
+        if duration_seconds < 60:
+            duration_str = f"{duration_seconds}s"
+        else:
+            minutes = duration_seconds // 60
+            seconds = duration_seconds % 60
+            duration_str = f"{minutes}dk {seconds}s"
+            
+        return duration_seconds, duration_str
+    except Exception:
+        return 0, "0s"
 
 class DataLayer:
     def __init__(self):

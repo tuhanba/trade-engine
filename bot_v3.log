@@ -19,3 +19,62 @@
 2026-05-04 06:15:19,411 | INFO | Async Scan completed in 3.65s. Found 153 candidates.
 2026-05-04 06:16:24,404 | INFO | 🌍 Piyasa Duyarlılığı: %32.28
 2026-05-04 06:16:28,462 | INFO | Async Scan completed in 4.06s. Found 153 candidates.
+2026-05-04 06:17:33,652 | INFO | 🌍 Piyasa Duyarlılığı: %32.39
+2026-05-04 06:17:38,253 | INFO | Async Scan completed in 4.60s. Found 153 candidates.
+2026-05-04 06:18:43,160 | INFO | 🌍 Piyasa Duyarlılığı: %30.33
+2026-05-04 06:18:46,980 | INFO | Async Scan completed in 3.82s. Found 156 candidates.
+2026-05-04 06:19:51,966 | INFO | 🌍 Piyasa Duyarlılığı: %29.38
+2026-05-04 06:20:00,696 | INFO | Async Scan completed in 8.73s. Found 155 candidates.
+2026-05-04 06:21:38,236 | INFO | 🌍 Piyasa Duyarlılığı: %28.65
+2026-05-04 06:21:46,609 | INFO | Async Scan completed in 8.37s. Found 155 candidates.
+2026-05-04 06:23:15,964 | INFO | 🌍 Piyasa Duyarlılığı: %28.32
+2026-05-04 06:23:24,589 | INFO | Async Scan completed in 8.62s. Found 156 candidates.
+2026-05-04 06:24:57,042 | INFO | 🌍 Piyasa Duyarlılığı: %27.76
+2026-05-04 06:25:06,118 | INFO | Async Scan completed in 9.08s. Found 156 candidates.
+2026-05-04 06:26:36,249 | INFO | 🌍 Piyasa Duyarlılığı: %27.73
+2026-05-04 06:26:40,252 | INFO | Async Scan completed in 4.00s. Found 157 candidates.
+2026-05-04 06:28:12,971 | INFO | 🌍 Piyasa Duyarlılığı: %28.32
+2026-05-04 06:28:16,968 | INFO | Async Scan completed in 4.00s. Found 157 candidates.
+2026-05-04 06:29:48,767 | INFO | 🌍 Piyasa Duyarlılığı: %29.71
+2026-05-04 06:29:51,592 | INFO | Async Scan completed in 2.83s. Found 157 candidates.
+2026-05-04 06:41:12,303 | ERROR | Trend mum verisi alınamadı BASEDUSDT: HTTPSConnectionPool(host='fapi.binance.com', port=443): Read timed out. (read timeout=10)
+2026-05-04 06:42:18,042 | INFO | 🌍 Piyasa Duyarlılığı: %50.0
+2026-05-04 06:42:18,210 | INFO | Async Scan completed in 0.17s. Found 158 candidates.
+2026-05-04 06:42:28,226 | ERROR | Trend mum verisi alınamadı XAGUSDT: HTTPSConnectionPool(host='fapi.binance.com', port=443): Read timed out. (read timeout=10)
+2026-05-04 06:43:31,712 | INFO | 🌍 Piyasa Duyarlılığı: %35.21
+2026-05-04 06:43:31,826 | INFO | Async Scan completed in 0.11s. Found 157 candidates.
+2026-05-04 06:44:35,170 | INFO | 🌍 Piyasa Duyarlılığı: %35.16
+2026-05-04 06:44:35,290 | INFO | Async Scan completed in 0.12s. Found 157 candidates.
+2026-05-04 06:45:39,011 | INFO | 🌍 Piyasa Duyarlılığı: %35.13
+2026-05-04 06:45:39,176 | INFO | Async Scan completed in 0.16s. Found 158 candidates.
+2026-05-04 06:46:42,653 | INFO | 🌍 Piyasa Duyarlılığı: %35.49
+2026-05-04 06:46:45,695 | INFO | Async Scan completed in 3.04s. Found 158 candidates.
+2026-05-04 06:47:49,121 | INFO | 🌍 Piyasa Duyarlılığı: %35.49
+2026-05-04 06:47:52,097 | INFO | Async Scan completed in 2.98s. Found 158 candidates.
+2026-05-04 06:48:55,494 | INFO | 🌍 Piyasa Duyarlılığı: %35.63
+2026-05-04 06:48:58,261 | INFO | Async Scan completed in 2.77s. Found 158 candidates.
+2026-05-04 06:50:01,975 | INFO | 🌍 Piyasa Duyarlılığı: %35.72
+2026-05-04 06:50:05,118 | INFO | Async Scan completed in 3.14s. Found 158 candidates.
+2026-05-04 06:51:08,455 | INFO | 🌍 Piyasa Duyarlılığı: %35.6
+2026-05-04 06:51:11,169 | INFO | Async Scan completed in 2.71s. Found 158 candidates.
+2026-05-04 06:52:14,587 | INFO | 🌍 Piyasa Duyarlılığı: %35.63
+2026-05-04 06:52:17,550 | INFO | Async Scan completed in 2.96s. Found 157 candidates.
+2026-05-04 06:53:21,060 | INFO | 🌍 Piyasa Duyarlılığı: %35.52
+2026-05-04 06:53:24,069 | INFO | Async Scan completed in 3.01s. Found 156 candidates.
+2026-05-04 06:54:27,787 | INFO | 🌍 Piyasa Duyarlılığı: %36.0
+2026-05-04 06:54:30,587 | INFO | Async Scan completed in 2.80s. Found 157 candidates.
+2026-05-04 06:55:34,564 | INFO | 🌍 Piyasa Duyarlılığı: %36.14
+2026-05-04 06:55:37,760 | INFO | Async Scan completed in 3.20s. Found 157 candidates.
+2026-05-04 06:56:41,141 | INFO | 🌍 Piyasa Duyarlılığı: %35.6
+2026-05-04 06:56:43,901 | INFO | Async Scan completed in 2.76s. Found 158 candidates.
+2026-05-04 06:57:47,281 | INFO | 🌍 Piyasa Duyarlılığı: %35.1
+2026-05-04 06:57:49,971 | INFO | Async Scan completed in 2.69s. Found 158 candidates.
+2026-05-04 06:58:53,355 | INFO | 🌍 Piyasa Duyarlılığı: %35.35
+2026-05-04 06:58:56,293 | INFO | Async Scan completed in 2.94s. Found 159 candidates.
+2026-05-06 05:50:20,343 | INFO | 🌍 Piyasa Duyarlılığı: %50.0
+2026-05-06 05:50:25,515 | INFO | Async Scan completed in 5.17s. Found 167 candidates.
+2026-05-06 05:50:25,521 | ERROR | Trend mum verisi alınamadı 1000LUNCUSDT: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-05-06 05:53:08,209 | INFO | 🌍 Piyasa Duyarlılığı: %45.85
+2026-05-06 05:53:12,901 | INFO | Async Scan completed in 4.69s. Found 166 candidates.
+2026-05-06 05:56:01,774 | INFO | 🌍 Piyasa Duyarlılığı: %45.88
+2026-05-06 05:56:07,363 | INFO | Async Scan completed in 5.59s. Found 166 candidates.

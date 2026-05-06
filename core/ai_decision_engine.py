@@ -1,91 +1,92 @@
 """
-AI Decision Engine — Profesyonel Sürüm
-Final karar katmanı. Sinyalleri onaylar veya reddeder.
+core/ai_decision_engine.py — AX AI Brain v4.9
+=============================================
+Aşama 9: AI Brain / Ghost Learning / Coin Personality.
 """
 import logging
 import sqlite3
 import json
-import uuid
-from datetime import datetime, timedelta, timezone
-from collections import defaultdict
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
-
-# Config'den backtest tabanlı filtre parametrelerini al
-try:
-    import sys as _sys, os as _os
-    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-    from config import (
-        BAD_HOURS_UTC as _BAD_HOURS,
-        GOOD_HOURS_UTC as _GOOD_HOURS,
-        ALLOWED_QUALITIES as _ALLOWED_QUAL,
-        DATA_THRESHOLD,
-        WATCHLIST_THRESHOLD,
-        TELEGRAM_THRESHOLD,
-        TRADE_THRESHOLD
-    )
-except ImportError:
-    _BAD_HOURS   = [5, 6, 14, 20]
-    _GOOD_HOURS  = [0, 2, 3, 7, 15]
-    _ALLOWED_QUAL = ["S", "A+", "A", "B"]
-    DATA_THRESHOLD = 45
-    WATCHLIST_THRESHOLD = 65
-    TELEGRAM_THRESHOLD = 75
-    TRADE_THRESHOLD = 82
 
 class AIDecisionEngine:
     def __init__(self, db_path="trading.db"):
         self.db_path = db_path
-        self.daily_signals = 0
-        self.max_daily_signals = 40
-        self.recent_coins = []
-        self.last_reset_date = datetime.now(timezone.utc).date()
-        self.thresholds = {
-            "data": DATA_THRESHOLD,
-            "watchlist": WATCHLIST_THRESHOLD,
-            "telegram": TELEGRAM_THRESHOLD,
-            "trade": TRADE_THRESHOLD,
-        }
-        self.params = {"sl_atr_mult": 1.5, "tp_atr_mult": 2.0, "risk_pct": 1.0}
         self._init_db()
 
     def _init_db(self):
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""CREATE TABLE IF NOT EXISTS ai_learning (
+                conn.execute("""CREATE TABLE IF NOT EXISTS ai_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    symbol TEXT, trade_result TEXT, pnl REAL, setup_quality TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    event TEXT,
+                    symbol TEXT,
+                    decision TEXT,
+                    score REAL,
+                    confidence REAL,
+                    reason TEXT,
+                    data TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )""")
-                conn.execute("""CREATE TABLE IF NOT EXISTS coin_profiles (
-                    symbol TEXT PRIMARY KEY, win_rate REAL DEFAULT 0, total_trades INTEGER DEFAULT 0,
-                    danger_score REAL DEFAULT 0, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                conn.execute("""CREATE TABLE IF NOT EXISTS coin_personality (
+                    symbol TEXT PRIMARY KEY,
+                    win_rate REAL DEFAULT 0,
+                    avg_pnl REAL DEFAULT 0,
+                    volatility_rank INTEGER DEFAULT 3,
+                    best_hour INTEGER,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )""")
                 conn.commit()
         except Exception as e:
             logger.error(f"AI DB init hatası: {e}")
 
-    def evaluate(self, signal_data) -> dict:
-        # Basit değerlendirme mantığı (Geliştirilebilir)
-        base_score = (
-            signal_data.coin_score * 0.1 +
-            signal_data.trend_score * 0.3 +
-            signal_data.trigger_score * 0.3 +
-            signal_data.risk_score * 0.3
-        )
+    def decide(self, signal_data):
+        """
+        Sinyali analiz eder ve karar verir.
+        """
+        # SignalData nesnesi veya dict olabilir
+        symbol = getattr(signal_data, 'symbol', signal_data.get('symbol'))
+        score = getattr(signal_data, 'final_score', signal_data.get('final_score', 0))
+        confidence = getattr(signal_data, 'confidence', signal_data.get('confidence', 0.8))
         
-        ai_score = base_score * 10
-        final_score = max(0.0, min(100.0, ai_score))
-        
-        if final_score >= self.thresholds["trade"]:
+        # Karar Mantığı
+        if score >= 80 and confidence >= 0.85:
             decision = "ALLOW"
-        elif final_score >= self.thresholds["telegram"]:
+            reason = "Yüksek skor ve güven onayı."
+        elif score >= 65:
             decision = "WATCH"
+            reason = "İzleme listesine alındı (Ghost Trade)."
         else:
             decision = "VETO"
+            reason = "Düşük skor."
+            
+        # Log kaydı
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO ai_logs (event, symbol, decision, score, confidence, reason, data)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, ("DECISION", symbol, decision, score, confidence, reason, json.dumps(signal_data if isinstance(signal_data, dict) else signal_data.__dict__)))
+        except Exception as e:
+            logger.error(f"AI Log kaydı hatası: {e}")
+        
+        return decision, reason
 
-        return {
-            "decision": decision,
-            "final_score": round(final_score, 1),
-            "reason": "score_evaluation"
-        }
+    def learn_from_outcome(self, symbol, pnl, reason):
+        """
+        Kapanan işlemlerden (Gerçek veya Ghost) öğrenir ve Coin Personality'yi günceller.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Basit bir güncelleme mantığı
+                conn.execute("""
+                    INSERT INTO coin_personality (symbol, win_rate, avg_pnl, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(symbol) DO UPDATE SET
+                    win_rate = (win_rate * 0.9) + (? * 0.1),
+                    avg_pnl = (avg_pnl * 0.9) + (? * 0.1)
+                """, (symbol, 1 if pnl > 0 else 0, pnl, 1 if pnl > 0 else 0, pnl))
+                logger.info(f"AI Learned: {symbol} | PnL: {pnl:.2f}")
+        except Exception as e:
+            logger.error(f"AI Learning hatası: {e}")

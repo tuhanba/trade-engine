@@ -1,19 +1,12 @@
 """
-database.py — AX Merkezi Veritabanı v4.2 (ULTIMATE ELITE)
+database.py — AX Merkezi Veritabanı v4.4 (ULTIMATE ELITE)
 =========================================================
-Dashboard ve Bot için gerekli tüm fonksiyonlar eklendi.
+Aşama 4: TP Lifecycle ve Balance Ledger Entegrasyonu.
 """
 import sqlite3
-import json
 import logging
-import os
-from datetime import datetime, timezone
-
-# Config'den DB_PATH al
-try:
-    from config import DB_PATH
-except ImportError:
-    DB_PATH = "trading.db"
+from datetime import datetime
+from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -31,21 +24,28 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             symbol TEXT NOT NULL,
             direction TEXT NOT NULL,
-            status TEXT DEFAULT 'open',
-            environment TEXT DEFAULT 'paper',
-            entry REAL, sl REAL, tp1 REAL, tp2 REAL,
+            status TEXT DEFAULT 'open', -- open, tp1_hit, tp2_hit, closed
+            entry REAL, sl REAL, tp1 REAL, tp2 REAL, tp3 REAL,
+            original_qty REAL, remaining_qty REAL,
+            leverage INTEGER,
+            realized_pnl REAL DEFAULT 0,
             net_pnl REAL DEFAULT 0,
+            total_fee REAL DEFAULT 0,
+            tp1_hit INTEGER DEFAULT 0,
+            tp2_hit INTEGER DEFAULT 0,
             open_time TEXT, close_time TEXT,
             close_reason TEXT
         );
-        CREATE TABLE IF NOT EXISTS signal_candidates (
+        CREATE TABLE IF NOT EXISTS balance_ledger (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol TEXT NOT NULL,
-            direction TEXT,
-            entry REAL, sl REAL, tp1 REAL, tp2 REAL,
-            score REAL DEFAULT 0,
-            decision TEXT DEFAULT 'PENDING',
-            created_at TEXT DEFAULT (datetime('now'))
+            trade_id INTEGER,
+            symbol TEXT,
+            event_type TEXT, -- TP1, TP2, FINAL, STOP, FEE
+            amount REAL,
+            balance_before REAL,
+            balance_after REAL,
+            timestamp TEXT DEFAULT (datetime('now')),
+            note TEXT
         );
         CREATE TABLE IF NOT EXISTS paper_account (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -53,54 +53,63 @@ def init_db():
             initial_balance REAL DEFAULT 250.0
         );
         INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, 250.0, 250.0);
-        CREATE TABLE IF NOT EXISTS state (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        );
         """)
 
-def get_trades(limit=50):
+def add_ledger_entry(trade_id, symbol, event_type, amount, note=""):
     with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-        return [dict(r) for r in rows]
-
-def get_open_trades():
-    with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM trades WHERE status='open'").fetchall()
-        return [dict(r) for r in rows]
-
-def get_stats():
-    with get_conn() as conn:
-        row = conn.execute("SELECT COUNT(*), SUM(net_pnl) FROM trades WHERE status != 'open'").fetchone()
-        total = row[0] or 0
-        pnl = row[1] or 0
-        return {
-            "total_trades": total,
-            "total_pnl": round(pnl, 2),
-            "win_rate": 0 # Basitleştirilmiş
-        }
-
-def get_paper_balance():
-    with get_conn() as conn:
+        # Mevcut bakiyeyi al
         row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
-        return row[0] if row else 250.0
+        balance_before = row[0]
+        balance_after = balance_before + amount
+        
+        # Bakiyeyi güncelle
+        conn.execute("UPDATE paper_account SET balance = ? WHERE id=1", (balance_after,))
+        
+        # Ledger kaydı at
+        conn.execute("""
+            INSERT INTO balance_ledger (trade_id, symbol, event_type, amount, balance_before, balance_after, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (trade_id, symbol, event_type, amount, balance_before, balance_after, note))
+        return balance_after
 
-def get_current_params():
-    return {"version": "4.2 Elite"}
-
-def get_state(key):
+def update_trade_tp(trade_id, tp_level, pnl, fee, remaining_qty):
     with get_conn() as conn:
-        row = conn.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
-        return row[0] if row else None
+        if tp_level == 1:
+            conn.execute("""
+                UPDATE trades SET 
+                tp1_hit = 1, 
+                realized_pnl = realized_pnl + ?, 
+                total_fee = total_fee + ?,
+                remaining_qty = ?,
+                status = 'tp1_hit'
+                WHERE id = ?
+            """, (pnl, fee, remaining_qty, trade_id))
+        elif tp_level == 2:
+            conn.execute("""
+                UPDATE trades SET 
+                tp2_hit = 1, 
+                realized_pnl = realized_pnl + ?, 
+                total_fee = total_fee + ?,
+                remaining_qty = ?,
+                status = 'tp2_hit'
+                WHERE id = ?
+            """, (pnl, fee, remaining_qty, trade_id))
 
-def save_scalp_signal(data):
-    with get_conn() as conn:
-        # Basitleştirilmiş kayıt
-        pass
-
-def save_paper_trade(sig_dict, tracked_from="ghost"):
+def close_trade(trade_id, final_pnl, final_fee, reason):
     with get_conn() as conn:
         conn.execute("""
-            INSERT INTO signal_candidates (symbol, direction, entry, sl, tp1, score, decision, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        """, (sig_dict['symbol'], sig_dict['direction'], sig_dict['entry_zone'], sig_dict['stop_loss'], sig_dict['tp1'], sig_dict.get('final_score', 0), tracked_from))
+            UPDATE trades SET 
+            status = 'closed',
+            net_pnl = realized_pnl + ?,
+            total_fee = total_fee + ?,
+            remaining_qty = 0,
+            close_time = datetime('now'),
+            close_reason = ?
+            WHERE id = ?
+        """, (final_pnl, final_fee, reason, trade_id))
+
+# Diğer yardımcı fonksiyonlar (Aşama 6 için)
+def get_open_trades():
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM trades WHERE status != 'closed'").fetchall()
+        return [dict(r) for r in rows]
