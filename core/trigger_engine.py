@@ -126,14 +126,16 @@ class TriggerEngine:
             dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10)
             adx_val  = float(dx.rolling(14).mean().iloc[-1])
         except Exception:
-            adx_val = 30
+            adx_val = 20
             atr_val = c5 * 0.02 # Fallback ATR %2
 
-        if adx_val < ADX_MIN_THRESHOLD:
+        # ADX Filtresini esnettik (AI karar verecek)
+        if adx_val < 15:
             return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
 
-        bull5 = direction == "LONG" and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5 < 75
-        bear5 = direction == "SHORT" and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5 < 65
+        # AI beynine daha fazla veri sağlamak için RSI şartlarını esnettik (Sıkı filtreyi AI yapacak)
+        bull5 = direction == "LONG" and e9_5.iloc[-1] > e21_5.iloc[-1] and 30 < rsi5 < 80
+        bear5 = direction == "SHORT" and e9_5.iloc[-1] < e21_5.iloc[-1] and 20 < rsi5 < 70
 
         if not bull5 and not bear5:
             return {"quality": "D", "score": 0, "entry": 0}
@@ -149,8 +151,8 @@ class TriggerEngine:
         mom3c = self._momentum_3c(df1)
         vwap_val = self._vwap(df1)
 
-        if bull5 and not (32 < rsi1 < 75): return {"quality": "D", "score": 0, "entry": 0}
-        if bear5 and not (25 < rsi1 < 68): return {"quality": "D", "score": 0, "entry": 0}
+        if bull5 and not (25 < rsi1 < 85): return {"quality": "D", "score": 0, "entry": 0}
+        if bear5 and not (15 < rsi1 < 75): return {"quality": "D", "score": 0, "entry": 0}
 
         funding = self.get_funding_rate(symbol)
         if direction == "LONG" and funding > 0.001: return {"quality": "D", "score": 0, "entry": 0}
