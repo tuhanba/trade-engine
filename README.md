@@ -1,9 +1,8 @@
-# AX Trade Engine v5.x PAPER Engine
-**PAPER-ONLY / LIVE-BLOCKED**
+# AX Trade Engine v5.x — PAPER ENGINE / LIVE-BLOCKED
 
-This is a production-grade AI trading engine strictly configured for "Paper Trading". It incorporates institutional-grade risk management and self-optimizing AI edge (Ghost Learning).
+This repository is configured as PAPER-ONLY / LIVE-BLOCKED. Live trading is intentionally not documented here.
 
-**It does NOT execute real orders.**
+Real orders are blocked. Binance public market data can be used.
 
 ## Architecture
 - **Bot**: `scalp_bot_v3.py` (Core engine)
@@ -11,7 +10,7 @@ This is a production-grade AI trading engine strictly configured for "Paper Trad
 - **Execution**: `execution_engine.py` (Paper Mode Execution)
 - **Virtual Env**: `.venv`
 - **Path**: `/root/trade_engine`
-- **Services**: `ax-bot`, `ax-dashboard`
+- **Systemd servisleri**: `ax-bot`, `ax-dashboard`
 
 ## Safety (Paper Mode)
 - `EXECUTION_MODE=paper`
@@ -23,6 +22,7 @@ This is a production-grade AI trading engine strictly configured for "Paper Trad
 No real orders are executed. All API keys and secrets are strictly excluded from logs.
 
 ## Deployment & Updates
+DB reset yok; backup + migration var.
 Do **NOT** delete the database (`trading.db`). The system uses a strict backup + migration standard to preserve AI Ghost Learning data.
 
 To update:

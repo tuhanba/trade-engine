@@ -42,7 +42,7 @@
 
 ### B2. Dinamik Kaldıraç Motoru
 
-`execution_engine.py`'de kaldıraç sabit (`max_leverage` config'den). `ai_brain.py`'deki `suggest_leverage()` fonksiyonu (win_rate + profit_factor bazlı) `core/risk_engine.py`'ye taşınmalı. Yüksek güvenli sinyallerde kaldıraç artırılmalı, düşük win rate'li coinlerde otomatik düşürülmeli.
+`execution_engine.py`'de kaldıraç sabit (`max_leverage` config'den). `ai_brain.py`'deki `suggest_leverage()` fonksiyonu (win_rate + profit_factor bazlı) `core/advanced_risk_engine.py`'ye taşınmalı. Yüksek güvenli sinyallerde kaldıraç artırılmalı, düşük win rate'li coinlerde otomatik düşürülmeli.
 
 ---
 
