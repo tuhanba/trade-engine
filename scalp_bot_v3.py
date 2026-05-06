@@ -31,7 +31,7 @@ from database import (
 )
 from core.data_layer import SignalData
 from telegram_delivery import deliver_signal, send_message
-from execution_engine import open_trade
+from execution_engine import open_trade, monitor_trades
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("scalp_bot_v3")
@@ -270,6 +270,15 @@ async def main_loop():
                     logger.debug(f"👀 WATCH: {symbol} - {reason}")
                 else:
                     logger.debug(f"🚫 VETO: {symbol} - {reason}")
+
+            # Monitor Trades
+            if client and not use_fallback:
+                try:
+                    closed_list = monitor_trades(client)
+                    if closed_list:
+                        logger.info(f"Kapanan işlemler: {closed_list}")
+                except Exception as monitor_err:
+                    logger.error(f"Trade monitor hatası: {monitor_err}")
 
             # Adaptive interval
             interval = get_adaptive_interval(SCAN_INTERVAL, hour_utc, len(open_trades))
