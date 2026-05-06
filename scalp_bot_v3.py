@@ -223,24 +223,43 @@ async def main_loop():
                 atr_pct = trigger_res.get("atr_pct") if not use_fallback and 'trigger_res' in locals() else None
                 risk_res = risk.calculate(symbol, direction, entry, quality, balance, open_trades, atr_pct=atr_pct)
 
-                # Sinyal oluştur
-                sig_data = {
-                    "id": str(uuid.uuid4())[:8],
-                    "symbol": symbol,
-                    "direction": direction,
-                    "entry": entry,
-                    "sl": risk_res.get("sl", entry * (0.98 if direction == "LONG" else 1.02)),
-                    "tp1": risk_res.get("tp1", entry * (1.02 if direction == "LONG" else 0.98)),
-                    "tp2": risk_res.get("tp2", entry * (1.04 if direction == "LONG" else 0.96)),
-                    "tp3": risk_res.get("tp2", entry * (1.04 if direction == "LONG" else 0.96)) * (1.01 if direction == "LONG" else 0.99),
-                    "setup_quality": quality,
-                    "final_score": score,
-                    "confidence": 0.8,
-                    "leverage": risk_res.get("leverage", 10),
-                    "risk_usd": risk_res.get("risk_usd", 0),
-                    "market_regime": "fallback" if use_fallback else "live",
-                    "reason": f"Score: {score:.1f}" + (" [CG]" if use_fallback else ""),
-                }
+                # SignalData Tek Schema Oluşturma
+                from core.data_layer import SignalData
+                
+                sig_obj = SignalData(
+                    symbol=symbol,
+                    direction=direction,
+                    entry_zone=entry,
+                    stop_loss=risk_res.get("sl", entry * (0.98 if direction == "LONG" else 1.02)),
+                    tp1=risk_res.get("tp1", entry * (1.02 if direction == "LONG" else 0.98)),
+                    tp2=risk_res.get("tp2", entry * (1.04 if direction == "LONG" else 0.96)),
+                    tp3=risk_res.get("tp2", entry * (1.04 if direction == "LONG" else 0.96)) * (1.01 if direction == "LONG" else 0.99),
+                    setup_quality=quality,
+                    final_score=score,
+                    confidence=0.8,
+                    leverage_suggestion=risk_res.get("leverage", 10),
+                    risk_percent=risk_res.get("risk_pct", 1.0),
+                    reason=f"Score: {score:.1f}" + (" [CG]" if use_fallback else "")
+                )
+                
+                if not sig_obj.is_valid():
+                    from database import update_system_state
+                    update_system_state("last_error", f"Invalid Signal Schema: {symbol}")
+                    # Log invalid candidate
+                    sig_obj.status = "invalid_candidate"
+                    sig_obj.reject_reason = "Eksik Schema Verisi"
+                    save_signal_candidate({**sig_obj.to_dict(), "decision": "VETO", "reason": sig_obj.reject_reason})
+                    continue
+
+                # Sistem Geriye Dönük Uyumluluk için Dict kullanımı
+                sig_data = sig_obj.to_dict()
+                # Ek legacy alanlar
+                sig_data["id"] = sig_obj.id[:8]
+                sig_data["entry"] = sig_obj.entry_zone
+                sig_data["sl"] = sig_obj.stop_loss
+                sig_data["leverage"] = sig_obj.leverage_suggestion
+                sig_data["risk_usd"] = risk_res.get("risk_usd", 0)
+                sig_data["market_regime"] = "fallback" if use_fallback else "live"
 
                 # AI karar
                 decision, reason = ai_engine.decide(sig_data)
@@ -282,21 +301,36 @@ async def main_loop():
                 except Exception as monitor_err:
                     logger.error(f"Trade monitor hatası: {monitor_err}")
                 
-                # AI Ghost Tracking Process
-                try:
-                    # Sadece her 5 scande bir yapıp limiti koruyabiliriz veya her scan yapabiliriz
-                    # Limiti 10 yaparak kline isteklerini azaltıyoruz
-                    if scan_count % 3 == 0:
-                        processed_ghosts = process_pending_paper_results(client, limit=10)
-                        if processed_ghosts > 0:
-                            logger.info(f"👻 AI Ghost Tracking: {processed_ghosts} paper trade sonuçlandırıldı ve öğrenildi.")
-                except Exception as ghost_err:
-                    logger.error(f"AI Ghost Tracker hatası: {ghost_err}")
+            # AI Ghost Tracking Process
+            try:
+                if scan_count % 3 == 0:
+                    processed_ghosts = process_pending_paper_results(client, limit=10)
+                    if processed_ghosts > 0:
+                        logger.info(f"👻 AI Ghost Tracking: {processed_ghosts} paper trade sonuçlandırıldı ve öğrenildi.")
+                        try:
+                            from database import update_system_state
+                            update_system_state("last_paper_result_process_at", datetime.now(tz.utc).isoformat())
+                        except: pass
+            except Exception as ghost_err:
+                logger.error(f"AI Ghost Tracker hatası: {ghost_err}")
 
-            # Adaptive interval
-            interval = get_adaptive_interval(SCAN_INTERVAL, hour_utc, len(open_trades))
-            consecutive_errors = 0
-            logger.info(f"Scan #{scan_count}: {len(candidates)} aday | "
+        # Adaptive interval
+        interval = get_adaptive_interval(SCAN_INTERVAL, hour_utc, len(open_trades))
+        consecutive_errors = 0
+        
+        # ── SYSTEM STATE GÜNCELLEMESİ (HEARTBEAT) ──
+        try:
+            from database import update_system_state
+            update_system_state("bot_heartbeat_at", datetime.now(tz.utc).isoformat())
+            update_system_state("last_scan_time", datetime.now(tz.utc).isoformat())
+            update_system_state("last_scan_status", "OK")
+            update_system_state("last_scan_symbol_count", str(len(candidates) if candidates else 0))
+            if client and not use_fallback:
+                update_system_state("last_trade_monitor_at", datetime.now(tz.utc).isoformat())
+        except Exception as e:
+            logger.error(f"Heartbeat yazılamadı: {e}")
+            
+        logger.info(f"Scan #{scan_count}: {len(candidates) if candidates else 0} aday | "
                        f"açık: {len(open_trades)} | "
                        f"sonraki: {interval}s | "
                        f"{'fallback' if use_fallback else 'binance'}")

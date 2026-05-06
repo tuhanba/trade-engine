@@ -657,6 +657,27 @@ def disable_coin(symbol, reason="delisted"):
         )
 
 
+# ── SYSTEM STATE ─────────────────────────────────────────────────────────────
+
+def update_system_state(key: str, value: str):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO system_state (key, value, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(key) DO UPDATE SET
+            value=?, updated_at=datetime('now')
+        """, (key, value, value))
+
+def get_system_state(key: str, default="-") -> str:
+    try:
+        with get_conn() as conn:
+            row = conn.execute("SELECT value FROM system_state WHERE key=?", (key,)).fetchone()
+            if row:
+                return str(row[0])
+    except Exception:
+        pass
+    return default
+
 # ── RESET (SAFE) ─────────────────────────────────────────────────────────────
 
 def reset_paper_data(force_delete=False):

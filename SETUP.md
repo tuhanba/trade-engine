@@ -1,4 +1,4 @@
-# AURVEX Ai Server Setup
+# AX Trade Engine v5.x PAPER - Server Setup
 
 This guide provides the definitive steps for deploying the production-grade paper trading engine.
 
@@ -16,10 +16,10 @@ cd trade_engine
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
 ## 3. Configuration
-Copy `.env.example` to `.env` and fill in the values.
 **MANDATORY FOR PAPER TRADING:**
 ```
 EXECUTION_MODE=paper
@@ -29,7 +29,15 @@ CONFIRM_LIVE_TRADING=False
 USE_BINANCE_PRIVATE_API=False
 ```
 
-## 4. Systemd Services
+## 4. DB Migration & Initial Setup
+**NEVER DELETE trading.db.**
+```bash
+python -c "from database import init_db; init_db()"
+python scripts/migrate_v6.py || true
+python scripts/audit_pnl_consistency.py || true
+```
+
+## 5. Systemd Services
 Link the services to systemd:
 ```bash
 cp systemd/ax-bot.service /etc/systemd/system/
@@ -37,24 +45,13 @@ cp systemd/ax-dashboard.service /etc/systemd/system/
 
 systemctl daemon-reload
 systemctl enable ax-bot ax-dashboard
-systemctl start ax-bot ax-dashboard
+systemctl restart ax-bot ax-dashboard
 ```
 
-## 5. DB Migration & Backup
-**NEVER DELETE trading.db.**
-If schema changes, the system will perform automatic migrations.
-Backup command:
+## 6. Validation Tests
+Verify the deployment:
 ```bash
-cp trading.db trading.db.bak
-```
-
-## 6. Troubleshooting
-Check port 5000 conflicts:
-```bash
-sudo lsof -i :5000
-```
-Check status:
-```bash
-systemctl status ax-bot -l --no-pager
-systemctl status ax-dashboard -l --no-pager
+curl http://127.0.0.1:5000/api/health
+curl http://127.0.0.1:5000/api/live
+curl http://127.0.0.1:5000/api/stats
 ```

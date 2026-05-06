@@ -9,25 +9,19 @@
 
 ### A1. ML Sinyal Skoru Entegrasyonu
 
-`ml_signal_scorer.py` (410 satır, Voting Ensemble RF+GB) mevcut `core/` pipeline'ına **bağlı değil**. Bu modül `scalp_bot.py`'de hiç çağrılmıyor. Entegrasyon yapıldığında her sinyal, geçmiş 30+ trade'den öğrenilmiş bir **0-100 güven skoru** alır ve bu skor AI Decision Engine'e ek girdi olarak beslenir.
-
-**Yapılacak:** `TriggerEngine.analyze()` çıktısına `ml_score` alanı eklenmeli, `AIDecisionEngine.evaluate()` içinde bu skora göre `ai_adj` düzeltmesi yapılmalı.
+`ml_signal_scorer.py` dosyası projede hiç oluşturulmamış olup, bu gereksinim **[NOT COMPLETED - DEPRECATED in v5 PAPER]** olarak işaretlenmiştir. Sistem bunun yerine `core/ai_decision_engine.py` üzerinden tamamen otonom "Ghost Learning" yapay zeka beynine geçmiştir.
 
 ---
 
 ### A2. Live Tracker Entegrasyonu
 
-`live_tracker.py` (252 satır) açık trade'lerin 15 saniyelik tick verilerini kaydediyor ancak bu veriler `ai_brain.py`'deki postmortem analizine **geri beslenmemiş**. Kapanan her trade için `trade_analysis` tablosuna `efficiency`, `sl_tightness`, `missed_gain` yazılmalı ve bu değerler `AIDecisionEngine.learn_from_trade()` çağrısına parametre olarak iletilmeli.
-
-**Yapılacak:** `execution_engine._finalize()` içinde `live_tracker.record_close()` çağrısı eklenmeli.
+`live_tracker.py` konsepti **[COMPLETED - REPLACED BY GHOST TRACKER]**. Sistem artık `core/paper_tracker.py` kullanarak "Ghost Learning" algoritmasını `scalp_bot_v3.py` ana döngüsünde çalıştırıyor. VETO veya WATCH yiyen her sinyal First-Touch (TP/SL) mantığıyla takip edilip `coin_profiles` tablosunu besliyor.
 
 ---
 
 ### A3. Coin Library Entegrasyonu
 
-`coin_library.py` (310 satır) her coin için `sl_atr_mult`, `tp_atr_mult`, `max_leverage`, `min_adx`, `preferred_direction`, `fakeout_rate` gibi **coin bazlı parametreler** tutuyor. Ancak `core/risk_engine.py` bu profilleri okumadan sabit değerler kullanıyor.
-
-**Yapılacak:** `RiskEngine.calculate()` içinde `coin_library.get_coin_profile(symbol)` çağrısı eklenmeli; SL/TP çarpanları coin profiline göre dinamik seçilmeli.
+`coin_library` parametreleri **[COMPLETED]**. Dinamik kaldıraç ve risk motoru (`core/advanced_risk_engine.py`) sistemde artık aktif. AI Decision Engine doğrudan `coin_profiles` tablosunu okuyarak coine özel win-rate bazlı eşik seviyeleri (`blended_wr`) ile karar veriyor. ATR bazlı dinamik stop ve portföy korelasyon kalkanı devrede.
 
 ---
 
@@ -60,7 +54,7 @@
 
 ### B4. Günlük Kayıp Limiti (Daily Drawdown Guard)
 
-`config.py`'de `DAILY_MAX_LOSS_PCT = 3.0` tanımlı ancak `scalp_bot.py`'de bu değer **kontrol edilmiyor**. Günlük PnL hesaplanmalı; limit aşıldığında devre kesici otomatik devreye girmeli.
+**[COMPLETED]** `execution_engine.py` içindeki `_check_daily_loss()` ana `open_trade` fonksiyonunda bir guard olarak aktif edilmiştir. Limit aşıldığında sistem yeni işlem açmayı reddeder.
 
 ---
 
@@ -113,7 +107,7 @@ Sistem yalnızca Binance Futures'a bağlı. `execution_engine.py` soyutlanarak B
 
 ### D3. Webhook Tabanlı Trade Bildirimleri
 
-`n8n_bridge.py` mevcut ancak `scalp_bot.py`'de `register_bot()` çağrısı yapılmıyor. n8n entegrasyonu aktif edildiğinde trade açılış/kapanış bildirimleri Telegram dışında e-posta, Discord veya özel webhook'lara da gönderilebilir.
+`n8n_bridge.py` dosyası repoda bulunmamaktadır **[NOT COMPLETED - DEPRECATED]**. Sistem şu an sadece Telegram (`telegram_delivery.py`) ile mükemmel ve temiz şekilde çalışmaktadır.
 
 ---
 

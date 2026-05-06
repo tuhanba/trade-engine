@@ -518,10 +518,32 @@ def api_health():
 
         active_trade_count = len(db.get_open_trades())
 
+        # System State Fetch
+        try:
+            from database import get_system_state
+            last_scan_str = get_system_state("last_scan_time", "-")
+            last_paper_str = get_system_state("last_paper_result_process_at", "-")
+            last_monitor_str = get_system_state("last_trade_monitor_at", "-")
+            bot_hb_str = get_system_state("bot_heartbeat_at", "")
+            
+            bot_running = False
+            if bot_hb_str:
+                from datetime import datetime, timezone
+                try:
+                    hb_dt = datetime.fromisoformat(bot_hb_str.replace("Z", "+00:00"))
+                    diff = (datetime.now(timezone.utc) - hb_dt).total_seconds()
+                    # 2 scan_interval süresi (e.g. 60s) limit sayılabilir
+                    if diff < 120:
+                        bot_running = True
+                except:
+                    pass
+        except Exception:
+            last_scan_str, last_paper_str, last_monitor_str, bot_running = "-", "-", "-", False
+
         return jsonify({
             "ok": True,
             "data": {
-                "bot_running": True, # Assume true if API is responding and updating
+                "bot_running": bot_running,
                 "dashboard_running": True,
                 "db_ok": db_ok,
                 "binance_public_ok": binance_ok,
@@ -530,10 +552,11 @@ def api_health():
                 "live_trading_enabled": bool(LIVE_TRADING_ENABLED),
                 "dry_run": bool(DRY_RUN),
                 "paper_safety_status": "SECURE" if EXECUTION_MODE == "paper" and DRY_RUN and not LIVE_TRADING_ENABLED else "RISK",
-                "last_scan_time": "-", # Extracted from logs or db
-                "last_trade_update_time": "-", # Extracted from logs or db
+                "last_scan_time": last_scan_str,
+                "last_trade_monitor_at": last_monitor_str,
+                "last_paper_result_process_at": last_paper_str,
                 "active_trade_count": active_trade_count,
-                "last_error": "-",
+                "last_error": get_system_state("last_error", "-"),
                 "uptime": uptime,
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
