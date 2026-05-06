@@ -43,6 +43,19 @@ class AdvancedRiskEngine:
         return True, "Güvenli"
 
     def calculate(self, symbol: str, direction: str, entry: float, quality: str, balance: float, open_trades: list = None, atr_pct: float = None) -> dict:
+        if open_trades is None: open_trades = []
+        
+        # 0. Portfolio Correlation Shield (Korelasyon Kalkanı)
+        # Bütün işlemlerin aynı anda aynı yönde stop olmasını (market crash/pump) engeller.
+        try:
+            from config import MAX_CORRELATED_TRADES
+        except ImportError:
+            MAX_CORRELATED_TRADES = 3
+            
+        same_direction_count = sum(1 for t in open_trades if t.get("direction") == direction)
+        if same_direction_count >= MAX_CORRELATED_TRADES:
+            return {"valid": False, "reason": f"Korelasyon Kalkanı: Zaten aynı yönde ({direction}) {same_direction_count} açık işlem var."}
+
         # Kaliteye göre risk yüzdesi
         risk_pct = 1.0
         if quality == "S": risk_pct = 2.0
@@ -57,7 +70,17 @@ class AdvancedRiskEngine:
             
         sl = entry * (1 - stop_dist_pct) if direction == "LONG" else entry * (1 + stop_dist_pct)
         
-        leverage = 10
+        # Dinamik Kaldıraç (Volatility-Scaled Leverage)
+        # Mükemmel bir trader çok hareketli coinde kaldıracı düşürür, az hareketli coinde artırır.
+        try:
+            from config import MAX_LEVERAGE
+        except ImportError:
+            MAX_LEVERAGE = 20
+            
+        # Hedef: Stop noktası ana paranın (marjinin) en fazla %80'ini yesin ki likidasyon olmayalım.
+        # Formul: leverage = 0.80 / stop_dist_pct
+        calculated_lev = int(0.80 / stop_dist_pct)
+        leverage = max(2, min(MAX_LEVERAGE, calculated_lev))
         
         # Güvenlik Kontrolü
         is_safe, reason = self.check_trade_safety(balance, entry, sl, leverage, risk_pct)
