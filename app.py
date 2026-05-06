@@ -529,6 +529,7 @@ def api_health():
                 "execution_mode": str(EXECUTION_MODE),
                 "live_trading_enabled": bool(LIVE_TRADING_ENABLED),
                 "dry_run": bool(DRY_RUN),
+                "paper_safety_status": "SECURE" if EXECUTION_MODE == "paper" and DRY_RUN and not LIVE_TRADING_ENABLED else "RISK",
                 "last_scan_time": "-", # Extracted from logs or db
                 "last_trade_update_time": "-", # Extracted from logs or db
                 "active_trade_count": active_trade_count,
