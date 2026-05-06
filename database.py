@@ -59,7 +59,17 @@ def init_db():
             final_score REAL,
             market_regime TEXT,
             is_valid_for_stats INTEGER DEFAULT 1,
-            archived_reason TEXT
+            archived_reason TEXT,
+            entry_zone REAL DEFAULT 0,
+            invalidation_level REAL DEFAULT 0,
+            stop_reason TEXT,
+            target_reason TEXT,
+            trigger_score REAL DEFAULT 0,
+            current_R REAL DEFAULT 0,
+            distance_to_sl REAL DEFAULT 0,
+            distance_to_tp1 REAL DEFAULT 0,
+            distance_to_tp2 REAL DEFAULT 0,
+            distance_to_tp3 REAL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS partial_closes (

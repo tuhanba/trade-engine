@@ -14,6 +14,11 @@ def migrate():
         conn.execute("ALTER TABLE trades ADD COLUMN stop_reason TEXT")
         conn.execute("ALTER TABLE trades ADD COLUMN target_reason TEXT")
         conn.execute("ALTER TABLE trades ADD COLUMN trigger_score REAL DEFAULT 0")
+        conn.execute("ALTER TABLE trades ADD COLUMN current_R REAL DEFAULT 0")
+        conn.execute("ALTER TABLE trades ADD COLUMN distance_to_sl REAL DEFAULT 0")
+        conn.execute("ALTER TABLE trades ADD COLUMN distance_to_tp1 REAL DEFAULT 0")
+        conn.execute("ALTER TABLE trades ADD COLUMN distance_to_tp2 REAL DEFAULT 0")
+        conn.execute("ALTER TABLE trades ADD COLUMN distance_to_tp3 REAL DEFAULT 0")
     except Exception as e:
         print(f"Trades migration notları (veya zaten var): {e}")
 

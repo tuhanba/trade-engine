@@ -342,13 +342,28 @@ def _check_trade(client, t: dict) -> bool:
     if price > 0:
         if is_long:
             unrealized_pnl = (price - entry) * remaining
+            sl_dist = ((price - sl) / entry) * 100
+            tp1_dist = ((tp1 - price) / entry) * 100 if tp1 else 0
+            tp2_dist = ((tp2 - price) / entry) * 100 if tp2 else 0
+            tp3_dist = ((t.get("tp3") or tp2 - price) / entry) * 100 if t.get("tp3") else 0
+            current_r = (price - entry) / abs(entry - sl) if abs(entry - sl) > 0 else 0
         else:
             unrealized_pnl = (entry - price) * remaining
+            sl_dist = ((sl - price) / entry) * 100
+            tp1_dist = ((price - tp1) / entry) * 100 if tp1 else 0
+            tp2_dist = ((price - tp2) / entry) * 100 if tp2 else 0
+            tp3_dist = ((price - t.get("tp3", tp2)) / entry) * 100 if t.get("tp3") else 0
+            current_r = (entry - price) / abs(entry - sl) if abs(entry - sl) > 0 else 0
         
         try:
             update_trade(trade_id, {
                 "current_price": price,
-                "unrealized_pnl": unrealized_pnl
+                "unrealized_pnl": unrealized_pnl,
+                "current_R": current_r,
+                "distance_to_sl": sl_dist,
+                "distance_to_tp1": tp1_dist,
+                "distance_to_tp2": tp2_dist,
+                "distance_to_tp3": tp3_dist
             })
         except Exception as e:
             logger.error(f"[Execution] Fiyat güncelleme hatası {trade_id}: {e}")
