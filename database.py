@@ -1,7 +1,7 @@
 """
-database.py — AX Merkezi Veritabanı v4.4 (ULTIMATE ELITE)
+database.py — AX Merkezi Veritabanı v4.10 (ULTIMATE ELITE)
 =========================================================
-Aşama 4: TP Lifecycle ve Balance Ledger Entegrasyonu.
+Aşama 10: MFE / MAE / R-Multiple Analizleri ve İstatistikler.
 """
 import sqlite3
 import logging
@@ -34,7 +34,12 @@ def init_db():
             tp1_hit INTEGER DEFAULT 0,
             tp2_hit INTEGER DEFAULT 0,
             open_time TEXT, close_time TEXT,
-            close_reason TEXT
+            close_reason TEXT,
+            mfe REAL DEFAULT 0,
+            mae REAL DEFAULT 0,
+            r_multiple REAL DEFAULT 0,
+            setup_quality TEXT,
+            final_score REAL
         );
         CREATE TABLE IF NOT EXISTS balance_ledger (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,49 +58,40 @@ def init_db():
             initial_balance REAL DEFAULT 250.0
         );
         INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, 250.0, 250.0);
+        
+        CREATE TABLE IF NOT EXISTS ai_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event TEXT,
+            symbol TEXT,
+            decision TEXT,
+            score REAL,
+            confidence REAL,
+            reason TEXT,
+            data TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """)
 
 def add_ledger_entry(trade_id, symbol, event_type, amount, note=""):
     with get_conn() as conn:
-        # Mevcut bakiyeyi al
         row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
         balance_before = row[0]
         balance_after = balance_before + amount
-        
-        # Bakiyeyi güncelle
         conn.execute("UPDATE paper_account SET balance = ? WHERE id=1", (balance_after,))
-        
-        # Ledger kaydı at
         conn.execute("""
             INSERT INTO balance_ledger (trade_id, symbol, event_type, amount, balance_before, balance_after, note)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (trade_id, symbol, event_type, amount, balance_before, balance_after, note))
         return balance_after
 
-def update_trade_tp(trade_id, tp_level, pnl, fee, remaining_qty):
+def update_trade_stats(trade_id, mfe=None, mae=None):
     with get_conn() as conn:
-        if tp_level == 1:
-            conn.execute("""
-                UPDATE trades SET 
-                tp1_hit = 1, 
-                realized_pnl = realized_pnl + ?, 
-                total_fee = total_fee + ?,
-                remaining_qty = ?,
-                status = 'tp1_hit'
-                WHERE id = ?
-            """, (pnl, fee, remaining_qty, trade_id))
-        elif tp_level == 2:
-            conn.execute("""
-                UPDATE trades SET 
-                tp2_hit = 1, 
-                realized_pnl = realized_pnl + ?, 
-                total_fee = total_fee + ?,
-                remaining_qty = ?,
-                status = 'tp2_hit'
-                WHERE id = ?
-            """, (pnl, fee, remaining_qty, trade_id))
+        if mfe is not None:
+            conn.execute("UPDATE trades SET mfe = MAX(mfe, ?) WHERE id = ?", (mfe, trade_id))
+        if mae is not None:
+            conn.execute("UPDATE trades SET mae = MIN(mae, ?) WHERE id = ?", (mae, trade_id))
 
-def close_trade(trade_id, final_pnl, final_fee, reason):
+def close_trade(trade_id, final_pnl, final_fee, reason, r_multiple=0):
     with get_conn() as conn:
         conn.execute("""
             UPDATE trades SET 
@@ -104,12 +100,19 @@ def close_trade(trade_id, final_pnl, final_fee, reason):
             total_fee = total_fee + ?,
             remaining_qty = 0,
             close_time = datetime('now'),
-            close_reason = ?
+            close_reason = ?,
+            r_multiple = ?
             WHERE id = ?
-        """, (final_pnl, final_fee, reason, trade_id))
+        """, (final_pnl, final_fee, reason, r_multiple, trade_id))
 
-# Diğer yardımcı fonksiyonlar (Aşama 6 için)
 def get_open_trades():
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM trades WHERE status != 'closed'").fetchall()
         return [dict(r) for r in rows]
+
+def save_ai_log(event, symbol, decision, score, confidence, reason, data):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO ai_logs (event, symbol, decision, score, confidence, reason, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (event, symbol, decision, score, confidence, reason, data))
