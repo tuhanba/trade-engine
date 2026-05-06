@@ -338,6 +338,21 @@ def _check_trade(client, t: dict) -> bool:
 
     is_long = direction == "LONG"
 
+    # ── PnL ve Fiyat Güncellemesi (Dashboard için) ───────────────
+    if price > 0:
+        if is_long:
+            unrealized_pnl = (price - entry) * remaining
+        else:
+            unrealized_pnl = (entry - price) * remaining
+        
+        try:
+            update_trade(trade_id, {
+                "current_price": price,
+                "unrealized_pnl": unrealized_pnl
+            })
+        except Exception as e:
+            logger.error(f"[Execution] Fiyat güncelleme hatası {trade_id}: {e}")
+
     # ── SL Kontrolü ──────────────────────────────────────────────────────
     sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
     if sl_hit:

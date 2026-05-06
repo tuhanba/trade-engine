@@ -38,6 +38,7 @@ def init_db():
             risk_pct REAL DEFAULT 1.0,
             risk_usd REAL DEFAULT 0,
             max_loss_after_fee REAL DEFAULT 0,
+            current_price REAL DEFAULT 0,
             realized_pnl REAL DEFAULT 0,
             unrealized_pnl REAL DEFAULT 0,
             net_pnl REAL DEFAULT 0,
