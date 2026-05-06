@@ -78,20 +78,45 @@ class AIDecisionEngine:
         # Coin personality kontrolü
         coin_data = self._get_coin_personality(symbol)
         danger = coin_data.get("danger_score", 0) if coin_data else 0
+        win_rate = coin_data.get("win_rate", 0) if coin_data else 0.5
+        ghost_wr = coin_data.get("ghost_win_rate", 0) if coin_data else 0.5
+        sample = (coin_data.get("sample_size", 0) + coin_data.get("ghost_sample", 0)) if coin_data else 0
+
+        # AI Expectancy Score (Öğrenme tabanlı beklenti)
+        # Sistemi tamamen benzersiz kılan self-optimizing (kendi kendini ayarlayan) eşik mekanizması
+        dynamic_threshold = 7.0
+        blended_wr = 0.5
+        
+        if sample >= 5:
+            # Gerçek trade ağırlıklı (%70), Ghost trade ağırlıklı (%30) karma win_rate
+            blended_wr = (win_rate * 0.7) + (ghost_wr * 0.3)
+            
+            # Öğrendikçe Karar Mekanizmasını Esnet veya Katılaştır:
+            if blended_wr >= 0.65:
+                dynamic_threshold = 5.5  # Çok kârlı coin, eşiği esnet
+            elif blended_wr >= 0.55:
+                dynamic_threshold = 6.0  # Karlı coin
+            elif blended_wr <= 0.35:
+                dynamic_threshold = 8.5  # Çok zararlı coin, mükemmel değilse girme
+            elif blended_wr <= 0.45:
+                dynamic_threshold = 7.5  # Zararlı coin, katı kurallar
 
         # Karar Mantığı
         if danger > 0.8:
             decision = "VETO"
-            reason = f"Yüksek danger_score: {danger:.2f}"
-        elif score >= 7.0 and confidence >= 0.7 and quality in ("S", "A+", "A"):
+            reason = f"Yüksek risk (Danger Score: {danger:.2f})"
+        elif score >= dynamic_threshold and quality in ("S", "A+", "A", "B"):
+            if sample >= 5:
+                reason = f"AI Edge: Score={score:.1f} (Hedef: {dynamic_threshold:.1f}) | WR={blended_wr*100:.1f}%"
+            else:
+                reason = f"Score={score:.1f} Quality={quality}"
             decision = "ALLOW"
-            reason = f"Score={score:.1f} Quality={quality} Confidence={confidence:.0%}"
         elif score >= 5.0:
             decision = "WATCH"
-            reason = f"Ghost tracking: score={score:.1f}"
+            reason = f"Ghost tracking: score={score:.1f} (Hedef={dynamic_threshold:.1f})"
         else:
             decision = "VETO"
-            reason = f"Düşük skor: {score:.1f}"
+            reason = f"Düşük skor: {score:.1f} (Gerekli: {dynamic_threshold:.1f})"
 
         # Log
         self._log("DECISION", symbol, decision, score, confidence, reason, signal_data)
