@@ -7,12 +7,12 @@ Bu rapor, Trade Engine sisteminde yapılan son optimizasyonları, giderilen darb
 Sistemin trade açmasını ve veri akışını engelleyen temel sorunlar tespit edilip çözülmüştür.
 
 ### 1.1. Günlük Kayıp Limiti (Daily Loss Limit) Blokajı
-Sistemde `ai_brain.py` ve `scalp_bot.py` içinde iki ayrı günlük kayıp limiti kontrolü bulunmaktaydı. Bu kontroller `datetime.utcnow()` hatası nedeniyle gece yarısı UTC'de sıfırlanmıyor, dünün kaybını bugüne taşıyarak botun saatlerce trade açmasını engelliyordu.
+Sistemde `ai_brain.py` ve `scalp_bot_v3.py` içinde iki ayrı günlük kayıp limiti kontrolü bulunmaktaydı. Bu kontroller `datetime.utcnow()` hatası nedeniyle gece yarısı UTC'de sıfırlanmıyor, dünün kaybını bugüne taşıyarak botun saatlerce trade açmasını engelliyordu.
 * **Çözüm:** Bu blokajlar tamamen kaldırıldı. Risk yönetimi artık `CIRCUIT_BREAKER` (devre kesici) ve coin bazlı cooldown mekanizmaları üzerinden daha güvenli bir şekilde sağlanmaktadır.
 
 ### 1.2. Dashboard Veri Akışı ve Trade Kapanmama Sorunu
 Dashboard'un haftalık veri endpoint'i, veritabanındaki `TEXT` formatlı `best_day` ve `worst_day` sütunlarına `round()` işlemi uygulamaya çalıştığı için çöküyordu. Ayrıca, bot "finish mode"a geçtiğinde açık trade'leri izleyen `exec_monitor()` çağrılmadığı için trade'ler açık kalıyordu.
-* **Çözüm:** Dashboard veri tipi hatası düzeltildi. `scalp_bot.py`'ye finish mode için `exec_monitor()` döngüsü eklendi.
+* **Çözüm:** Dashboard veri tipi hatası düzeltildi. `scalp_bot_v3.py`'ye finish mode için `exec_monitor()` döngüsü eklendi.
 
 ### 1.3. Hardcoded Dizin Yolları
 `paper_sim.py`, `app.py` ve `config.py` içinde veritabanı ve log dizinleri `/root/` veya `/home/ubuntu/` olarak hardcoded yazılmıştı. Bu durum, farklı dizinlerden çalıştırıldığında sistemin eski veritabanını okumasına neden oluyordu.
