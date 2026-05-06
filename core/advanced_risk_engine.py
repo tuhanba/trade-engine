@@ -42,14 +42,19 @@ class AdvancedRiskEngine:
 
         return True, "Güvenli"
 
-    def calculate(self, symbol: str, direction: str, entry: float, quality: str, balance: float, open_trades: list = None) -> dict:
+    def calculate(self, symbol: str, direction: str, entry: float, quality: str, balance: float, open_trades: list = None, atr_pct: float = None) -> dict:
         # Kaliteye göre risk yüzdesi
         risk_pct = 1.0
         if quality == "S": risk_pct = 2.0
         elif quality == "A+": risk_pct = 1.5
         
-        # Varsayılan stop (Aşama 8'de dinamikleşecek)
-        stop_dist_pct = 0.02 
+        # Dinamik ATR tabanlı stop
+        if atr_pct and atr_pct > 0.005:
+            # Min %1, Max %5 ATR sınırı
+            stop_dist_pct = min(0.05, max(0.01, atr_pct * 1.5))
+        else:
+            stop_dist_pct = 0.02 
+            
         sl = entry * (1 - stop_dist_pct) if direction == "LONG" else entry * (1 + stop_dist_pct)
         
         leverage = 10

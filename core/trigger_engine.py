@@ -118,6 +118,7 @@ class TriggerEngine:
             close = df5["close"]
             tr = pd.concat([high - low, (high - close.shift()).abs(), (low  - close.shift()).abs()], axis=1).max(axis=1)
             atr14 = tr.rolling(14).mean()
+            atr_val = float(atr14.iloc[-1])
             plus_dm  = (high.diff()).where((high.diff() > 0) & (high.diff() > -low.diff()), 0)
             minus_dm = (-low.diff()).where((-low.diff() > 0) & (-low.diff() > high.diff()), 0)
             plus_di  = 100 * (plus_dm.rolling(14).mean()  / (atr14 + 1e-10))
@@ -126,6 +127,7 @@ class TriggerEngine:
             adx_val  = float(dx.rolling(14).mean().iloc[-1])
         except Exception:
             adx_val = 30
+            atr_val = c5 * 0.02 # Fallback ATR %2
 
         if adx_val < ADX_MIN_THRESHOLD:
             return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
@@ -191,6 +193,8 @@ class TriggerEngine:
             "score": min(10.0, max(0.0, score)),
             "ml_score": 50,
             "entry": c1,
+            "atr": round(atr_val, 6),
+            "atr_pct": round(atr_val / c1, 4),
             "rsi5": round(rsi5, 1),
             "rsi1": round(rsi1, 1),
             "rv": rv,

@@ -32,6 +32,7 @@ from database import (
 from core.data_layer import SignalData
 from telegram_delivery import deliver_signal, send_message
 from execution_engine import open_trade, monitor_trades
+from core.paper_tracker import process_pending_paper_results
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("scalp_bot_v3")
@@ -219,7 +220,8 @@ async def main_loop():
                     score = trigger_res.get("score", 0)
 
                 # Risk kontrolü
-                risk_res = risk.calculate(symbol, direction, entry, quality, balance, open_trades)
+                atr_pct = trigger_res.get("atr_pct") if not use_fallback and 'trigger_res' in locals() else None
+                risk_res = risk.calculate(symbol, direction, entry, quality, balance, open_trades, atr_pct=atr_pct)
 
                 # Sinyal oluştur
                 sig_data = {
@@ -279,6 +281,17 @@ async def main_loop():
                         logger.info(f"Kapanan işlemler: {closed_list}")
                 except Exception as monitor_err:
                     logger.error(f"Trade monitor hatası: {monitor_err}")
+                
+                # AI Ghost Tracking Process
+                try:
+                    # Sadece her 5 scande bir yapıp limiti koruyabiliriz veya her scan yapabiliriz
+                    # Limiti 10 yaparak kline isteklerini azaltıyoruz
+                    if scan_count % 3 == 0:
+                        processed_ghosts = process_pending_paper_results(client, limit=10)
+                        if processed_ghosts > 0:
+                            logger.info(f"👻 AI Ghost Tracking: {processed_ghosts} paper trade sonuçlandırıldı ve öğrenildi.")
+                except Exception as ghost_err:
+                    logger.error(f"AI Ghost Tracker hatası: {ghost_err}")
 
             # Adaptive interval
             interval = get_adaptive_interval(SCAN_INTERVAL, hour_utc, len(open_trades))
