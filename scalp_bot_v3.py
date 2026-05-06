@@ -36,21 +36,28 @@ async def main_loop():
     logger.info("=== AX Scalp Engine v5.0 (LIVE-READY) Başlatılıyor ===")
     init_db()
 
-    # Binance Client — bağlantı retry
+    # Binance Client — bağlantı retry + proxy desteği
     client = None
     max_retries = 5
+    proxy = os.getenv("HTTPS_PROXY") or os.getenv("https_proxy")
+    binance_tld = os.getenv("BINANCE_TLD", "com")
+    use_testnet = os.getenv("BINANCE_TESTNET", "").lower() in ("true", "1", "yes")
+
+    req_params = {}
+    if proxy:
+        req_params["proxies"] = {"https": proxy, "http": proxy}
+        logger.info(f"Proxy aktif: {proxy[:30]}...")
+
     for attempt in range(1, max_retries + 1):
         try:
-            use_testnet = os.getenv("BINANCE_TESTNET", "").lower() in ("true", "1", "yes")
-            if use_testnet:
-                client = Client(
-                    BINANCE_API_KEY, BINANCE_API_SECRET,
-                    testnet=True
-                )
-                logger.info("Binance TESTNET bağlantısı kuruldu.")
-            else:
-                client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
-                logger.info("Binance LIVE bağlantısı kuruldu.")
+            client = Client(
+                BINANCE_API_KEY, BINANCE_API_SECRET,
+                testnet=use_testnet,
+                tld=binance_tld,
+                requests_params=req_params if req_params else None,
+            )
+            mode_str = "TESTNET" if use_testnet else f"LIVE (.{binance_tld})"
+            logger.info(f"Binance {mode_str} bağlantısı kuruldu.")
             break
         except Exception as e:
             logger.warning(f"Binance bağlantı denemesi {attempt}/{max_retries} başarısız: {e}")
@@ -59,8 +66,9 @@ async def main_loop():
                 logger.info(f"  {wait}s sonra tekrar denenecek...")
                 await asyncio.sleep(wait)
             else:
-                logger.error("Binance API'ye bağlanılamadı! VPN gerekli olabilir.")
-                send_message("❌ <b>AX Engine:</b> Binance API bağlantısı kurulamadı!\nVPN aktif mi kontrol edin.")
+                logger.error("Binance API'ye bağlanılamadı! VPN veya HTTPS_PROXY gerekli.")
+                send_message("❌ <b>AX Engine:</b> Binance API bağlantısı kurulamadı!\n"
+                             "VPN veya .env'de HTTPS_PROXY ayarlayın.")
                 return
 
     scanner = AsyncMarketScanner(db_path=DB_PATH)
