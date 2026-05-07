@@ -34,6 +34,107 @@ except ImportError:
     BREAKEVEN_TRIGGER_R  = 1.0
     BREAKEVEN_OFFSET_PCT = 0.05
 
+# ─────────────────────────────────────────────────────────────────────────────
+# BAĞIMSIZ RISK GOVERNOR FONKSİYONLARI (class dışı, modül seviyesi)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_daily_loss_limit(balance: float) -> bool:
+    """
+    Bugünkü net PnL, günlük max kayıp limitini aştı mı?
+    Returns True: trade açılabilir. Returns False: bloke.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from config import DAILY_MAX_LOSS_PCT
+        from database import get_conn
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(net_pnl), 0) FROM trades "
+                "WHERE DATE(close_time) = ? AND status = 'closed'", (today,)
+            ).fetchone()
+        daily_pnl = float(row[0] or 0)
+        limit = balance * (DAILY_MAX_LOSS_PCT / 100)
+        return daily_pnl > -abs(limit)
+    except Exception as e:
+        logger.warning(f"check_daily_loss_limit hatası: {e}")
+        return True
+
+
+def check_consecutive_losses() -> bool:
+    """
+    Son N trade ardışık kayıp mı? Bloke eder.
+    Returns True: trade açılabilir. Returns False: bloke.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from config import MAX_CONSECUTIVE_LOSSES
+        from database import get_conn
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT net_pnl FROM trades WHERE status = 'closed' "
+                "ORDER BY id DESC LIMIT ?", (MAX_CONSECUTIVE_LOSSES,)
+            ).fetchall()
+        if len(rows) < MAX_CONSECUTIVE_LOSSES:
+            return True
+        return not all((r[0] or 0) <= 0 for r in rows)
+    except Exception as e:
+        logger.warning(f"check_consecutive_losses hatası: {e}")
+        return True
+
+
+def check_coin_cooldown(symbol: str) -> bool:
+    """
+    Coin cooldown'da mı?
+    Returns True: trade açılabilir. Returns False: bloke.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from database import is_coin_in_cooldown
+        return not is_coin_in_cooldown(symbol)
+    except Exception as e:
+        logger.warning(f"check_coin_cooldown hatası: {e}")
+        return True
+
+
+def check_max_open_trades() -> bool:
+    """
+    Maksimum açık trade sayısına ulaşıldı mı?
+    Returns True: trade açılabilir. Returns False: bloke.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from config import MAX_OPEN_TRADES
+        from database import get_open_trades
+        return len(get_open_trades()) < MAX_OPEN_TRADES
+    except Exception as e:
+        logger.warning(f"check_max_open_trades hatası: {e}")
+        return True
+
+
+def check_correlated_exposure(symbol: str, open_trades: list) -> bool:
+    """
+    Aynı base asset veya yüksek korelasyonlu coin için max açık
+    pozisyon sayısını kontrol eder.
+    Returns True: trade açılabilir. Returns False: bloke.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from config import MAX_CORRELATED_TRADES
+        base = symbol.replace("USDT", "").replace("BUSD", "")
+        same_base = [t for t in open_trades if base in t.get("symbol", "")]
+        return len(same_base) < MAX_CORRELATED_TRADES
+    except Exception as e:
+        logger.warning(f"check_correlated_exposure hatası: {e}")
+        return True
+
+
 class RiskEngine:
     def __init__(self, client):
         self.client = client

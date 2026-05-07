@@ -426,6 +426,53 @@ class AIDecisionEngine:
                 
             # Parametreleri optimize et
             self._optimize_params()
-            
+
         except Exception as e:
             logger.error(f"AI öğrenme hatası: {e}")
+
+    def learn_from_outcome(self, symbol: str, net_pnl: float, reason: str):
+        """
+        Trade sonucundan öğren. Coin profilini tam olarak güncelle.
+        execution_engine._finalize() tarafından çağrılır.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute("""
+                    SELECT net_pnl, tp1_hit, tp2_hit, r_multiple, duration_seconds
+                    FROM trades
+                    WHERE symbol=? AND status='closed' AND is_valid_for_stats=1
+                    ORDER BY id DESC LIMIT 30
+                """, (symbol,)).fetchall()
+
+            if not rows:
+                return
+
+            total  = len(rows)
+            wins   = sum(1 for r in rows if (r["net_pnl"] or 0) > 0)
+            tp1s   = sum(1 for r in rows if r["tp1_hit"])
+            tp2s   = sum(1 for r in rows if r["tp2_hit"])
+            avg_r  = sum(float(r["r_multiple"] or 0) for r in rows) / total
+            gp = sum(float(r["net_pnl"] or 0) for r in rows if (r["net_pnl"] or 0) > 0)
+            gl = abs(sum(float(r["net_pnl"] or 0) for r in rows if (r["net_pnl"] or 0) < 0))
+            pf     = round(gp / gl, 2) if gl > 0 else 0
+            avg_dur = sum(float(r["duration_seconds"] or 0) for r in rows) / total / 60
+
+            import sys as _sys, os as _os
+            _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+            from database import update_coin_profile
+            update_coin_profile(symbol, {
+                "win_rate":       round(wins / total, 4),
+                "avg_r":          round(avg_r, 3),
+                "profit_factor":  pf,
+                "tp1_hit_rate":   round(tp1s / total, 4),
+                "tp2_hit_rate":   round(tp2s / total, 4),
+                "avg_duration":   round(avg_dur, 1),
+                "sample_size":    total,
+                "danger_score":   round(max(0, 1 - (wins / total)), 2),
+            })
+            logger.info(
+                f"[AI] {symbol} profil: wr={wins/total:.1%} pf={pf} avg_r={avg_r:.2f} n={total}"
+            )
+        except Exception as e:
+            logger.warning(f"[AI] learn_from_outcome hatası {symbol}: {e}")

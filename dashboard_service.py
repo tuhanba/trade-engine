@@ -275,17 +275,42 @@ def get_ax_status() -> dict:
             ).fetchone()
             today_allowed = row3[0] or 0
 
+        # Bot heartbeat — son 2 dakika içinde kalp atışı yoksa offline say
+        bot_hb = get_state("bot_heartbeat_at") or ""
+        bot_running = False
+        if bot_hb:
+            try:
+                hb_dt = datetime.fromisoformat(bot_hb.replace("Z", "+00:00"))
+                if hb_dt.tzinfo is None:
+                    hb_dt = hb_dt.replace(tzinfo=timezone.utc)
+                bot_running = (datetime.now(timezone.utc) - hb_dt).total_seconds() < 120
+            except Exception:
+                pass
+
+        from config import DRY_RUN, LIVE_TRADING_ENABLED
+        paper_safety = (
+            "SECURE" if mode == "paper" and DRY_RUN and not LIVE_TRADING_ENABLED else "RISK"
+        )
+
         return {
             "circuit_breaker_active": cb_active,
             "circuit_breaker_until":  cb_until_str,
             "paused":                 paused,
             "mode":                   mode,
+            "execution_mode":         mode,
             "open_trades":            len(open_trades),
             "balance":                round(balance, 4),
+            "paper_balance":          round(balance, 4),
             "today_trades":           today_trades,
             "today_pnl":              today_pnl,
             "today_signals":          today_signals,
             "today_allowed":          today_allowed,
+            "bot_running":            bot_running,
+            "dry_run":                DRY_RUN,
+            "live_trading":           LIVE_TRADING_ENABLED,
+            "paper_safety_status":    paper_safety,
+            "last_scan_time":         get_state("last_scan_time") or "-",
+            "last_monitor_time":      get_state("last_trade_monitor_at") or "-",
         }
     except Exception as e:
         logger.error(f"[Dashboard] get_ax_status hatası: {e}")

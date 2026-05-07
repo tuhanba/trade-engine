@@ -849,3 +849,138 @@ def reset_paper_data(force_delete=False):
             """)
             conn.execute("UPDATE paper_account SET balance = initial_balance WHERE id=1")
         logger.info("[DB] Paper reset: trades is_valid_for_stats=0 yapıldı.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TELEGRAM MESAJ TABLOSU
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_telegram_message(sig_id, symbol: str, dedupe_key: str,
+                          text: str, status: str = "queued") -> bool:
+    """Telegram mesajını kuyruğa yaz. Duplicate dedupe_key'i reddeder."""
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS telegram_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sig_id TEXT,
+                    symbol TEXT,
+                    dedupe_key TEXT UNIQUE,
+                    text TEXT,
+                    status TEXT DEFAULT 'queued',
+                    created_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            existing = conn.execute(
+                "SELECT id FROM telegram_messages WHERE dedupe_key = ?", (dedupe_key,)
+            ).fetchone()
+            if existing:
+                return False
+            conn.execute(
+                "INSERT INTO telegram_messages (sig_id, symbol, dedupe_key, text, status) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (str(sig_id), symbol, dedupe_key, text[:4096], status)
+            )
+            return True
+    except Exception as e:
+        logger.warning(f"[DB] save_telegram_message hatası: {e}")
+        return False
+
+
+def mark_telegram_message_sent(dedupe_key: str):
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE telegram_messages SET status = 'sent' WHERE dedupe_key = ?",
+                (dedupe_key,)
+            )
+    except Exception as e:
+        logger.warning(f"[DB] mark_telegram_message_sent hatası: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MARKET SCANNER TABLOSU
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_market_snapshot(data: dict):
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS market_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT,
+                    volume REAL,
+                    price REAL,
+                    price_change REAL,
+                    status TEXT,
+                    score REAL,
+                    timestamp TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            conn.execute(
+                "INSERT INTO market_snapshots (symbol, volume, price, price_change, status, score) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (data.get("symbol"), data.get("volume"), data.get("price"),
+                 data.get("price_change"), data.get("status"), data.get("score"))
+            )
+    except Exception as e:
+        logger.debug(f"[DB] save_market_snapshot: {e}")
+
+
+def save_scanned_coin(data: dict):
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scanned_coins (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT,
+                    status TEXT,
+                    reason TEXT,
+                    score REAL,
+                    volume REAL,
+                    price REAL,
+                    price_change REAL,
+                    timestamp TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            conn.execute(
+                "INSERT INTO scanned_coins (symbol, status, reason, score, volume, price, price_change) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (data.get("symbol"), data.get("status"), data.get("reason"),
+                 data.get("score"), data.get("volume"), data.get("price"),
+                 data.get("price_change"))
+            )
+    except Exception as e:
+        logger.debug(f"[DB] save_scanned_coin: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ALIAS VE COMPAT FONKSİYONLAR
+# ─────────────────────────────────────────────────────────────────────────────
+
+def upsert_coin_profile(symbol: str, updates: dict):
+    """update_coin_profile alias — geriye dönük uyumluluk."""
+    update_coin_profile(symbol, updates)
+
+
+def get_coin_profile(symbol: str) -> dict:
+    """Coin profil verisini döndürür. Kayıt yoksa boş dict."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM coin_profiles WHERE symbol = ?", (symbol,)
+        ).fetchone()
+        return dict(row) if row else {}
+
+
+def is_coin_in_cooldown(symbol: str) -> bool:
+    """Coin'in cooldown listesinde olup olmadığını kontrol eder."""
+    try:
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT until FROM coin_cooldown WHERE symbol = ? AND until > ?",
+                (symbol, now_str)
+            ).fetchone()
+            return row is not None
+    except Exception:
+        return False

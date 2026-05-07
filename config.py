@@ -127,6 +127,14 @@ MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "40.0
 # ── Veritabanı ───────────────────────────────────────────────────────────────
 DB_PATH = os.getenv("DB_PATH", "/root/trade_engine/trading.db")
 
+# ── Paper/Live Mod (ek sabitler) ─────────────────────────────────────────────
+DRY_RUN              = os.getenv("DRY_RUN", "true").lower() == "true"
+LIVE_TRADING_ENABLED = os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
+
+# ── Ek Risk Sabitleri ─────────────────────────────────────────────────────────
+MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3"))
+MAX_MARGIN_LOSS_PCT    = float(os.getenv("MAX_MARGIN_LOSS_PCT", "0.40"))  # %40 margin kaybı limiti
+
 # ── Market Scanner Filtreler ─────────────────────────────────────────────────
 MIN_VOLUME_USD     = float(os.getenv("MIN_VOLUME_USD", "10000000"))   # 10M
 MIN_PRICE          = float(os.getenv("MIN_PRICE", "0.001"))

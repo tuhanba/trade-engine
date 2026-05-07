@@ -57,8 +57,10 @@ class MarketScanner:
             
             # Sadece USDT paritelerini ve trading'e açık olanları al
             valid_symbols = {
-                s["symbol"]: s for s in exchange_info["symbols"] 
-                if s["quoteAsset"] == "USDT" and s["status"] == "TRADING"
+                s["symbol"]: s for s in exchange_info["symbols"]
+                if s["quoteAsset"] == "USDT"
+                and s["status"] == "TRADING"
+                and s.get("contractType") == "PERPETUAL"
             }
             
             cooldown_coins = self._get_cooldown_coins()
