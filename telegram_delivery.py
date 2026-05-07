@@ -102,12 +102,7 @@ def send_trade_open(data):
         f"🎯 TP2:   <code>{data.get('tp2', 0):.6f}</code>\n"
         f"🎯 TP3:   <code>{data.get('tp3', 0):.6f}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📌 Giriş: <code>{data.get('entry', 0):.6f}</code>\n"
-        f"🛑 Stop:  <code>{data.get('sl', 0):.6f}</code> ({stop_dist:.2f}%)\n"
-        f"🎯 TP1:   <code>{data.get('tp1', 0):.6f}</code>\n"
-        f"🎯 TP2:   <code>{data.get('tp2', 0):.6f}</code>\n"
-        f"🎯 TP3:   <code>{data.get('tp3', 0):.6f}</code>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
+
         f"🏦 Margin: <code>{data.get('margin_used', 0):.2f} USD</code> | ⚙️ x{data.get('leverage', 10)}\n"
         f"⚠️ Risk: <code>{data.get('risk_usd', 0):.2f} USD</code> (%{data.get('risk_pct', 1):.1f})\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
