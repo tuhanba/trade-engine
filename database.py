@@ -599,6 +599,21 @@ def save_scalp_signal(data: dict, decision: str = "ALLOW"):
     })
 
 
+def get_active_scalp_signals(limit: int = 100) -> list:
+    """Son 24 saatte kaydedilen sinyal adaylarını döner."""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT * FROM signal_candidates
+                WHERE created_at >= datetime('now', '-24 hours')
+                ORDER BY id DESC LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning(f"get_active_scalp_signals hatası: {e}")
+        return []
+
+
 def save_paper_trade(data: dict, tracked_from: str = "candidate"):
     with get_conn() as conn:
         conn.execute("""

@@ -91,6 +91,8 @@ def migrate():
         "danger_score":        "REAL DEFAULT 0",
         "sample_size":         "INTEGER DEFAULT 0",
         "last_updated":        "TEXT",
+        "avg_r":               "REAL DEFAULT 0",
+        "profit_factor":       "REAL DEFAULT 0",
     }
     total_added += _add_columns(cursor, "coin_profiles", coin_profile_columns)
 

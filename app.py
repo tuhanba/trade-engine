@@ -529,6 +529,7 @@ def api_learning_metrics():
 
 
 # ── /api/scalp_signals ────────────────────────────────────────────────────────
+@app.route("/api/signals")
 @app.route("/api/scalp_signals")
 def api_scalp_signals():
     try:
