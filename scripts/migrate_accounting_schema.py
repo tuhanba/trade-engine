@@ -102,6 +102,8 @@ def migrate():
         "spread":          "REAL DEFAULT 0",
         "volume":          "REAL DEFAULT 0",
         "volatility":      "REAL DEFAULT 0",
+        "final_score":     "TEXT",
+        "setup_quality":   "TEXT",
     }
     total_added += _add_columns(cursor, "signal_candidates", signal_columns)
 

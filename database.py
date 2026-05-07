@@ -999,3 +999,132 @@ def is_coin_in_cooldown(symbol: str) -> bool:
             return row is not None
     except Exception:
         return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCALP BOT COMPAT FONKSİYONLARI
+# ─────────────────────────────────────────────────────────────────────────────
+
+def init_paper_account():
+    """Paper account yoksa başlangıç bakiyesiyle oluşturur."""
+    try:
+        from config import DB_PATH as _db
+        with get_conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM paper_account WHERE id=1"
+            ).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO paper_account (id, balance, initial_balance) VALUES (1, 250.0, 250.0)"
+                )
+            logger.info("[DB] paper_account hazır.")
+    except Exception as e:
+        logger.warning(f"init_paper_account: {e}")
+
+
+def archive_old_scalp_signals(hours: int = 24):
+    """Eski sinyal adaylarını arşivle (signal_candidates soft-delete)."""
+    try:
+        cutoff = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        with get_conn() as conn:
+            conn.execute(
+                "DELETE FROM signal_candidates WHERE created_at < datetime(?, ?)",
+                (cutoff, f"-{hours} hours")
+            )
+    except Exception as e:
+        logger.warning(f"archive_old_scalp_signals: {e}")
+
+
+def save_candidate_signal(data: dict) -> int:
+    """Sinyal adayını signal_candidates tablosuna kaydeder, id döndürür."""
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        with get_conn() as conn:
+            cursor = conn.execute("""
+                INSERT INTO signal_candidates
+                  (symbol, direction, entry, sl, tp1, tp2, rr,
+                   score, decision, session, market_regime, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                data.get("symbol"), data.get("direction"),
+                data.get("entry"), data.get("sl"),
+                data.get("tp1"), data.get("tp2"),
+                data.get("rr", 0), data.get("score", 0),
+                data.get("decision", "PENDING"),
+                data.get("session"), data.get("market_regime"),
+                now,
+            ))
+            return cursor.lastrowid
+    except Exception as e:
+        logger.warning(f"save_candidate_signal: {e}")
+        return 0
+
+
+def save_signal_event(signal_id, event_type: str, **kwargs):
+    """Sinyal yaşam döngüsü olayını kaydeder (ai_logs tablosuna)."""
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        symbol = kwargs.get("symbol", "")
+        reason = kwargs.get("reason", kwargs.get("reject_reason", ""))
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO ai_logs (event, symbol, reason, created_at) VALUES (?,?,?,?)",
+                (event_type, symbol, reason, now)
+            )
+    except Exception as e:
+        logger.debug(f"save_signal_event: {e}")
+
+
+def update_candidate_status(candidate_id: int, **kwargs):
+    """signal_candidates kaydının durumunu günceller."""
+    try:
+        # lifecycle_stage/execution_status → decision/veto_reason eşlemesi
+        col_map = {
+            "decision": "decision",
+            "reject_reason": "veto_reason",
+            "ai_veto_reason": "veto_reason",
+            "linked_trade_id": "linked_trade_id",
+            "lifecycle_stage": None,   # kolon yok, atla
+            "execution_status": None,  # kolon yok, atla
+        }
+        valid_cols = {r[1] for r in __import__('sqlite3').connect(DB_PATH).execute(
+            "PRAGMA table_info(signal_candidates)"
+        ).fetchall()}
+        updates = {}
+        for k, v in kwargs.items():
+            mapped = col_map.get(k, k)
+            if mapped and mapped in valid_cols:
+                updates[mapped] = v
+        if not updates:
+            return
+        set_clause = ", ".join(f"{k}=?" for k in updates)
+        with get_conn() as conn:
+            conn.execute(
+                f"UPDATE signal_candidates SET {set_clause} WHERE id=?",
+                list(updates.values()) + [candidate_id]
+            )
+    except Exception as e:
+        logger.debug(f"update_candidate_status: {e}")
+
+
+def get_daily_signal_count() -> dict:
+    """Bugün üretilen sinyallerin kalite bazlı dağılımını döndürür."""
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT decision, COUNT(*) as cnt
+                FROM signal_candidates
+                WHERE DATE(created_at) = ?
+                GROUP BY decision
+            """, (today,)).fetchall()
+        result = {}
+        total = 0
+        for r in rows:
+            result[r[0] or "UNKNOWN"] = r[1]
+            total += r[1]
+        result["total"] = total
+        return result
+    except Exception as e:
+        logger.warning(f"get_daily_signal_count: {e}")
+        return {"total": 0}
