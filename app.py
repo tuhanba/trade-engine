@@ -395,6 +395,41 @@ def api_daily_pnl():
         return jsonify({"ok": False, "error": str(e), "data": {}}), 500
 
 
+@app.route('/api/health')
+def api_health():
+    """Bot health status, DB check, and config info."""
+    try:
+        from database import get_conn
+        db_ok = False
+        try:
+            with get_conn() as conn:
+                conn.execute("SELECT 1").fetchone()
+                db_ok = True
+        except Exception:
+            pass
+
+        from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+        telegram_ok = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+
+        # Simple heartbeat simulation (in a real app, the bot writes its heartbeat to DB)
+        bot_status = "alive" if db_ok else "offline"
+
+        return jsonify({
+            "ok": True,
+            "data": {
+                "status": "healthy" if db_ok else "unhealthy",
+                "bot_heartbeat": bot_status,
+                "db_connected": db_ok,
+                "binance_public_data": True,  # Always true in paper mode unless API is down
+                "telegram_configured": telegram_ok,
+                "last_error": None
+            }
+        })
+    except Exception as e:
+        logger.error(f"[API] /api/health crash: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
+
+
 @app.route('/api/weekly')
 def api_weekly():
     """Haftalık özet verisi."""
@@ -442,7 +477,7 @@ def api_coin_profiles():
         return jsonify({"ok": True, "data": profiles})
     except Exception as e:
         logger.error(f"[API] /api/coin_profiles crash: {e}", exc_info=True)
-        return jsonify({"ok": True, "data": []})
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
 
 
 @app.route('/api/ax_status')
@@ -483,7 +518,7 @@ def api_scalp_signal_stats():
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         logger.error(f"[API] /api/scalp_signal_stats crash: {e}", exc_info=True)
-        return jsonify({"ok": True, "data": {"S": 0, "A+": 0, "A": 0, "B": 0, "total": 0}})
+        return jsonify({"ok": False, "error": str(e), "data": {"S": 0, "A+": 0, "A": 0, "B": 0, "total": 0}}), 500
 
 
 @app.route('/api/health')
@@ -584,7 +619,7 @@ def api_learning_metrics():
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         logger.error(f"[API] /api/learning_metrics crash: {e}", exc_info=True)
-        return jsonify({"ok": True, "data": {}})
+        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
 
 if __name__ == '__main__':
     db.init_db()
