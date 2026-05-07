@@ -2,7 +2,7 @@
 
 > Bu dosya Claude Code oturumları için yazılmıştır.
 > Son güncelleme: 2026-05-07 | Branch: `claude/audit-fix-codebase-Uf2IF`
-> Commit: `4c30148` — FAZ 3 tamamlandı
+> Commit: `1da31fc` — FAZ 6 tamamlandı (production deployment bekliyor)
 
 ---
 
@@ -151,20 +151,63 @@ python3 scripts/audit_pnl_consistency.py
 - `core/risk_engine.py` — 5 modül-seviyesi risk governor fonksiyonu
 - `config.py` — DRY_RUN, LIVE_TRADING_ENABLED, MAX_CONSECUTIVE_LOSSES ekli
 
+### FAZ 4 — Ghost Learning, Dashboard, Audit ✅ (commit: 190549b)
+- `core/ghost_learning.py` — WATCH/VETO/SKIPPED sinyal takibi, GHOST_WEIGHT=0.30
+- `coin_library.py` — coin profiles DB'den yüklendi
+- `templates/index.html` — TP1/TP2/TP3 alanları, paper_safety_status dinamik, /api/health
+- `app.py` — /api/signals alias, avg_r kolon düzeltmesi, /api/history
+
+### FAZ 5 — Backtest, Entegrasyon Testi ✅ (commit: cc2da38)
+- `scripts/backtest_engine.py` — v5.1 (risk_breach, margin_breach, coin/quality dağılım)
+- `scripts/monitor_paper_run.py` — bakiye, açık tradeler, ledger tutarlılık, heartbeat
+- 9-noktalı entegrasyon testi: PASS
+- Audit: 0 ERROR, 2 WARNING
+
+### FAZ 6 — Paper Run Hazırlığı ✅ (commit: 1da31fc)
+- `database.py` — 6 scalp_bot compat fonksiyonu eklendi:
+  `init_paper_account`, `archive_old_scalp_signals`, `save_candidate_signal`,
+  `save_signal_event` (doğru ai_logs kolonları), `update_candidate_status`,
+  `get_daily_signal_count`
+- `scripts/migrate_accounting_schema.py` — `final_score`, `setup_quality` kolonları eklendi
+- `aurvex-bot.service` / `aurvex-dashboard.service` — path düzeltmeleri, PYTHONPATH
+- scalp_bot import OK | 14/14 modül import OK | Audit: 0 ERROR, 2 WARNING
+
 ---
 
-## Bekleyen İşler (FAZ 4+)
+## Bekleyen İşler (Production Deployment)
 
-### FAZ 4 — ML Entegrasyonu (ROADMAP Faz A1)
+### Production Deploy (Gerekli — Bot Bu Ortamda Çalışamaz)
+Container'da Binance API'ye erişim yok ("Host not in allowlist").
+Bot production sunucusunda çalıştırılmalı:
+
+```bash
+# Sunucuya çek
+git pull origin claude/audit-fix-codebase-Uf2IF
+
+# Migration çalıştır
+python3 scripts/migrate_accounting_schema.py
+
+# Servisleri kur
+cp aurvex-bot.service /etc/systemd/system/
+cp aurvex-dashboard.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable aurvex-bot aurvex-dashboard
+systemctl start aurvex-bot aurvex-dashboard
+
+# İzle
+python3 scripts/monitor_paper_run.py 60
+```
+
+### FAZ 7 — ML Pipeline Entegrasyonu (ROADMAP Faz A1)
 `ml_signal_scorer.py` mevcut pipeline'a **bağlı değil**.
 - `TriggerEngine.analyze()` çıktısına `ml_score` alanı eklenecek
 - `AIDecisionEngine.evaluate()` içinde `ai_adj` düzeltmesi yapılacak
 
-### FAZ 4 — Live Tracker Postmortem (ROADMAP Faz A2)
+### FAZ 7 — Live Tracker Postmortem (ROADMAP Faz A2)
 `live_tracker.py` verileri `ai_brain.py`'ye geri beslenmemiş.
 - `execution_engine._finalize()` içine `live_tracker.record_close()` eklenecek
 
-### FAZ 4 — Çoklu Zaman Dilimi Confluence (ROADMAP Faz B1)
+### FAZ 7 — Çoklu Zaman Dilimi Confluence (ROADMAP Faz B1)
 - `core/trend_engine.py` 4 zaman dilimini tek confluence skoruna indirmeli
 - Bu skor `trigger_engine.py`'deki kalite kararına dahil edilmeli
 
