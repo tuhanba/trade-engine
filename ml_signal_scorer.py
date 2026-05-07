@@ -140,7 +140,7 @@ class MLSignalScorer:
         try:
             if created_at:
                 hour = int(created_at[11:13])
-        except:
+        except Exception:
             pass
 
         features = [
@@ -263,7 +263,7 @@ class MLSignalScorer:
             self.feature_imp = dict(zip(feature_names, importances))
             top = sorted(self.feature_imp.items(), key=lambda x: -x[1])[:6]
             logger.info("ML Feature Importance: " + " | ".join(f"{n}={v:.3f}" for n,v in top))
-        except:
+        except Exception:
             pass
 
         self._save_model()

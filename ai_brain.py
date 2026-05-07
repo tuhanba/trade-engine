@@ -198,13 +198,15 @@ def db():
     conn.row_factory = sqlite3.Row
     conn.execute("""CREATE TABLE IF NOT EXISTS coin_cooldown (
         symbol TEXT PRIMARY KEY,
-        blacklisted_until TEXT,
+        until TEXT,
         reason TEXT,
         consec_losses INTEGER DEFAULT 0)""")
     conn.execute("""CREATE TABLE IF NOT EXISTS daily_summary (
-        date TEXT PRIMARY KEY,
-        total INTEGER, wins INTEGER, losses INTEGER,
-        pnl REAL, win_rate REAL,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT UNIQUE,
+        trade_count INTEGER DEFAULT 0, win_count INTEGER DEFAULT 0,
+        loss_count INTEGER DEFAULT 0, win_rate REAL DEFAULT 0,
+        net_pnl REAL DEFAULT 0,
         best_coin TEXT, worst_coin TEXT,
         sent INTEGER DEFAULT 0)""")
     conn.execute("""CREATE TABLE IF NOT EXISTS trade_postmortem (
@@ -250,7 +252,7 @@ def get_current_params(conn):
     return dict(r) if r else {}
 
 def get_trades(conn, hours=48, limit=300, symbol=None):
-    cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
     if symbol:
         rows = conn.execute(
             "SELECT * FROM trades WHERE status!='OPEN' AND symbol=? "
@@ -276,7 +278,7 @@ def get_last_n_trades(conn, n=20):
     return [dict(r) for r in rows]
 
 def get_today_trades(conn):
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     rows  = conn.execute(
         "SELECT * FROM trades WHERE status!='OPEN' AND close_time LIKE ? "
         "ORDER BY close_time DESC", (f"{today}%",)).fetchall()
@@ -454,7 +456,7 @@ def update_coin_profiles(conn, all_trades):
             sym, len(trades), wr, avg_rr, avg_eff, avg_dur,
             best_rsi_min, best_rsi_max, best_rv_min, danger,
             sl_tight_rate, long_wr, short_wr, preferred,
-            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         ))
 
     conn.commit()
@@ -548,16 +550,16 @@ def get_market_regime(trades):
 # ═══════════════════════════════════════════════════════════
 
 def update_coin_cooldowns(conn, sym_stats):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
     for sym, s in sym_stats.items():
         if s.get("recent_consec_loss", 0) >= 3:
-            until = (now + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+            until_str = (now + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
             conn.execute("""INSERT OR REPLACE INTO coin_cooldown
-                (symbol, blacklisted_until, reason, consec_losses)
+                (symbol, until, reason, consec_losses)
                 VALUES (?, ?, ?, ?)""",
-                (sym, until, "3+ ardisik kayip", s["recent_consec_loss"]))
-    conn.execute("DELETE FROM coin_cooldown WHERE blacklisted_until < ?",
-                 (now.strftime("%Y-%m-%d %H:%M:%S"),))
+                (sym, until_str, "3+ ardisik kayip", s["recent_consec_loss"]))
+    conn.execute("DELETE FROM coin_cooldown WHERE until < ?", (now_str,))
     conn.commit()
     rows = conn.execute(
         "SELECT symbol, consec_losses FROM coin_cooldown").fetchall()
@@ -569,7 +571,7 @@ def update_coin_cooldowns(conn, sym_stats):
 # ═══════════════════════════════════════════════════════════
 
 def is_drought(conn, hours=3):
-    cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
     r = conn.execute(
         "SELECT COUNT(*) as c FROM trades WHERE open_time>=?", (cutoff,)).fetchone()
     return (r["c"] if r else 0) == 0
@@ -599,7 +601,7 @@ def is_win_streak(trades, n=3):
     return c >= n
 
 def is_overtrading(conn, limit=8):
-    cutoff = (datetime.utcnow() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     r = conn.execute(
         "SELECT COUNT(*) as c FROM trades WHERE open_time>=?", (cutoff,)).fetchone()
     count = r["c"] if r else 0
@@ -776,7 +778,7 @@ def save_best_params_if_better(conn, current_params, stats):
             (params_json, win_rate, profit_factor, total_pnl, saved_at)
             VALUES (?, ?, ?, ?, ?)""", (
             json.dumps(current_params), wr, pf, stats["total_pnl"],
-            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
 
 def try_rollback_to_best(conn, last20_stats):
@@ -939,7 +941,7 @@ def save_params(conn, p, reason, changes):
         p.get("rsi1_min",       35), p.get("rsi1_max",       72),
         p.get("vol_ratio_min",  1.2), p.get("min_volume_m", 10.0),
         p.get("min_change_pct", 2.0), p.get("risk_pct",     1.5),
-        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         (reason or "AI Brain")[:500]
     ))
     conn.commit()
@@ -950,7 +952,7 @@ def log_analysis(conn, stats, insight, changes):
     conn.execute("""INSERT INTO ai_logs
         (created_at, trades_analyzed, win_rate, avg_rr, insight, changes)
         VALUES (?, ?, ?, ?, ?, ?)""", (
-        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         stats.get("total", 0), stats.get("win_rate", 0),
         stats.get("avg_rr",   0), insight[:1000],
         json.dumps(changes, ensure_ascii=False)
@@ -963,8 +965,8 @@ def log_analysis(conn, stats, insight, changes):
 # ═══════════════════════════════════════════════════════════
 
 def check_eod_summary(conn, today_trades):
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    if datetime.utcnow().hour not in (21, 22, 23):
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if datetime.now(timezone.utc).hour not in (21, 22, 23):
         return None
     already = conn.execute(
         "SELECT sent FROM daily_summary WHERE date=?", (today,)).fetchone()
@@ -984,7 +986,8 @@ def check_eod_summary(conn, today_trades):
     worst_sym = min(sym_pnl, key=sym_pnl.get) if sym_pnl else "—"
 
     conn.execute("""INSERT OR REPLACE INTO daily_summary
-        (date, total, wins, losses, pnl, win_rate, best_coin, worst_coin, sent)
+        (date, trade_count, win_count, loss_count, net_pnl, win_rate,
+         best_coin, worst_coin, sent)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
         (today, s["total"], s["wins"], s["losses"], s["total_pnl"],
          s["win_rate"], best_sym, worst_sym))

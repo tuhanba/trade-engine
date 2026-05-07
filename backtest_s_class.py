@@ -87,7 +87,7 @@ def fetch(symbol):
         df["mom3c"] = df["close"].diff(3)
 
         return df
-    except: return None
+    except Exception: return None
 
 def classify(row, direction, adx_v, btc_bullish=True):
     """Composite S skoru hesapla ve kalite döndür."""

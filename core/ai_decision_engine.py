@@ -143,7 +143,7 @@ class AIDecisionEngine:
                     try:
                         dt = datetime.fromisoformat(t["created_at"])
                         by_hour[dt.hour].append(t["trade_result"])
-                    except:
+                    except Exception:
                         pass
                 
                 current_hour = datetime.now(timezone.utc).hour

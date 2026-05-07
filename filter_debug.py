@@ -41,7 +41,7 @@ def fetch(symbol):
         df=pd.DataFrame(r.json(),columns=["time","open","high","low","close","volume","ct","qav","nt","tbbav","tbqav","ignore"])
         for c in ["open","high","low","close","volume"]: df[c]=df[c].astype(float)
         return df
-    except: return pd.DataFrame()
+    except Exception: return pd.DataFrame()
 
 def check(sym):
     df=fetch(sym)

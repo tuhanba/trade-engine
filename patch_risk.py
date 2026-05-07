@@ -1,5 +1,5 @@
 """risk_engine.py'ye S sınıfı dinamik risk ekle"""
-content = open('/home/ubuntu/trade-engine/core/risk_engine.py').read()
+content = open('/home/user/trade-engine/core/risk_engine.py').read()
 
 # Eski risk bloğu
 old = '''        # ── Risk Ayarlaması ───────────────────────────────────────────────────
@@ -37,5 +37,5 @@ else:
     print('HATA: Blok bulunamadi')
     import sys; sys.exit(1)
 
-open('/home/ubuntu/trade-engine/core/risk_engine.py', 'w').write(content)
+open('/home/user/trade-engine/core/risk_engine.py', 'w').write(content)
 print('risk_engine.py kaydedildi.')

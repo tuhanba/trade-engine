@@ -536,6 +536,12 @@ def _migrate(conn):
         ("paper_results", "skip_decision_correct", "INTEGER DEFAULT 1"),
         ("paper_results", "final_score_snap", "REAL DEFAULT 0"),
         ("paper_results", "reject_reason_snap", "TEXT"),
+        # daily_summary — ai_brain.py EOD özet için ek kolonlar
+        ("daily_summary", "sent",       "INTEGER DEFAULT 0"),
+        ("daily_summary", "best_coin",  "TEXT"),
+        ("daily_summary", "worst_coin", "TEXT"),
+        # coin_cooldown — eski consec_losses kolonu (ai_brain uyumluluğu)
+        ("coin_cooldown", "consec_losses", "INTEGER DEFAULT 0"),
     ]
     for table, col, col_type in migrations:
         try:

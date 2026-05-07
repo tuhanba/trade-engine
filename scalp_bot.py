@@ -180,7 +180,6 @@ def main():
         except Exception as e:
             logger.warning(f"TelegramManager başlatılamadı: {e}")
 
-    consecutive_losses = 0
     _last_ai_adapt = 0  # AI Brain periyodik adaptasyon (30 dakikada bir)
     send_message(
         f"🚀 <b>AX Scalp Engine v2.0 başlatıldı</b>\n"

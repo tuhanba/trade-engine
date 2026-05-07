@@ -91,13 +91,13 @@ def fetch(symbol, interval="5m", limit=80):
         for c in ["open","high","low","close","volume"]: df[c] = df[c].astype(float)
         df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
         return df
-    except: return pd.DataFrame()
+    except Exception: return pd.DataFrame()
 
 def get_prices(symbols):
     try:
         r = requests.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=8)
         return {t["symbol"]: float(t["price"]) for t in r.json() if t["symbol"] in symbols}
-    except: return {}
+    except Exception: return {}
 
 # ── Log ───────────────────────────────────────────────────────────────────────
 def log(msg):
@@ -140,7 +140,7 @@ def analyze_coin(sym, btc_trend):
         return {"sym": sym, "direction": direction, "entry": entry,
                 "sl": sl, "tp1": tp1, "tp2": tp2, "atr": atr,
                 "adx": adx, "rsi": rsi, "rv": rv, "rr": rr}
-    except: return None
+    except Exception: return None
 
 # ── Açık Pozisyon Takibi (DB'den) ─────────────────────────────────────────────
 # paper_sim kendi açtığı trade'leri DB'de takip eder

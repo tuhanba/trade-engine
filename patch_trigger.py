@@ -1,5 +1,5 @@
 """trigger_engine.py'ye S sınıfı ekle"""
-content = open('/home/ubuntu/trade-engine/core/trigger_engine.py').read()
+content = open('/home/user/trade-engine/core/trigger_engine.py').read()
 
 old2 = '''        # A+ Kalite Yükseltmesi
         if quality == "A" and score >= 9.0:
@@ -61,5 +61,5 @@ else:
     print('HATA: Blok bulunamadi')
     import sys; sys.exit(1)
 
-open('/home/ubuntu/trade-engine/core/trigger_engine.py', 'w').write(content)
+open('/home/user/trade-engine/core/trigger_engine.py', 'w').write(content)
 print('trigger_engine.py kaydedildi.')
