@@ -10,7 +10,6 @@ import logging
 import signal
 import time
 import os
-import uuid
 import sys
 from binance.client import Client
 from config import (
@@ -41,14 +40,12 @@ logger = logging.getLogger("scalp_bot_v3")
 _shutdown_event = asyncio.Event() if sys.platform != "win32" else None
 _shutdown_flag = False
 
-
 def _signal_handler(sig, frame):
     global _shutdown_flag
     logger.info(f"[Bot] Sinyal alındı ({sig}) — graceful shutdown...")
     _shutdown_flag = True
     if _shutdown_event:
         _shutdown_event.set()
-
 
 # ── Adaptive Scan ──
 def get_adaptive_interval(base_interval: int, hour_utc: int, open_trades: int) -> int:
@@ -67,7 +64,6 @@ def get_adaptive_interval(base_interval: int, hour_utc: int, open_trades: int) -
         return int(base_interval * 2)  # Gece: 2x yavaş
     else:
         return int(base_interval * 1.5)  # Geçiş: 1.5x yavaş
-
 
 async def main_loop():
     global _shutdown_flag
@@ -314,28 +310,28 @@ async def main_loop():
             except Exception as ghost_err:
                 logger.error(f"AI Ghost Tracker hatası: {ghost_err}")
 
-        # Adaptive interval
-        interval = get_adaptive_interval(SCAN_INTERVAL, hour_utc, len(open_trades))
-        consecutive_errors = 0
-        
-        # ── SYSTEM STATE GÜNCELLEMESİ (HEARTBEAT) ──
-        try:
-            from database import update_system_state
-            update_system_state("bot_heartbeat_at", datetime.now(tz.utc).isoformat())
-            update_system_state("last_scan_time", datetime.now(tz.utc).isoformat())
-            update_system_state("last_scan_status", "OK")
-            update_system_state("last_scan_symbol_count", str(len(candidates) if candidates else 0))
-            if client and not use_fallback:
-                update_system_state("last_trade_monitor_at", datetime.now(tz.utc).isoformat())
-        except Exception as e:
-            logger.error(f"Heartbeat yazılamadı: {e}")
+            # Adaptive interval
+            interval = get_adaptive_interval(SCAN_INTERVAL, hour_utc, len(open_trades))
+            consecutive_errors = 0
             
-        logger.info(f"Scan #{scan_count}: {len(candidates) if candidates else 0} aday | "
-                       f"açık: {len(open_trades)} | "
-                       f"sonraki: {interval}s | "
-                       f"{'fallback' if use_fallback else 'binance'}")
+            # ── SYSTEM STATE GÜNCELLEMESİ (HEARTBEAT) ──
+            try:
+                from database import update_system_state
+                update_system_state("bot_heartbeat_at", datetime.now(tz.utc).isoformat())
+                update_system_state("last_scan_time", datetime.now(tz.utc).isoformat())
+                update_system_state("last_scan_status", "OK")
+                update_system_state("last_scan_symbol_count", str(len(candidates) if candidates else 0))
+                if client and not use_fallback:
+                    update_system_state("last_trade_monitor_at", datetime.now(tz.utc).isoformat())
+            except Exception as e:
+                logger.error(f"Heartbeat yazılamadı: {e}")
+                
+            logger.info(f"Scan #{scan_count}: {len(candidates) if candidates else 0} aday | "
+                           f"açık: {len(open_trades)} | "
+                           f"sonraki: {interval}s | "
+                           f"{'fallback' if use_fallback else 'binance'}")
 
-        await asyncio.sleep(interval)
+            await asyncio.sleep(interval)
 
         except Exception as e:
             consecutive_errors += 1
@@ -352,7 +348,6 @@ async def main_loop():
     watchdog.stop()
     logger.info("=== AX Engine düzgün şekilde kapatıldı ===")
     send_message("🛑 <b>AX Engine</b> kapatıldı.")
-
 
 if __name__ == "__main__":
     asyncio.run(main_loop())

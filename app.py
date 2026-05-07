@@ -395,7 +395,6 @@ def api_daily_pnl():
         return jsonify({"ok": False, "error": str(e), "data": {}}), 500
 
 
-
 @app.route('/api/weekly')
 def api_weekly():
     """Haftalık özet verisi."""
@@ -582,7 +581,6 @@ def api_health():
                 try:
                     hb_dt = datetime.fromisoformat(bot_hb_str.replace("Z", "+00:00"))
                     diff = (datetime.now(timezone.utc) - hb_dt).total_seconds()
-                    # 2 scan_interval süresi (e.g. 60s) limit sayılabilir
                     if diff < 120:
                         bot_running = True
                 except:
