@@ -165,6 +165,9 @@ COIN_UNIVERSE = [
     "ZECUSDT", "GOOGLUSDT",
 ]
 
+# ── Fee ──────────────────────────────────────────────────────────────────────
+DEFAULT_FEE_RATE = float(os.getenv("DEFAULT_FEE_RATE", "0.0004"))  # Binance Futures maker/taker
+
 # ── Log ──────────────────────────────────────────────────────────────────────
 LOG_DIR      = os.getenv("LOG_DIR", "/root/trade_engine/logs")
 LOG_MAX_DAYS = int(os.getenv("LOG_MAX_DAYS", "7"))
