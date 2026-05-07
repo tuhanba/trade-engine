@@ -1,1267 +1,851 @@
 """
-database.py — AX Merkezi Veritabanı
-=====================================
-WAL mode, tek writer, tüm tablolar burada.
-
-Tablolar:
-  trades               — Açık/kapanan trade'ler
-  signal_candidates    — Her sinyal buraya kaydedilir
-  paper_account        — Paper trading bakiyesi
-  params               — Bot parametreleri
-  ai_logs              — AX kararları ve gerekçeleri
-  trade_postmortem     — Trade sonrası MFE/MAE analizi
-  coin_profile         — Coin öğrenme profili
-  coin_market_memory   — Coin piyasa hafızası
-  coin_cooldown        — Coin bazlı bekleme
-  daily_summary        — Günlük özet
-  weekly_summary       — Haftalık özet
-  dashboard_snapshots  — Dashboard geçmişi
-  best_params          — En iyi parametre seti
-  system_state         — Sistem durumu (CB, pause vb.)
-  pattern_memory       — Genel pattern hafızası
+database.py — AX Merkezi Veritabanı v5.1 (PAPER-ONLY / LIVE-BLOCKED)
+======================================================
+DEĞİŞİKLİKLER v5.1:
+- close_trade() artık close_price parametresi alır ve yazar.
+- get_closed_trades() eklendi.
+- get_trade_events() eklendi.
+- save_scalp_signal() decision parametresini dışarıdan alır (ghost learning fix).
+- _TRADE_COLUMNS cache migration sonrasında sıfırlanabilir.
 """
-
 import sqlite3
 import json
 import logging
-import uuid
-from datetime import datetime, timezone, date, timedelta
+from datetime import datetime, timezone
 from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# BAĞLANTI
-# ─────────────────────────────────────────────────────────────────────────────
-
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# INIT — TÜM TABLOLAR
-# ─────────────────────────────────────────────────────────────────────────────
 
 def init_db():
     with get_conn() as conn:
         conn.executescript("""
-
-        -- ── trades ──────────────────────────────────────────────────────────
         CREATE TABLE IF NOT EXISTS trades (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol           TEXT NOT NULL,
-            direction        TEXT NOT NULL,
-            status           TEXT DEFAULT 'open',
-            environment      TEXT DEFAULT 'paper',
-            ax_mode          TEXT DEFAULT 'execute',
-
-            entry            REAL,
-            sl               REAL,
-            tp1              REAL,
-            tp2              REAL,
-            trail_stop       REAL,
-
-            qty              REAL,
-            qty_tp1          REAL,
-            qty_tp2          REAL,
-            qty_runner       REAL,
-
-            realized_pnl     REAL DEFAULT 0,
-            net_pnl          REAL DEFAULT 0,
-            r_multiple       REAL DEFAULT 0,
-
-            tp1_hit          INTEGER DEFAULT 0,
-            tp2_hit          INTEGER DEFAULT 0,
-
-            linked_candidate_id INTEGER,
-            linked_candidate_uuid TEXT,
-            open_time        TEXT,
-            close_time       TEXT,
-            close_price      REAL,
-            close_reason     TEXT,
-            hold_minutes     REAL DEFAULT 0
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            status TEXT DEFAULT 'open',
+            entry REAL, sl REAL, tp1 REAL, tp2 REAL, tp3 REAL,
+            original_qty REAL, remaining_qty REAL,
+            qty_tp1 REAL, qty_tp2 REAL, qty_runner REAL,
+            leverage INTEGER DEFAULT 10,
+            notional_size REAL DEFAULT 0,
+            margin_used REAL DEFAULT 0,
+            risk_pct REAL DEFAULT 1.0,
+            risk_usd REAL DEFAULT 0,
+            max_loss_after_fee REAL DEFAULT 0,
+            current_price REAL DEFAULT 0,
+            close_price REAL DEFAULT 0,
+            mark_price REAL DEFAULT 0,
+            last_update TEXT,
+            source TEXT DEFAULT 'bot',
+            realized_pnl REAL DEFAULT 0,
+            unrealized_pnl REAL DEFAULT 0,
+            net_pnl REAL DEFAULT 0,
+            total_fee REAL DEFAULT 0,
+            open_fee REAL DEFAULT 0,
+            close_fee REAL DEFAULT 0,
+            fee_rate REAL DEFAULT 0.0004,
+            tp1_hit INTEGER DEFAULT 0,
+            tp2_hit INTEGER DEFAULT 0,
+            open_time TEXT,
+            close_time TEXT,
+            duration_seconds INTEGER DEFAULT 0,
+            close_reason TEXT,
+            r_multiple REAL DEFAULT 0,
+            mfe REAL DEFAULT 0,
+            mae REAL DEFAULT 0,
+            setup_quality TEXT,
+            final_score REAL,
+            market_regime TEXT,
+            is_valid_for_stats INTEGER DEFAULT 1,
+            archived_reason TEXT,
+            entry_zone REAL DEFAULT 0,
+            invalidation_level REAL DEFAULT 0,
+            stop_reason TEXT,
+            target_reason TEXT,
+            trigger_score REAL DEFAULT 0,
+            current_R REAL DEFAULT 0,
+            distance_to_sl REAL DEFAULT 0,
+            distance_to_tp1 REAL DEFAULT 0,
+            distance_to_tp2 REAL DEFAULT 0,
+            distance_to_tp3 REAL DEFAULT 0,
+            qty REAL,
+            hold_minutes REAL,
+            open_time_str TEXT,
+            ax_mode TEXT,
+            environment TEXT,
+            session TEXT
         );
 
-        -- ── signal_candidates ────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS signal_candidates (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol           TEXT NOT NULL,
-            direction        TEXT,
-            entry            REAL,
-            sl               REAL,
-            tp1              REAL,
-            tp2              REAL,
-            runner_target    REAL,
-            rr               REAL,
-            expected_mfe_r   REAL,
-            score            REAL DEFAULT 0,
-            confidence       REAL DEFAULT 0,
-            decision         TEXT DEFAULT 'PENDING',
-            veto_reason      TEXT,
-            session          TEXT,
-            market_regime    TEXT,
-            ax_mode          TEXT DEFAULT 'execute',
-            execution_mode   TEXT DEFAULT 'paper',
-            linked_trade_id  INTEGER,
-            created_at       TEXT DEFAULT (datetime('now'))
+        CREATE TABLE IF NOT EXISTS partial_closes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id INTEGER NOT NULL,
+            symbol TEXT,
+            close_type TEXT,
+            close_qty REAL,
+            close_price REAL,
+            net_pnl REAL,
+            fee REAL,
+            timestamp TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (trade_id) REFERENCES trades(id)
         );
 
-        -- ── paper_account ────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS balance_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id INTEGER,
+            symbol TEXT,
+            event_type TEXT,
+            amount REAL,
+            balance_before REAL,
+            balance_after REAL,
+            timestamp TEXT DEFAULT (datetime('now')),
+            note TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS paper_account (
-            id              INTEGER PRIMARY KEY CHECK (id = 1),
-            balance         REAL DEFAULT 250.0,
-            initial_balance REAL DEFAULT 250.0,
-            updated_at      TEXT DEFAULT (datetime('now'))
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            balance REAL DEFAULT 250.0,
+            initial_balance REAL DEFAULT 250.0
         );
+        INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, 250.0, 250.0);
 
-        -- ── params ──────────────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS params (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            data       TEXT NOT NULL,
-            reason     TEXT,
+        CREATE TABLE IF NOT EXISTS signal_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            uuid TEXT,
+            symbol TEXT,
+            direction TEXT,
+            entry REAL, sl REAL, tp1 REAL, tp2 REAL, tp3 REAL,
+            setup_quality TEXT,
+            final_score REAL,
+            decision TEXT,
+            reason TEXT,
+            market_regime TEXT,
+            risk_status TEXT,
+            margin_loss_pct REAL DEFAULT 0,
+            spread REAL DEFAULT 0,
+            volume REAL DEFAULT 0,
+            volatility REAL DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now'))
         );
 
-        -- ── ai_logs ─────────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS paper_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            direction TEXT,
+            preview_entry REAL,
+            preview_sl REAL,
+            preview_tp1 REAL,
+            tracked_from TEXT,
+            horizon_minutes REAL DEFAULT 480,
+            hit_tp INTEGER DEFAULT 0,
+            hit_stop_first INTEGER DEFAULT 0,
+            time_to_move_minutes REAL DEFAULT 0,
+            max_favorable_excursion REAL DEFAULT 0,
+            max_adverse_excursion REAL DEFAULT 0,
+            setup_worked INTEGER DEFAULT 0,
+            would_have_won INTEGER DEFAULT 0,
+            first_touch TEXT,
+            skip_decision_correct INTEGER,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT DEFAULT (datetime('now')),
+            finalized_at TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS ai_logs (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            event        TEXT,
-            symbol       TEXT,
-            decision     TEXT,
-            score        REAL,
-            confidence   REAL,
-            reason       TEXT,
-            data         TEXT,
-            created_at   TEXT DEFAULT (datetime('now'))
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event TEXT,
+            symbol TEXT,
+            decision TEXT,
+            score REAL,
+            confidence REAL,
+            reason TEXT,
+            data TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
-        -- ── trade_postmortem ─────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS trade_postmortem (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_id        INTEGER UNIQUE,
-            symbol          TEXT,
-            direction       TEXT,
-            mfe_r           REAL,
-            mae_r           REAL,
-            efficiency      REAL,
-            missed_gain     REAL,
-            sl_tightness    REAL,
-            hold_minutes    REAL,
-            exit_quality    REAL,
-            setup_quality   REAL,
-            notes           TEXT,
-            created_at      TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── coin_profile ─────────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS coin_profile (
-            symbol              TEXT PRIMARY KEY,
-            trade_count         INTEGER DEFAULT 0,
-            win_count           INTEGER DEFAULT 0,
-            loss_count          INTEGER DEFAULT 0,
-            win_rate            REAL DEFAULT 0,
-            avg_r               REAL DEFAULT 0,
-            profit_factor       REAL DEFAULT 0,
-            avg_mfe             REAL DEFAULT 0,
-            avg_mae             REAL DEFAULT 0,
-            best_session        TEXT,
-            preferred_direction TEXT,
-            danger_score        REAL DEFAULT 0,
-            fakeout_rate        REAL DEFAULT 0,
-            volatility_profile  TEXT DEFAULT 'normal',
-            updated_at          TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── coin_market_memory ───────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS coin_market_memory (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol     TEXT NOT NULL,
-            session    TEXT,
-            regime     TEXT,
-            direction  TEXT,
-            result     TEXT,
-            r_multiple REAL,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── coin_cooldown ────────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS coin_cooldown (
-            symbol      TEXT PRIMARY KEY,
-            reason      TEXT,
-            until       TEXT NOT NULL,
-            created_at  TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── daily_summary ────────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS daily_summary (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            date         TEXT UNIQUE,
-            trade_count  INTEGER DEFAULT 0,
-            win_count    INTEGER DEFAULT 0,
-            loss_count   INTEGER DEFAULT 0,
-            win_rate     REAL DEFAULT 0,
-            gross_pnl    REAL DEFAULT 0,
-            net_pnl      REAL DEFAULT 0,
-            avg_r        REAL DEFAULT 0,
-            max_drawdown REAL DEFAULT 0,
-            balance_eod  REAL DEFAULT 0,
-            created_at   TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── weekly_summary ───────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS weekly_summary (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            week_start   TEXT UNIQUE,
-            trade_count  INTEGER DEFAULT 0,
-            win_count    INTEGER DEFAULT 0,
-            loss_count   INTEGER DEFAULT 0,
-            win_rate     REAL DEFAULT 0,
-            net_pnl      REAL DEFAULT 0,
-            avg_r        REAL DEFAULT 0,
-            best_day     TEXT,
-            worst_day    TEXT,
-            created_at   TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── dashboard_snapshots ──────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS dashboard_snapshots (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            note       TEXT,
-            balance    REAL,
-            data       TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── best_params ──────────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS best_params (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            data          TEXT,
-            params_json   TEXT,
-            win_rate      REAL DEFAULT 0,
-            avg_r         REAL DEFAULT 0,
-            pnl           REAL DEFAULT 0,
-            trade_count   INTEGER DEFAULT 0,
+        CREATE TABLE IF NOT EXISTS coin_profiles (
+            symbol TEXT PRIMARY KEY,
+            win_rate REAL DEFAULT 0,
+            avg_r REAL DEFAULT 0,
             profit_factor REAL DEFAULT 0,
-            created_at    TEXT DEFAULT (datetime('now'))
+            tp1_hit_rate REAL DEFAULT 0,
+            tp2_hit_rate REAL DEFAULT 0,
+            runner_contribution REAL DEFAULT 0,
+            avg_duration REAL DEFAULT 0,
+            fakeout_rate REAL DEFAULT 0,
+            fee_drag REAL DEFAULT 0,
+            best_hour INTEGER,
+            best_session TEXT,
+            long_bias REAL DEFAULT 0.5,
+            short_bias REAL DEFAULT 0.5,
+            regime_performance TEXT,
+            danger_score REAL DEFAULT 0,
+            sample_size INTEGER DEFAULT 0,
+            last_updated TEXT
         );
 
-        -- ── system_state ─────────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS coin_library (
+            symbol TEXT PRIMARY KEY,
+            min_qty REAL,
+            step_size REAL,
+            tick_size REAL,
+            min_notional REAL DEFAULT 5.0,
+            status TEXT DEFAULT 'TRADING',
+            last_updated TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS trade_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id INTEGER,
+            event_type TEXT,
+            data TEXT,
+            timestamp TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS daily_summary (
+            date TEXT PRIMARY KEY,
+            trade_count INTEGER DEFAULT 0,
+            win_count INTEGER DEFAULT 0,
+            loss_count INTEGER DEFAULT 0,
+            win_rate REAL DEFAULT 0,
+            gross_pnl REAL DEFAULT 0,
+            net_pnl REAL DEFAULT 0,
+            avg_r REAL DEFAULT 0,
+            max_drawdown REAL DEFAULT 0,
+            balance_eod REAL DEFAULT 0,
+            sent INTEGER DEFAULT 0,
+            best_coin TEXT,
+            worst_coin TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS weekly_summary (
+            week_start TEXT PRIMARY KEY,
+            trade_count INTEGER DEFAULT 0,
+            win_count INTEGER DEFAULT 0,
+            loss_count INTEGER DEFAULT 0,
+            win_rate REAL DEFAULT 0,
+            net_pnl REAL DEFAULT 0,
+            avg_r REAL DEFAULT 0,
+            best_day TEXT,
+            worst_day TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS system_state (
-            key        TEXT PRIMARY KEY,
-            value      TEXT,
+            key TEXT PRIMARY KEY,
+            value TEXT,
             updated_at TEXT DEFAULT (datetime('now'))
         );
 
-        -- ── scalp_signals (Yeni Tek Schema) ──────────────────────────────────
-        CREATE TABLE IF NOT EXISTS scalp_signals (
-            id                 TEXT PRIMARY KEY,
-            symbol             TEXT NOT NULL,
-            timestamp          REAL,
-            source             TEXT DEFAULT 'system',
-            timeframe          TEXT DEFAULT '1m',
-            direction          TEXT,
-            coin_score         REAL DEFAULT 0,
-            trend_score        REAL DEFAULT 0,
-            trigger_score      REAL DEFAULT 0,
-            risk_score         REAL DEFAULT 0,
-            final_score        REAL DEFAULT 0,
-            setup_quality      TEXT DEFAULT 'D',
-            entry_zone         REAL DEFAULT 0,
-            stop_loss          REAL DEFAULT 0,
-            tp1                REAL DEFAULT 0,
-            tp2                REAL DEFAULT 0,
-            tp3                REAL DEFAULT 0,
-            rr                 REAL DEFAULT 0,
-            risk_percent       REAL DEFAULT 0,
-            position_size      REAL DEFAULT 0,
-            notional_size      REAL DEFAULT 0,
-            leverage_suggestion INTEGER DEFAULT 1,
-            max_loss           REAL DEFAULT 0,
-            invalidation_level REAL DEFAULT 0,
-            confidence         REAL DEFAULT 0,
-            status             TEXT DEFAULT 'pending',
-            reason             TEXT DEFAULT '',
-            telegram_status    TEXT DEFAULT 'pending',
-            dashboard_status   TEXT DEFAULT 'pending',
-            error              TEXT DEFAULT '',
-            created_at         TEXT DEFAULT (datetime('now')),
-            archived_at        TEXT
+        CREATE TABLE IF NOT EXISTS coin_cooldown (
+            symbol TEXT PRIMARY KEY,
+            until TEXT,
+            reason TEXT,
+            consec_losses INTEGER DEFAULT 0
         );
-
-        -- ── pattern_memory ───────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS pattern_memory (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol       TEXT,
-            direction    TEXT,
-            session      TEXT,
-            result       TEXT,
-            net_pnl      REAL,
-            hold_minutes REAL,
-            partial_exit INTEGER DEFAULT 0,
-            created_at   TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── market_snapshots ────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS market_snapshots (
-            id                    TEXT PRIMARY KEY,
-            symbol                TEXT NOT NULL,
-            timestamp             REAL,
-            price                 REAL,
-            volume_24h            REAL,
-            price_change_24h      REAL,
-            atr_percent           REAL,
-            spread_percent        REAL,
-            funding_rate          REAL,
-            open_interest_change  REAL,
-            tradeability_score    REAL,
-            scanner_status        TEXT,
-            scanner_reason        TEXT,
-            created_at            TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── scanned_coins ────────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS scanned_coins (
-            id                     TEXT PRIMARY KEY,
-            symbol                 TEXT NOT NULL,
-            timestamp              REAL,
-            scanner_status         TEXT,
-            scanner_reason         TEXT,
-            volume                 REAL,
-            volatility             REAL,
-            spread                 REAL,
-            price_change           REAL,
-            funding                REAL,
-            open_interest          REAL,
-            trend_cleanliness      REAL,
-            tradeability_score     REAL,
-            volume_score           REAL,
-            volatility_score       REAL,
-            spread_score           REAL,
-            orderbook_depth_score  REAL,
-            open_interest_score    REAL,
-            funding_score          REAL,
-            trend_cleanliness_score REAL,
-            pump_dump_penalty      REAL,
-            correlation_penalty    REAL,
-            created_at             TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── candidate_signals ────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS candidate_signals (
-            id                    TEXT PRIMARY KEY,
-            signal_id             TEXT,
-            symbol                TEXT NOT NULL,
-            direction             TEXT,
-            trend_score           REAL DEFAULT 0,
-            trigger_score         REAL DEFAULT 0,
-            risk_score            REAL DEFAULT 0,
-            ai_score              REAL DEFAULT 0,
-            final_score           REAL DEFAULT 0,
-            quality               TEXT DEFAULT 'D',
-            reason                TEXT DEFAULT '',
-            reject_reason         TEXT DEFAULT '',
-            ai_veto_reason        TEXT DEFAULT '',
-            risk_reject_reason    TEXT DEFAULT '',
-            lifecycle_stage       TEXT DEFAULT 'SCANNED',
-            entry                 REAL,
-            stop                  REAL,
-            tp1                   REAL,
-            tp2                   REAL,
-            tp3                   REAL,
-            rr                    REAL,
-            atr                   REAL,
-            stop_distance_percent REAL,
-            estimated_fee         REAL,
-            estimated_slippage    REAL,
-            net_rr                REAL,
-            position_size         REAL,
-            notional              REAL,
-            leverage_suggestion   INTEGER,
-            risk_amount           REAL,
-            max_loss              REAL,
-            execution_status      TEXT DEFAULT 'candidate',
-            created_at            TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── signal_events ────────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS signal_events (
-            id            TEXT PRIMARY KEY,
-            signal_id     TEXT NOT NULL,
-            symbol        TEXT,
-            stage         TEXT NOT NULL,
-            reason        TEXT DEFAULT '',
-            reject_reason TEXT DEFAULT '',
-            payload       TEXT,
-            created_at    TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── trade_events ─────────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS trade_events (
-            id            TEXT PRIMARY KEY,
-            trade_id      INTEGER,
-            signal_id     TEXT,
-            symbol        TEXT NOT NULL,
-            event_type    TEXT NOT NULL,
-            event_payload TEXT,
-            created_at    TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── paper_results ────────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS paper_results (
-            id                      TEXT PRIMARY KEY,
-            signal_id               TEXT,
-            candidate_id            TEXT,
-            symbol                  TEXT NOT NULL,
-            direction               TEXT,
-            tracked_from            TEXT DEFAULT 'candidate',
-            hit_tp                  INTEGER DEFAULT 0,
-            hit_stop_first          INTEGER DEFAULT 0,
-            time_to_move_minutes    REAL DEFAULT 0,
-            max_favorable_excursion REAL DEFAULT 0,
-            max_adverse_excursion   REAL DEFAULT 0,
-            setup_worked            INTEGER DEFAULT 0,
-            would_have_won          INTEGER DEFAULT 0,
-            status                  TEXT DEFAULT 'pending',
-            preview_entry           REAL,
-            preview_sl              REAL,
-            preview_tp1             REAL,
-            preview_tp2             REAL,
-            preview_tp3             REAL,
-            leverage_hint           INTEGER DEFAULT 10,
-            finalized_at            TEXT,
-            first_touch             TEXT DEFAULT '',
-            horizon_minutes         REAL DEFAULT 480,
-            skip_decision_correct   INTEGER DEFAULT 1,
-            final_score_snap        REAL DEFAULT 0,
-            reject_reason_snap      TEXT,
-            created_at              TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── adaptive_stats ───────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS adaptive_stats (
-            id                    TEXT PRIMARY KEY,
-            scope                 TEXT NOT NULL,
-            key                   TEXT NOT NULL,
-            sample_size           INTEGER DEFAULT 0,
-            win_rate              REAL DEFAULT 0,
-            expectancy            REAL DEFAULT 0,
-            avg_r                 REAL DEFAULT 0,
-            threshold_data        REAL DEFAULT 0,
-            threshold_watchlist   REAL DEFAULT 0,
-            threshold_telegram    REAL DEFAULT 0,
-            threshold_trade       REAL DEFAULT 0,
-            action_taken          TEXT DEFAULT '',
-            notes                 TEXT DEFAULT '',
-            created_at            TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── telegram_messages ────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS telegram_messages (
-            id            TEXT PRIMARY KEY,
-            signal_id     TEXT,
-            symbol        TEXT NOT NULL,
-            dedupe_key    TEXT UNIQUE,
-            status        TEXT DEFAULT 'queued',
-            message_body  TEXT,
-            created_at    TEXT DEFAULT (datetime('now'))
-        );
-
-        -- ── backtest_runs ────────────────────────────────────────────────────
-        CREATE TABLE IF NOT EXISTS backtest_runs (
-            id            TEXT PRIMARY KEY,
-            run_name      TEXT,
-            config        TEXT,
-            started_at    TEXT,
-            finished_at   TEXT,
-            summary       TEXT,
-            created_at    TEXT DEFAULT (datetime('now'))
-        );
-
         """)
-
-    # ── Eski şemadan yeni kolonlara migration ─────────────────────────────────
-    _migrate(get_conn())
-    logger.info("DB init tamamlandı.")
+    _migrate()
+    logger.info("[DB] init_db tamamlandı.")
 
 
-def _migrate(conn):
-    """Eksik kolonları ekle — her çalıştırmada idempotent."""
+def _migrate():
     migrations = [
-        # trades tablosu — yeni kolonlar
-        ("trades", "qty_tp1",            "REAL"),
-        ("trades", "qty_tp2",            "REAL"),
-        ("trades", "qty_runner",         "REAL"),
-        ("trades", "trail_stop",         "REAL"),
-        ("trades", "realized_pnl",       "REAL DEFAULT 0"),
-        ("trades", "r_multiple",         "REAL DEFAULT 0"),
-        ("trades", "tp1_hit",            "INTEGER DEFAULT 0"),
-        ("trades", "tp2_hit",            "INTEGER DEFAULT 0"),
-        ("trades", "linked_candidate_id","INTEGER"),
-        ("trades", "linked_candidate_uuid", "TEXT"),
-        ("trades", "hold_minutes",       "REAL DEFAULT 0"),
-        ("trades", "ax_mode",            "TEXT DEFAULT 'execute'"),
-        ("trades", "environment",        "TEXT DEFAULT 'paper'"),
-        ("trades", "close_reason",       "TEXT"),
+        ("trades", "qty",                "REAL"),
+        ("trades", "hold_minutes",       "REAL"),
+        ("trades", "open_time_str",      "TEXT"),
+        ("trades", "ax_mode",            "TEXT"),
+        ("trades", "environment",        "TEXT"),
         ("trades", "session",            "TEXT"),
-        # coin_params tablosu — yeni kolonlar
-        ("coin_params", "volatility_profile", "TEXT DEFAULT 'normal'"),
-        ("coin_params", "sl_atr_mult",        "REAL DEFAULT 1.3"),
-        ("coin_params", "tp_atr_mult",        "REAL DEFAULT 2.0"),
-        ("coin_params", "risk_pct",           "REAL DEFAULT 1.0"),
-        ("coin_params", "max_leverage",       "INTEGER DEFAULT 15"),
-        ("coin_params", "min_adx",            "REAL DEFAULT 20"),
-        ("coin_params", "min_bb_width",       "REAL DEFAULT 1.3"),
-        ("coin_params", "min_volume_m",       "REAL DEFAULT 15.0"),
-        ("coin_params", "enabled",            "INTEGER DEFAULT 1"),
-        ("coin_params", "updated_at",         "TEXT DEFAULT (datetime('now'))"),
-        # paper_account — eski şemada 'paper_balance', yeni şemada 'balance'
-        ("paper_account", "balance",         "REAL DEFAULT 250.0"),
-        ("paper_account", "initial_balance", "REAL DEFAULT 250.0"),
-        ("paper_results", "status", "TEXT DEFAULT 'pending'"),
-        ("paper_results", "preview_entry", "REAL"),
-        ("paper_results", "preview_sl", "REAL"),
-        ("paper_results", "preview_tp1", "REAL"),
-        ("paper_results", "preview_tp2", "REAL"),
-        ("paper_results", "preview_tp3", "REAL"),
-        ("paper_results", "leverage_hint", "INTEGER DEFAULT 10"),
-        ("paper_results", "finalized_at", "TEXT"),
-        ("paper_results", "first_touch", "TEXT DEFAULT ''"),
-        ("paper_results", "horizon_minutes", "REAL DEFAULT 480"),
-        ("paper_results", "skip_decision_correct", "INTEGER DEFAULT 1"),
-        ("paper_results", "final_score_snap", "REAL DEFAULT 0"),
-        ("paper_results", "reject_reason_snap", "TEXT"),
-        # daily_summary — ai_brain.py EOD özet için ek kolonlar
-        ("daily_summary", "sent",       "INTEGER DEFAULT 0"),
-        ("daily_summary", "best_coin",  "TEXT"),
-        ("daily_summary", "worst_coin", "TEXT"),
-        # coin_cooldown — eski consec_losses kolonu (ai_brain uyumluluğu)
+        ("trades", "close_price",        "REAL DEFAULT 0"),
+        ("trades", "mark_price",         "REAL DEFAULT 0"),
+        ("trades", "last_update",        "TEXT"),
+        ("trades", "source",             "TEXT DEFAULT 'bot'"),
+        ("trades", "current_price",      "REAL DEFAULT 0"),
+        ("trades", "unrealized_pnl",     "REAL DEFAULT 0"),
+        ("trades", "open_fee",           "REAL DEFAULT 0"),
+        ("trades", "close_fee",          "REAL DEFAULT 0"),
+        ("trades", "fee_rate",           "REAL DEFAULT 0.0004"),
+        ("trades", "notional_size",      "REAL DEFAULT 0"),
+        ("trades", "margin_used",        "REAL DEFAULT 0"),
+        ("trades", "risk_pct",           "REAL DEFAULT 1.0"),
+        ("trades", "risk_usd",           "REAL DEFAULT 0"),
+        ("trades", "max_loss_after_fee", "REAL DEFAULT 0"),
+        ("trades", "duration_seconds",   "INTEGER DEFAULT 0"),
+        ("trades", "market_regime",      "TEXT"),
+        ("trades", "is_valid_for_stats", "INTEGER DEFAULT 1"),
+        ("trades", "archived_reason",    "TEXT"),
+        ("trades", "tp3",                "REAL"),
+        ("trades", "remaining_qty",      "REAL"),
+        ("trades", "original_qty",       "REAL"),
+        ("trades", "qty_tp1",            "REAL DEFAULT 0"),
+        ("trades", "qty_tp2",            "REAL DEFAULT 0"),
+        ("trades", "qty_runner",         "REAL DEFAULT 0"),
+        ("trades", "mfe",                "REAL DEFAULT 0"),
+        ("trades", "mae",                "REAL DEFAULT 0"),
+        ("trades", "entry_zone",         "REAL DEFAULT 0"),
+        ("trades", "invalidation_level", "REAL DEFAULT 0"),
+        ("trades", "stop_reason",        "TEXT"),
+        ("trades", "target_reason",      "TEXT"),
+        ("trades", "trigger_score",      "REAL DEFAULT 0"),
+        ("trades", "current_R",          "REAL DEFAULT 0"),
+        ("trades", "distance_to_sl",     "REAL DEFAULT 0"),
+        ("trades", "distance_to_tp1",    "REAL DEFAULT 0"),
+        ("trades", "distance_to_tp2",    "REAL DEFAULT 0"),
+        ("trades", "distance_to_tp3",    "REAL DEFAULT 0"),
+        ("daily_summary", "sent",        "INTEGER DEFAULT 0"),
+        ("daily_summary", "best_coin",   "TEXT"),
+        ("daily_summary", "worst_coin",  "TEXT"),
         ("coin_cooldown", "consec_losses", "INTEGER DEFAULT 0"),
+        ("coin_profiles", "short_bias",  "REAL DEFAULT 0.5"),
+        ("coin_profiles", "tp1_hit_rate","REAL DEFAULT 0"),
+        ("coin_profiles", "tp2_hit_rate","REAL DEFAULT 0"),
+        ("coin_profiles", "runner_contribution", "REAL DEFAULT 0"),
+        ("coin_profiles", "avg_duration","REAL DEFAULT 0"),
+        ("coin_profiles", "fakeout_rate","REAL DEFAULT 0"),
+        ("coin_profiles", "fee_drag",    "REAL DEFAULT 0"),
+        ("coin_profiles", "best_hour",   "INTEGER"),
+        ("coin_profiles", "best_session","TEXT"),
+        ("coin_profiles", "long_bias",   "REAL DEFAULT 0.5"),
+        ("coin_profiles", "regime_performance", "TEXT"),
+        ("coin_profiles", "danger_score","REAL DEFAULT 0"),
+        ("coin_profiles", "sample_size", "INTEGER DEFAULT 0"),
+        ("trades", "total_fee",    "REAL DEFAULT 0"),
+        ("trades", "setup_quality","TEXT"),
+        ("trades", "final_score",  "REAL"),
+        ("trades", "leverage",     "INTEGER DEFAULT 10"),
+        ("trades", "realized_pnl", "REAL DEFAULT 0"),
+        ("trades", "tp1_hit",      "INTEGER DEFAULT 0"),
+        ("trades", "tp2_hit",      "INTEGER DEFAULT 0"),
+        ("trades", "r_multiple",   "REAL DEFAULT 0"),
+        ("trades", "close_reason", "TEXT"),
+        ("trades", "close_time",   "TEXT"),
+        ("trades", "open_time",    "TEXT"),
+        ("signal_candidates", "risk_status",     "TEXT"),
+        ("signal_candidates", "margin_loss_pct", "REAL DEFAULT 0"),
+        ("signal_candidates", "spread",          "REAL DEFAULT 0"),
+        ("signal_candidates", "volume",          "REAL DEFAULT 0"),
+        ("signal_candidates", "volatility",      "REAL DEFAULT 0"),
     ]
-    for table, col, col_type in migrations:
-        try:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
-        except Exception:
-            pass  # Kolon zaten var
+    with get_conn() as conn:
+        for table, col, col_type in migrations:
+            try:
+                existing = {
+                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+                }
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
 
-    # paper_account: eski paper_balance → yeni balance kolonuna kopyala
-    try:
-        conn.execute(
-            "UPDATE paper_account SET balance = paper_balance "
-            "WHERE balance IS NULL OR balance = 250.0"
+
+_TRADE_COLUMNS = None
+
+
+def _get_trade_columns(conn):
+    global _TRADE_COLUMNS
+    if _TRADE_COLUMNS is None:
+        cursor = conn.execute("PRAGMA table_info(trades)")
+        _TRADE_COLUMNS = {row[1] for row in cursor.fetchall()}
+    return _TRADE_COLUMNS
+
+
+def save_trade(trade: dict) -> int:
+    with get_conn() as conn:
+        cols = _get_trade_columns(conn)
+        filtered = {k: v for k, v in trade.items() if k in cols and k != "id"}
+        if not filtered:
+            raise ValueError("save_trade: No valid columns to insert")
+        col_names = ", ".join(filtered.keys())
+        placeholders = ", ".join(["?"] * len(filtered))
+        cursor = conn.execute(
+            f"INSERT INTO trades ({col_names}) VALUES ({placeholders})",
+            list(filtered.values())
         )
-    except Exception:
-        pass
+        trade_id = cursor.lastrowid
+        logger.info(f"[DB] Trade #{trade_id} kaydedildi: {trade.get('symbol')}")
+        return trade_id
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PAPER ACCOUNT
-# ─────────────────────────────────────────────────────────────────────────────
-
-def init_paper_account(initial: float = 250.0):
+def update_trade(trade_id: int, updates: dict):
     with get_conn() as conn:
+        cols = _get_trade_columns(conn)
+        filtered = {k: v for k, v in updates.items() if k in cols and k != "id"}
+        if not filtered:
+            return
+        set_clause = ", ".join([f"{k} = ?" for k in filtered.keys()])
         conn.execute(
-            "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
-            (initial, initial)
-        )
-
-def get_paper_balance() -> float:
-    with get_conn() as conn:
-        row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
-        return float(row["balance"]) if row else 250.0
-
-def update_paper_balance(pnl: float):
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE paper_account SET balance=balance+?, updated_at=datetime('now') WHERE id=1",
-            (pnl,)
-        )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SIGNAL CANDIDATES
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_signal_candidate(sig: dict) -> int:
-    sql = """
-        INSERT INTO signal_candidates
-            (symbol, direction, entry, sl, tp1, tp2, runner_target,
-             rr, expected_mfe_r, score, confidence, decision, veto_reason,
-             session, market_regime, ax_mode, execution_mode)
-        VALUES
-            (:symbol, :direction, :entry, :sl, :tp1, :tp2, :runner_target,
-             :rr, :expected_mfe_r, :score, :confidence, :decision, :veto_reason,
-             :session, :market_regime, :ax_mode, :execution_mode)
-    """
-    defaults = {
-        "direction": None, "entry": None, "sl": None,
-        "tp1": None, "tp2": None, "runner_target": None,
-        "rr": 0, "expected_mfe_r": 0, "score": 0, "confidence": 0,
-        "decision": "PENDING", "veto_reason": None,
-        "session": None, "market_regime": None,
-        "ax_mode": "execute", "execution_mode": "paper",
-    }
-    with get_conn() as conn:
-        cur = conn.execute(sql, {**defaults, **sig})
-        return cur.lastrowid
-
-def update_signal_decision(candidate_id: int, decision: str, score: float,
-                            confidence: float, veto_reason: str = None,
-                            linked_trade_id: int = None):
-    with get_conn() as conn:
-        conn.execute(
-            """UPDATE signal_candidates
-               SET decision=?, score=?, confidence=?, veto_reason=?, linked_trade_id=?
-               WHERE id=?""",
-            (decision, score, confidence, veto_reason, linked_trade_id, candidate_id)
+            f"UPDATE trades SET {set_clause} WHERE id = ?",
+            list(filtered.values()) + [trade_id]
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TRADES
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_trade(t: dict) -> int:
-    sql = """
-        INSERT INTO trades
-            (symbol, direction, status, environment, ax_mode,
-             entry, sl, tp1, tp2, trail_stop,
-             qty, qty_tp1, qty_tp2, qty_runner,
-             linked_candidate_id, linked_candidate_uuid, open_time)
-        VALUES
-            (:symbol, :direction, :status, :environment, :ax_mode,
-             :entry, :sl, :tp1, :tp2, :trail_stop,
-             :qty, :qty_tp1, :qty_tp2, :qty_runner,
-             :linked_candidate_id, :linked_candidate_uuid, :open_time)
-    """
-    defaults = {
-        "status": "open", "environment": "paper", "ax_mode": "execute",
-        "trail_stop": None, "qty_tp1": None, "qty_tp2": None, "qty_runner": None,
-        "linked_candidate_id": None,
-        "linked_candidate_uuid": None,
-        "open_time": datetime.now(timezone.utc).isoformat(),
-    }
-    with get_conn() as conn:
-        cur = conn.execute(sql, {**defaults, **t})
-        return cur.lastrowid
-
-def update_trade(trade_id: int, fields: dict):
-    if not fields:
-        return
-    sets = ", ".join(f"{k}=?" for k in fields)
-    vals = list(fields.values()) + [trade_id]
-    with get_conn() as conn:
-        conn.execute(f"UPDATE trades SET {sets} WHERE id=?", vals)
-
-def close_trade(trade_id: int, close_price: float, net_pnl: float,
-                reason: str, hold_minutes: float = 0):
+def close_trade(trade_id: int, net_pnl: float, total_fee: float,
+                reason: str, r_multiple: float = 0,
+                close_price: float = 0):
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
-        conn.execute(
-            """UPDATE trades SET
-                status='closed', close_price=?, net_pnl=?, close_reason=?,
-                hold_minutes=?, close_time=?
-               WHERE id=?""",
-            (close_price, net_pnl, reason, hold_minutes, now, trade_id)
-        )
+        row = conn.execute(
+            "SELECT open_time FROM trades WHERE id = ?", (trade_id,)
+        ).fetchone()
+        duration_seconds = 0
+        if row and row["open_time"]:
+            try:
+                opened = datetime.fromisoformat(
+                    str(row["open_time"]).replace("Z", "+00:00")
+                )
+                if opened.tzinfo is None:
+                    opened = opened.replace(tzinfo=timezone.utc)
+                duration_seconds = int(
+                    (datetime.now(timezone.utc) - opened).total_seconds()
+                )
+            except Exception:
+                pass
+        conn.execute("""
+            UPDATE trades SET
+                status           = 'closed',
+                net_pnl          = ?,
+                total_fee        = ?,
+                remaining_qty    = 0,
+                close_price      = ?,
+                close_time       = ?,
+                close_reason     = ?,
+                r_multiple       = ?,
+                duration_seconds = ?,
+                last_update      = ?
+            WHERE id = ?
+        """, (
+            net_pnl, total_fee, close_price, now,
+            reason, r_multiple, duration_seconds, now, trade_id
+        ))
 
-def get_trade(trade_id: int) -> dict | None:
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
-        return dict(row) if row else None
 
 def get_open_trades() -> list:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status IN ('open','tp1_hit','runner') ORDER BY open_time"
+            "SELECT * FROM trades WHERE status NOT IN ('closed') AND status IS NOT NULL"
         ).fetchall()
         return [dict(r) for r in rows]
 
-def get_trades(limit: int = 100, status: str = None, symbol: str = None) -> list:
-    sql = "SELECT * FROM trades WHERE 1=1"
-    params = []
-    if status:
-        sql += " AND status=?"
-        params.append(status)
-    if symbol:
-        sql += " AND symbol=?"
-        params.append(symbol)
-    sql += " ORDER BY id DESC LIMIT ?"
-    params.append(limit)
+
+def get_closed_trades(limit: int = 200, valid_only: bool = True) -> list:
     with get_conn() as conn:
-        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+        if valid_only:
+            rows = conn.execute(
+                """SELECT * FROM trades
+                   WHERE status = 'closed' AND is_valid_for_stats = 1
+                   ORDER BY id DESC LIMIT ?""",
+                (limit,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE status = 'closed' ORDER BY id DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# POSTMORTEM
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_postmortem(data: dict):
-    sql = """
-        INSERT OR REPLACE INTO trade_postmortem
-            (trade_id, symbol, direction, mfe_r, mae_r, efficiency,
-             missed_gain, sl_tightness, hold_minutes, exit_quality, setup_quality, notes)
-        VALUES
-            (:trade_id, :symbol, :direction, :mfe_r, :mae_r, :efficiency,
-             :missed_gain, :sl_tightness, :hold_minutes, :exit_quality, :setup_quality, :notes)
-    """
-    defaults = {k: None for k in ["symbol","direction","mfe_r","mae_r","efficiency",
-                                   "missed_gain","sl_tightness","hold_minutes",
-                                   "exit_quality","setup_quality","notes"]}
-    with get_conn() as conn:
-        conn.execute(sql, {**defaults, **data})
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# COIN PROFILE
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_coin_profile(symbol: str) -> dict:
+def get_trade_by_id(trade_id: int) -> dict:
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM coin_profile WHERE symbol=?", (symbol,)
+            "SELECT * FROM trades WHERE id = ?", (trade_id,)
         ).fetchone()
         return dict(row) if row else {}
 
-def upsert_coin_profile(symbol: str, fields: dict):
+
+def get_stats() -> dict:
     with get_conn() as conn:
-        existing = conn.execute(
-            "SELECT symbol FROM coin_profile WHERE symbol=?", (symbol,)
-        ).fetchone()
-        if existing:
-            sets = ", ".join(f"{k}=?" for k in fields) + ", updated_at=datetime('now')"
-            conn.execute(
-                f"UPDATE coin_profile SET {sets} WHERE symbol=?",
-                list(fields.values()) + [symbol]
-            )
-        else:
-            fields["symbol"] = symbol
-            cols = ", ".join(fields.keys())
-            vals = ", ".join("?" * len(fields))
-            conn.execute(
-                f"INSERT INTO coin_profile ({cols}) VALUES ({vals})",
-                list(fields.values())
-            )
+        row = conn.execute("""
+            SELECT
+                COUNT(*) as total_trades,
+                SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) as wins,
+                SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END) as losses,
+                SUM(net_pnl) as total_pnl,
+                SUM(total_fee) as total_fees,
+                AVG(r_multiple) as avg_r,
+                SUM(CASE WHEN net_pnl > 0 THEN net_pnl ELSE 0 END) as gross_profit,
+                SUM(CASE WHEN net_pnl < 0 THEN ABS(net_pnl) ELSE 0 END) as gross_loss
+            FROM trades
+            WHERE status = 'closed' AND is_valid_for_stats = 1
+        """).fetchone()
 
-def save_coin_market_memory(symbol: str, session: str, regime: str,
-                             direction: str, result: str, r_multiple: float):
+        total = row["total_trades"] or 0
+        wins = row["wins"] or 0
+        gross_profit = row["gross_profit"] or 0
+        gross_loss = row["gross_loss"] or 0
+
+        return {
+            "total_trades": total,
+            "wins": wins,
+            "losses": row["losses"] or 0,
+            "win_rate": round(wins / total, 4) if total > 0 else 0,
+            "total_pnl": round(row["total_pnl"] or 0, 4),
+            "total_fees": round(row["total_fees"] or 0, 4),
+            "avg_r": round(row["avg_r"] or 0, 3),
+            "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else 0,
+        }
+
+
+def get_paper_balance() -> float:
     with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO coin_market_memory
-               (symbol, session, regime, direction, result, r_multiple)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (symbol, session, regime, direction, result, r_multiple)
-        )
+        row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+        return float(row[0]) if row else 250.0
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# COIN COOLDOWN
-# ─────────────────────────────────────────────────────────────────────────────
-
-def set_coin_cooldown(symbol: str, minutes: int, reason: str = ""):
-    until = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
+def update_paper_balance(amount: float) -> float:
     with get_conn() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO coin_cooldown (symbol, reason, until) VALUES (?, ?, ?)",
-            (symbol, reason, until)
-        )
+        row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+        current = float(row[0]) if row else 250.0
+        new_balance = current + amount
+        conn.execute("UPDATE paper_account SET balance = ? WHERE id=1", (new_balance,))
+        return new_balance
 
-def is_coin_in_cooldown(symbol: str) -> bool:
-    now = datetime.now(timezone.utc).isoformat()
+
+def add_ledger_entry(trade_id, symbol, event_type, amount, note=""):
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT until FROM coin_cooldown WHERE symbol=? AND until > ?",
-            (symbol, now)
-        ).fetchone()
-        return row is not None
+        row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+        balance_before = float(row[0]) if row else 250.0
+        balance_after = balance_before + amount
+        conn.execute("UPDATE paper_account SET balance = ? WHERE id=1", (balance_after,))
+        conn.execute("""
+            INSERT INTO balance_ledger
+                (trade_id, symbol, event_type, amount, balance_before, balance_after, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (trade_id, symbol, event_type, amount,
+              balance_before, balance_after, note))
+        return balance_after
 
-def clear_expired_cooldowns():
-    now = datetime.now(timezone.utc).isoformat()
+
+def save_partial_close(trade_id, symbol, close_type, close_qty,
+                       close_price, net_pnl, fee):
     with get_conn() as conn:
-        conn.execute("DELETE FROM coin_cooldown WHERE until <= ?", (now,))
+        conn.execute("""
+            INSERT INTO partial_closes
+                (trade_id, symbol, close_type, close_qty, close_price, net_pnl, fee)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (trade_id, symbol, close_type, close_qty, close_price, net_pnl, fee))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DAILY / WEEKLY SUMMARY
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_daily_summary(data: dict):
-    sql = """
-        INSERT OR REPLACE INTO daily_summary
-            (date, trade_count, win_count, loss_count, win_rate,
-             gross_pnl, net_pnl, avg_r, max_drawdown, balance_eod)
-        VALUES
-            (:date, :trade_count, :win_count, :loss_count, :win_rate,
-             :gross_pnl, :net_pnl, :avg_r, :max_drawdown, :balance_eod)
-    """
-    defaults = {k: 0 for k in ["trade_count","win_count","loss_count","win_rate",
-                                "gross_pnl","net_pnl","avg_r","max_drawdown","balance_eod"]}
-    defaults["date"] = date.today().isoformat()
-    with get_conn() as conn:
-        conn.execute(sql, {**defaults, **data})
-
-def get_daily_summaries(days: int = 30) -> list:
+def get_partial_closes(trade_id) -> list:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM daily_summary ORDER BY date DESC LIMIT ?", (days,)
+            "SELECT * FROM partial_closes WHERE trade_id = ? ORDER BY id",
+            (trade_id,)
         ).fetchall()
         return [dict(r) for r in rows]
 
-def save_weekly_summary(data: dict):
-    sql = """
-        INSERT OR REPLACE INTO weekly_summary
-            (week_start, trade_count, win_count, loss_count, win_rate,
-             net_pnl, avg_r, best_day, worst_day)
-        VALUES
-            (:week_start, :trade_count, :win_count, :loss_count, :win_rate,
-             :net_pnl, :avg_r, :best_day, :worst_day)
-    """
-    defaults = {k: 0 for k in ["trade_count","win_count","loss_count","win_rate","net_pnl","avg_r"]}
-    defaults.update({"best_day": None, "worst_day": None})
-    with get_conn() as conn:
-        conn.execute(sql, {**defaults, **data})
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STATS
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_stats(hours: int = 720) -> dict:
-    """Son N saatin istatistikleri (varsayilan: 720 saat = 30 gun)."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    with get_conn() as conn:
-        rows = conn.execute(
-            """SELECT * FROM trades
-               WHERE status IN ('closed','closed_win','closed_loss','sl','tp1_hit','runner','trail','timeout')
-               AND close_time >= ? AND close_time IS NOT NULL""",
-            (cutoff,)
-        ).fetchall()
-        open_rows = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE close_time IS NULL"
-        ).fetchone()
-    trades = [dict(r) for r in rows]
-    open_count = open_rows[0] if open_rows else 0
-    _empty = {
-        "total": 0, "wins": 0, "losses": 0, "win_rate": 0,
-        "total_pnl": 0, "avg_pnl": 0, "avg_win": 0, "avg_loss": 0,
-        "avg_r": 0, "avg_rr": 0, "profit_factor": 0, "max_drawdown": 0,
-        "best_trade": 0, "worst_trade": 0, "avg_dur": 0,
-        "open_count": open_count, "last_ai": {},
-    }
-    if not trades:
-        return _empty
-    wins   = [t for t in trades if (t.get("net_pnl") or 0) > 0]
-    losses = [t for t in trades if (t.get("net_pnl") or 0) <= 0]
-    pnls   = [t.get("net_pnl") or 0 for t in trades]
-    gross_win  = sum(t["net_pnl"] for t in wins)
-    gross_loss = abs(sum(t["net_pnl"] for t in losses))
-    cum, peak, max_dd = 0, 0, 0
-    for p in reversed(pnls):
-        cum += p
-        peak = max(peak, cum)
-        max_dd = max(max_dd, peak - cum)
-    # Ortalama sure (dakika)
-    durations = []
-    for t in trades:
-        try:
-            if t.get("open_time") and t.get("close_time"):
-                from datetime import datetime as _dt
-                ot = _dt.fromisoformat(str(t["open_time"]).replace("Z",""))
-                ct = _dt.fromisoformat(str(t["close_time"]).replace("Z",""))
-                durations.append(abs((ct - ot).total_seconds() / 60))
-        except Exception:
-            pass
-    avg_dur = round(sum(durations) / len(durations), 1) if durations else 0
-    r_vals = [t.get("r_multiple") or 0 for t in trades]
-    return {
-        "total":         len(trades),
-        "wins":          len(wins),
-        "losses":        len(losses),
-        "win_rate":      round(len(wins) / len(trades), 4),
-        "total_pnl":     round(sum(pnls), 4),
-        "avg_pnl":       round(sum(pnls) / len(trades), 4),
-        "avg_win":       round(gross_win  / len(wins),   4) if wins   else 0,
-        "avg_loss":      round(gross_loss / len(losses), 4) if losses else 0,
-        "avg_r":         round(sum(r_vals) / len(trades), 4),
-        "avg_rr":        round(sum(r_vals) / len(trades), 4),
-        "profit_factor": round(gross_win / gross_loss, 4) if gross_loss > 0 else 0,
-        "max_drawdown":  round(max_dd, 4),
-        "best_trade":    round(max(pnls), 4),
-        "worst_trade":   round(min(pnls), 4),
-        "avg_dur":       avg_dur,
-        "open_count":    open_count,
-        "last_ai":       {},
-    }
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SYSTEM STATE
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_state(key: str, default=None):
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT value FROM system_state WHERE key=?", (key,)
-        ).fetchone()
-        if row is None:
-            return default
-        try:
-            return json.loads(row["value"])
-        except Exception:
-            return row["value"]
-
-def set_state(key: str, value):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO system_state (key, value, updated_at) VALUES (?, ?, datetime('now'))",
-            (key, json.dumps(value))
-        )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AI LOGS
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_ai_log(event: str, symbol: str = None, decision: str = None,
-                score: float = None, confidence: float = None,
-                reason: str = None, data: dict = None):
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO ai_logs (event, symbol, decision, score, confidence, reason, data)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (event, symbol, decision, score, confidence, reason,
-             json.dumps(data) if data else None)
-        )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PARAMS
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_current_params() -> dict:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT data FROM params ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        if row:
-            try:
-                return json.loads(row["data"])
-            except Exception:
-                pass
-    return {}
-
-def save_params(params: dict, reason: str = ""):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO params (data, reason) VALUES (?, ?)",
-            (json.dumps(params), reason)
-        )
-
-def save_best_params(params: dict, win_rate: float, avg_r: float,
-                     pnl: float, trade_count: int):
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO best_params (data, win_rate, avg_r, pnl, trade_count)
-               VALUES (?, ?, ?, ?, ?)""",
-            (json.dumps(params), win_rate, avg_r, pnl, trade_count)
-        )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# DASHBOARD SNAPSHOT
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_snapshot(note: str = "", balance: float = 0, data: dict = None):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO dashboard_snapshots (note, balance, data) VALUES (?, ?, ?)",
-            (note, balance, json.dumps(data or {}))
-        )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PATTERN MEMORY
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_pattern(symbol: str, direction: str, session: str, result: str,
-                 net_pnl: float, hold_minutes: float = 0, partial_exit: int = 0):
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO pattern_memory
-               (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (symbol, direction, session, result, net_pnl, hold_minutes, partial_exit)
-        )
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SCALP SIGNALS — Yeni Tek Schema
-# ─────────────────────────────────────────────────────────────────────────────
-def save_scalp_signal(sig_data: dict):
-    """Yeni schema ile sinyali kaydet."""
+def archive_invalid_trade(trade_id, reason="manual_archive"):
     with get_conn() as conn:
         conn.execute("""
-            INSERT OR REPLACE INTO scalp_signals (
-                id, symbol, timestamp, source, timeframe, direction,
-                coin_score, trend_score, trigger_score, risk_score, final_score,
-                setup_quality, entry_zone, stop_loss, tp1, tp2, tp3,
-                rr, risk_percent, position_size, notional_size, leverage_suggestion,
-                max_loss, invalidation_level, confidence, status, reason,
-                telegram_status, dashboard_status, error
-            ) VALUES (
-                :id, :symbol, :timestamp, :source, :timeframe, :direction,
-                :coin_score, :trend_score, :trigger_score, :risk_score, :final_score,
-                :setup_quality, :entry_zone, :stop_loss, :tp1, :tp2, :tp3,
-                :rr, :risk_percent, :position_size, :notional_size, :leverage_suggestion,
-                :max_loss, :invalidation_level, :confidence, :status, :reason,
-                :telegram_status, :dashboard_status, :error
-            )
-        """, sig_data)
+            UPDATE trades SET is_valid_for_stats = 0, archived_reason = ?
+            WHERE id = ?
+        """, (reason, trade_id))
 
-def get_active_scalp_signals(limit: int = 100) -> list:
-    """Dashboard için aktif sinyalleri getir (null veri olmadan)."""
+
+def save_signal_candidate(data: dict):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO signal_candidates
+                (uuid, symbol, direction, entry, sl, tp1, tp2, tp3,
+                 setup_quality, final_score, decision, reason, market_regime,
+                 risk_status, margin_loss_pct, spread, volume, volatility)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data.get("uuid"), data.get("symbol"), data.get("direction"),
+            data.get("entry"), data.get("sl"), data.get("tp1"),
+            data.get("tp2"), data.get("tp3"),
+            data.get("setup_quality"), data.get("final_score"),
+            data.get("decision"), data.get("reason"), data.get("market_regime"),
+            data.get("risk_status"),
+            data.get("margin_loss_pct", 0),
+            data.get("spread", 0),
+            data.get("volume", 0),
+            data.get("volatility", 0),
+        ))
+
+
+def save_scalp_signal(data: dict, decision: str = "ALLOW"):
+    """
+    decision parametresi dışarıdan alınır.
+    Hardcoded 'ALLOW' kaldırıldı — ghost learning veri bütünlüğü için kritik.
+    """
+    save_signal_candidate({
+        "uuid":            data.get("id"),
+        "symbol":          data.get("symbol"),
+        "direction":       data.get("direction"),
+        "entry":           data.get("entry_zone", data.get("entry")),
+        "sl":              data.get("stop_loss", data.get("sl")),
+        "tp1":             data.get("tp1"),
+        "tp2":             data.get("tp2"),
+        "tp3":             data.get("tp3"),
+        "setup_quality":   data.get("setup_quality"),
+        "final_score":     data.get("final_score"),
+        "decision":        decision,
+        "reason":          data.get("reason", ""),
+        "market_regime":   data.get("market_regime"),
+        "risk_status":     data.get("risk_status"),
+        "margin_loss_pct": data.get("margin_loss_pct", 0),
+        "spread":          data.get("spread", 0),
+        "volume":          data.get("volume", 0),
+        "volatility":      data.get("volatility", 0),
+    })
+
+
+def save_paper_trade(data: dict, tracked_from: str = "candidate"):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO paper_results
+                (symbol, direction, preview_entry, preview_sl, preview_tp1,
+                 tracked_from, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+        """, (
+            data.get("symbol"),
+            data.get("direction"),
+            data.get("entry_zone", data.get("entry")),
+            data.get("stop_loss", data.get("sl")),
+            data.get("tp1"),
+            tracked_from,
+        ))
+
+
+def save_paper_result(data: dict):
+    save_paper_trade(data)
+
+
+def get_pending_paper_results(limit=35) -> list:
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT * FROM scalp_signals
-            WHERE status != 'archived'
-              AND direction IS NOT NULL
-              AND entry_zone > 0
-              AND setup_quality NOT IN ('D', '')
-            ORDER BY final_score DESC
+            SELECT * FROM paper_results
+            WHERE status = 'pending'
+            ORDER BY created_at ASC
             LIMIT ?
         """, (limit,)).fetchall()
-    return [dict(r) for r in rows]
+        return [dict(r) for r in rows]
 
-def archive_old_scalp_signals(hours: int = 24):
-    """Eski sinyalleri arşivle."""
+
+def update_paper_result(result_id: int, updates: dict):
+    with get_conn() as conn:
+        valid_cols = {
+            "hit_tp", "hit_stop_first", "time_to_move_minutes",
+            "max_favorable_excursion", "max_adverse_excursion",
+            "setup_worked", "would_have_won", "first_touch",
+            "skip_decision_correct", "status", "finalized_at",
+        }
+        filtered = {k: v for k, v in updates.items() if k in valid_cols}
+        if not filtered:
+            return
+        set_clause = ", ".join([f"{k} = ?" for k in filtered.keys()])
+        conn.execute(
+            f"UPDATE paper_results SET {set_clause} WHERE id = ?",
+            list(filtered.values()) + [result_id]
+        )
+
+
+def update_coin_profile(symbol: str, updates: dict):
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT symbol FROM coin_profiles WHERE symbol = ?", (symbol,)
+        ).fetchone()
+        now = datetime.now(timezone.utc).isoformat()
+        if existing:
+            valid_cols = {
+                "win_rate", "avg_r", "profit_factor", "tp1_hit_rate",
+                "tp2_hit_rate", "runner_contribution", "avg_duration",
+                "fakeout_rate", "fee_drag", "best_hour", "best_session",
+                "long_bias", "short_bias", "regime_performance",
+                "danger_score", "sample_size",
+            }
+            filtered = {k: v for k, v in updates.items() if k in valid_cols}
+            filtered["last_updated"] = now
+            set_clause = ", ".join([f"{k} = ?" for k in filtered.keys()])
+            conn.execute(
+                f"UPDATE coin_profiles SET {set_clause} WHERE symbol = ?",
+                list(filtered.values()) + [symbol]
+            )
+        else:
+            conn.execute(
+                "INSERT INTO coin_profiles (symbol, last_updated) VALUES (?, ?)",
+                (symbol, now)
+            )
+            if updates:
+                update_coin_profile(symbol, updates)
+
+
+def update_trade_stats(trade_id, mfe=None, mae=None):
+    with get_conn() as conn:
+        if mfe is not None:
+            conn.execute(
+                "UPDATE trades SET mfe = MAX(mfe, ?) WHERE id = ?", (mfe, trade_id)
+            )
+        if mae is not None:
+            conn.execute(
+                "UPDATE trades SET mae = MIN(mae, ?) WHERE id = ?", (mae, trade_id)
+            )
+
+
+def save_ai_log(event, symbol, decision, score, confidence, reason, data):
     with get_conn() as conn:
         conn.execute("""
-            UPDATE scalp_signals
-            SET status = 'archived', archived_at = datetime('now')
-            WHERE created_at < datetime('now', ?) AND status != 'archived'
-        """, (f"-{hours} hours",))
+            INSERT INTO ai_logs (event, symbol, decision, score, confidence, reason, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (event, symbol, decision, score, confidence, reason, data))
 
-def get_daily_signal_count() -> dict:
-    """Bugünkü sinyal istatistikleri."""
+
+def save_postmortem(trade_id, data: dict):
+    save_trade_event(trade_id, "POSTMORTEM", json.dumps(data))
+
+
+def save_trade_event(trade_id, event_type, data=""):
     with get_conn() as conn:
-        rows = conn.execute("""
-            SELECT setup_quality, COUNT(*) as cnt
-            FROM scalp_signals
-            WHERE created_at >= datetime('now', '-1 day')
-              AND status != 'archived'
-            GROUP BY setup_quality
-        """).fetchall()
-    counts = {"S": 0, "A+": 0, "A": 0, "B": 0, "C": 0, "total": 0}
-    for row in rows:
-        q = row["setup_quality"]
-        if q in counts:
-            counts[q] = row["cnt"]
-        counts["total"] += row["cnt"]
-    return counts
+        conn.execute("""
+            INSERT INTO trade_events (trade_id, event_type, data)
+            VALUES (?, ?, ?)
+        """, (trade_id, event_type, data))
 
 
-VALID_SIGNAL_STAGES = {
-    "SCANNED", "TREND_CHECKED", "TRIGGER_CHECKED", "RISK_CHECKED", "AI_CHECKED",
-    "APPROVED_FOR_WATCHLIST", "APPROVED_FOR_TELEGRAM", "APPROVED_FOR_TRADE",
-    "REJECTED", "OPENED", "MANAGED", "CLOSED", "ERROR",
-}
-
-VALID_REJECT_REASONS = {
-    "low_volume", "bad_spread", "weak_trend", "weak_trigger", "bad_rr", "high_funding",
-    "low_confidence", "bad_session", "ai_veto", "risk_guard_failed", "duplicate_signal",
-    "correlation_risk", "pump_dump_risk",
-    "max_portfolio_exposure",
-}
-
-
-def _id() -> str:
-    return str(uuid.uuid4())
-
-
-def save_market_snapshot(data: dict):
-    defaults = {
-        "id": _id(), "symbol": "", "timestamp": None, "price": 0, "volume_24h": 0,
-        "price_change_24h": 0, "atr_percent": 0, "spread_percent": 0, "funding_rate": 0,
-        "open_interest_change": 0, "tradeability_score": 0, "scanner_status": "",
-        "scanner_reason": "",
-    }
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO market_snapshots (
-               id, symbol, timestamp, price, volume_24h, price_change_24h, atr_percent,
-               spread_percent, funding_rate, open_interest_change, tradeability_score,
-               scanner_status, scanner_reason
-            ) VALUES (
-               :id, :symbol, :timestamp, :price, :volume_24h, :price_change_24h, :atr_percent,
-               :spread_percent, :funding_rate, :open_interest_change, :tradeability_score,
-               :scanner_status, :scanner_reason
-            )""",
-            {**defaults, **data},
-        )
-
-
-def save_scanned_coin(data: dict):
-    defaults = {
-        "id": _id(), "symbol": "", "timestamp": None, "scanner_status": "", "scanner_reason": "",
-        "volume": 0, "volatility": 0, "spread": 0, "price_change": 0, "funding": 0, "open_interest": 0,
-        "trend_cleanliness": 0, "tradeability_score": 0, "volume_score": 0, "volatility_score": 0,
-        "spread_score": 0, "orderbook_depth_score": 0, "open_interest_score": 0, "funding_score": 0,
-        "trend_cleanliness_score": 0, "pump_dump_penalty": 0, "correlation_penalty": 0,
-    }
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO scanned_coins (
-               id, symbol, timestamp, scanner_status, scanner_reason, volume, volatility, spread,
-               price_change, funding, open_interest, trend_cleanliness, tradeability_score,
-               volume_score, volatility_score, spread_score, orderbook_depth_score, open_interest_score,
-               funding_score, trend_cleanliness_score, pump_dump_penalty, correlation_penalty
-            ) VALUES (
-               :id, :symbol, :timestamp, :scanner_status, :scanner_reason, :volume, :volatility, :spread,
-               :price_change, :funding, :open_interest, :trend_cleanliness, :tradeability_score,
-               :volume_score, :volatility_score, :spread_score, :orderbook_depth_score, :open_interest_score,
-               :funding_score, :trend_cleanliness_score, :pump_dump_penalty, :correlation_penalty
-            )""",
-            {**defaults, **data},
-        )
-
-
-def save_candidate_signal(data: dict):
-    defaults = {
-        "id": _id(), "signal_id": None, "symbol": "", "direction": None, "trend_score": 0,
-        "trigger_score": 0, "risk_score": 0, "ai_score": 0, "final_score": 0, "quality": "D",
-        "reason": "", "reject_reason": "", "ai_veto_reason": "", "risk_reject_reason": "",
-        "lifecycle_stage": "SCANNED", "entry": None, "stop": None, "tp1": None, "tp2": None,
-        "tp3": None, "rr": 0, "atr": 0, "stop_distance_percent": 0, "estimated_fee": 0,
-        "estimated_slippage": 0, "net_rr": 0, "position_size": 0, "notional": 0,
-        "leverage_suggestion": 1, "risk_amount": 0, "max_loss": 0, "execution_status": "candidate",
-    }
-    payload = {**defaults, **data}
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO candidate_signals (
-               id, signal_id, symbol, direction, trend_score, trigger_score, risk_score,
-               ai_score, final_score, quality, reason, reject_reason, ai_veto_reason,
-               risk_reject_reason, lifecycle_stage, entry, stop, tp1, tp2, tp3, rr, atr,
-               stop_distance_percent, estimated_fee, estimated_slippage, net_rr, position_size,
-               notional, leverage_suggestion, risk_amount, max_loss, execution_status
-            ) VALUES (
-               :id, :signal_id, :symbol, :direction, :trend_score, :trigger_score, :risk_score,
-               :ai_score, :final_score, :quality, :reason, :reject_reason, :ai_veto_reason,
-               :risk_reject_reason, :lifecycle_stage, :entry, :stop, :tp1, :tp2, :tp3, :rr, :atr,
-               :stop_distance_percent, :estimated_fee, :estimated_slippage, :net_rr, :position_size,
-               :notional, :leverage_suggestion, :risk_amount, :max_loss, :execution_status
-            )""",
-            payload,
-        )
-    return payload["id"]
-
-
-def update_candidate_status(candidate_id: str, **updates):
-    if not updates:
-        return
-    sets = ", ".join(f"{k}=?" for k in updates)
-    values = list(updates.values()) + [candidate_id]
-    with get_conn() as conn:
-        conn.execute(f"UPDATE candidate_signals SET {sets} WHERE id=?", values)
-
-
-def save_signal_event(signal_id: str, stage: str, symbol: str = "", reason: str = "", reject_reason: str = "", payload: dict | None = None):
-    if stage not in VALID_SIGNAL_STAGES:
-        stage = "ERROR"
-    if reject_reason and reject_reason not in VALID_REJECT_REASONS:
-        reject_reason = "risk_guard_failed"
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO signal_events (id, signal_id, symbol, stage, reason, reject_reason, payload)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (_id(), signal_id, symbol, stage, reason, reject_reason, json.dumps(payload or {})),
-        )
-
-
-def save_trade_event(trade_id: int, signal_id: str, symbol: str, event_type: str, payload: dict | None = None):
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO trade_events (id, trade_id, signal_id, symbol, event_type, event_payload)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (_id(), trade_id, signal_id, symbol, event_type, json.dumps(payload or {})),
-        )
-
-
-def save_paper_result(data: dict) -> str:
-    defaults = {
-        "id": _id(), "signal_id": None, "candidate_id": None, "symbol": "", "direction": None,
-        "tracked_from": "candidate", "hit_tp": 0, "hit_stop_first": 0, "time_to_move_minutes": 0,
-        "max_favorable_excursion": 0, "max_adverse_excursion": 0, "setup_worked": 0, "would_have_won": 0,
-        "status": "pending", "preview_entry": None, "preview_sl": None, "preview_tp1": None,
-        "preview_tp2": None, "preview_tp3": None, "leverage_hint": 10, "finalized_at": None,
-        "first_touch": "", "horizon_minutes": 480.0, "skip_decision_correct": 1,
-        "final_score_snap": 0.0, "reject_reason_snap": "",
-    }
-    payload = {**defaults, **data}
-    if payload["horizon_minutes"] is None:
-        payload["horizon_minutes"] = 480.0
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO paper_results (
-               id, signal_id, candidate_id, symbol, direction, tracked_from,
-               hit_tp, hit_stop_first, time_to_move_minutes,
-               max_favorable_excursion, max_adverse_excursion, setup_worked, would_have_won,
-               status, preview_entry, preview_sl, preview_tp1, preview_tp2, preview_tp3,
-               leverage_hint, finalized_at, first_touch, horizon_minutes,
-               skip_decision_correct, final_score_snap, reject_reason_snap
-            ) VALUES (
-               :id, :signal_id, :candidate_id, :symbol, :direction, :tracked_from,
-               :hit_tp, :hit_stop_first, :time_to_move_minutes,
-               :max_favorable_excursion, :max_adverse_excursion, :setup_worked, :would_have_won,
-               :status, :preview_entry, :preview_sl, :preview_tp1, :preview_tp2, :preview_tp3,
-               :leverage_hint, :finalized_at, :first_touch, :horizon_minutes,
-               :skip_decision_correct, :final_score_snap, :reject_reason_snap
-            )""",
-            payload,
-        )
-    return payload["id"]
-
-
-def get_pending_paper_results(limit: int = 40) -> list:
+def get_trade_events(trade_id: int) -> list:
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT * FROM paper_results
-               WHERE (status IS NULL OR status='pending')
-                 AND preview_entry IS NOT NULL AND preview_sl IS NOT NULL AND preview_tp1 IS NOT NULL
-               ORDER BY created_at ASC LIMIT ?""",
-            (limit,),
+            "SELECT * FROM trade_events WHERE trade_id = ? ORDER BY id",
+            (trade_id,)
         ).fetchall()
         return [dict(r) for r in rows]
 
 
-def update_paper_result(row_id: str, updates: dict):
-    if not updates:
-        return
-    sets = ", ".join(f"{k}=?" for k in updates)
-    vals = list(updates.values()) + [row_id]
-    with get_conn() as conn:
-        conn.execute(f"UPDATE paper_results SET {sets} WHERE id=?", vals)
-
-
-def save_telegram_message(signal_id: str, symbol: str, dedupe_key: str, message_body: str, status: str = "queued") -> bool:
+def get_state(key: str) -> str:
     try:
         with get_conn() as conn:
-            conn.execute(
-                """INSERT INTO telegram_messages (id, signal_id, symbol, dedupe_key, status, message_body)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (_id(), signal_id, symbol, dedupe_key, status, message_body),
-            )
-        return True
-    except sqlite3.IntegrityError:
-        return False
+            row = conn.execute(
+                "SELECT value FROM system_state WHERE key = ?", (key,)
+            ).fetchone()
+            return row[0] if row else None
+    except Exception:
+        return None
 
 
-def mark_telegram_message_sent(dedupe_key: str) -> None:
+def set_state(key: str, value: str):
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                INSERT INTO system_state (key, value, updated_at)
+                VALUES (?, ?, datetime('now'))
+                ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')
+            """, (key, value, value))
+    except Exception as e:
+        logger.warning(f"[DB] set_state hatası: {e}")
+
+
+def update_system_state(key: str, value: str):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO system_state (key, value, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
+        """, (key, value, value))
+
+
+def get_system_state(key: str, default="-") -> str:
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM system_state WHERE key=?", (key,)
+            ).fetchone()
+            if row:
+                return str(row[0])
+    except Exception:
+        pass
+    return default
+
+
+def save_daily_summary(data: dict):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO daily_summary
+                (date, trade_count, win_count, loss_count, win_rate,
+                 gross_pnl, net_pnl, avg_r, max_drawdown, balance_eod)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(date) DO UPDATE SET
+                trade_count=?, win_count=?, loss_count=?, win_rate=?,
+                gross_pnl=?, net_pnl=?, avg_r=?, max_drawdown=?, balance_eod=?
+        """, (
+            data["date"], data["trade_count"], data["win_count"],
+            data["loss_count"], data["win_rate"], data["gross_pnl"],
+            data["net_pnl"], data["avg_r"], data["max_drawdown"], data["balance_eod"],
+            data["trade_count"], data["win_count"], data["loss_count"],
+            data["win_rate"], data["gross_pnl"], data["net_pnl"],
+            data["avg_r"], data["max_drawdown"], data["balance_eod"],
+        ))
+
+
+def save_weekly_summary(data: dict):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO weekly_summary
+                (week_start, trade_count, win_count, loss_count, win_rate,
+                 net_pnl, avg_r, best_day, worst_day)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(week_start) DO UPDATE SET
+                trade_count=?, win_count=?, loss_count=?, win_rate=?,
+                net_pnl=?, avg_r=?, best_day=?, worst_day=?
+        """, (
+            data["week_start"], data["trade_count"], data["win_count"],
+            data["loss_count"], data["win_rate"], data["net_pnl"],
+            data["avg_r"], data.get("best_day"), data.get("worst_day"),
+            data["trade_count"], data["win_count"], data["loss_count"],
+            data["win_rate"], data["net_pnl"], data["avg_r"],
+            data.get("best_day"), data.get("worst_day"),
+        ))
+
+
+def save_coin_library(symbol, filters: dict):
+    with get_conn() as conn:
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute("""
+            INSERT INTO coin_library
+                (symbol, min_qty, step_size, tick_size, min_notional, status, last_updated)
+            VALUES (?, ?, ?, ?, ?, 'TRADING', ?)
+            ON CONFLICT(symbol) DO UPDATE SET
+                min_qty=?, step_size=?, tick_size=?, min_notional=?,
+                status='TRADING', last_updated=?
+        """, (
+            symbol,
+            filters.get("min_qty"), filters.get("step_size"),
+            filters.get("tick_size"), filters.get("min_notional", 5.0), now,
+            filters.get("min_qty"), filters.get("step_size"),
+            filters.get("tick_size"), filters.get("min_notional", 5.0), now,
+        ))
+
+
+def disable_coin(symbol, reason="delisted"):
     with get_conn() as conn:
         conn.execute(
-            "UPDATE telegram_messages SET status='sent' WHERE dedupe_key=? AND status!='sent'",
-            (dedupe_key,),
+            "UPDATE coin_library SET status = ? WHERE symbol = ?",
+            (reason, symbol)
         )
+
+
+def reset_paper_data(force_delete=False):
+    if force_delete:
+        with get_conn() as conn:
+            conn.execute("DELETE FROM trades")
+            conn.execute("DELETE FROM partial_closes")
+            conn.execute("DELETE FROM balance_ledger")
+            conn.execute("UPDATE paper_account SET balance = initial_balance WHERE id=1")
+        logger.warning("[DB] FORCE DELETE: Tüm trade verileri silindi!")
+    else:
+        with get_conn() as conn:
+            conn.execute("""
+                UPDATE trades SET is_valid_for_stats = 0,
+                    archived_reason = 'paper_reset'
+                WHERE is_valid_for_stats = 1
+            """)
+            conn.execute("UPDATE paper_account SET balance = initial_balance WHERE id=1")
+        logger.info("[DB] Paper reset: trades is_valid_for_stats=0 yapıldı.")
