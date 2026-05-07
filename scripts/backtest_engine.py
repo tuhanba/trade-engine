@@ -335,12 +335,142 @@ class BacktestEngine:
             print("  Negatif/sıfır expectancy — canlıya geçiş ÖNERİLMEZ.")
         print("=" * 55)
 
+    def run_walk_forward(self, n_splits: int = 3) -> dict:
+        """
+        Walk-forward analiz: veriyi n_splits eşit parçaya böler.
+        Her parça için bağımsız backtest çalıştırır.
+        Sonuçların dönemler arasında tutarlı olup olmadığını gösterir.
+        """
+        import sqlite3
+
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""
+            SELECT * FROM trades
+            WHERE status='closed' AND is_valid_for_stats=1
+            ORDER BY id
+        """).fetchall()
+        conn.close()
+
+        if not rows:
+            logger.warning("[WF] DB'de closed trade bulunamadı.")
+            return {}
+
+        total = len(rows)
+        size  = total // n_splits
+        if size < 5:
+            logger.warning(f"[WF] Bölüm başına {size} trade — yeterli veri yok (min 5).")
+            return {}
+
+        print(f"\n{'='*55}")
+        print(f"WALK-FORWARD ANALİZ — {n_splits} dönem, {total} trade")
+        print(f"{'='*55}")
+
+        period_reports = []
+
+        for i in range(n_splits):
+            start_idx = i * size
+            end_idx   = (i + 1) * size if i < n_splits - 1 else total
+            period    = rows[start_idx:end_idx]
+
+            engine = BacktestEngine(
+                initial_balance=self.initial_balance,
+                fee_rate=self.fee_rate
+            )
+
+            for r in period:
+                entry     = float(r["entry"] or 0)
+                sl        = float(r["sl"] or 0)
+                tp1       = float(r["tp1"] or 0)
+                tp2       = float(r["tp2"] or 0) or tp1 * 1.02
+                direction = r["direction"] or "LONG"
+                leverage  = int(r["leverage"] or 10)
+                symbol    = r["symbol"] or ""
+                sq        = r["setup_quality"] or ""
+                regime    = r["market_regime"] or ""
+
+                if not entry or not sl:
+                    continue
+
+                if r["tp2_hit"]:
+                    outcome = "tp2"
+                elif r["tp1_hit"]:
+                    outcome = "tp1"
+                elif float(r["net_pnl"] or 0) > 0:
+                    outcome = "tp1"
+                else:
+                    outcome = "sl"
+
+                engine.simulate_trade(
+                    entry, sl, tp1, tp2, direction, leverage,
+                    outcome=outcome, symbol=symbol,
+                    setup_quality=sq, market_regime=regime
+                )
+
+            n   = len(engine.results)
+            wins = sum(1 for r in engine.results if r["net_pnl"] > 0)
+            pnl  = sum(r["net_pnl"] for r in engine.results)
+            avg_r = sum(r["r_multiple"] for r in engine.results) / n if n > 0 else 0
+            wr    = wins / n if n > 0 else 0
+            gp    = sum(r["net_pnl"] for r in engine.results if r["net_pnl"] > 0)
+            gl    = abs(sum(r["net_pnl"] for r in engine.results if r["net_pnl"] < 0))
+            pf    = round(gp / gl, 2) if gl > 0 else 0
+            exp   = (wr * (gp / wins if wins > 0 else 0)
+                     - (1 - wr) * (gl / (n - wins) if n - wins > 0 else 0))
+
+            report = {
+                "period":          i + 1,
+                "trades":          n,
+                "win_rate":        round(wr, 4),
+                "profit_factor":   pf,
+                "expectancy":      round(exp, 4),
+                "avg_r":           round(avg_r, 3),
+                "total_pnl":       round(pnl, 4),
+                "max_drawdown":    round(engine.max_drawdown, 4),
+            }
+            period_reports.append(report)
+
+            sign = "+" if pnl >= 0 else ""
+            print(
+                f"  Dönem {i+1}: {n} trade | WR={wr:.1%} | PF={pf} | "
+                f"Exp={exp:.4f} | PnL={sign}{pnl:.4f}"
+            )
+
+        positive_periods = sum(1 for r in period_reports if r["expectancy"] > 0)
+        all_positive     = positive_periods == n_splits
+        consistent       = positive_periods >= n_splits * 0.67
+
+        print(f"\n  Pozitif dönem: {positive_periods}/{n_splits}")
+        if all_positive:
+            print("  Tutarlı pozitif expectancy — sistem tüm dönemlerde çalışıyor.")
+        elif consistent:
+            print("  Genel olarak tutarlı — bazı zayıf dönemler var, dikkatli ol.")
+        else:
+            print("  Tutarsız sonuçlar — sistemi canlıya ALMA. Daha fazla veri gerekli.")
+        print(f"{'='*55}\n")
+
+        return {
+            "periods":          period_reports,
+            "n_splits":         n_splits,
+            "positive_periods": positive_periods,
+            "consistent":       consistent,
+            "all_positive":     all_positive,
+        }
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AX Backtest Engine v5.1")
-    parser.add_argument("--limit",   type=int,   default=500)
-    parser.add_argument("--balance", type=float, default=250.0)
+    parser.add_argument("--limit",        type=int,   default=500)
+    parser.add_argument("--balance",      type=float, default=250.0)
+    parser.add_argument("--walk-forward", action="store_true",
+                        help="Walk-forward analiz çalıştır")
+    parser.add_argument("--splits",       type=int,   default=3,
+                        help="Walk-forward dönem sayısı (varsayılan: 3)")
     args = parser.parse_args()
 
     engine = BacktestEngine(initial_balance=args.balance)
-    engine.run_from_db(limit=args.limit)
+
+    if args.walk_forward:
+        engine.run_walk_forward(n_splits=args.splits)
+    else:
+        engine.run_from_db(limit=args.limit)

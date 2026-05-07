@@ -107,6 +107,27 @@ def migrate():
     }
     total_added += _add_columns(cursor, "signal_candidates", signal_columns)
 
+    paper_results_columns = {
+        "signal_id":    "TEXT",
+        "candidate_id": "TEXT",
+        "preview_tp2":  "REAL DEFAULT 0",
+        "preview_tp3":  "REAL DEFAULT 0",
+    }
+    total_added += _add_columns(cursor, "paper_results", paper_results_columns)
+
+    # signal_events tablosu yoksa oluştur
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS signal_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id TEXT,
+            stage TEXT,
+            symbol TEXT,
+            reject_reason TEXT,
+            data TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
     conn.commit()
     conn.close()
 

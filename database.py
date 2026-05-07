@@ -139,11 +139,15 @@ def init_db():
 
         CREATE TABLE IF NOT EXISTS paper_results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id TEXT,
+            candidate_id TEXT,
             symbol TEXT,
             direction TEXT,
             preview_entry REAL,
             preview_sl REAL,
             preview_tp1 REAL,
+            preview_tp2 REAL,
+            preview_tp3 REAL,
             tracked_from TEXT,
             horizon_minutes REAL DEFAULT 480,
             hit_tp INTEGER DEFAULT 0,
@@ -158,6 +162,16 @@ def init_db():
             status TEXT DEFAULT 'pending',
             created_at TEXT DEFAULT (datetime('now')),
             finalized_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS signal_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id TEXT,
+            stage TEXT,
+            symbol TEXT,
+            reject_reason TEXT,
+            data TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
         );
 
         CREATE TABLE IF NOT EXISTS ai_logs (
@@ -618,21 +632,27 @@ def save_paper_trade(data: dict, tracked_from: str = "candidate"):
     with get_conn() as conn:
         conn.execute("""
             INSERT INTO paper_results
-                (symbol, direction, preview_entry, preview_sl, preview_tp1,
-                 tracked_from, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                (signal_id, candidate_id,
+                 symbol, direction, preview_entry, preview_sl, preview_tp1,
+                 preview_tp2, preview_tp3, tracked_from, would_have_won, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         """, (
+            data.get("signal_id"),
+            data.get("candidate_id"),
             data.get("symbol"),
             data.get("direction"),
-            data.get("entry_zone", data.get("entry")),
-            data.get("stop_loss", data.get("sl")),
-            data.get("tp1"),
-            tracked_from,
+            data.get("preview_entry", data.get("entry_zone", data.get("entry"))),
+            data.get("preview_sl", data.get("stop_loss", data.get("sl"))),
+            data.get("preview_tp1", data.get("tp1")),
+            data.get("tp2", data.get("preview_tp2")),
+            data.get("tp3", data.get("preview_tp3")),
+            data.get("tracked_from", tracked_from),
+            data.get("would_have_won", 0),
         ))
 
 
 def save_paper_result(data: dict):
-    save_paper_trade(data)
+    save_paper_trade(data, tracked_from=data.get("tracked_from", "candidate"))
 
 
 def get_pending_paper_results(limit=35) -> list:
@@ -1042,16 +1062,18 @@ def save_candidate_signal(data: dict) -> int:
         with get_conn() as conn:
             cursor = conn.execute("""
                 INSERT INTO signal_candidates
-                  (symbol, direction, entry, sl, tp1, tp2, rr,
-                   score, decision, session, market_regime, created_at)
+                  (symbol, direction, entry, sl, tp1, tp2, tp3,
+                   setup_quality, final_score,
+                   decision, market_regime, created_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 data.get("symbol"), data.get("direction"),
                 data.get("entry"), data.get("sl"),
-                data.get("tp1"), data.get("tp2"),
-                data.get("rr", 0), data.get("score", 0),
+                data.get("tp1"), data.get("tp2"), data.get("tp3"),
+                data.get("quality", data.get("setup_quality")),
+                data.get("final_score", data.get("score", 0)),
                 data.get("decision", "PENDING"),
-                data.get("session"), data.get("market_regime"),
+                data.get("market_regime"),
                 now,
             ))
             return cursor.lastrowid
@@ -1061,15 +1083,15 @@ def save_candidate_signal(data: dict) -> int:
 
 
 def save_signal_event(signal_id, event_type: str, **kwargs):
-    """Sinyal yaşam döngüsü olayını kaydeder (ai_logs tablosuna)."""
+    """Sinyal yaşam döngüsü olayını signal_events tablosuna kaydeder."""
     try:
         now = datetime.now(timezone.utc).isoformat()
         symbol = kwargs.get("symbol", "")
-        reason = kwargs.get("reason", kwargs.get("reject_reason", ""))
+        reject_reason = kwargs.get("reject_reason", kwargs.get("reason", ""))
         with get_conn() as conn:
             conn.execute(
-                "INSERT INTO ai_logs (event, symbol, reason, created_at) VALUES (?,?,?,?)",
-                (event_type, symbol, reason, now)
+                "INSERT INTO signal_events (signal_id, stage, symbol, reject_reason, created_at) VALUES (?,?,?,?,?)",
+                (str(signal_id), event_type, symbol, reject_reason, now)
             )
     except Exception as e:
         logger.debug(f"save_signal_event: {e}")

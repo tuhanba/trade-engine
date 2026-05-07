@@ -7,6 +7,6 @@ def test_candidate_signal_saved(test_db):
         "quality": "A+",
     })
     with test_db.get_conn() as conn:
-        row = conn.execute("SELECT id, symbol, final_score FROM candidate_signals WHERE id=?", (cid,)).fetchone()
+        row = conn.execute("SELECT id, symbol, final_score FROM signal_candidates WHERE id=?", (cid,)).fetchone()
     assert row["symbol"] == "BTCUSDT"
     assert row["final_score"] == 71

@@ -24,8 +24,8 @@ def test_paper_result_saved(test_db):
 
 
 def test_paper_resolve_bar_intrabar_priority():
-    from core import paper_tracker
+    from core.paper_tracker import _resolve_bar
 
-    assert paper_tracker._resolve_bar("LONG", high=105, low=97, sl=98, tp1=104) == "stop"
-    assert paper_tracker._resolve_bar("LONG", high=103, low=99.5, sl=98, tp1=101) == "tp1"
-    assert paper_tracker._resolve_bar("SHORT", high=206, low=192, sl=205, tp1=198) == "stop"
+    assert _resolve_bar("LONG", high=105, low=97, sl=98, tp1=104) == "stop"
+    assert _resolve_bar("LONG", high=103, low=99.5, sl=98, tp1=101) == "tp1"
+    assert _resolve_bar("SHORT", high=206, low=192, sl=205, tp1=198) == "stop"
