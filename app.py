@@ -395,40 +395,6 @@ def api_daily_pnl():
         return jsonify({"ok": False, "error": str(e), "data": {}}), 500
 
 
-@app.route('/api/health')
-def api_health():
-    """Bot health status, DB check, and config info."""
-    try:
-        from database import get_conn
-        db_ok = False
-        try:
-            with get_conn() as conn:
-                conn.execute("SELECT 1").fetchone()
-                db_ok = True
-        except Exception:
-            pass
-
-        from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-        telegram_ok = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
-
-        # Simple heartbeat simulation (in a real app, the bot writes its heartbeat to DB)
-        bot_status = "alive" if db_ok else "offline"
-
-        return jsonify({
-            "ok": True,
-            "data": {
-                "status": "healthy" if db_ok else "unhealthy",
-                "bot_heartbeat": bot_status,
-                "db_connected": db_ok,
-                "binance_public_data": True,  # Always true in paper mode unless API is down
-                "telegram_configured": telegram_ok,
-                "last_error": None
-            }
-        })
-    except Exception as e:
-        logger.error(f"[API] /api/health crash: {e}", exc_info=True)
-        return jsonify({"ok": False, "error": str(e), "data": {}}), 500
-
 
 @app.route('/api/weekly')
 def api_weekly():
@@ -519,6 +485,46 @@ def api_scalp_signal_stats():
     except Exception as e:
         logger.error(f"[API] /api/scalp_signal_stats crash: {e}", exc_info=True)
         return jsonify({"ok": False, "error": str(e), "data": {"S": 0, "A+": 0, "A": 0, "B": 0, "total": 0}}), 500
+
+
+@app.route('/api/signals')
+def api_signals():
+    """Son signal candidates listesi."""
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT id, symbol, direction, final_score, decision, reason,
+                       entry, sl, tp1, tp2, tp3,
+                       setup_quality, market_regime, created_at
+                FROM signal_candidates
+                ORDER BY created_at DESC
+                LIMIT 50
+            """).fetchall()
+
+        signals = []
+        for r in rows:
+            signals.append({
+                "id": str(r[0] or ""),
+                "symbol": str(r[1] or ""),
+                "side": str(r[2] or ""),
+                "score": round(float(r[3] or 0.0), 2),
+                "decision": str(r[4] or ""),
+                "reason": str(r[5] or ""),
+                "entry_price": float(r[6] or 0.0),
+                "stop_loss": float(r[7] or 0.0),
+                "tp1": float(r[8] or 0.0),
+                "tp2": float(r[9] or 0.0),
+                "tp3": float(r[10] or 0.0),
+                "quality": str(r[11] or ""),
+                "regime": str(r[12] or ""),
+                "created_at": str(r[13] or ""),
+            })
+
+        return jsonify({"ok": True, "data": signals})
+    except Exception as e:
+        logger.error(f"[API] /api/signals crash: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
 
 
 @app.route('/api/health')

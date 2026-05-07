@@ -624,6 +624,8 @@ def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> flo
         return float(tr.rolling(period).mean().iloc[-1])
     except Exception:
         try:
-            return float(df["close"].iloc[-1]) * 0.005
+            # Fallback to current ticker price if pandas/klines fail
+            ticker = client.futures_ticker(symbol=symbol)
+            return float(ticker["lastPrice"]) * 0.005
         except Exception:
             return 0.01

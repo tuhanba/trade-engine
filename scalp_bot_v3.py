@@ -335,7 +335,7 @@ async def main_loop():
                        f"sonraki: {interval}s | "
                        f"{'fallback' if use_fallback else 'binance'}")
 
-            await asyncio.sleep(interval)
+        await asyncio.sleep(interval)
 
         except Exception as e:
             consecutive_errors += 1
