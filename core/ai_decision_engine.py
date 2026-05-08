@@ -129,6 +129,37 @@ class AIDecisionEngine:
             logger.error(f"Coin profile okuma hatası: {e}")
         return {"win_rate": 0.5, "total_trades": 0, "danger_score": 0.0}
 
+    def _get_ghost_profile(self, symbol: str) -> dict:
+        """
+        Ghost (WATCH/VETO/SKIPPED) sinyallerinin geçmiş sonuçlarını okur.
+        paper_results tablosundan finalize edilmiş kayıtları çeker.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute("""
+                    SELECT
+                        COUNT(*) as total,
+                        SUM(CASE WHEN would_have_won=1 THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN skip_decision_correct=1 THEN 1 ELSE 0 END) as correct_skips,
+                        AVG(max_favorable_excursion) as avg_mfe,
+                        AVG(max_adverse_excursion) as avg_mae
+                    FROM paper_results
+                    WHERE symbol=? AND status IN ('completed','finalized')
+                """, (symbol,)).fetchone()
+                if row and row[0]:
+                    total = row[0]
+                    wins  = row[1] or 0
+                    return {
+                        "total":          total,
+                        "ghost_win_rate": round(wins / total, 4),
+                        "correct_skips":  row[2] or 0,
+                        "avg_mfe":        round(float(row[3] or 0), 4),
+                        "avg_mae":        round(float(row[4] or 0), 4),
+                    }
+        except Exception as e:
+            logger.debug(f"Ghost profile okuma atlandı: {e}")
+        return {"total": 0, "ghost_win_rate": 0.5, "correct_skips": 0, "avg_mfe": 0, "avg_mae": 0}
+
     def _get_hourly_heatmap_score(self) -> float:
         """Mevcut saatin geçmiş performansına göre risk skoru döner."""
         try:
@@ -224,7 +255,8 @@ class AIDecisionEngine:
             return {"decision": "VETO", "reason": "Coin spam protection"}
 
         profile = self._get_coin_profile(signal_data.symbol)
-        
+        ghost  = self._get_ghost_profile(signal_data.symbol)
+
         base_score = (
             signal_data.coin_score * 0.1 +
             signal_data.trend_score * 0.3 +
@@ -233,12 +265,29 @@ class AIDecisionEngine:
         )
 
         ai_adj = 0.0
-        
-        # 1. Coin Geçmiş Performansı
+
+        # 1. Coin Geçmiş Performansı (gerçek trade'ler)
         if profile["total_trades"] >= 5:
             if profile["win_rate"] < 0.3: ai_adj -= 2.0
             elif profile["win_rate"] > 0.6: ai_adj += 1.0
-                
+
+        # 1b. Ghost Learning — WATCH/VETO/SKIPPED sonuçlarından öğren
+        GHOST_WEIGHT = 0.30
+        if ghost["total"] >= 5:
+            gwr = ghost["ghost_win_rate"]
+            correct_skip_rate = ghost["correct_skips"] / ghost["total"]
+            # Çok kazandıran ama atlanan coin → bonus
+            if gwr > 0.65 and correct_skip_rate < 0.4:
+                ai_adj += 1.5 * GHOST_WEIGHT
+            elif gwr > 0.55:
+                ai_adj += 0.8 * GHOST_WEIGHT
+            # Doğru atlanan coin (SL'e giden) → ceza
+            elif correct_skip_rate > 0.70:
+                ai_adj -= 1.0 * GHOST_WEIGHT
+            # Çoğu SL'e giden coin → ek ceza
+            if gwr < 0.35:
+                ai_adj -= 1.5 * GHOST_WEIGHT
+
         # 2. Tehlike Skoru
         if profile["danger_score"] > 0.7: ai_adj -= 2.0
             
@@ -403,8 +452,62 @@ class AIDecisionEngine:
                     ),
                 )
                 conn.commit()
+
+            # Ghost istatistiklerini coin_profiles'a yansıt (GHOST_WEIGHT ağırlıklı)
+            self._update_coin_profile_with_ghost(symbol)
+
         except Exception as e:
             logger.debug(f"Paper outcome learn atlandı: {e}")
+
+    def _update_coin_profile_with_ghost(self, symbol: str):
+        """
+        Finalize edilmiş ghost sonuçlarını coin_profiles'a GHOST_WEIGHT (0.30) ile blend eder.
+        Gerçek trade verisi yokken bile coin'in davranışı hakkında erken sinyal sağlar.
+        """
+        GHOST_WEIGHT = 0.30
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                ghost_row = conn.execute("""
+                    SELECT COUNT(*) as total,
+                           SUM(CASE WHEN would_have_won=1 THEN 1 ELSE 0 END) as wins
+                    FROM paper_results
+                    WHERE symbol=? AND status IN ('completed','finalized')
+                """, (symbol,)).fetchone()
+                if not ghost_row or not ghost_row[0]:
+                    return
+                g_total, g_wins = ghost_row[0], ghost_row[1] or 0
+                if g_total < 3:
+                    return
+                ghost_wr = g_wins / g_total
+
+                real_row = conn.execute(
+                    "SELECT win_rate, total_trades, danger_score FROM coin_profiles WHERE symbol=?",
+                    (symbol,)
+                ).fetchone()
+
+                if real_row and real_row[1] >= 5:
+                    # Gerçek veri varsa ghost'u hafif blend et
+                    blended_wr = real_row[0] * (1 - GHOST_WEIGHT) + ghost_wr * GHOST_WEIGHT
+                    danger = real_row[2]
+                    total  = real_row[1]
+                else:
+                    # Gerçek veri yoksa ghost veriyi baskın kullan
+                    blended_wr = ghost_wr
+                    danger = 0.6 if ghost_wr < 0.35 else 0.0
+                    total  = g_total
+
+                conn.execute("""
+                    INSERT OR REPLACE INTO coin_profiles
+                        (symbol, win_rate, total_trades, danger_score, updated_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (symbol, round(blended_wr, 4), total, danger))
+                conn.commit()
+                logger.debug(
+                    f"[Ghost→Profile] {symbol}: ghost_wr={ghost_wr:.2f} "
+                    f"blended_wr={blended_wr:.2f} total={total}"
+                )
+        except Exception as e:
+            logger.debug(f"Ghost profile güncelleme atlandı: {e}")
 
     def learn_from_trade(self, symbol: str, result: str, pnl: float, setup_quality: str):
         """Kapanan işlemlerden öğrenir, coin profillerini günceller ve parametreleri optimize eder."""
