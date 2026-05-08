@@ -178,6 +178,33 @@ def api_trades():
 
 
 # ── /api/live ─────────────────────────────────────────────────────────────────
+def _get_mark_price(symbol: str) -> float:
+    """
+    Paper modda key gerektirmeden Binance public API'den anlık fiyat çeker.
+    Client varsa önce onu dener, yoksa direkt HTTP isteği atar.
+    """
+    # Önce mevcut client'ı dene
+    if client is not None:
+        try:
+            ticker = client.futures_symbol_ticker(symbol=symbol)
+            return float(ticker["price"])
+        except Exception:
+            pass
+    # Fallback: public REST (auth gerektirmez)
+    try:
+        import requests as _req
+        r = _req.get(
+            "https://fapi.binance.com/fapi/v1/ticker/price",
+            params={"symbol": symbol},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            return float(r.json()["price"])
+    except Exception:
+        pass
+    return 0.0
+
+
 @app.route("/api/live")
 def api_live():
     try:
@@ -195,10 +222,9 @@ def api_live():
             hold_str, hold_min = _fmt_duration(t.get("open_time"))
 
             try:
-                if client is None:
-                    raise RuntimeError("Binance client kullanılamıyor")
-                ticker = client.futures_symbol_ticker(symbol=symbol)
-                mark   = float(ticker["price"])
+                mark = _get_mark_price(symbol)
+                if mark <= 0:
+                    raise ValueError("Fiyat alınamadı")
                 raw_pnl = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
                 sl_dist     = abs(entry - sl)
                 tp_dist     = abs(tp - entry)
