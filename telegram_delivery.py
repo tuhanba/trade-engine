@@ -203,33 +203,15 @@ def deliver_signal(sig):
 
 def send_trade_open(data: dict):
     """
-    Trade açılış bildirimi. PAPER/DRY-RUN etiketi zorunludur.
+    Trade açılış bildirimi. Score breakdown ve kaynak dahil premium format.
     data dict'i execution_engine.open_trade() tarafından sağlanır.
     """
     try:
-        direction_emoji = "🟢 LONG" if str(data.get("direction", "")).upper() == "LONG" else "🔴 SHORT"
-        mode_label = "📄 PAPER/DRY-RUN" if EXECUTION_MODE != "live" else "🔴 LIVE"
-        text = (
-            f"{mode_label}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"🆕 TRADE AÇILDI\n"
-            f"{direction_emoji} {data.get('symbol', '-')} x{data.get('leverage', '?')}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"Entry:   {_fmt(data.get('entry', 0))}\n"
-            f"SL:      {_fmt(data.get('sl', 0))}\n"
-            f"TP1:     {_fmt(data.get('tp1', 0))}\n"
-            f"TP2:     {_fmt(data.get('tp2', 0))}\n"
-            f"TP3:     {_fmt(data.get('tp3', 0))}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"Notional:     ${_fmt(data.get('notional_size', 0), 2)}\n"
-            f"Margin:       ${_fmt(data.get('margin_used', 0), 2)}\n"
-            f"Risk USD:     ${_fmt(data.get('risk_usd', 0), 2)}\n"
-            f"Max Kayıp:    ${_fmt(data.get('max_loss_after_fee', 0), 2)}\n"
-            f"Giriş Fee:    ${_fmt(data.get('open_fee', 0), 4)}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"Kalite:  {data.get('setup_quality', '-')} | Skor: {_fmt(data.get('final_score', 0), 1)}\n"
-            f"Sebep:   {data.get('reason', '-')}\n"
-        )
+        from core.score_engine import normalize_signal_scores
+        from core.telegram_formatter import format_trade_open
+        data = normalize_signal_scores(dict(data))
+        data.setdefault("execution_mode", EXECUTION_MODE)
+        text = format_trade_open(data)
         _queue.push(text)
     except Exception as e:
         logger.error(f"Trade open bildirim hatası: {e}")
@@ -237,21 +219,10 @@ def send_trade_open(data: dict):
 
 def send_tp_hit(symbol: str, tp_level: int, net_pnl: float,
                 remaining_qty: float, balance_after: float = 0):
-    """TP1 veya TP2 vurdu bildirimi."""
+    """TP1/TP2/TP3 vurdu bildirimi."""
     try:
-        emoji = "🎯" if tp_level == 1 else "🏆"
-        sign = "+" if net_pnl >= 0 else ""
-        text = (
-            f"{emoji} TP{tp_level} — {symbol}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"TP{tp_level} PnL:      {sign}${net_pnl:.4f}\n"
-            f"Kalan Qty:    {remaining_qty:.6f}\n"
-            f"Bakiye:       ${balance_after:.2f}\n"
-        )
-        if tp_level == 1:
-            text += "SL → Breakeven taşındı\n"
-        elif tp_level == 2:
-            text += "Runner / Trailing başladı\n"
+        from core.telegram_formatter import format_tp_hit
+        text = format_tp_hit(symbol, tp_level, net_pnl, remaining_qty, balance_after)
         _queue.push(text)
     except Exception as e:
         logger.error(f"TP{tp_level} bildirim hatası: {e}")
@@ -263,18 +234,12 @@ def send_trade_close(symbol: str, net_pnl: float, total_fee: float,
                      balance_after: float = 0):
     """Trade kapanış bildirimi."""
     try:
-        sign = "+" if net_pnl >= 0 else ""
-        result = "✅ KAR" if net_pnl > 0 else "❌ ZARAR"
-        text = (
-            f"{result} — {symbol}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"Sebep:        {reason.upper()}\n"
-            f"Net PnL:      {sign}${net_pnl:.4f}\n"
-            f"Toplam Fee:   ${total_fee:.4f}\n"
-            f"R-Multiple:   {r_multiple:.2f}R\n"
-            f"Süre:         {duration_str}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"Bakiye:       ${balance_after:.2f}\n"
+        from core.telegram_formatter import format_trade_close
+        text = format_trade_close(
+            symbol=symbol, net_pnl=net_pnl, total_fee=total_fee,
+            reason=reason, duration_str=duration_str,
+            direction=direction, r_multiple=r_multiple,
+            balance_after=balance_after,
         )
         _queue.push(text)
     except Exception as e:

@@ -97,13 +97,22 @@ def migrate():
     total_added += _add_columns(cursor, "coin_profiles", coin_profile_columns)
 
     signal_columns = {
-        "risk_status":     "TEXT",
-        "margin_loss_pct": "REAL DEFAULT 0",
-        "spread":          "REAL DEFAULT 0",
-        "volume":          "REAL DEFAULT 0",
-        "volatility":      "REAL DEFAULT 0",
-        "final_score":     "TEXT",
-        "setup_quality":   "TEXT",
+        "risk_status":              "TEXT",
+        "margin_loss_pct":          "REAL DEFAULT 0",
+        "spread":                   "REAL DEFAULT 0",
+        "volume":                   "REAL DEFAULT 0",
+        "volatility":               "REAL DEFAULT 0",
+        "final_score":              "REAL",
+        "setup_quality":            "TEXT",
+        "technical_score":          "REAL",
+        "ml_score":                 "REAL",
+        "ai_score":                 "REAL",
+        "risk_score":               "REAL",
+        "cold_start_score":         "REAL",
+        "score_source":             "TEXT",
+        "score_confidence":         "REAL",
+        "score_breakdown_json":     "TEXT",
+        "telegram_template_version": "TEXT DEFAULT 'v5_score_breakdown'",
     }
     total_added += _add_columns(cursor, "signal_candidates", signal_columns)
 

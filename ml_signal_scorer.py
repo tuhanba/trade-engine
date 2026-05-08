@@ -275,12 +275,14 @@ class MLSignalScorer:
 
     def predict(self, signal: dict) -> int:
         if not self.trained or self.model is None:
-            # Cold-start stratejisi: Model eğitilmemişse, coin'in kendi win rate'ini kullan
+            from core.score_engine import cold_start_score
             sym = signal.get("symbol", "")
             coin_data = self.coin_stats.get(sym, {})
             if coin_data.get("total", 0) >= 5:
-                return int(round(coin_data.get("win_rate", 0.5) * 100))
-            return 50  # Model eğitilmemişse ve coin verisi yoksa nötr skor
+                coin_score = int(round(coin_data.get("win_rate", 0.5) * 100))
+                heuristic = cold_start_score(signal)
+                return int(round(coin_score * 0.45 + heuristic * 0.55))
+            return cold_start_score(signal)
 
         try:
             import numpy as np
@@ -343,7 +345,8 @@ class MLSignalScorer:
             return score
         except Exception as e:
             logger.warning(f"ML predict hatası: {e}")
-            return 50
+            from core.score_engine import cold_start_score
+            return cold_start_score(signal)
 
     def should_trade(self, signal: dict) -> tuple:
         score = self.predict(signal)

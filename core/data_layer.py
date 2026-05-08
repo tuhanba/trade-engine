@@ -21,9 +21,14 @@ class SignalData:
     trend_score: float = 0.0
     trigger_score: float = 0.0
     risk_score: float = 0.0
-    ml_score: int = 0
-    final_score: float = 0.0
+    technical_score: Optional[float] = None
+    ai_score: Optional[float] = None
+    ml_score: Optional[float] = None
+    cold_start_score: Optional[float] = None
+    final_score: Optional[float] = None
     setup_quality: str = "D"
+    score_source: str = ""
+    score_confidence: Optional[float] = None
     
     # Risk & Entry
     entry_zone: float = 0.0

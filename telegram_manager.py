@@ -256,14 +256,18 @@ class TelegramManager:
         )
 
     def _cmd_status(self):
-        mode  = "PAPER" if self.paper_mode else "LIVE"
-        state = ("⏸ DURAKLATILDI" if self.paused
-                 else "🏁 FİNİSH" if self.finish_mode
-                 else "✅ AKTİF")
+        mode = "🧪 PAPER" if self.paper_mode else "🚨 LIVE"
+        state = ("⏸ PAUSED" if self.paused
+                 else "🏁 FINISH" if self.finish_mode
+                 else "✅ RUNNING")
         self.send(
-            f"🤖 <b>AX Bot Durumu</b>\n\n"
-            f"Mod: {mode}\n"
-            f"Durum: {state}\n"
+            f"⚙️ <b>AX SYSTEM STATUS</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Mode: <b>{mode}</b>\n"
+            f"State: <b>{state}</b>\n"
+            f"Pipeline: <code>Scanner → Trend → Trigger → Risk → AI → Paper</code>\n"
+            f"Telegram: ✅ Active\n"
+            f"Dashboard: DB Projection\n"
             f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
         )
 
@@ -332,11 +336,15 @@ class TelegramManager:
         threading.Thread(target=self._run_ai_brain_fn, daemon=True).start()
 
     def _cmd_mode(self):
-        from config import AX_MODE, EXECUTION_MODE
+        from config import AX_MODE, EXECUTION_MODE, DRY_RUN, LIVE_TRADING_ENABLED
+        live_lock = "🔒 LOCKED" if not LIVE_TRADING_ENABLED else "⚠️ UNLOCKED"
         self.send(
-            f"⚙️ <b>Mod Bilgisi</b>\n\n"
+            f"🛡️ <b>EXECUTION MODE</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
             f"AX_MODE: <code>{AX_MODE}</code>\n"
             f"EXECUTION_MODE: <code>{EXECUTION_MODE}</code>\n"
+            f"DRY_RUN: <code>{DRY_RUN}</code>\n"
+            f"Live Lock: <b>{live_lock}</b>\n"
             f"Paper: {'✅' if self.paper_mode else '❌'}"
         )
 
@@ -386,16 +394,41 @@ class TelegramManager:
                        WHERE created_at >= datetime('now', '-7 days')
                        GROUP BY decision"""
                 ).fetchall()
-            if not rows:
-                self.send("📡 Henüz sinyal kaydı yok.")
-                return
-            lines = ["📡 <b>Sinyal İstatistikleri (7 Gün)</b>\n"]
+                stats = conn.execute(
+                    """SELECT
+                           AVG(COALESCE(final_score, score)) as avg_score,
+                           AVG(rr) as avg_rr,
+                           COUNT(*) as total
+                       FROM signal_candidates
+                       WHERE created_at >= datetime('now', '-7 days')
+                         AND decision = 'ALLOW'"""
+                ).fetchone()
+
+            allow_c = veto_c = watch_c = 0
             for r in rows:
-                emoji = {"ALLOW": "✅", "VETO": "❌", "WATCH": "👀"}.get(r["decision"], "❓")
-                lines.append(f"{emoji} {r['decision']}: {r['cnt']}")
-            self.send("\n".join(lines))
+                d = r["decision"]
+                if d == "ALLOW":
+                    allow_c = r["cnt"]
+                elif d == "VETO":
+                    veto_c = r["cnt"]
+                elif d == "WATCH":
+                    watch_c = r["cnt"]
+
+            avg_score = (stats["avg_score"] or 0) if stats else 0
+            avg_rr = (stats["avg_rr"] or 0) if stats else 0
+
+            self.send(
+                f"📊 <b>SIGNAL QUALITY — 7D</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"✅ Allowed: <b>{allow_c}</b>\n"
+                f"👀 Watchlist: <b>{watch_c}</b>\n"
+                f"❌ Veto: <b>{veto_c}</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"🏆 Avg Score: <b>{avg_score:.1f}</b>\n"
+                f"🎯 Avg RR: <b>{avg_rr:.2f}R</b>"
+            )
         except Exception as e:
-            self.send(f"Sinyal istatistiği alınamadı: {e}")
+            self.send(f"❌ Signal stats alınamadı: {e}")
 
     def _cmd_coin(self, symbol: str):
         symbol = symbol.strip().upper()
