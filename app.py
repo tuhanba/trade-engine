@@ -74,54 +74,113 @@ def index():
 @app.route("/api/stats")
 def api_stats():
     try:
-        stats = get_stats()
+        raw   = get_stats()
+        opens = get_open_trades()
+
+        # Template'in beklediği alan adlarına normalize et
+        total  = raw.get("total_trades", 0)
+        wins   = raw.get("wins", 0)
+        losses = raw.get("losses", 0)
+        wr     = raw.get("win_rate", 0)
+        tpnl   = raw.get("total_pnl", 0)
+        avg_r  = raw.get("avg_r", 0)
+        pf     = raw.get("profit_factor", 0)
+
+        # Ek istatistikler: best/worst/avg_win/avg_loss/avg_dur/max_drawdown
+        extra = {"best_trade": 0, "worst_trade": 0, "avg_win": 0,
+                 "avg_loss": 0, "avg_dur": 0, "max_drawdown": 0, "avg_pnl": 0}
         try:
             with get_conn() as conn:
-                sess_stats = {}
-                # Session istatistiklerini trades tablosundan hesapla
+                erow = conn.execute("""
+                    SELECT
+                        MAX(net_pnl)  as best,
+                        MIN(net_pnl)  as worst,
+                        AVG(CASE WHEN net_pnl>0 THEN net_pnl END) as avg_win,
+                        AVG(CASE WHEN net_pnl<0 THEN net_pnl END) as avg_loss,
+                        AVG(duration_min) as avg_dur,
+                        AVG(net_pnl)  as avg_pnl
+                    FROM trades WHERE status='closed' AND is_valid_for_stats=1
+                """).fetchone()
+                if erow:
+                    extra = {
+                        "best_trade":   round(erow[0] or 0, 4),
+                        "worst_trade":  round(erow[1] or 0, 4),
+                        "avg_win":      round(erow[2] or 0, 4),
+                        "avg_loss":     round(erow[3] or 0, 4),
+                        "avg_dur":      round(erow[4] or 0, 1),
+                        "avg_pnl":      round(erow[5] or 0, 4),
+                        "max_drawdown": 0,
+                    }
+        except Exception:
+            pass
+
+        # Params
+        params_row = {}
+        try:
+            with get_conn() as conn:
+                p = conn.execute("SELECT * FROM params ORDER BY id DESC LIMIT 1").fetchone()
+                if p:
+                    params_row = dict(p)
+        except Exception:
+            pass
+
+        # Last AI log
+        last_ai = {}
+        try:
+            with get_conn() as conn:
+                la = conn.execute(
+                    "SELECT * FROM ai_logs ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                if la:
+                    last_ai = dict(la)
+        except Exception:
+            pass
+
+        # Session stats
+        sess_stats = {}
+        try:
+            with get_conn() as conn:
                 for sess in ["ASIA", "LONDON", "NEW_YORK"]:
-                    try:
-                        srow = conn.execute(
-                            """SELECT COUNT(*),
+                    srow = conn.execute("""
+                        SELECT COUNT(*),
                                SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END),
                                SUM(net_pnl)
-                               FROM trades
-                               WHERE session=? AND close_time IS NOT NULL
-                               AND status IN ('closed','closed_win','closed_loss','sl','tp1_hit','runner','trail','timeout')""",
-                            (sess,)
-                        ).fetchone()
-                        total_s = srow[0] or 0
-                        wins_s  = srow[1] or 0
-                        pnl_s   = round(srow[2] or 0, 4)
-                    except Exception:
-                        # coin_market_memory fallback
-                        srow = conn.execute(
-                            "SELECT COUNT(*), SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END), 0 "
-                            "FROM coin_market_memory WHERE session=?", (sess,)
-                        ).fetchone()
-                        total_s = srow[0] or 0
-                        wins_s  = srow[1] or 0
-                        pnl_s   = 0.0
+                        FROM trades
+                        WHERE session=? AND status='closed'""", (sess,)
+                    ).fetchone()
+                    total_s = srow[0] or 0
+                    wins_s  = srow[1] or 0
                     sess_stats[sess] = {
                         "total":    total_s,
                         "wins":     wins_s,
                         "losses":   total_s - wins_s,
                         "win_rate": round(wins_s / max(total_s, 1) * 100, 1),
-                        "pnl":      pnl_s,
+                        "pnl":      round(srow[2] or 0, 4),
                     }
-                # NEWYORK -> NEW_YORK alias
-                if "NEW_YORK" in sess_stats and "NEWYORK" not in sess_stats:
-                    sess_stats["NEWYORK"] = sess_stats["NEW_YORK"]
-                stats["session_stats"] = sess_stats
+                sess_stats["NEWYORK"] = sess_stats.get("NEW_YORK", {"total":0,"wins":0,"losses":0,"win_rate":0,"pnl":0})
         except Exception:
-            stats["session_stats"] = {
-                "ASIA":     {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "pnl": 0.0},
-                "LONDON":   {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "pnl": 0.0},
-                "NEW_YORK": {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "pnl": 0.0},
-                "NEWYORK":  {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "pnl": 0.0},
-            }
-        stats["ml_status"] = {"trained": False, "n_samples": 0}
-        return jsonify({"ok": True, "data": stats})
+            for k in ["ASIA","LONDON","NEW_YORK","NEWYORK"]:
+                sess_stats[k] = {"total":0,"wins":0,"losses":0,"win_rate":0.0,"pnl":0.0}
+
+        data = {
+            # Template'in beklediği isimler
+            "total":          total,
+            "total_trades":   total,
+            "open_count":     len(opens),
+            "wins":           wins,
+            "losses":         losses,
+            "win_rate":       wr,
+            "total_pnl":      tpnl,
+            "avg_rr":         avg_r,
+            "avg_r":          avg_r,
+            "profit_factor":  pf,
+            "session_stats":  sess_stats,
+            "params":         params_row,
+            "last_ai":        last_ai,
+            "ml_status":      {"trained": False, "n_samples": 0},
+            **extra,
+        }
+        return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
