@@ -242,6 +242,7 @@ def api_live():
                     "tp_progress":     progress,
                     "hold_str":        hold_str,
                     "hold_min":        hold_min,
+                    "duration_str":    hold_str,
                 })
             except Exception:
                 live.append({
@@ -250,6 +251,7 @@ def api_live():
                     "unrealized_pct": 0, "current_rr": 0,
                     "sl_distance_pct": 0, "tp_progress": 0,
                     "hold_str": hold_str, "hold_min": hold_min,
+                    "duration_str": hold_str,
                 })
 
         closed         = get_trades(limit=500, status="closed")

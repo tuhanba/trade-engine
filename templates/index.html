@@ -757,13 +757,18 @@ async function loadPositions(){
     const d=j.data,pos=d.live||[],ur=d.total_unrealized||0;
     const urEl=document.getElementById("unreal");
     urEl.textContent=(ur>=0?"+":"")+ur.toFixed(3)+" USDT";urEl.style.color=ur>=0?"var(--green-br)":"var(--red-br)";
+    // detect new positions for feed
+    const nowTime=new Date().toUTCString().split(" ")[4].substring(0,5);
+    pos.forEach(p=>{if(!lastTradeIds.has(p.id)){lastTradeIds.add(p.id);addFeedItem(nowTime,"open","<b>"+(p.symbol||"")+"</b> "+(p.direction||"")+" acildi",0);}});
     const wrap=document.getElementById("posList");
     if(!pos.length){wrap.innerHTML="<div class='empty'>— Acik Pozisyon Yok —</div>";return}
     wrap.innerHTML=pos.map(p=>{
       const isL=(p.direction||"").toUpperCase()==="LONG",pnl=p.unrealized_pnl||0,bar=Math.min(Math.abs(p.sl_distance_pct||0),100);
-      const tgt=p.active_target||p.tp1?"TP"+(p.active_target||"1"):"—";
+      const tgt=p.active_target?"TP"+p.active_target:"TP1";
       const tp1v=p.tp1||p.tp||0,tp2v=p.tp2||0,tp3v=p.tp3||0;
-      return "<div class='pos "+(isL?"long-p":"short-p")+"'><div class='pos-top'><div><div class='pos-sym'>"+p.symbol+"</div><span class='pos-dir "+(isL?"long":"short")+"'>"+p.direction+" x"+(p.leverage||"—")+"</span></div><div class='pos-pnl'><div class='pos-pnl-val "+(pnl>=0?"pos-c":"neg-c")+"'>"+fp(pnl)+"</div><div class='pos-pnl-pct'>"+(pnl>=0?"+":"")+f(p.unrealized_pct,2)+"%</div></div></div><div class='pos-levels'><div><div class='pl-lbl'>Entry</div><div class='pl-val entry'>"+f(p.entry,5)+"</div></div><div><div class='pl-lbl'>Stop</div><div class='pl-val stop'>"+f(p.sl,4)+"</div></div><div><div class='pl-lbl'>TP1</div><div class='pl-val target'>"+f(tp1v,4)+"</div></div><div><div class='pl-lbl'>TP2</div><div class='pl-val target'>"+f(tp2v,4)+"</div></div></div><div class='pos-levels'><div><div class='pl-lbl'>TP3</div><div class='pl-val target'>"+f(tp3v,4)+"</div></div><div><div class='pl-lbl'>Hedef</div><div class='pl-val rr'>"+tgt+"</div></div><div><div class='pl-lbl'>Kalan</div><div class='pl-val'>"+f(p.remaining_qty,4)+"</div></div><div><div class='pl-lbl'>Süre</div><div class='pl-val'>"+((p.duration_str||"—"))+"</div></div></div><div class='pos-bar-bg'><div class='pos-bar-fill "+(isL?"long":"short")+"' style='width:"+bar+"%'></div></div><div class='pos-foot'><span>Mark: "+f(p.current_price,5)+"</span><span>Risk: $"+f(p.risk_usd,2)+"</span><span>SL: "+f(p.sl_distance_pct,1)+"%</span></div></div>";
+      const remQty=p.remaining_qty||p.qty||0;
+      const durStr=p.duration_str||p.hold_str||"—";
+      return "<div class='pos "+(isL?"long-p":"short-p")+"'><div class='pos-top'><div><div class='pos-sym'>"+p.symbol+"</div><span class='pos-dir "+(isL?"long":"short")+"'>"+p.direction+" x"+(p.leverage||"—")+"</span></div><div class='pos-pnl'><div class='pos-pnl-val "+(pnl>=0?"pos-c":"neg-c")+"'>"+fp(pnl)+"</div><div class='pos-pnl-pct'>"+(pnl>=0?"+":"")+f(p.unrealized_pct,2)+"%</div></div></div><div class='pos-levels'><div><div class='pl-lbl'>Entry</div><div class='pl-val entry'>"+f(p.entry,5)+"</div></div><div><div class='pl-lbl'>Stop</div><div class='pl-val stop'>"+f(p.sl,4)+"</div></div><div><div class='pl-lbl'>TP1</div><div class='pl-val target'>"+f(tp1v,4)+"</div></div><div><div class='pl-lbl'>TP2</div><div class='pl-val target'>"+f(tp2v,4)+"</div></div></div><div class='pos-levels'><div><div class='pl-lbl'>TP3</div><div class='pl-val target'>"+f(tp3v,4)+"</div></div><div><div class='pl-lbl'>Hedef</div><div class='pl-val rr'>"+tgt+"</div></div><div><div class='pl-lbl'>Kalan</div><div class='pl-val'>"+f(remQty,4)+"</div></div><div><div class='pl-lbl'>Süre</div><div class='pl-val'>"+durStr+"</div></div></div><div class='pos-bar-bg'><div class='pos-bar-fill "+(isL?"long":"short")+"' style='width:"+bar+"%'></div></div><div class='pos-foot'><span>Mark: "+f(p.current_price,5)+"</span><span>Risk: $"+f(p.risk_usd,2)+"</span><span>SL: "+f(p.sl_distance_pct,1)+"%</span></div></div>";
     }).join("");
   }catch(e){console.error(e)}
 }
@@ -908,8 +913,8 @@ async function refreshAll(){
   await Promise.allSettled([loadStats(),loadChart(),loadPositions(),loadHistory(curPage),loadAxStatus(),loadCalendar(),loadWeekly(),loadCoinProfiles()]);
 }
 refreshAll();
-setInterval(()=>{loadPositions();loadAxStatus();},8000);
-setInterval(()=>{loadStats();loadChart();loadHistory(curPage);loadWeekly();},30000);
+setInterval(()=>{loadPositions();loadAxStatus();},3000);
+setInterval(()=>{loadStats();loadChart();loadHistory(curPage);loadWeekly();},10000);
 setInterval(()=>{loadCoinProfiles();loadCalendar();},120000);
 </script>
 </body>
