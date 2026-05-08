@@ -178,31 +178,52 @@ def api_trades():
 
 
 # ── /api/live ─────────────────────────────────────────────────────────────────
+import urllib.request as _urllib_req
+import json as _json_mod
+
+def _fetch_url_price(url: str) -> float:
+    """urllib ile (built-in) HTTP GET → JSON price alanını döndürür."""
+    with _urllib_req.urlopen(url, timeout=4) as resp:
+        data = _json_mod.loads(resp.read().decode())
+        return float(data["price"])
+
 def _get_mark_price(symbol: str) -> float:
     """
-    Paper modda key gerektirmeden Binance public API'den anlık fiyat çeker.
-    Client varsa önce onu dener, yoksa direkt HTTP isteği atar.
+    Binance'den anlık fiyat çeker. Sırayla:
+    1. python-binance client (varsa)
+    2. Futures public REST (urllib, kurulum gerektirmez)
+    3. Spot public REST (yedek)
     """
-    # Önce mevcut client'ı dene
     if client is not None:
         try:
             ticker = client.futures_symbol_ticker(symbol=symbol)
             return float(ticker["price"])
         except Exception:
             pass
-    # Fallback: public REST (auth gerektirmez)
+    # Futures mark price
     try:
-        import requests as _req
-        r = _req.get(
-            "https://fapi.binance.com/fapi/v1/ticker/price",
-            params={"symbol": symbol},
-            timeout=5,
+        return _fetch_url_price(
+            f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
         )
-        if r.status_code == 200:
-            return float(r.json()["price"])
+    except Exception:
+        pass
+    # Spot price (son çare)
+    try:
+        return _fetch_url_price(
+            f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
+        )
     except Exception:
         pass
     return 0.0
+
+
+@app.route("/api/debug/price/<symbol>")
+def api_debug_price(symbol):
+    """Fiyat çekme test endpoint'i — sadece debug için."""
+    import time
+    t0 = time.time()
+    price = _get_mark_price(symbol.upper())
+    return jsonify({"ok": True, "symbol": symbol.upper(), "price": price, "ms": round((time.time()-t0)*1000, 1)})
 
 
 @app.route("/api/live")
