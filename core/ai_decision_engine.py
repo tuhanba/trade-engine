@@ -106,6 +106,7 @@ class AIDecisionEngine:
                 if best:
                     self.params = json.loads(best["params_json"])
                     logger.info(f"En iyi parametreler yüklendi: {self.params}")
+            self._last_param_reload = datetime.now(timezone.utc)
         except Exception as e:
             logger.error(f"Parametre yükleme hatası: {e}")
 
@@ -240,9 +241,16 @@ class AIDecisionEngine:
             logger.error(f"Markov hesaplama hatası: {e}")
             return None
 
+    def _maybe_reload_params(self):
+        """Her 5 dakikada bir best_params'tan parametreleri yeniler (analyze_and_adapt senkronizasyonu)."""
+        last = getattr(self, "_last_param_reload", None)
+        if last is None or (datetime.now(timezone.utc) - last).total_seconds() > 300:
+            self._load_best_params()
+
     def evaluate(self, signal_data) -> dict:
         """Sinyali değerlendirir ve final kararını verir."""
         self._check_daily_reset()
+        self._maybe_reload_params()
 
         if not signal_data.is_valid():
             return {"decision": "VETO", "reason": "Invalid data"}

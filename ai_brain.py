@@ -459,6 +459,16 @@ def update_coin_profiles(conn, all_trades):
             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         ))
 
+        # AIDecisionEngine'in okuduğu coin_profiles tablosunu da senkronize et
+        danger_norm = min(1.0, danger / 8.0)
+        try:
+            conn.execute("""INSERT OR REPLACE INTO coin_profiles
+                (symbol, win_rate, total_trades, danger_score, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                (sym, round(wr, 4), len(trades), round(danger_norm, 3)))
+        except Exception:
+            pass  # Tablo yoksa migration çalıştırılmamış — sessiz geç
+
     conn.commit()
 
 def get_coin_profiles(conn, min_trades=3):
@@ -1176,14 +1186,22 @@ def set_client(client, tg_send_fn=None):
     _tg_send_ref = tg_send_fn
 
 
+def _fetch_klines_public(symbol: str, interval: str = "5m", limit: int = 100) -> list:
+    """Auth gerektirmeyen public Binance futures klines."""
+    import urllib.request as _ur, json as _jm
+    url = (f"https://fapi.binance.com/fapi/v1/klines"
+           f"?symbol={symbol}&interval={interval}&limit={limit}")
+    with _ur.urlopen(url, timeout=8) as r:
+        return _jm.loads(r.read().decode())
+
+
 def post_trade_analysis(trade_id, client_ref=None, tg_fn=None):
     try:
         import pandas as pd
 
         cli = client_ref or _client_ref
         tg  = tg_fn      or _tg_send_ref
-        if not cli:
-            return
+        # cli opsiyonel — paper modda public REST kullanılır
 
         conn = db()
         if conn.execute(
@@ -1216,10 +1234,21 @@ def post_trade_analysis(trade_id, client_ref=None, tg_fn=None):
             return
 
         extra  = max(int(dur_min * 1.5 / 5) + 10, 20)
-        try:
-            klines = cli.futures_klines(symbol=sym, interval="5m", limit=min(extra, 100))
-        except Exception:
-            klines = cli.get_klines(symbol=sym, interval="5m", limit=min(extra, 100))
+        klines = None
+        if cli:
+            try:
+                klines = cli.futures_klines(symbol=sym, interval="5m", limit=min(extra, 100))
+            except Exception:
+                try:
+                    klines = cli.get_klines(symbol=sym, interval="5m", limit=min(extra, 100))
+                except Exception:
+                    klines = None
+        if not klines:
+            try:
+                klines = _fetch_klines_public(sym, "5m", min(extra, 100))
+            except Exception:
+                conn.close()
+                return
 
         df = pd.DataFrame(klines, columns=[
             "time", "open", "high", "low", "close", "volume",
