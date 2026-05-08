@@ -296,24 +296,39 @@ def api_live():
             symbol    = t["symbol"]
             entry     = t["entry"] or 0
             sl        = t["sl"] or 0
-            tp        = t.get("tp1") or t.get("tp") or 0
+            tp1       = t.get("tp1") or t.get("tp") or 0
+            tp2       = t.get("tp2") or 0
+            tp3       = t.get("tp3") or 0
             qty       = t["qty"] or 0
             direction = t["direction"]
             hold_str, hold_min = _fmt_duration(t.get("open_time"))
+
+            # Aktif hedef: tp2_hit varsa TP3'e bakıyor, tp1_hit varsa TP2, yoksa TP1
+            tp1_hit = t.get("tp1_hit", 0) or 0
+            tp2_hit = t.get("tp2_hit", 0) or 0
+            if tp2_hit:
+                active_target = "3"
+            elif tp1_hit:
+                active_target = "2"
+            else:
+                active_target = "1"
 
             try:
                 mark = _get_mark_price(symbol)
                 if mark <= 0:
                     raise ValueError("Fiyat alınamadı")
-                raw_pnl = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
+                raw_pnl     = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
                 sl_dist     = abs(entry - sl)
-                tp_dist     = abs(tp - entry)
+                tp_dist     = abs(tp1 - entry)
                 current_rr  = round(raw_pnl / (sl_dist * qty + 1e-10), 3) if sl_dist else 0
                 sl_dist_pct = round(abs(mark - sl) / (mark + 1e-10) * 100, 2)
                 progress    = round(min(abs(mark - entry) / (tp_dist + 1e-10) * 100, 100), 1) if tp_dist else 0
                 total_unrealized += raw_pnl
                 live.append({
                     **t,
+                    "tp2":             tp2,
+                    "tp3":             tp3,
+                    "active_target":   active_target,
                     "current_price":   round(mark, 6),
                     "unrealized_pnl":  round(raw_pnl, 4),
                     "unrealized_pct":  round(raw_pnl / (entry * qty + 1e-10) * 100, 2),
@@ -327,6 +342,8 @@ def api_live():
             except Exception:
                 live.append({
                     **t,
+                    "tp2": tp2, "tp3": tp3,
+                    "active_target":   active_target,
                     "current_price": 0, "unrealized_pnl": 0,
                     "unrealized_pct": 0, "current_rr": 0,
                     "sl_distance_pct": 0, "tp_progress": 0,
@@ -547,14 +564,39 @@ def api_coin_profiles():
     try:
         with get_conn() as conn:
             rows = conn.execute("""
-                SELECT symbol, sample_size as trade_count,
-                       ROUND(win_rate*100,1) as win_rate_pct,
-                       avg_r, profit_factor, danger_score, fakeout_rate,
-                       best_session, last_updated as updated_at
-                FROM coin_profiles
-                ORDER BY sample_size DESC, danger_score DESC
+                SELECT cp.symbol,
+                       COALESCE(cp.total_trades, cp.sample_size, 0) as total,
+                       COALESCE(cp.win_rate, 0) as win_rate,
+                       ROUND(COALESCE(cp.win_rate, 0)*100, 1) as win_rate_pct,
+                       COALESCE(cp.avg_r, 0) as avg_r,
+                       COALESCE(cp.profit_factor, 0) as profit_factor,
+                       COALESCE(cp.danger_score, 0) as danger_score,
+                       cp.updated_at
+                FROM coin_profiles cp
+                ORDER BY total DESC, danger_score DESC
             """).fetchall()
-        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+
+        # Her coin için trades tablosundan total_pnl hesapla
+        pnl_map = {}
+        try:
+            with get_conn() as conn:
+                pnl_rows = conn.execute("""
+                    SELECT symbol, SUM(net_pnl) as total_pnl, COUNT(*) as cnt
+                    FROM trades WHERE status='closed'
+                    GROUP BY symbol
+                """).fetchall()
+                for pr in pnl_rows:
+                    pnl_map[pr[0]] = round(pr[1] or 0, 4)
+        except Exception:
+            pass
+
+        data = []
+        for r in rows:
+            d = dict(r)
+            d["total_pnl"] = pnl_map.get(d["symbol"], 0)
+            data.append(d)
+
+        return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -652,11 +694,26 @@ def api_scalp_signals():
 # ── /api/scalp_signal_stats ───────────────────────────────────────────────────
 @app.route("/api/scalp_signal_stats")
 def api_scalp_signal_stats():
-    """A+/A/B/C dağılımı."""
+    """Bugünkü sinyal kalite dağılımı — S/A+/A/B grade bazlı."""
     try:
-        from database import get_daily_signal_count
-        stats = get_daily_signal_count()
-        return jsonify({"ok": True, "data": stats})
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT setup_quality, COUNT(*) as cnt
+                FROM signal_candidates
+                WHERE DATE(created_at) = ?
+                  AND setup_quality IS NOT NULL
+                GROUP BY setup_quality
+            """, (today,)).fetchall()
+        grade_map = {"S": 0, "A+": 0, "A": 0, "B": 0, "C": 0, "D": 0}
+        total = 0
+        for r in rows:
+            q = (r[0] or "").strip()
+            if q in grade_map:
+                grade_map[q] = r[1]
+            total += r[1]
+        grade_map["total"] = total
+        return jsonify({"ok": True, "data": grade_map})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

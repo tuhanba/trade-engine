@@ -901,9 +901,10 @@ async function loadCoinProfiles(){
     const grid=document.getElementById("cpGrid");
     if(!profiles.length){grid.innerHTML="<div class='cp'><div class='cp-sym' style='color:var(--text-muted)'>Veri yok</div></div>";return}
     grid.innerHTML=profiles.map(p=>{
-      const wr=p.win_rate||0;const pnl=p.total_pnl||0;
+      const wr=p.win_rate_pct||(p.win_rate<=1?p.win_rate*100:p.win_rate)||0;
+      const pnl=p.total_pnl||0;const cnt=p.total||p.total_trades||p.trade_count||0;
       const cls=wr>=50?"good":wr>=35?"mid":"bad";
-      return "<div class='cp'><div class='cp-sym'>"+p.symbol.replace("USDT","")+"</div><div class='cp-wr' style='color:"+(wr>=50?"var(--green-br)":wr>=35?"var(--cyan-br)":"var(--red-br)")+"'>"+wr.toFixed(0)+"%</div><div class='cp-detail'>"+p.total+" trade · "+fp(pnl)+"</div><div class='cp-bar'><div class='cp-bar-f "+cls+"' style='width:"+Math.min(wr,100)+"%'></div></div></div>";
+      return "<div class='cp'><div class='cp-sym'>"+p.symbol.replace("USDT","")+"</div><div class='cp-wr' style='color:"+(wr>=50?"var(--green-br)":wr>=35?"var(--cyan-br)":"var(--red-br)")+"'>"+wr.toFixed(0)+"%</div><div class='cp-detail'>"+cnt+" trade · "+fp(pnl)+"</div><div class='cp-bar'><div class='cp-bar-f "+cls+"' style='width:"+Math.min(wr,100)+"%'></div></div></div>";
     }).join("");
   }catch(e){console.error(e)}
 }
