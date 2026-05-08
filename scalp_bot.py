@@ -149,6 +149,36 @@ def activate_circuit_breaker():
     logger.warning(f"Devre kesici aktif — {CIRCUIT_BREAKER_MINUTES}dk")
     send_message(f"⛔ Devre kesici aktif — {CIRCUIT_BREAKER_MINUTES} dakika bekleniyor.")
 
+
+def _check_circuit_breaker_from_closes(closed_ids: list):
+    """
+    Kapanan trade'leri kontrol eder; ardışık kayıp sayısı eşiği aşarsa
+    devre kesiciyi aktif eder. Bu fonksiyon exec_monitor dönüşünde çağrılır.
+    """
+    if not closed_ids:
+        return
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT net_pnl FROM trades
+                    WHERE id IN ({','.join('?' for _ in closed_ids)})
+                    ORDER BY close_time DESC""",
+                closed_ids,
+            ).fetchall()
+        consecutive = 0
+        for row in rows:
+            if (row[0] or 0) < 0:
+                consecutive += 1
+            else:
+                break
+        if consecutive >= CIRCUIT_BREAKER_LOSSES:
+            logger.warning(f"[CB] {consecutive} ardışık kayıp → devre kesici devreye alınıyor")
+            activate_circuit_breaker()
+    except Exception as e:
+        logger.debug(f"[CB] Kontrol hatası: {e}")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ANA DÖNGÜ
 # ─────────────────────────────────────────────────────────────────────────────
@@ -180,7 +210,10 @@ def main():
         except Exception as e:
             logger.warning(f"TelegramManager başlatılamadı: {e}")
 
-    _last_ai_adapt = 0  # AI Brain periyodik adaptasyon (30 dakikada bir)
+    _last_ai_adapt  = 0      # AI Brain periyodik adaptasyon (30 dakikada bir)
+    _ai_adapt_running = threading.Event()  # Thread guard — çift çalışmayı önler
+    _error_streak   = 0      # Ardışık hata sayacı (exponential backoff için)
+
     send_message(
         f"🚀 <b>AX Scalp Engine v2.0 başlatıldı</b>\n"
         f"Mod: {AX_MODE.upper()} | {EXECUTION_MODE.upper()}\n"
@@ -189,6 +222,10 @@ def main():
 
     while True:
         try:
+            # Heartbeat — dashboard bot_running tespiti için
+            set_state("bot_heartbeat_at", datetime.now(timezone.utc).isoformat())
+            _error_streak = 0  # Başarılı iterasyon → sayacı sıfırla
+
             # Pause kontrolü
             if tg_manager and hasattr(tg_manager, 'is_paused') and tg_manager.is_paused:
                 time.sleep(5)
@@ -244,11 +281,14 @@ def main():
                 time.sleep(60)
                 continue
 
-            # Açık trade takibi
+            # Açık trade takibi + devre kesici kontrolü
             if EXECUTION_AVAILABLE:
                 open_trades_now = get_open_trades()
                 if open_trades_now:
-                    exec_monitor(client)
+                    closed_ids = exec_monitor(client)
+                    if closed_ids:
+                        logger.info(f"[monitor] {len(closed_ids)} trade kapandı: {closed_ids}")
+                        _check_circuit_breaker_from_closes(closed_ids)
 
             # Açık trade limiti
             open_trades_now = get_open_trades()
@@ -540,9 +580,6 @@ def main():
                     update_candidate_status(candidate_id, lifecycle_stage="APPROVED_FOR_WATCHLIST")
                     save_signal_event(sig.id, "APPROVED_FOR_WATCHLIST", symbol=symbol, reason="watchlist_threshold_pass")
 
-                    # ── ADIM 7: DATA LAYER'A KAYDET ────────────────────────
-                    save_scalp_signal(sig.to_dict())
-
                     # ── ADIM 8: TELEGRAM DELIVERY ──────────────────────────
                     telegram_sent_ok = False
                     if sig.final_score >= TELEGRAM_THRESHOLD:
@@ -672,10 +709,16 @@ def main():
             time.sleep(SCAN_INTERVAL)
             # ── AI Brain Periyodik Adaptasyon (30 dakikada bir) ─────────────
             _now_ts = time.time()
-            if AI_BRAIN_AVAILABLE and (_now_ts - _last_ai_adapt) >= 1800:
+            if AI_BRAIN_AVAILABLE and (_now_ts - _last_ai_adapt) >= 1800 and not _ai_adapt_running.is_set():
                 try:
                     from ai_brain import analyze_and_adapt
-                    threading.Thread(target=analyze_and_adapt, daemon=True).start()
+                    def _adapt_safe(_ev=_ai_adapt_running):
+                        _ev.set()
+                        try:
+                            analyze_and_adapt()
+                        finally:
+                            _ev.clear()
+                    threading.Thread(target=_adapt_safe, daemon=True).start()
                     _last_ai_adapt = _now_ts
                     logger.info("[AI Brain] Periyodik adaptasyon baslatildi.")
                 except Exception as _ae:
@@ -686,8 +729,13 @@ def main():
             send_message("⛔ AX Scalp Engine durduruldu.")
             break
         except Exception as e:
-            logger.error(f"Ana döngü hatası: {e}", exc_info=True)
-            time.sleep(10)
+            _error_streak += 1
+            _backoff = min(10 * (2 ** min(_error_streak - 1, 4)), 120)  # 10→20→40→80→120s
+            logger.error(
+                f"Ana döngü hatası ({_error_streak}. ardışık, {_backoff}s bekleniyor): {e}",
+                exc_info=True,
+            )
+            time.sleep(_backoff)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GİRİŞ NOKTASI
