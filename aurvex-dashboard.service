@@ -5,15 +5,15 @@ After=network.target aurvex-bot.service
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/home/user/trade-engine
-EnvironmentFile=-/home/user/trade-engine/.env
-ExecStart=/usr/local/bin/python3 /home/user/trade-engine/app.py
+WorkingDirectory=/root/trade_engine/trade-engine
+EnvironmentFile=-/root/trade_engine/trade-engine/.env
+ExecStart=/usr/local/bin/python3 /root/trade_engine/trade-engine/app.py
 Restart=always
 RestartSec=10
 StandardOutput=append:/root/trade_engine/logs/dashboard.log
 StandardError=append:/root/trade_engine/logs/dashboard.log
 Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONPATH=/home/user/trade-engine
+Environment=PYTHONPATH=/root/trade_engine/trade-engine
 
 [Install]
 WantedBy=multi-user.target
