@@ -611,6 +611,81 @@ def api_history():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# ── /api/signals/active ──────────────────────────────────────────────────────
+@app.route("/api/signals/active")
+def api_signals_active():
+    """Telegram'a gönderilmiş / trade açılmış aktif sinyal kartları (score breakdown dahil)."""
+    try:
+        limit = int(request.args.get("limit", 30))
+        data = dash_svc.get_active_signal_candidates(limit=limit)
+        return jsonify({"ok": True, "data": data, "total": len(data)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/signals/watchlist ────────────────────────────────────────────────────
+@app.route("/api/signals/watchlist")
+def api_signals_watchlist():
+    """Watch kararı almış adaylar."""
+    try:
+        limit = int(request.args.get("limit", 30))
+        data = dash_svc.get_watchlist_candidates(limit=limit)
+        return jsonify({"ok": True, "data": data, "total": len(data)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/signals/rejected ─────────────────────────────────────────────────────
+@app.route("/api/signals/rejected")
+def api_signals_rejected():
+    """Son reddedilmiş/veto edilmiş adaylar."""
+    try:
+        limit = int(request.args.get("limit", 30))
+        data = dash_svc.get_rejected_candidates(limit=limit)
+        return jsonify({"ok": True, "data": data, "total": len(data)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/signals/candidates ───────────────────────────────────────────────────
+@app.route("/api/signals/candidates")
+def api_signals_candidates():
+    """Tüm adaylar — lifecycle_stage ve decision filtresi destekler."""
+    try:
+        limit = int(request.args.get("limit", 50))
+        stage = request.args.get("stage") or None
+        decision = request.args.get("decision") or None
+        data = dash_svc.get_signal_candidates(lifecycle_stage=stage, decision=decision, limit=limit)
+        return jsonify({"ok": True, "data": data, "total": len(data)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/performance/summary ──────────────────────────────────────────────────
+@app.route("/api/performance/summary")
+def api_performance_summary():
+    """Expectancy, profit_factor, win_rate, avg_R, max_drawdown özeti."""
+    try:
+        days = int(request.args.get("days", 30))
+        data = dash_svc.get_performance_summary(days=days)
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/performance/score-distribution ──────────────────────────────────────
+@app.route("/api/performance/score-distribution")
+def api_performance_score_dist():
+    """Sinyal kalite dağılımı (S/A+/A/B/C/D) son N günde."""
+    try:
+        days = int(request.args.get("days", 7))
+        summary = dash_svc.get_performance_summary(days=days)
+        dist = summary.get("score_distribution", {})
+        return jsonify({"ok": True, "data": dist, "days": days})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     socketio.run(

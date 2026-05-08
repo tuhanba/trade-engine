@@ -410,9 +410,14 @@ def main():
                     sig.coin_score = coin_info["tradeability_score"]
                     sig.trend_score = trend_result["score"]
                     sig.trigger_score = trigger_result["score"]
+                    sig.technical_score = round(trigger_result["score"] * 10, 1)  # 0-10 → 0-100
                     sig.risk_score = risk_result["score"]
                     sig.setup_quality = trigger_result["quality"]
-                    sig.ml_score = trigger_result.get("ml_score", 50)
+                    _raw_ml = trigger_result.get("ml_score")
+                    if _raw_ml is None:
+                        from core.score_engine import cold_start_score as _cs
+                        _raw_ml = _cs(trigger_result)
+                    sig.ml_score = _raw_ml
                     sig.entry_zone = trigger_result["entry"]
                     sig.stop_loss = risk_result["sl"]
                     sig.tp1 = risk_result["tp1"]
@@ -430,8 +435,11 @@ def main():
                     # ── ADIM 6: AI DECISION ENGINE ─────────────────────────
                     decision = ai_engine.evaluate(sig)
                     sig.final_score = decision["final_score"]
+                    sig.ai_score = decision.get("ai_score", sig.final_score)
                     sig.confidence = decision["confidence"]
                     sig.reason = decision["reason"]
+                    sig.score_source = decision.get("score_source", "heuristic")
+                    sig.score_confidence = decision.get("confidence", 0.5)
                     save_signal_event(sig.id, "AI_CHECKED", symbol=symbol, reason=decision["reason"])
 
                     candidate_payload = {
@@ -441,8 +449,12 @@ def main():
                         "trend_score": sig.trend_score,
                         "trigger_score": sig.trigger_score,
                         "risk_score": sig.risk_score,
+                        "technical_score": sig.technical_score,
+                        "ml_score": sig.ml_score,
                         "ai_score": decision.get("ai_score", sig.final_score),
                         "final_score": sig.final_score,
+                        "score_source": sig.score_source,
+                        "score_confidence": sig.score_confidence,
                         "quality": sig.setup_quality,
                         "reason": sig.reason,
                         "lifecycle_stage": "AI_CHECKED",

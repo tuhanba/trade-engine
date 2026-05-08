@@ -318,6 +318,237 @@ def get_ax_status() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SİNYAL KARTLARİ — Dashboard ve Telegram aynı kaynaktan beslenir
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SCORE_COLS = (
+    "final_score", "technical_score", "ml_score", "ai_score",
+    "risk_score", "cold_start_score", "score_source", "score_confidence",
+)
+
+def _normalize_candidate_row(row: dict) -> dict:
+    """DB satırını dashboard kartı için normalize eder."""
+    from core.score_engine import normalize_signal_scores
+    out = dict(row)
+    # Canonical aliases
+    out.setdefault("stop_loss", out.get("stop") or out.get("sl"))
+    out.setdefault("tp3", out.get("runner_target") or out.get("tp3"))
+    out.setdefault("risk_percent", out.get("risk_pct") or out.get("risk_percent"))
+    out.setdefault("entry", out.get("entry_zone") or out.get("entry"))
+    out.setdefault("setup_quality", out.get("quality") or out.get("setup_quality", "D"))
+    normalize_signal_scores(out)
+    return out
+
+
+def get_signal_candidates(lifecycle_stage: str | None = None,
+                          decision: str | None = None,
+                          limit: int = 50) -> list[dict]:
+    """
+    signal_candidates tablosundan score alanları dahil sinyal kartlarını döner.
+    lifecycle_stage: APPROVED_FOR_TELEGRAM, REJECTED, AI_CHECKED, vb.
+    decision: ALLOW, VETO, WATCH
+    """
+    try:
+        conditions = ["1=1"]
+        params: list = []
+        if lifecycle_stage:
+            conditions.append("lifecycle_stage = ?")
+            params.append(lifecycle_stage)
+        if decision:
+            conditions.append("decision = ?")
+            params.append(decision)
+        where = " AND ".join(conditions)
+
+        with get_conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, signal_id, symbol, direction, entry, stop, tp1, tp2, tp3,
+                       rr, risk_amount, position_size, notional, leverage_suggestion,
+                       final_score, technical_score, ml_score, ai_score, risk_score,
+                       cold_start_score, score_source, score_confidence,
+                       quality, setup_quality, reason, decision, lifecycle_stage,
+                       execution_status, created_at
+                FROM signal_candidates
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (*params, limit),
+            ).fetchall()
+
+        return [_normalize_candidate_row(dict(r)) for r in rows]
+    except Exception as e:
+        logger.error(f"[Dashboard] get_signal_candidates hatası: {e}")
+        return []
+
+
+def get_active_signal_candidates(limit: int = 30) -> list[dict]:
+    """Telegram'a gönderilmiş veya trade açılmış aktif adaylar."""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, signal_id, symbol, direction, entry, stop, tp1, tp2, tp3,
+                       rr, risk_amount, position_size, notional, leverage_suggestion,
+                       final_score, technical_score, ml_score, ai_score, risk_score,
+                       cold_start_score, score_source, score_confidence,
+                       quality, setup_quality, reason, decision, lifecycle_stage,
+                       execution_status, created_at
+                FROM signal_candidates
+                WHERE lifecycle_stage IN (
+                    'APPROVED_FOR_TELEGRAM','APPROVED_FOR_TRADE','OPENED','MANAGED'
+                )
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [_normalize_candidate_row(dict(r)) for r in rows]
+    except Exception as e:
+        logger.error(f"[Dashboard] get_active_signal_candidates hatası: {e}")
+        return []
+
+
+def get_watchlist_candidates(limit: int = 30) -> list[dict]:
+    """Watch/watchlist kararı almış adaylar."""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, signal_id, symbol, direction, entry, stop, tp1, tp2, tp3,
+                       rr, risk_amount, leverage_suggestion,
+                       final_score, technical_score, ml_score, ai_score, risk_score,
+                       score_source, score_confidence, quality, setup_quality,
+                       reason, decision, lifecycle_stage, created_at
+                FROM signal_candidates
+                WHERE decision = 'WATCH'
+                  AND lifecycle_stage NOT IN ('REJECTED','CLOSED')
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [_normalize_candidate_row(dict(r)) for r in rows]
+    except Exception as e:
+        logger.error(f"[Dashboard] get_watchlist_candidates hatası: {e}")
+        return []
+
+
+def get_rejected_candidates(limit: int = 30) -> list[dict]:
+    """Son reddedilmiş adaylar."""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, signal_id, symbol, direction, entry,
+                       final_score, technical_score, ml_score, ai_score, risk_score,
+                       score_source, quality, setup_quality,
+                       reason, reject_reason, ai_veto_reason, decision,
+                       lifecycle_stage, created_at
+                FROM signal_candidates
+                WHERE lifecycle_stage = 'REJECTED' OR decision = 'VETO'
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [_normalize_candidate_row(dict(r)) for r in rows]
+    except Exception as e:
+        logger.error(f"[Dashboard] get_rejected_candidates hatası: {e}")
+        return []
+
+
+def get_performance_summary(days: int = 30) -> dict:
+    """
+    Expectancy, profit_factor, avg_R, win_rate, max_drawdown_R özeti.
+    Dashboard ve /performance/summary endpoint'i için.
+    """
+    try:
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT net_pnl, r_multiple, close_reason
+                FROM trades
+                WHERE DATE(close_time) >= ?
+                  AND close_time IS NOT NULL
+                """,
+                (since,),
+            ).fetchall()
+
+        if not rows:
+            return {"days": days, "trade_count": 0}
+
+        pnls  = [r[0] or 0 for r in rows]
+        rs    = [r[1] or 0 for r in rows]
+        wins  = sum(1 for p in pnls if p > 0)
+        total = len(pnls)
+        losses = total - wins
+        win_rate = wins / total if total else 0
+
+        gross_win  = sum(p for p in pnls if p > 0)
+        gross_loss = abs(sum(p for p in pnls if p < 0))
+        profit_factor = gross_win / gross_loss if gross_loss > 0 else (float("inf") if gross_win > 0 else 0)
+
+        avg_win_r  = (sum(r for r in rs if r > 0) / wins) if wins > 0 else 0
+        avg_loss_r = (sum(r for r in rs if r < 0) / losses) if losses > 0 else 0
+        expectancy_r = (win_rate * avg_win_r) + ((1 - win_rate) * avg_loss_r)
+
+        running = 0
+        peak = 0
+        max_dd = 0
+        for p in pnls:
+            running += p
+            if running > peak:
+                peak = running
+            dd = peak - running
+            if dd > max_dd:
+                max_dd = dd
+
+        # Score distribution from signal_candidates
+        with get_conn() as conn:
+            dist_rows = conn.execute(
+                """
+                SELECT
+                    CASE
+                        WHEN final_score >= 90 THEN 'S'
+                        WHEN final_score >= 82 THEN 'A+'
+                        WHEN final_score >= 75 THEN 'A'
+                        WHEN final_score >= 65 THEN 'B'
+                        WHEN final_score >= 50 THEN 'C'
+                        ELSE 'D'
+                    END as grade,
+                    COUNT(*) as cnt
+                FROM signal_candidates
+                WHERE created_at >= datetime('now', ?)
+                  AND final_score IS NOT NULL
+                GROUP BY grade
+                """,
+                (f"-{days} days",),
+            ).fetchall()
+        score_dist = {r[0]: r[1] for r in dist_rows}
+
+        return {
+            "days": days,
+            "trade_count": total,
+            "win_count": wins,
+            "loss_count": losses,
+            "win_rate": round(win_rate, 4),
+            "profit_factor": round(profit_factor, 3),
+            "expectancy_r": round(expectancy_r, 4),
+            "avg_r": round(sum(rs) / total if total else 0, 4),
+            "avg_win_r": round(avg_win_r, 4),
+            "avg_loss_r": round(avg_loss_r, 4),
+            "max_drawdown_usd": round(max_dd, 4),
+            "gross_pnl": round(sum(pnls), 4),
+            "score_distribution": score_dist,
+        }
+    except Exception as e:
+        logger.error(f"[Dashboard] get_performance_summary hatası: {e}")
+        return {"error": str(e)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ARKAPLAN SERVİSİ
 # ─────────────────────────────────────────────────────────────────────────────
 

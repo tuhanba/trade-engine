@@ -439,12 +439,15 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
         "direction":       direction,
         "entry":           round(entry, 8),
         "sl":              levels["sl"],
+        "stop_loss":       levels["sl"],          # canonical alias
         "tp1":             levels["tp1"],
         "tp2":             levels["tp2"],
+        "tp3":             levels["runner_target"],  # canonical alias
         "runner_target":   levels["runner_target"],
         "rr":              levels["rr"],
         "expected_mfe_r":  expected_mfe_r,
         "score":           score,
+        "technical_score": round(score, 1),       # canonical — 0-100 scale
         "confidence":      confidence,
         # debug / loglama
         "atr":             round(atr1, 8),

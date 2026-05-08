@@ -265,26 +265,25 @@ class TriggerEngine:
             score = min(10.0, score + 0.5)
 
         # ML Sinyal Skoru Hesaplama
-        ml_score = 50
+        _ml_signal = {
+            "symbol": symbol, "direction": direction,
+            "adx15": adx_val, "rv": rv, "rsi5": rsi5, "rsi1": rsi1,
+            "momentum_3c": mom3c, "btc_trend": btc_trend,
+            "funding_favorable": 1 if (direction == "LONG" and funding < 0) or (direction == "SHORT" and funding > 0) else 0,
+        }
+        try:
+            from core.score_engine import cold_start_score as _cold_start_score
+            ml_score = _cold_start_score(_ml_signal)
+        except Exception:
+            ml_score = 45
         try:
             import sys
             import os
             sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             from ml_signal_scorer import get_scorer
             scorer = get_scorer()
-            signal_data = {
-                "symbol": symbol,
-                "direction": direction,
-                "rsi5": rsi5,
-                "rsi1": rsi1,
-                "rv": rv,
-                "momentum_3c": mom3c,
-                "funding_favorable": 1 if (direction == "LONG" and funding < 0) or (direction == "SHORT" and funding > 0) else 0,
-                "btc_trend": "NEUTRAL", # Trend engine'den gelmeli ama şimdilik nötr
-                "session": "OFF", # AI decision engine'den gelmeli
-            }
-            ml_score = scorer.predict(signal_data)
-            
+            ml_score = scorer.predict(_ml_signal)
+
             # ML skoru düşükse kaliteyi düşür
             if ml_score < 35 and quality in ["A+", "A", "B"]:
                 quality = "C"

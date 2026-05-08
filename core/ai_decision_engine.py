@@ -255,7 +255,10 @@ class AIDecisionEngine:
                 ai_adj -= 1.0
 
         # 5. ML Sinyal Skoru Etkisi
-        ml_score = getattr(signal_data, "ml_score", 50)
+        ml_score = getattr(signal_data, "ml_score", None)
+        if ml_score is None:
+            from core.score_engine import cold_start_score
+            ml_score = cold_start_score(signal_data.to_dict() if hasattr(signal_data, "to_dict") else {})
         if ml_score > 75:
             ai_adj += 1.5
         elif ml_score > 60:
@@ -297,13 +300,22 @@ class AIDecisionEngine:
             # Dinamik parametreleri sinyale uygula
             signal_data.risk_percent = self.params["risk_pct"]
 
+        from ml_signal_scorer import get_scorer as _get_scorer
+        try:
+            _scorer_trained = _get_scorer().trained
+        except Exception:
+            _scorer_trained = False
+        score_source = "mixed" if _scorer_trained else "cold_start"
+
         return {
             "decision": decision,
             "final_score": round(final_score, 1),
             "ai_score": round(ai_score, 1),
+            "ml_score": round(ml_score, 1),
             "confidence": round(confidence, 2),
             "reason": reason,
-            "ai_adjustment": round(ai_adj, 1)
+            "ai_adjustment": round(ai_adj, 1),
+            "score_source": score_source,
         }
 
     def _optimize_params(self):

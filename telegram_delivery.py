@@ -165,6 +165,8 @@ def format_trade_close(trade, pnl, reason):
     )
 
 _sent_ids: deque = deque(maxlen=1000)
+_trade_open_dedupe: dict = {}  # key -> sent_at timestamp (15 dk window)
+_TRADE_OPEN_DEDUPE_SECS = 900
 _sent_ids_set: set = set()
 
 def deliver_signal(sig):
@@ -201,12 +203,29 @@ def deliver_signal(sig):
             pass
         return False
 
+def _trade_open_dedupe_key(data: dict) -> str:
+    entry = round(float(data.get("entry", data.get("entry_zone", 0)) or 0), 4)
+    return f"{data.get('symbol')}:{data.get('direction')}:{entry}:{data.get('setup_quality','')}"
+
+
 def send_trade_open(data: dict):
     """
     Trade açılış bildirimi. Score breakdown ve kaynak dahil premium format.
-    data dict'i execution_engine.open_trade() tarafından sağlanır.
+    Aynı symbol+direction+entry+quality 15 dk içinde tekrar gönderilmez.
     """
     try:
+        import time as _time
+        dk = _trade_open_dedupe_key(data)
+        now = _time.time()
+        if dk in _trade_open_dedupe and now - _trade_open_dedupe[dk] < _TRADE_OPEN_DEDUPE_SECS:
+            logger.debug(f"Trade open dedupe engellendi: {dk}")
+            return
+        _trade_open_dedupe[dk] = now
+        # Eski kayıtları temizle
+        stale = [k for k, t in _trade_open_dedupe.items() if now - t > _TRADE_OPEN_DEDUPE_SECS * 2]
+        for k in stale:
+            _trade_open_dedupe.pop(k, None)
+
         from core.score_engine import normalize_signal_scores
         from core.telegram_formatter import format_trade_open
         data = normalize_signal_scores(dict(data))
