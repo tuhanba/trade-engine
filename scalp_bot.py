@@ -189,6 +189,10 @@ def main():
     init_db()
     init_paper_account()
 
+    # Dashboard için başlangıç sistem durumu
+    set_state("execution_mode", EXECUTION_MODE)
+    set_state("paused", "0")
+
     # Binance client
     client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
     if AI_BRAIN_AVAILABLE:
@@ -206,7 +210,11 @@ def main():
     if TG_MANAGER_AVAILABLE:
         try:
             tg_manager = TelegramManager(send_message)
-            tg_manager.start()
+            tg_manager.start(
+                get_balance_fn          = get_paper_balance,
+                get_open_trades_fn      = get_open_trades,
+                get_circuit_breaker_fn  = is_circuit_breaker_active,
+            )
         except Exception as e:
             logger.warning(f"TelegramManager başlatılamadı: {e}")
 
@@ -672,11 +680,17 @@ def main():
                             "sl": sig.stop_loss,
                             "tp1": sig.tp1,
                             "tp2": sig.tp2,
+                            "tp3": sig.tp3,
                             "runner_target": sig.tp3,
                             "rr": sig.rr,
                             "score": sig.final_score,
+                            "final_score": sig.final_score,
                             "confidence": sig.confidence,
                             "candidate_id": candidate_id,
+                            "setup_quality": sig.setup_quality,
+                            "leverage": int(sig.leverage_suggestion or 10),
+                            "atr": sig.atr if hasattr(sig, "atr") else 0,
+                            "max_loss": sig.max_loss if hasattr(sig, "max_loss") else 0,
                         }
                         ax_result = {
                             "decision": "ALLOW",
@@ -705,6 +719,9 @@ def main():
                 except Exception as e:
                     logger.error(f"Coin işleme hatası {symbol}: {e}", exc_info=True)
                     continue
+
+            # Dashboard son tarama zamanı güncelle
+            set_state("last_scan_time", datetime.now(timezone.utc).isoformat())
 
             time.sleep(SCAN_INTERVAL)
             # ── AI Brain Periyodik Adaptasyon (30 dakikada bir) ─────────────

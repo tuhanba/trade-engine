@@ -26,7 +26,12 @@ from database import (
     get_open_trades, update_paper_balance, get_paper_balance,
     save_postmortem, save_trade_event,
 )
-from core.accounting import calculate_runner_unrealized_pnl
+from core.accounting import (
+    calculate_runner_unrealized_pnl,
+    calculate_fee,
+    calculate_max_loss_after_fee,
+)
+from telegram_delivery import send_tp_hit, send_trade_close
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +121,12 @@ def open_trade(client, signal: dict, ax_decision: dict,
     qty_tp2    = round(qty * TP2_CLOSE_PCT / 100, 8)
     qty_runner = round(qty - qty_tp1 - qty_tp2, 8)
 
+    # Fee hesabı (giriş tarafı)
+    open_fee = calculate_fee(entry * qty)
+
+    # Max kayıp (SL senaryosu)
+    max_loss = signal.get("max_loss") or calculate_max_loss_after_fee(entry, sl, qty)
+
     trade = {
         "symbol":         symbol,
         "direction":      direction,
@@ -125,12 +136,20 @@ def open_trade(client, signal: dict, ax_decision: dict,
         "entry":          entry,
         "sl":             sl,
         "tp1":            tp1,
-        "tp2":            tp2,
+        "tp2":            signal.get("tp2", tp2) if tp2 else signal.get("tp2"),
+        "tp3":            signal.get("tp3") or signal.get("runner_target"),
         "trail_stop":     None,
         "qty":            qty,
         "qty_tp1":        qty_tp1,
         "qty_tp2":        qty_tp2,
         "qty_runner":     qty_runner,
+        "leverage":       signal.get("leverage", 10),
+        "setup_quality":  signal.get("setup_quality") or signal.get("quality"),
+        "final_score":    signal.get("score") or signal.get("final_score"),
+        "rr":             signal.get("rr"),
+        "max_loss_after_fee": max_loss,
+        "open_fee":       open_fee,
+        "total_fee":      open_fee,
         "linked_candidate_id": None,
         "linked_candidate_uuid": signal.get("candidate_id"),
         "open_time":      datetime.now(timezone.utc).isoformat(),
@@ -251,6 +270,11 @@ def _check_trade(client, t: dict) -> bool:
                 f"[Execution] TP1 #{trade_id} {symbol} +{pnl_tp1:.3f}$ "
                 f"| Breakeven SL → {new_sl:.6f}"
             )
+            try:
+                bal = get_paper_balance()
+                send_tp_hit(symbol, 1, pnl_tp1, qty_tp2 + qty_runner, bal)
+            except Exception as _e:
+                logger.debug(f"TP1 Telegram hata: {_e}")
             return False
 
     # ── TP2 Kontrolü ────────────────────────────────────────────────────────
@@ -275,6 +299,11 @@ def _check_trade(client, t: dict) -> bool:
             update_paper_balance(pnl_tp2)
             save_trade_event(trade_id, "TP2_HIT", f"price={tp2} pnl={pnl_tp2:.4f} trail={new_trail:.6f}")
             logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ → RUNNER trail={new_trail:.6f}")
+            try:
+                bal = get_paper_balance()
+                send_tp_hit(symbol, 2, pnl_tp2, qty_runner, bal)
+            except Exception as _e:
+                logger.debug(f"TP2 Telegram hata: {_e}")
             return False
 
     # ── Runner: Trailing Stop ────────────────────────────────────────────────
@@ -356,10 +385,50 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     except Exception:
         hold_min = 0
 
-    db_close_trade(trade_id, net_pnl=net_pnl, total_fee=0,
-                   reason=reason, close_price=close_price)
+    # Kapanış fee hesabı — kalan miktar üzerinden
+    qty       = t.get("qty") or 0
+    qty_tp1   = t.get("qty_tp1") or 0
+    qty_tp2   = t.get("qty_tp2") or 0
+    qty_runner = t.get("qty_runner") or max(qty - qty_tp1 - qty_tp2, 0)
+    close_qty  = qty_runner if t.get("status") in ("runner",) else qty
+    close_fee  = calculate_fee(close_price * close_qty)
+    open_fee   = t.get("open_fee") or calculate_fee((t.get("entry") or close_price) * qty)
+    total_fee  = round(open_fee + close_fee, 6)
+
+    # R-katı hesabı
+    entry_p = t.get("entry") or 0
+    sl_p    = t.get("sl") or 0
+    r_multiple = 0.0
+    if entry_p and sl_p:
+        sl_dist = abs(entry_p - sl_p)
+        if sl_dist > 0 and qty > 0:
+            r_multiple = round(net_pnl / (sl_dist * qty), 3)
+
+    # Tutma süresi human-readable
+    h = int(hold_min // 60)
+    m = int(hold_min % 60)
+    duration_str = f"{h}s {m}dk" if h else f"{m}dk"
+
+    db_close_trade(trade_id, net_pnl=net_pnl, total_fee=total_fee,
+                   reason=reason, close_price=close_price, r_multiple=r_multiple)
     update_paper_balance(net_pnl - (t.get("realized_pnl") or 0))
-    save_trade_event(trade_id, "CLOSE", f"reason={reason} close_price={close_price} net_pnl={net_pnl:.4f}")
+    save_trade_event(trade_id, "CLOSE", f"reason={reason} close_price={close_price} net_pnl={net_pnl:.4f} fee={total_fee:.4f} r={r_multiple:.2f}")
+
+    # Telegram kapanış bildirimi
+    try:
+        bal = get_paper_balance()
+        send_trade_close(
+            symbol       = t.get("symbol", ""),
+            net_pnl      = net_pnl,
+            total_fee    = total_fee,
+            reason       = reason,
+            duration_str = duration_str,
+            direction    = t.get("direction", ""),
+            r_multiple   = r_multiple,
+            balance_after= bal,
+        )
+    except Exception as _e:
+        logger.debug(f"Trade close Telegram hata: {_e}")
 
     result = "WIN" if net_pnl > 0 else "LOSS"
 

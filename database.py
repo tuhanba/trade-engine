@@ -265,6 +265,58 @@ def init_db():
             reason TEXT,
             consec_losses INTEGER DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS pattern_memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            direction TEXT,
+            adx REAL,
+            rv REAL,
+            rsi5 REAL,
+            rsi1 REAL,
+            funding_favorable INTEGER DEFAULT 1,
+            bb_width_pct REAL,
+            ob_ratio REAL,
+            volume_m REAL,
+            btc_trend TEXT,
+            session TEXT,
+            hold_minutes REAL,
+            partial_exit INTEGER DEFAULT 0,
+            result TEXT,
+            bb_width_chg REAL DEFAULT 0,
+            momentum_3c REAL DEFAULT 0,
+            prev_result TEXT DEFAULT 'NONE',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS best_params (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            params TEXT,
+            score REAL DEFAULT 0,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS adaptive_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            metric TEXT,
+            value REAL,
+            period TEXT,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS ai_learning (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            result TEXT,
+            pnl REAL,
+            setup_quality TEXT,
+            r_multiple REAL DEFAULT 0,
+            session TEXT,
+            regime TEXT,
+            learned_at TEXT DEFAULT (datetime('now'))
+        );
         """)
     _migrate()
     logger.info("[DB] init_db tamamlandı.")

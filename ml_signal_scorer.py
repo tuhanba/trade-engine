@@ -23,9 +23,10 @@ import logging
 import pickle
 from datetime import datetime, timezone
 
+from config import DB_PATH
+
 logger = logging.getLogger(__name__)
 
-DB_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_model.pkl")
 
 MIN_TRAIN_SAMPLES = 30
