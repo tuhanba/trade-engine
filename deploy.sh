@@ -2,6 +2,25 @@
 # ═══════════════════════════════════════════════════════════════════
 #  AURVEX Ai — Deploy  |  bash deploy.sh [--reset] [--branch=X]
 # ═══════════════════════════════════════════════════════════════════
+BRANCH="claude/fix-scoring-telegram-ux-YuTYB"
+DIR="/root/trade_engine"
+
+# ── Aşama 1: Git pull → script kendini yeniden başlatır ────────────
+# Bu sayede bash her zaman güncel deploy.sh'i çalıştırır.
+if [ "${_AX_INNER:-0}" != "1" ]; then
+    cd "$DIR"
+    git config pull.rebase false 2>/dev/null || true
+    git fetch origin "$BRANCH" -q 2>/dev/null || true
+    if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+        git checkout "$BRANCH" -q 2>/dev/null || true
+    else
+        git checkout -b "$BRANCH" "origin/$BRANCH" -q 2>/dev/null || true
+    fi
+    git pull origin "$BRANCH" -q 2>/dev/null || true
+    export _AX_INNER=1
+    exec bash "$0" "$@"   # Güncellenen script'i çalıştır
+fi
+
 set -euo pipefail
 
 BRANCH="claude/fix-scoring-telegram-ux-YuTYB"
