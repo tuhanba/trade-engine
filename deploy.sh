@@ -1,200 +1,222 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
-#  AURVEX Ai — Güvenli Deploy Scripti
-#  Kullanım: bash deploy.sh [--reset]
-#    --reset  : Trade/sinyal verilerini sıfırla (bakiye dahil)
-#    --branch : Özel branch belirt (varsayılan: aşağıda tanımlı)
+#  AURVEX Ai — Deploy  |  bash deploy.sh [--reset] [--branch=X]
 # ═══════════════════════════════════════════════════════════════════
 set -euo pipefail
 
 BRANCH="claude/fix-scoring-telegram-ux-YuTYB"
 PY="python3"
 DIR="/root/trade_engine"
-SERVICES="aurvex-bot aurvex-dashboard"
-WATCHDOG="aurvex-watchdog"
 HEALTH_URL="http://localhost:5000/api/health"
 RESET=false
+START_TIME=$(date +%s)
 
-# ── Argüman ayrıştırma ──────────────────────────────────────────────
 for arg in "$@"; do
     case $arg in
-        --reset)   RESET=true ;;
+        --reset)    RESET=true ;;
         --branch=*) BRANCH="${arg#*=}" ;;
     esac
 done
 
-# ── Renk kodları ────────────────────────────────────────────────────
-OK="\033[0;32m✓\033[0m"
-ERR="\033[0;31m✗\033[0m"
-INF="\033[0;34m→\033[0m"
-WARN="\033[0;33m!\033[0m"
+# ── Renkler & ikonlar ───────────────────────────────────────────────
+R="\033[0m"
+BOLD="\033[1m"
+DIM="\033[2m"
+GREEN="\033[38;5;82m"
+RED="\033[38;5;196m"
+YELLOW="\033[38;5;220m"
+BLUE="\033[38;5;75m"
+CYAN="\033[38;5;51m"
+GRAY="\033[38;5;245m"
+WHITE="\033[38;5;255m"
+PURPLE="\033[38;5;135m"
 
-log()  { echo -e "${INF} $1"; }
-ok()   { echo -e "${OK} $1"; }
-fail() { echo -e "${ERR} $1"; }
-warn() { echo -e "${WARN} $1"; }
+step()  { echo -e "\n${BOLD}${BLUE}  ┌─ ${WHITE}$1${R}"; }
+ok()    { echo -e "${GREEN}  │  ✓ ${R}$1"; }
+fail()  { echo -e "${RED}  │  ✗ ${R}${BOLD}$1${R}"; }
+warn()  { echo -e "${YELLOW}  │  ! ${R}$1"; }
+info()  { echo -e "${GRAY}  │    ${R}${DIM}$1${R}"; }
+done_() { echo -e "${BLUE}  └─────────────────────────────${R}"; }
 
+# ── Banner ──────────────────────────────────────────────────────────
+clear
 echo ""
-echo "╔══════════════════════════════════════╗"
-echo "║     AURVEX Ai — DEPLOY BAŞLIYOR      ║"
-echo "╚══════════════════════════════════════╝"
-echo " Branch : $BRANCH"
-echo " Dizin  : $DIR"
-echo " Reset  : $RESET"
+echo -e "${BOLD}${PURPLE}"
+echo "    ╔═══════════════════════════════════════╗"
+echo "    ║                                       ║"
+echo "    ║    ◈  AURVEX Ai  —  DEPLOY  ◈         ║"
+echo "    ║                                       ║"
+echo "    ╚═══════════════════════════════════════╝"
+echo -e "${R}"
+echo -e "${GRAY}    Branch  ${R}${CYAN}$BRANCH${R}"
+echo -e "${GRAY}    Dizin   ${R}${WHITE}$DIR${R}"
+echo -e "${GRAY}    Reset   ${R}$([ "$RESET" = true ] && echo -e "${YELLOW}EVET${R}" || echo -e "${GRAY}hayır${R}")"
+echo -e "${GRAY}    Zaman   ${R}${DIM}$(date '+%H:%M:%S')${R}"
 echo ""
 
 # ── Dizin kontrolü ──────────────────────────────────────────────────
 if [ ! -d "$DIR" ]; then
-    fail "Dizin bulunamadı: $DIR"
+    echo -e "${RED}  ✗ Dizin bulunamadı: $DIR${R}"
     exit 1
 fi
 cd "$DIR"
 
-# ── [1/7] Git ayarları ──────────────────────────────────────────────
-log "[1/7] Git yapılandırılıyor..."
+# ═══════════════════════════════════════════════════════════════════
+# ADIM 1 — Git
+# ═══════════════════════════════════════════════════════════════════
+step "Git  ·  Kod güncelleniyor"
 git config pull.rebase false 2>/dev/null || true
-ok "Git merge stratejisi: merge"
+info "merge stratejisi ayarlandı"
 
-# ── [2/7] Kod güncelle ──────────────────────────────────────────────
-log "[2/7] Kod güncelleniyor (branch: $BRANCH)..."
+PREV=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
+git fetch origin "$BRANCH" 2>&1 | grep -E "->|error" | sed 's/^/  │    /' || true
 
-# Mevcut branch'i kaydet (rollback için)
-PREV_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-
-git fetch origin "$BRANCH" 2>&1 | tail -3
-
-# Branch varsa geç, yoksa oluştur
 if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-    git checkout "$BRANCH"
+    git checkout "$BRANCH" -q
 else
-    git checkout -b "$BRANCH" "origin/$BRANCH"
+    git checkout -b "$BRANCH" "origin/$BRANCH" -q
 fi
 
-# Yerel değişiklik varsa stash'le
-if ! git diff --quiet; then
-    warn "Yerel değişiklikler stash'leniyor..."
-    git stash
+if ! git diff --quiet 2>/dev/null; then
+    warn "Yerel değişiklikler stash'leniyor"
+    git stash -q
 fi
 
-git pull origin "$BRANCH"
-NEW_COMMIT=$(git rev-parse HEAD)
-ok "Kod güncellendi: ${PREV_COMMIT:0:7} → ${NEW_COMMIT:0:7}"
+git pull origin "$BRANCH" -q
+NEW=$(git rev-parse --short HEAD)
 
-# ── [3/7] Import sağlığı (pull sonrası, servis öncesi) ──────────────
-log "[3/7] Import sağlığı kontrol ediliyor..."
-IMPORT_RESULT=$($PY -c "
-import sys; sys.path.insert(0, '.')
-failed = []
-for m in ['config','database','core.accounting','execution_engine',
-          'telegram_delivery','signal_engine','ml_signal_scorer',
-          'ai_brain','dashboard_service']:
-    try: __import__(m)
-    except Exception as e: failed.append(f'{m}: {e}')
-if failed:
-    print('FAIL:' + '|'.join(failed))
-else:
-    print('OK')
-" 2>/dev/null)
+ok "Güncellendi  ${GRAY}${PREV}${R} ${GRAY}→${R} ${CYAN}${NEW}${R}"
+info "$(git log -1 --pretty='%s' 2>/dev/null)"
+done_
 
-if [[ "$IMPORT_RESULT" == OK ]]; then
-    ok "Import sağlığı: 14/14 OK"
+# ═══════════════════════════════════════════════════════════════════
+# ADIM 2 — Import kontrolü
+# ═══════════════════════════════════════════════════════════════════
+step "Import  ·  Modül sağlığı"
+
+MODULES=('config' 'database' 'core.accounting' 'core.trigger_engine'
+         'core.risk_engine' 'core.trend_engine' 'core.ai_decision_engine'
+         'core.market_scanner' 'execution_engine' 'telegram_delivery'
+         'signal_engine' 'ml_signal_scorer' 'ai_brain' 'dashboard_service')
+
+FAIL_LIST=""
+PASS=0
+for m in "${MODULES[@]}"; do
+    result=$($PY -c "import sys; sys.path.insert(0,'.'); __import__('$m')" 2>&1)
+    if [ $? -eq 0 ]; then
+        PASS=$((PASS+1))
+    else
+        FAIL_LIST="$FAIL_LIST\n    $m: $result"
+    fi
+done
+
+if [ -z "$FAIL_LIST" ]; then
+    ok "${PASS}/${#MODULES[@]} modül import başarılı"
 else
-    fail "Import hatası — deploy iptal ediliyor!"
-    echo "$IMPORT_RESULT" | tr '|' '\n' | sed 's/^/  /'
-    warn "Rollback: $PREV_COMMIT"
-    git checkout "$PREV_COMMIT" 2>/dev/null || true
+    fail "Import hatası — rollback başlatılıyor"
+    echo -e "$FAIL_LIST" | head -5
+    git checkout "$PREV" -q 2>/dev/null || true
+    done_
+    echo -e "\n${RED}  ✗ DEPLOY BAŞARISIZ — eski sürüme döndürüldü${R}\n"
     exit 1
 fi
+done_
 
-# ── [4/7] Servisleri durdur ─────────────────────────────────────────
-log "[4/7] Servisler durduruluyor..."
-for svc in $SERVICES $WATCHDOG; do
+# ═══════════════════════════════════════════════════════════════════
+# ADIM 3 — Servisler durdur
+# ═══════════════════════════════════════════════════════════════════
+step "Servisler  ·  Durduruluyor"
+for svc in aurvex-bot aurvex-dashboard aurvex-watchdog; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
         systemctl stop "$svc" 2>/dev/null || true
         ok "$svc durduruldu"
+    else
+        info "$svc zaten duruyordu"
     fi
 done
 sleep 2
+done_
 
-# ── [5/7] Migration ─────────────────────────────────────────────────
-log "[5/7] DB migration çalıştırılıyor..."
+# ═══════════════════════════════════════════════════════════════════
+# ADIM 4 — Migration
+# ═══════════════════════════════════════════════════════════════════
+step "Migration  ·  DB şema güncelle"
 if $PY scripts/migrate_accounting_schema.py 2>/dev/null; then
     ok "Migration tamamlandı"
 else
     warn "Migration uyarısı (devam ediliyor)"
 fi
 
-# Reset isteniyorsa
 if [ "$RESET" = true ]; then
-    warn "Dashboard sıfırlanıyor (trade/sinyal verileri silinecek)..."
-    read -r -p "  Emin misiniz? [y/N]: " confirm
+    echo ""
+    echo -e "${YELLOW}  │  Dashboard sıfırlama seçildi.${R}"
+    echo -ne "${YELLOW}  │  Trade/sinyal verileri silinecek. Emin misiniz? [y/N]: ${R}"
+    read -r confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
         $PY reset_dashboard.py 2>/dev/null && ok "Dashboard sıfırlandı" || warn "Reset hatası"
     else
-        warn "Reset iptal edildi"
+        info "Reset iptal edildi"
     fi
 fi
+done_
 
-# ── [6/7] Service dosyaları ve başlatma ─────────────────────────────
-log "[6/7] Servisler başlatılıyor..."
+# ═══════════════════════════════════════════════════════════════════
+# ADIM 5 — Servisleri başlat
+# ═══════════════════════════════════════════════════════════════════
+step "Başlatma  ·  Servisler ayağa kaldırılıyor"
 
-# Service dosyalarını kopyala (varsa)
-for svcfile in aurvex-bot.service aurvex-dashboard.service; do
-    if [ -f "$svcfile" ]; then
-        cp "$svcfile" /etc/systemd/system/ 2>/dev/null || true
-    fi
+for svcfile in aurvex-bot.service aurvex-dashboard.service aurvex-watchdog.service; do
+    [ -f "$svcfile" ] && cp "$svcfile" /etc/systemd/system/ 2>/dev/null || true
 done
-if [ -f "aurvex-watchdog.service" ]; then
-    cp aurvex-watchdog.service /etc/systemd/system/ 2>/dev/null || true
-fi
 systemctl daemon-reload 2>/dev/null || true
 
-# Bot'u başlat
-systemctl start aurvex-bot 2>/dev/null && ok "aurvex-bot başlatıldı" || fail "aurvex-bot başlatılamadı!"
+systemctl start aurvex-bot       && ok "aurvex-bot başlatıldı"       || fail "aurvex-bot BAŞLAMIYOR"
 sleep 3
-
-# Dashboard'u başlat
-systemctl start aurvex-dashboard 2>/dev/null && ok "aurvex-dashboard başlatıldı" || fail "aurvex-dashboard başlatılamadı!"
+systemctl start aurvex-dashboard && ok "aurvex-dashboard başlatıldı" || fail "aurvex-dashboard BAŞLAMIYOR"
 sleep 3
+systemctl start aurvex-watchdog  2>/dev/null && ok "aurvex-watchdog başlatıldı" || info "watchdog yok / atlandı"
+done_
 
-# Watchdog (opsiyonel)
-systemctl start "$WATCHDOG" 2>/dev/null && ok "$WATCHDOG başlatıldı" || warn "$WATCHDOG yok/atlandı"
-
-# ── [7/7] Sağlık kontrolü ───────────────────────────────────────────
-log "[7/7] Sağlık kontrolü yapılıyor..."
+# ═══════════════════════════════════════════════════════════════════
+# ADIM 6 — Sağlık kontrolü
+# ═══════════════════════════════════════════════════════════════════
+step "Sağlık  ·  Sistem kontrol ediliyor"
 sleep 4
 
-echo ""
-echo "── Servis Durumları ────────────────────"
-for svc in $SERVICES; do
+for svc in aurvex-bot aurvex-dashboard; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
-        ok "$svc: ÇALIŞIYOR"
+        UPTIME=$(systemctl show "$svc" --property=ActiveEnterTimestamp --value 2>/dev/null | cut -d' ' -f2 || echo "")
+        ok "$svc  ${GRAY}ÇALIŞIYOR${R}  ${DIM}$UPTIME${R}"
     else
-        fail "$svc: DURDU"
-        systemctl status "$svc" --no-pager -n 5 2>/dev/null || true
+        fail "$svc DURDU"
+        systemctl status "$svc" --no-pager -n 3 2>/dev/null | grep -E "Error|error|failed|Active" | sed 's/^/  │    /' || true
     fi
 done
 
 echo ""
-echo "── API Sağlık Kontrolü ─────────────────"
 for i in 1 2 3; do
-    HEALTH=$(curl -s --max-time 5 "$HEALTH_URL" 2>/dev/null || echo "")
+    HEALTH=$(curl -s --max-time 4 "$HEALTH_URL" 2>/dev/null || echo "")
     if echo "$HEALTH" | grep -q '"status"'; then
-        ok "Dashboard API: HAZIR"
+        ok "Dashboard API hazır  ${GRAY}→ $HEALTH_URL${R}"
         break
     fi
-    if [ $i -lt 3 ]; then
-        warn "Dashboard bekleniyor... ($i/3)"
-        sleep 5
-    else
-        warn "Dashboard API henüz hazır değil (başlıyor olabilir)"
-    fi
+    [ $i -lt 3 ] && { warn "API bekleniyor ($i/3)..."; sleep 5; } || info "API başlıyor olabilir — birkaç saniye bekleyin"
 done
+done_
+
+# ═══════════════════════════════════════════════════════════════════
+# ÖZET
+# ═══════════════════════════════════════════════════════════════════
+ELAPSED=$(( $(date +%s) - START_TIME ))
 
 echo ""
-echo "╔══════════════════════════════════════╗"
-echo "║          DEPLOY TAMAMLANDI           ║"
-echo "╚══════════════════════════════════════╝"
-echo " Commit : ${NEW_COMMIT:0:12}"
-echo " Log    : journalctl -u aurvex-bot -f"
+echo -e "${BOLD}${GREEN}"
+echo "    ╔═══════════════════════════════════════╗"
+echo "    ║        ✓  DEPLOY TAMAMLANDI           ║"
+echo "    ╚═══════════════════════════════════════╝"
+echo -e "${R}"
+echo -e "${GRAY}    Commit  ${R}${CYAN}${NEW}${R}"
+echo -e "${GRAY}    Süre    ${R}${WHITE}${ELAPSED}s${R}"
+echo -e "${GRAY}    Log     ${R}${DIM}journalctl -u aurvex-bot -f${R}"
+echo -e "${GRAY}    Takip   ${R}${DIM}python3 scripts/monitor_paper_run.py 60${R}"
 echo ""
