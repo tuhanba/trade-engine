@@ -5,20 +5,24 @@
 BRANCH="claude/fix-scoring-telegram-ux-YuTYB"
 DIR="/root/trade_engine"
 
-# ── Aşama 1: Git pull → script kendini yeniden başlatır ────────────
-# Bu sayede bash her zaman güncel deploy.sh'i çalıştırır.
+# ── Aşama 1: Git pull → /tmp'den çalıştır (bash tampon sorunu çözümü) ─
+# bash deploy.sh'i başlangıçta tamponlar; git pull dosyayı güncelleyince
+# bash eski içeriği çalıştırır. Çözüm: güncel dosyayı /tmp'ye kopyala.
 if [ "${_AX_INNER:-0}" != "1" ]; then
     cd "$DIR"
     git config pull.rebase false 2>/dev/null || true
-    git fetch origin "$BRANCH" -q 2>/dev/null || true
+    git fetch origin "$BRANCH" -q
     if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-        git checkout "$BRANCH" -q 2>/dev/null || true
+        git checkout "$BRANCH" -q
     else
-        git checkout -b "$BRANCH" "origin/$BRANCH" -q 2>/dev/null || true
+        git checkout -b "$BRANCH" "origin/$BRANCH" -q
     fi
-    git pull origin "$BRANCH" -q 2>/dev/null || true
+    if ! git diff --quiet HEAD 2>/dev/null; then git stash -q; fi
+    git pull origin "$BRANCH" -q
+    # Güncel deploy.sh'i /tmp'ye kopyala ve oradan çalıştır
+    cp "$DIR/deploy.sh" /tmp/_aurvex_deploy.sh
     export _AX_INNER=1
-    exec bash "$0" "$@"   # Güncellenen script'i çalıştır
+    exec bash /tmp/_aurvex_deploy.sh "$@"
 fi
 
 set -euo pipefail
