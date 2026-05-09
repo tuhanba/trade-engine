@@ -141,29 +141,93 @@ MIN_PRICE          = float(os.getenv("MIN_PRICE", "0.001"))
 MAX_PRICE_CHANGE   = float(os.getenv("MAX_PRICE_CHANGE", "30.0"))    # pump/dump filtresi
 
 # ── Coin Evreni ──────────────────────────────────────────────────────────────
-# v2.3: 207 coin backtest ile genişletildi — 92 coin, PF ≥ 1.0, ≥5 trade
-# Test tarihi: 2026-05-01 | BTC 4H: BULLISH | Paralel backtest
+# v3.0: ~200 coin — majörler + DeFi + AI + Gaming + Emtia (Altın/Gümüş)
+# Güncelleme: 2026-05-09
 COIN_UNIVERSE = [
-    "ALLOUSDT", "DYDXUSDT", "SNDKUSDT", "FLUIDUSDT", "ZEREBROUSDT",
-    "HOODUSDT", "GWEIUSDT", "REZUSDT", "TACUSDT", "ARBUSDT",
-    "ADAUSDT", "EIGENUSDT", "1000FLOKIUSDT", "1000SHIBUSDT", "FARTCOINUSDT",
-    "AEROUSDT", "EWYUSDT", "FLOWUSDT", "PENDLEUSDT", "BZUSDT",
-    "BASUSDT", "TIAUSDT", "PIPPINUSDT", "OPUSDT", "BCHUSDT",
-    "XPTUSDT", "MASKUSDT", "UNIUSDT", "SIRENUSDT", "DASHUSDT",
-    "MAGMAUSDT", "MSFTUSDT", "CRCLUSDT", "ENAUSDT", "ICPUSDT",
-    "STRKUSDT", "WLFIUSDT", "MOODENGUSDT", "CLUSDT", "AIOTUSDT",
-    "1000PEPEUSDT", "SPXUSDT", "SOONUSDT", "TRADOORUSDT", "XAGUSDT",
-    "AIGENSYNUSDT", "WIFUSDT", "MSTRUSDT", "DRIFTUSDT", "RAYSOLUSDT",
-    "ETHUSDT", "HUSDT", "USTCUSDT", "COMPUSDT", "BIOUSDT",
-    "APTUSDT", "CHZUSDT", "AXSUSDT", "NEIROUSDT", "BLUAIUSDT",
-    "CRVUSDT", "RENDERUSDT", "NAORISUSDT", "BEATUSDT", "DOTUSDT",
-    "CGPTUSDT", "TAOUSDT", "PIEVERSEUSDT", "LINEAUSDT", "SKYAIUSDT",
-    "AXLUSDT", "PUMPUSDT", "ARCUSDT", "POLUSDT", "ACHUSDT",
-    "HBARUSDT", "ASTERUSDT", "BSBUSDT", "ZBTUSDT", "BERAUSDT",
-    "FILUSDT", "PENGUUSDT", "1000BONKUSDT", "CFXUSDT", "ETHFIUSDT",
-    "AIXBTUSDT", "B2USDT", "HUMAUSDT", "ATOMUSDT", "LITUSDT",
-    "ZECUSDT", "GOOGLUSDT",
+    # ── Majörler ───────────────────────────────────────────────────────────
+    "BTCUSDT",  "ETHUSDT",  "SOLUSDT",  "BNBUSDT",  "XRPUSDT",
+    "ADAUSDT",  "AVAXUSDT", "DOGEUSDT", "LTCUSDT",  "LINKUSDT",
+    "DOTUSDT",  "NEARUSDT", "ATOMUSDT", "BCHUSDT",  "APTUSDT",
+    "INJUSDT",  "SUIUSDT",  "SEIUSDT",  "TONUSDT",  "ARBUSDT",
+    "OPUSDT",   "POLUSDT",  "FILUSDT",  "HBARUSDT", "ICPUSDT",
+    "TAOUSDT",  "FTMUSDT",  "EGLDUSDT", "ALGOUSDT", "VETUSDT",
+
+    # ── Emtia ──────────────────────────────────────────────────────────────
+    "XAUUSDT",  "XAGUSDT",  "XPTUSDT",
+
+    # ── DeFi ───────────────────────────────────────────────────────────────
+    "AAVEUSDT", "UNIUSDT",  "CRVUSDT",  "MKRUSDT",  "SNXUSDT",
+    "COMPUSDT", "BALUSDT",  "CAKEUSDT", "SUSHIUSDT","GRTUSDT",
+    "PENDLEUSDT","DYDXUSDT","STRKUSDT", "RDNTUSDT", "ENAUSDT",
+    "AXLUSDT",  "ROSEUSDT", "KAVAUSDT", "STGUSDT",  "SSVUSDT",
+    "LRCUSDT",  "KNCUSDT",  "RNDRUSDT", "PERPUSDT", "BALUSDT",
+
+    # ── L2 & Altyapı ───────────────────────────────────────────────────────
+    "STXUSDT",  "IOTXUSDT", "ZILUSDT",  "ONTUSDT",  "ANKRUSDT",
+    "CELRUSDT", "TRBUSDT",  "QNTUSDT",  "HNTUSDT",  "KSMUSDT",
+    "THETAUSDT","MINAUSDT", "BANDUSDT", "STORJUSDT","TRUUSDT",
+    "SKLUSDT",  "COTIUSDT", "WOOUSDT",  "CFXUSDT",  "AXSUSDT",
+
+    # ── AI & Data ──────────────────────────────────────────────────────────
+    "FETUSDT",  "AGIXUSDT", "OCEANUSDT","RENDERUSDT","TAOUSDT",
+    "AIXBTUSDT","CGPTUSDT", "AIUSDT",   "AIOTUSDT", "EIGENUSDT",
+    "NAORISUSDT","HUMAUSDT","BLUAIUSDT","AIGENSYNUSDT","SKYAIUSDT",
+
+    # ── Gaming & Metaverse ─────────────────────────────────────────────────
+    "GALAUSDT", "SANDUSDT", "MANAUSDT", "APEUSDT",  "IMXUSDT",
+    "GMTUSDT",  "CHZUSDT",  "FLOWUSDT", "MASKUSDT", "MAGICUSDT",
+    "ILVUSDT",  "HIGHUSDT", "GMTUSDT",  "ROSEUSDT", "ACHUSDT",
+
+    # ── Meme & Kültür ──────────────────────────────────────────────────────
+    "1000PEPEUSDT","1000SHIBUSDT","1000BONKUSDT","1000FLOKIUSDT",
+    "WIFUSDT",  "FARTCOINUSDT","MOODENGUSDT","NEIROUSDT","PENGUUSDT",
+    "BOMEUSDT", "TURBOUSDT","MEWUSDT",  "BRETTUSDT","TRUMPUSDT",
+    "SPXUSDT",  "PIPPINUSDT",
+
+    # ── Yeni Nesil & Trend ─────────────────────────────────────────────────
+    "ORDIUSDT", "RUNEUSDT", "JUPUSDT",  "PYTHUSDT", "JITOUSDT",
+    "WUSDT",    "NOTUSDT",  "ZKUSDT",   "MOVEUSDT", "CATIUSDT",
+    "HMSTRUSDT","SCRUSDT",  "VINEUSDT", "MEUSDT",   "TIAUSDT",
+    "BERAUSDT", "DRIFTUSDT","RAYSOLUSDT","WLFIUSDT","EIGENUSDT",
+    "LINEAUSDT","AEROUSDT", "BASUSDT",  "BIOUSDT",  "ETHFIUSDT",
+
+    # ── Diğer Likit Coinler ────────────────────────────────────────────────
+    "DASHUSDT", "ZECUSDT",  "WAVESUSDT","SXPUSDT",  "DIAUSDT",
+    "LITUSDT",  "CTSIUSDT", "JOEUSDT",  "FXSUSDT",  "ALLOUSDT",
+    "DYDXUSDT", "FLUIDUSDT","HOODUSDT", "BZUSDT",   "MSFTUSDT",
+    "CRCLUSDT", "CLUSDT",   "SOONUSDT", "MSTRUSDT", "ARCUSDT",
+    "ASTERUSDT","ZBTUSDT",  "B2USDT",   "GOOGLUSDT","SNDKUSDT",
+    "GWEIUSDT", "REZUSDT",  "TACUSDT",  "EWYUSDT",  "MAGMAUSDT",
+    "SIRENUSDT","AIGENSYNUSDT","HUSDT", "USTCUSDT",
 ]
+COIN_UNIVERSE = list(dict.fromkeys(COIN_UNIVERSE))
+
+# ── Coin Özel Parametre Profilleri ────────────────────────────────────────────
+# Standart parametrelerden farklı davranması gereken coinler (emtia vb.)
+COIN_SPECIAL_PARAMS = {
+    "XAUUSDT": {
+        "adx_min_threshold": 20,    # Altın daha yavaş hareket eder
+        "sl_atr_mult":       2.0,   # Daha geniş SL (altın = geniş swing)
+        "tp1_r":             1.0,
+        "tp2_r":             2.0,
+        "tp3_r":             4.0,   # Altın uzun vadeli trend taşır
+        "min_rr":            1.5,
+        "label":             "Altın",
+    },
+    "XAGUSDT": {
+        "adx_min_threshold": 22,
+        "sl_atr_mult":       1.8,
+        "tp3_r":             3.5,
+        "min_rr":            1.5,
+        "label":             "Gümüş",
+    },
+    "XPTUSDT": {
+        "adx_min_threshold": 22,
+        "sl_atr_mult":       1.8,
+        "min_rr":            1.5,
+        "label":             "Platin",
+    },
+}
 
 # ── Fee ──────────────────────────────────────────────────────────────────────
 DEFAULT_FEE_RATE = float(os.getenv("DEFAULT_FEE_RATE", "0.0004"))  # Binance Futures maker/taker

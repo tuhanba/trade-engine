@@ -180,19 +180,27 @@ class RiskEngine:
         if pd.isna(atr_val) or atr_val == 0:
             return {"score": 0, "valid": False}
 
-        # Coin profili parametrelerini al (coin_library'den)
+        # Coin özel parametreleri: önce COIN_SPECIAL_PARAMS (altın/emtia), sonra coin_library
+        try:
+            from config import COIN_SPECIAL_PARAMS as _CSP
+            _special = _CSP.get(symbol, {})
+        except Exception:
+            _special = {}
+
         try:
             from coin_library import get_coin_params
             coin_params = get_coin_params(symbol)
-            # Config değerlerine öncelik ver, coin_library fallback
-            sl_mult  = coin_params.get("sl_atr_mult", SL_ATR_MULT)
+            sl_mult  = _special.get("sl_atr_mult", coin_params.get("sl_atr_mult", SL_ATR_MULT))
             base_risk = coin_params.get("risk_pct", self.base_risk_pct)
             max_lev  = coin_params.get("max_leverage", 20)
         except Exception as e:
             logger.warning(f"Coin profili alınamadı: {e}")
-            sl_mult   = SL_ATR_MULT
+            sl_mult   = _special.get("sl_atr_mult", SL_ATR_MULT)
             base_risk = self.base_risk_pct
             max_lev   = 20
+
+        # Emtia için min_rr override
+        _min_rr = _special.get("min_rr", self.min_rr)
 
         # ── Stop Mesafesi (ATR bazlı, config'den sıkılaştırılmış) ─────────────
         sl_dist = atr_val * sl_mult
@@ -251,8 +259,8 @@ class RiskEngine:
         liquidation_distance_percent = round(100.0 / lev_use * 0.92, 4)
 
         risk_reject_reason = ""
-        valid = rr >= self.min_rr and risk_pct > 0
-        if rr < self.min_rr:
+        valid = rr >= _min_rr and risk_pct > 0
+        if rr < _min_rr:
             risk_reject_reason = "bad_rr"
         elif risk_pct <= 0:
             risk_reject_reason = "risk_guard_failed"

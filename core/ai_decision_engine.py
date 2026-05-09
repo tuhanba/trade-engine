@@ -325,6 +325,43 @@ class AIDecisionEngine:
         elif ml_score < 45:
             ai_adj -= 1.0
 
+        # 6. Haber Duygu Skoru (RSS)
+        news_signal = "NEUTRAL"
+        try:
+            import sys as _sys, os as _os
+            _root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+            if _root not in _sys.path:
+                _sys.path.insert(0, _root)
+            from news_engine import get_news_sentiment, get_market_sentiment
+            _news = get_news_sentiment(signal_data.symbol)
+            _market = get_market_sentiment()
+            news_signal = _news["signal"]
+            _mentions  = _news["mentions"]
+            _news_sc   = _news["score"]
+            _mkt_sc    = _market["score"]
+            direction  = getattr(signal_data, "direction", "LONG")
+
+            # Coin haberleri: LONG için pozitif haber bonus, SHORT için negatif bonus
+            if _mentions >= 1:
+                if direction == "LONG":
+                    if _news_sc >= 0.3:
+                        ai_adj += 1.5 if _mentions >= 3 else 0.8
+                    elif _news_sc <= -0.3:
+                        ai_adj -= 1.5 if _mentions >= 3 else 0.8
+                else:  # SHORT
+                    if _news_sc <= -0.3:
+                        ai_adj += 1.5 if _mentions >= 3 else 0.8
+                    elif _news_sc >= 0.3:
+                        ai_adj -= 1.5 if _mentions >= 3 else 0.8
+
+            # Genel piyasa duygusu (daha düşük ağırlık)
+            if direction == "LONG" and _mkt_sc >= 0.3:
+                ai_adj += 0.5
+            elif direction == "LONG" and _mkt_sc <= -0.3:
+                ai_adj -= 0.5
+        except Exception as _ne:
+            logger.debug(f"[AI] Haber skoru alınamadı: {_ne}")
+
         ai_score = (base_score + ai_adj) * 10
         final_score = max(0.0, min(100.0, ai_score))
         
@@ -371,6 +408,7 @@ class AIDecisionEngine:
             "ml_score": round(ml_score, 1),
             "confidence": round(confidence, 2),
             "reason": reason,
+            "news_signal": news_signal,
             "ai_adjustment": round(ai_adj, 1),
             "score_source": score_source,
         }
