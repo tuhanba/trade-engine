@@ -7,9 +7,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <style>
 :root {
   --void:       #000000;
+  --notif-success: #059669;
+  --notif-error: #B91C1C;
+  --notif-info: #00B4FF;
   --bg:         #030508;
   --surface:    #070c12;
   --card:       #0a1018;
@@ -117,6 +121,8 @@ body::after{
 .sc-bar{height:2px;background:rgba(0,180,255,0.06);margin-top:11px;border-radius:2px;overflow:hidden}
 .sc-bar-f{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--blue),var(--cyan),var(--cyan-dim));background-size:200% 100%;animation:bar-shine 3s linear infinite;transition:width 1.4s cubic-bezier(.25,1,.5,1)}
 @keyframes bar-shine{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes slideIn{0%{transform:translateX(400px);opacity:0}100%{transform:translateX(0);opacity:1}}
+@keyframes slideOut{0%{transform:translateX(0);opacity:1}100%{transform:translateX(400px);opacity:0}}
 .sc-bar-f.green{background:linear-gradient(90deg,var(--green),var(--green-br));animation:none}
 
 /* ── GRID ── */
@@ -601,9 +607,9 @@ for(let i=0;i<18;i++){
   <div class="foot-l"><span>AURVEX.Ai</span> &mdash; Elite Trading Intelligence &middot; Futures &middot; v5.0</div>
   <div class="foot-r" id="footTime">--:--:-- UTC</div>
 </footer>
-
+<script src="/static/realtime.js"></script>
 <script>
-const BASE="";let chart=null,curPage=1;const PER=10;
+const BASE = "/";t chart=null,curPage=1;const PER=10;
 const f=(v,d=4)=>v==null?"—":Number(v).toFixed(d);
 const fp=(v,d=3)=>v==null?"—":(Number(v)>=0?"+":"")+Number(v).toFixed(d)+"$";
 const fc=(v)=>{const n=Number(v);return n>0?"pos-c":n<0?"neg-c":"dim-c"};

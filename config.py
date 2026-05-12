@@ -125,7 +125,7 @@ MAX_COINS_PER_SCAN_LOOP = int(os.getenv("MAX_COINS_PER_SCAN_LOOP", "80"))
 MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "40.0"))
 
 # ── Veritabanı ───────────────────────────────────────────────────────────────
-DB_PATH = os.getenv("DB_PATH", "/root/trade_engine/trading.db")
+DB_PATH = os.getenv("DB_PATH", "/home/ubuntu/trade-engine/trade_engine.db")
 
 # ── Paper/Live Mod (ek sabitler) ─────────────────────────────────────────────
 DRY_RUN              = os.getenv("DRY_RUN", "true").lower() == "true"

@@ -10,6 +10,7 @@ except ImportError:
 
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
+from websocket_events import initialize_websocket_events
 from database import (
     init_db, get_stats, get_closed_trades, get_open_trades,
     get_paper_balance, get_conn, get_system_state,
@@ -31,6 +32,7 @@ os.makedirs(_static_folder, exist_ok=True)
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "scalp2026")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+event_manager = initialize_websocket_events(socketio)
 if N8N_AVAILABLE:
     app.register_blueprint(n8n_bp)
 
