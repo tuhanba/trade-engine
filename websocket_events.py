@@ -100,6 +100,19 @@ class WebSocketEventManager:
             logger.debug("[WebSocket] Dashboard refresh istendi")
         except Exception as e:
             logger.error(f"[WebSocket] Dashboard refresh hatası: {e}")
+
+    def broadcast_signal_rejected(self, symbol: str, direction: str, reason: str):
+        """Sinyal reddedildiğinde broadcast et"""
+        try:
+            self.socketio.emit('signal_rejected', {
+                'symbol': symbol,
+                'direction': direction,
+                'reason': reason,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+            }, broadcast=True)
+            logger.debug(f"[WebSocket] Sinyal reddedildi: {symbol} {direction} {reason}")
+        except Exception as e:
+            logger.error(f"[WebSocket] Signal rejected hatası: {e}")
     
     def send_to_client(self, sid: str, event: str, data: Dict[str, Any]):
         """Belirli bir istemciye mesaj gönder"""

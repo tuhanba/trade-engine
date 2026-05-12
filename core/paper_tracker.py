@@ -89,11 +89,11 @@ def _simulate_path(
         ts = float(b[0])
         touch = _resolve_bar(direction, h, l, sl, tp1)
         if direction == "LONG":
-            mfe_r = max(mfe_r, max(0.0, (h - entry) / sl_dist))
-            mae_r = max(mae_r, max(0.0, (entry - l) / sl_dist))
+            mfe_r = max(mfe_r, 0.0, (h - entry) / sl_dist)
+            mae_r = max(mae_r, 0.0, (entry - l) / sl_dist)
         else:
-            mfe_r = max(mfe_r, max(0.0, (entry - l) / sl_dist))
-            mae_r = max(mae_r, max(0.0, (h - entry) / sl_dist))
+            mfe_r = max(mfe_r, 0.0, (entry - l) / sl_dist)
+            mae_r = max(mae_r, 0.0, (h - entry) / sl_dist)
 
         if first_touch is None and touch == "stop":
             first_touch = "stop"

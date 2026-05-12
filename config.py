@@ -125,7 +125,7 @@ MAX_COINS_PER_SCAN_LOOP = int(os.getenv("MAX_COINS_PER_SCAN_LOOP", "80"))
 MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "40.0"))
 
 # ── Veritabanı ───────────────────────────────────────────────────────────────
-DB_PATH = os.getenv("DB_PATH", "/home/ubuntu/trade-engine/trade_engine.db")
+DB_PATH = os.getenv("DB_PATH", "/home/ubuntu/trade-engine-work/trade_engine.db")
 
 # ── Paper/Live Mod (ek sabitler) ─────────────────────────────────────────────
 DRY_RUN              = os.getenv("DRY_RUN", "true").lower() == "true"
@@ -169,6 +169,6 @@ COIN_UNIVERSE = [
 DEFAULT_FEE_RATE = float(os.getenv("DEFAULT_FEE_RATE", "0.0004"))  # Binance Futures maker/taker
 
 # ── Log ──────────────────────────────────────────────────────────────────────
-LOG_DIR      = os.getenv("LOG_DIR", "/root/trade_engine/logs")
+LOG_DIR      = os.getenv("LOG_DIR", "/home/ubuntu/trade-engine-work/logs")
 LOG_MAX_DAYS = int(os.getenv("LOG_MAX_DAYS", "7"))
 LOG_MAX_MB   = int(os.getenv("LOG_MAX_MB", "50"))
