@@ -26,6 +26,7 @@ from database import (
     get_open_trades, update_paper_balance, get_paper_balance,
     save_postmortem, save_trade_event,
 )
+from websocket_events import event_manager
 from core.accounting import calculate_runner_unrealized_pnl
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,7 @@ def open_trade(client, signal: dict, ax_decision: dict,
         f"[Execution] AÇILDI #{trade_id} {symbol} {direction} "
         f"entry={entry:.6f} sl={sl:.6f} tp1={tp1:.6f} tp2={tp2:.6f} qty={qty}"
     )
+    if event_manager: event_manager.broadcast_live_update(get_open_trades())
     return trade_id
 
 
@@ -211,6 +213,7 @@ def _check_trade(client, t: dict) -> bool:
     if status in ("runner",) and remaining_qty > 0:
         unreal = calculate_runner_unrealized_pnl(direction, entry, price, remaining_qty)
         update_trade(trade_id, {"unrealized_pnl": unreal, "current_price": price})
+        if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), unreal, t.get("realized_pnl", 0))
 
     # ── SL Kontrolü ─────────────────────────────────────────────────────────
     sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
@@ -247,6 +250,8 @@ def _check_trade(client, t: dict) -> bool:
             })
             update_paper_balance(pnl_tp1)
             save_trade_event(trade_id, "TP1_HIT", f"price={tp1} pnl={pnl_tp1:.4f} new_sl={new_sl:.6f}")
+            if event_manager: event_manager.broadcast_live_update(get_open_trades())
+            if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), t.get("realized_pnl", 0) + pnl_tp1)
             logger.info(
                 f"[Execution] TP1 #{trade_id} {symbol} +{pnl_tp1:.3f}$ "
                 f"| Breakeven SL → {new_sl:.6f}"
@@ -274,6 +279,8 @@ def _check_trade(client, t: dict) -> bool:
             })
             update_paper_balance(pnl_tp2)
             save_trade_event(trade_id, "TP2_HIT", f"price={tp2} pnl={pnl_tp2:.4f} trail={new_trail:.6f}")
+            if event_manager: event_manager.broadcast_live_update(get_open_trades())
+            if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), realized)
             logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ → RUNNER trail={new_trail:.6f}")
             return False
 
@@ -359,6 +366,8 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     db_close_trade(trade_id, net_pnl=net_pnl, total_fee=0,
                    reason=reason, close_price=close_price)
     update_paper_balance(net_pnl - (t.get("realized_pnl") or 0))
+    if event_manager: event_manager.broadcast_trade_closed(t["symbol"], t["direction"], net_pnl, reason)
+    if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), 0, net_pnl)
     save_trade_event(trade_id, "CLOSE", f"reason={reason} close_price={close_price} net_pnl={net_pnl:.4f}")
 
     result = "WIN" if net_pnl > 0 else "LOSS"

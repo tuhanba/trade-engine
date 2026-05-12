@@ -9,6 +9,7 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
+from core.signal_intelligence import SignalIntelligence
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ class AIDecisionEngine:
         
         self._init_db()
         self._load_best_params()
+        self.intelligence = SignalIntelligence(db_path=db_path)
 
     def _init_db(self):
         """AI öğrenme tablolarını oluşturur."""
@@ -254,7 +256,11 @@ class AIDecisionEngine:
             if markov["LOSS->LOSS"] > 0.65 and markov["sample"] >= 12:
                 ai_adj -= 1.0
 
-        # 5. ML Sinyal Skoru Etkisi
+        # 5. Historical Intelligence Boost
+        intel_boost = self.intelligence.get_ai_boost_recommendation(signal_data.symbol, signal_data.setup_quality)
+        ai_adj += intel_boost
+        
+        # 6. ML Sinyal Skoru Etkisi
         ml_score = getattr(signal_data, "ml_score", 50)
         if ml_score > 75:
             ai_adj += 1.5

@@ -49,6 +49,7 @@ from core.trigger_engine import TriggerEngine
 from core.risk_engine import RiskEngine
 from core.ai_decision_engine import AIDecisionEngine
 from telegram_delivery import deliver_signal, send_message
+from websocket_events import event_manager
 
 # Geriye dönük uyumluluk için eski modüller
 try:
@@ -168,7 +169,7 @@ def main():
     scanner  = MarketScanner(client, db_path=DB_PATH)
     trend    = TrendEngine(client)
     trigger  = TriggerEngine(client)
-    risk     = RiskEngine(client)
+    risk     = RiskEngine(client, db_path=DB_PATH)
     ai_engine = AIDecisionEngine(db_path=DB_PATH)
 
     # Telegram Manager (komut dinleyici)
@@ -301,6 +302,7 @@ def main():
                     trend_result = trend.analyze(symbol)
                     if trend_result["direction"] == "NO TRADE":
                         save_signal_event(signal_id, "REJECTED", symbol=symbol, reject_reason="weak_trend", reason="trend_engine_no_trade")
+                        if event_manager: event_manager.broadcast_signal_rejected(symbol, trend_result["direction"], "weak_trend")
                         continue
                     save_signal_event(signal_id, "TREND_CHECKED", symbol=symbol, reason="trend_pass")
 
@@ -308,6 +310,7 @@ def main():
                     trigger_result = trigger.analyze(symbol, trend_result["direction"], trend_result.get("btc_trend", "NEUTRAL"))
                     if trigger_result["quality"] == "D":
                         save_signal_event(signal_id, "REJECTED", symbol=symbol, reject_reason="weak_trigger", reason="trigger_quality_d")
+                        if event_manager: event_manager.broadcast_signal_rejected(symbol, trend_result["direction"], "weak_trigger")
                         continue
                     save_signal_event(signal_id, "TRIGGER_CHECKED", symbol=symbol, reason="trigger_pass")
 
@@ -383,6 +386,7 @@ def main():
                             "entry": trigger_result["entry"],
                         })
                         save_signal_event(signal_id, "REJECTED", symbol=symbol, reject_reason=risk_result.get("risk_reject_reason", "risk_guard_failed"), reason="risk_engine_reject")
+                        if event_manager: event_manager.broadcast_signal_rejected(symbol, trend_result["direction"], risk_result.get("risk_reject_reason", "risk_guard_failed"))
                         if PAPER_TRACK_REJECTED_CANDIDATES:
                             prv = risk.preview_for_paper(symbol, trend_result["direction"], trigger_result["entry"], balance)
                             if prv.get("valid"):
@@ -426,6 +430,7 @@ def main():
                     sig.max_loss = risk_result["max_loss"]
                     sig.status = "ready"
                     sig.dashboard_status = "active"
+                    if event_manager: event_manager.broadcast_signal_generated(sig.symbol, sig.direction, sig.setup_quality, sig.final_score)
 
                     # ── ADIM 6: AI DECISION ENGINE ─────────────────────────
                     decision = ai_engine.evaluate(sig)
@@ -473,6 +478,7 @@ def main():
                         sig.telegram_status = "skip"
                         update_candidate_status(candidate_id, reject_reason="low_confidence", lifecycle_stage="REJECTED", execution_status="rejected")
                         save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="low_confidence", reason="below_data_threshold")
+                        if event_manager: event_manager.broadcast_signal_rejected(symbol, sig.direction, "low_confidence")
                         save_scalp_signal(sig.to_dict())
                         if PAPER_TRACK_REJECTED_CANDIDATES:
                             save_paper_result({
@@ -500,6 +506,7 @@ def main():
                         sig.telegram_status = "skip"
                         update_candidate_status(candidate_id, ai_veto_reason=decision["reason"], reject_reason="ai_veto", lifecycle_stage="REJECTED", execution_status="rejected")
                         save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="ai_veto", reason=decision["reason"])
+                        if event_manager: event_manager.broadcast_signal_rejected(symbol, sig.direction, "ai_veto")
                         save_scalp_signal(sig.to_dict())
                         logger.info(
                             f"[VETO] {symbol} {sig.direction} | {decision['reason']} | "

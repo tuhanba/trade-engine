@@ -9,6 +9,7 @@ v2.1 Değişiklikleri (Backtest Bulgularına Dayalı):
 """
 import logging
 import pandas as pd
+from core.coin_personality import CoinPersonalityEngine
 
 logger = logging.getLogger(__name__)
 
@@ -136,10 +137,12 @@ def check_correlated_exposure(symbol: str, open_trades: list) -> bool:
 
 
 class RiskEngine:
-    def __init__(self, client):
+    def __init__(self, client, db_path="trade_engine.db"):
         self.client = client
+        self.db_path = db_path
         self.base_risk_pct = 1.0
         self.min_rr = MIN_RR
+        self.personality_engine = CoinPersonalityEngine(db_path=db_path)
 
     def preview_for_paper(self, symbol: str, direction: str, entry: float, balance: float) -> dict:
         """Sadece paper-outcome için SL/TP; kaliteyi B olarak alır (C/risk-ret sonrası yol için)."""
@@ -180,16 +183,22 @@ class RiskEngine:
         if pd.isna(atr_val) or atr_val == 0:
             return {"score": 0, "valid": False}
 
-        # Coin profili parametrelerini al (coin_library'den)
+        # Coin profili parametrelerini al (ADAPTIVE)
         try:
+            # Önce Coin Personality Engine'den adaptif parametreleri al
+            adaptive_params = self.personality_engine.get_adaptive_params(symbol)
+            
             from coin_library import get_coin_params
             coin_params = get_coin_params(symbol)
-            # Config değerlerine öncelik ver, coin_library fallback
-            sl_mult  = coin_params.get("sl_atr_mult", SL_ATR_MULT)
-            base_risk = coin_params.get("risk_pct", self.base_risk_pct)
-            max_lev  = coin_params.get("max_leverage", 20)
+            
+            # Kişilik bazlı parametreler ile kütüphane parametrelerini harmanla
+            sl_mult = adaptive_params.get("sl_atr_mult", coin_params.get("sl_atr_mult", SL_ATR_MULT))
+            base_risk = adaptive_params.get("risk_pct", coin_params.get("risk_pct", self.base_risk_pct))
+            max_lev = adaptive_params.get("leverage", coin_params.get("max_leverage", 20))
+            
+            logger.info(f"[Risk] {symbol} için adaptif parametreler uygulandı: SL={sl_mult}, Risk={base_risk}, Lev={max_lev}")
         except Exception as e:
-            logger.warning(f"Coin profili alınamadı: {e}")
+            logger.warning(f"Adaptif parametre hatası, varsayılanlar kullanılıyor: {e}")
             sl_mult   = SL_ATR_MULT
             base_risk = self.base_risk_pct
             max_lev   = 20
