@@ -15,18 +15,30 @@ try:
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
     from config import COIN_UNIVERSE as _COIN_UNIVERSE
     from database import save_market_snapshot, save_scanned_coin
+    from core.coin_library import CoinLibrary
 except ImportError:
     _COIN_UNIVERSE = []
     save_market_snapshot = None
     save_scanned_coin = None
+    CoinLibrary = None
 
 class MarketScanner:
     def __init__(self, client, db_path="trade_engine.db"):
         self.client = client
         self.db_path = db_path
-        self.min_volume = 10_000_000  # 10M USD
-        self.min_price = 0.001
-        self.coin_universe = set(_COIN_UNIVERSE)  # 92 coin filtresi
+        self.min_volume = 10_000_000  # 10M USD (Production-grade)
+        self.min_price = 0.0001
+        self.coin_lib = CoinLibrary(client, db_path) if CoinLibrary else None
+        self.coin_universe = set()
+        self._refresh_universe()
+
+    def _refresh_universe(self):
+        if self.coin_lib:
+            self.coin_universe = set(self.coin_lib.get_active_universe())
+            if not self.coin_universe:
+                self.coin_universe = set(self.coin_lib.refresh_universe())
+        else:
+            self.coin_universe = set(_COIN_UNIVERSE)
 
     def _get_cooldown_coins(self) -> set:
         """Cooldown'da olan coinleri getirir (danger_score kayıtları `coin_profile` tablosunda)."""

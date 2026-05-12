@@ -46,7 +46,9 @@ class TrendEngine:
         plus_di = 100 * (plus_dm.rolling(period).mean() / (atr14 + 1e-10))
         minus_di = 100 * (minus_dm.rolling(period).mean() / (atr14 + 1e-10))
         dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10))
-        adx_val = dx.rolling(period).mean()
+        adx_val = dx.rolling(period).mean().dropna()
+        if adx_val.empty:
+            return 0.0, 0.0, 0.0
         return float(adx_val.iloc[-1]), float(plus_di.iloc[-1]), float(minus_di.iloc[-1])
 
     def _bollinger_width(self, df: pd.DataFrame, period: int = 20, std: float = 2.0) -> float:
@@ -126,14 +128,21 @@ class TrendEngine:
         """Trend analizi yapar ve yön/skor döner."""
         df15 = self.get_candles(symbol, "15m", 100)
         if df15.empty or len(df15) < 50:
-            return {"direction": "NO TRADE", "score": 0}
+            return {"direction": "NO TRADE", "score": 0, "adx15": 0.0}
 
         close = df15["close"]
         e9 = self._ema(close, 9)
         e21 = self._ema(close, 21)
         e50 = self._ema(close, 50)
         
-        adx_v, pdi, mdi = self._adx(df15)
+        adx_v, pdi, mdi = 0.0, 0.0, 0.0
+        try:
+            res = self._adx(df15)
+            if res and len(res) == 3:
+                adx_v, pdi, mdi = res
+        except Exception:
+            pass
+            
         bb_w = self._bollinger_width(df15)
         bb_chg = self._bb_width_change(df15)
         
@@ -155,7 +164,7 @@ class TrendEngine:
         )
 
         if not trend_up and not trend_dn:
-            return {"direction": "NO TRADE", "score": 0}
+            return {"direction": "NO TRADE", "score": 0, "adx15": round(adx_v, 1)}
 
         direction = "LONG" if trend_up else "SHORT"
         
@@ -185,10 +194,16 @@ class TrendEngine:
         if direction == "LONG" and trend_4h == "BULLISH": score += 1.0
         if direction == "SHORT" and trend_4h == "BEARISH": score += 1.0
 
+        try:
+            adx_val = float(adx_v) if adx_v is not None else 0.0
+            if np.isnan(adx_val): adx_val = 0.0
+        except:
+            adx_val = 0.0
+
         return {
             "direction": direction,
             "score": min(10.0, score),
-            "adx15": round(adx_v, 1),
+            "adx15": round(adx_val, 1),
             "bb_width": bb_w,
             "bb_width_chg": bb_chg,
             "btc_trend": btc_trend,

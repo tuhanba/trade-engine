@@ -203,6 +203,16 @@ class RiskEngine:
             base_risk = self.base_risk_pct
             max_lev   = 20
 
+        # ── Volatilite Adaptasyonu ──────────────────────────────────────────
+        # Eğer coin çok volatil ise SL'i biraz daha genişlet, sakinse daralt
+        try:
+            volatility_24h = self.client.futures_ticker(symbol=symbol).get("priceChangePercent", 0)
+            vol_factor = max(0.8, min(1.5, abs(float(volatility_24h)) / 10.0))
+            sl_mult = sl_mult * vol_factor
+            logger.debug(f"[Risk] {symbol} Volatilite Adaptasyonu: Factor={vol_factor:.2f}, New SL Mult={sl_mult:.2f}")
+        except:
+            pass
+
         # ── Stop Mesafesi (ATR bazlı, config'den sıkılaştırılmış) ─────────────
         sl_dist = atr_val * sl_mult
 

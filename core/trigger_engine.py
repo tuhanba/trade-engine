@@ -51,7 +51,10 @@ class TriggerEngine:
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
         rs = gain / (loss + 1e-10)
-        return float(100 - (100 / (1 + rs)).iloc[-1])
+        rsi_series = (100 - (100 / (1 + rs))).dropna()
+        if rsi_series.empty:
+            return 50.0
+        return float(rsi_series.iloc[-1])
 
     def _macd_hist(self, series: pd.Series) -> float:
         fast = self._ema(series, 12).iloc[-1] - self._ema(series, 26).iloc[-1]
@@ -90,29 +93,29 @@ class TriggerEngine:
 
     def analyze(self, symbol: str, direction: str, btc_trend: str = "NEUTRAL") -> dict:
         """Trigger analizi yapar ve setup kalitesi döner."""
-        if direction == "NO TRADE":
-            return {"quality": "D", "score": 0, "entry": 0}
+        if not direction:
+            return {"quality": "D", "score": 0, "entry": 0, "adx": 0.0}
 
         # ── Saat Filtresi (UTC) ────────────────────────────────────────────────
         from datetime import datetime, timezone
         current_hour = datetime.now(timezone.utc).hour
         if current_hour in BAD_HOURS_UTC:
             logger.debug(f"[{symbol}] Kötü saat filtresi: {current_hour}:00 UTC — trade yok")
-            return {"quality": "D", "score": 0, "entry": 0}
+            return {"quality": "D", "score": 0, "entry": 0, "adx": 0.0}
 
         # ── BTC Trend Filtresi ─────────────────────────────────────────────────
         if SHORT_REQUIRES_BTC_BEARISH:
             if direction == "SHORT" and btc_trend == "BULLISH":
                 logger.debug(f"[{symbol}] SHORT engellendi: BTC 4H BULLISH")
-                return {"quality": "D", "score": 0, "entry": 0}
+                return {"quality": "D", "score": 0, "entry": 0, "adx": 0.0}
             if direction == "LONG" and btc_trend == "BEARISH":
                 logger.debug(f"[{symbol}] LONG engellendi: BTC 4H BEARISH")
-                return {"quality": "D", "score": 0, "entry": 0}
+                return {"quality": "D", "score": 0, "entry": 0, "adx": 0.0}
 
         # ── 5m Analizi ────────────────────────────────────────────────────────
         df5 = self.get_candles(symbol, "5m", 150)
         if df5.empty or len(df5) < 50:
-            return {"quality": "D", "score": 0, "entry": 0}
+            return {"quality": "D", "score": 0, "entry": 0, "adx": 0.0}
 
         c5 = df5["close"].iloc[-1]
         e9_5 = self._ema(df5["close"], 9)
@@ -122,39 +125,45 @@ class TriggerEngine:
 
         # ── ADX Trend Gücü Filtresi ────────────────────────────────────────────
         # Backtest: ADX < 25 olan sinyallerde WR düşük — trend gücü zayıf
-        try:
-            high = df5["high"]
-            low  = df5["low"]
-            close = df5["close"]
-            tr = pd.concat([
-                high - low,
-                (high - close.shift()).abs(),
-                (low  - close.shift()).abs()
-            ], axis=1).max(axis=1)
-            atr14 = tr.rolling(14).mean()
-            plus_dm  = (high.diff()).where((high.diff() > 0) & (high.diff() > -low.diff()), 0)
-            minus_dm = (-low.diff()).where((-low.diff() > 0) & (-low.diff() > high.diff()), 0)
-            plus_di  = 100 * (plus_dm.rolling(14).mean()  / (atr14 + 1e-10))
-            minus_di = 100 * (minus_dm.rolling(14).mean() / (atr14 + 1e-10))
-            dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10)
-            adx_val  = float(dx.rolling(14).mean().iloc[-1])
-        except Exception:
-            adx_val = 30  # Hesaplanamadıysa geç
+        high = df5["high"]
+        low  = df5["low"]
+        close = df5["close"]
+        tr = pd.concat([
+            high - low,
+            (high - close.shift()).abs(),
+            (low  - close.shift()).abs()
+        ], axis=1).max(axis=1)
+        atr14 = tr.rolling(14).mean()
+        plus_dm  = (high.diff()).where((high.diff() > 0) & (high.diff() > -low.diff()), 0)
+        minus_dm = (-low.diff()).where((-low.diff() > 0) & (-low.diff() > high.diff()), 0)
+        plus_di  = 100 * (plus_dm.rolling(14).mean()  / (atr14 + 1e-10))
+        minus_di = 100 * (minus_dm.rolling(14).mean() / (atr14 + 1e-10))
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10)
+        adx_series = dx.rolling(14).mean().dropna()
+        if adx_series.empty:
+            adx_val = 0.0
+        else:
+            adx_val = float(adx_series.iloc[-1])
 
         if adx_val < ADX_MIN_THRESHOLD:
             logger.debug(f"[{symbol}] ADX filtresi: {adx_val:.1f} < {ADX_MIN_THRESHOLD} — trend zayıf")
             return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
 
-        bull5 = direction == "LONG" and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5 < 75
-        bear5 = direction == "SHORT" and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5 < 65
+        try:
+            rsi5_val = float(rsi5.iloc[-1]) if hasattr(rsi5, 'iloc') else float(rsi5)
+        except:
+            rsi5_val = 50.0
 
+        bull5 = direction == "LONG" and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5_val < 75
+        bear5 = direction == "SHORT" and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5_val < 65
+            
         if not bull5 and not bear5:
-            return {"quality": "D", "score": 0, "entry": 0}
+            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1), "rsi5": round(float(rsi5_val), 1)}
 
         # ── 1m Analizi ────────────────────────────────────────────────────────
         df1 = self.get_candles(symbol, "1m", 100)
         if df1.empty or len(df1) < 30:
-            return {"quality": "D", "score": 0, "entry": 0}
+            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
 
         c1 = df1["close"].iloc[-1]
         rsi1 = self._rsi(df1["close"], 7)
@@ -165,16 +174,16 @@ class TriggerEngine:
 
         # RSI 1m giriş onayı
         if bull5 and not (32 < rsi1 < 75):
-            return {"quality": "D", "score": 0, "entry": 0}
+            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1), "rsi5": round(rsi5.iloc[-1], 1), "rsi1": round(rsi1, 1)}
         if bear5 and not (25 < rsi1 < 68):
-            return {"quality": "D", "score": 0, "entry": 0}
+            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1), "rsi5": round(rsi5.iloc[-1], 1), "rsi1": round(rsi1, 1)}
 
         # ── Funding Rate Kontrolü ─────────────────────────────────────────────
         funding = self.get_funding_rate(symbol)
         if direction == "LONG" and funding > 0.001:
-            return {"quality": "D", "score": 0, "entry": 0}  # Longs ağır, olumsuz funding
+            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
         if direction == "SHORT" and funding < -0.001:
-            return {"quality": "D", "score": 0, "entry": 0}
+            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
 
         # ── Skor ve Kalite Hesaplama ──────────────────────────────────────────
         score = 5.0
@@ -258,7 +267,7 @@ class TriggerEngine:
         # ── Kalite Filtresi ────────────────────────────────────────────────────
         if quality not in ALLOWED_QUALITIES:
             logger.debug(f"[{symbol}] Kalite filtresi: {quality} izin verilenler={ALLOWED_QUALITIES}")
-            return {"quality": "D", "score": 0, "entry": 0}
+            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
 
         # ── İyi Saat Bonusu ────────────────────────────────────────────────────
         if current_hour in GOOD_HOURS_UTC:
@@ -307,4 +316,5 @@ class TriggerEngine:
             "btc_trend": btc_trend,
             "hour_utc": current_hour,
             "good_hour": current_hour in GOOD_HOURS_UTC,
+            "adx": round(adx_val, 1),
         }
