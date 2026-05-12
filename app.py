@@ -613,6 +613,48 @@ def api_history():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# ── /api/signal_archive ───────────────────────────────────────────────────────
+@app.route("/api/signal_archive")
+def api_signal_archive():
+    """Geçmiş sinyal adayları — sayfalı."""
+    try:
+        page  = int(request.args.get("page", 1))
+        limit = int(request.args.get("limit", 10))
+        
+        with get_conn() as conn:
+            # Toplam sayıyı al
+            total_count = conn.execute("SELECT COUNT(*) FROM signal_candidates").fetchone()[0]
+            total_pages = max(1, (total_count + limit - 1) // limit)
+            page = max(1, min(page, total_pages))
+            offset = (page - 1) * limit
+            
+            # Verileri çek (paper_results ile join yaparak MFE/MAE bilgilerini de al)
+            rows = conn.execute("""
+                SELECT 
+                    sc.*,
+                    pr.max_favorable_excursion as mfe,
+                    pr.max_adverse_excursion as mae,
+                    pr.would_have_won
+                FROM signal_candidates sc
+                LEFT JOIN paper_results pr ON sc.uuid = pr.signal_id
+                ORDER BY sc.id DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset)).fetchall()
+            
+            signals = [dict(r) for r in rows]
+            
+        return jsonify({
+            "ok": True, 
+            "data": signals,
+            "page": page, 
+            "total_pages": total_pages,
+            "total_count": total_count, 
+            "limit": limit,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     socketio.run(

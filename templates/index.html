@@ -583,8 +583,14 @@ for(let i=0;i<18;i++){
     </div>
   </div>
 
+  <!-- TABS -->
+  <div style="display:flex;gap:10px;margin-bottom:12px">
+    <button class="tv-btn active" id="tabHistory" onclick="switchTab('history')">Trade Gecmisi</button>
+    <button class="tv-btn" id="tabArchive" onclick="switchTab('archive')">Sinyal Arsivi</button>
+  </div>
+
   <!-- HISTORY -->
-  <div class="card">
+  <div id="viewHistory" class="card">
     <div class="card-hdr">
       <div class="card-title">Trade Gecmisi</div>
       <div class="card-meta" id="histCount">&mdash; islem</div>
@@ -599,6 +605,24 @@ for(let i=0;i<18;i++){
       </tbody>
     </table>
     <div class="pager" id="pager"></div>
+  </div>
+
+  <!-- SIGNAL ARCHIVE -->
+  <div id="viewArchive" class="card" style="display:none">
+    <div class="card-hdr">
+      <div class="card-title">Sinyal Arsivi</div>
+      <div class="card-meta" id="archiveCount">&mdash; sinyal</div>
+    </div>
+    <table class="hist-table">
+      <thead><tr>
+        <th>Sembol</th><th>Kalite</th><th>Skor</th><th>Karar</th>
+        <th>MFE</th><th>MAE</th><th>Sonuc</th><th>Tarih</th>
+      </tr></thead>
+      <tbody id="archiveBody">
+        <tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:28px;font-family:var(--orb);letter-spacing:.16em;font-size:8.5px">YUKLENIYOR...</td></tr>
+      </tbody>
+    </table>
+    <div class="pager" id="archivePager"></div>
   </div>
 
 </main>
@@ -776,36 +800,55 @@ async function loadPositions(){
 
 // HISTORY
 let knownTrades={};
+let currentTab = 'history';
+function switchTab(tab){
+  currentTab = tab;
+  document.getElementById('tabHistory').classList.toggle('active', tab==='history');
+  document.getElementById('tabArchive').classList.toggle('active', tab==='archive');
+  document.getElementById('viewHistory').style.display = tab==='history' ? 'block' : 'none';
+  document.getElementById('viewArchive').style.display = tab==='archive' ? 'block' : 'none';
+  if(tab==='history') loadHistory(1);
+  else loadArchive(1);
+}
+
 async function loadHistory(page=1){
   try{
     curPage=page;
     const j=await(await fetch(BASE+"/api/trades?page="+page+"&per_page="+PER)).json();if(!j.ok)return;
-    const trades=j.data||[],pag=j.pagination||{};
-    document.getElementById("histCount").textContent=(pag.total||0)+" islem";
-    const nowTime=new Date().toUTCString().split(" ")[4].substring(0,5);
-    trades.forEach(t=>{
-      if(!knownTrades[t.id]){
-        knownTrades[t.id]=true;
-        const pnl=t.net_pnl||0;const st=(t.status||"").toUpperCase();
-        const win=st==="WIN"||(pnl>0);
-        addFeedItem(nowTime,win?"close-win":"close-loss","<b>"+(t.symbol||"")+"</b> "+(t.direction||"")+" kapandi",pnl);
-      }
-    });
+    const trades=j.data||[],pag=j; // API yapısı gereği pagination verileri root'ta
+    document.getElementById("histCount").textContent=(pag.total_count||0)+" islem";
     const tb=document.getElementById("histBody");
-    if(!trades.length){tb.innerHTML="<tr><td colspan='8' style='text-align:center;color:var(--text-muted);padding:28px;font-family:var(--orb);letter-spacing:.16em;font-size:8.5px'>KAYIT YOK</td></tr>";renderPager(pag);return}
+    if(!trades.length){tb.innerHTML="<tr><td colspan='8' style='text-align:center;color:var(--text-muted);padding:28px;font-family:var(--orb);letter-spacing:.16em;font-size:8.5px'>KAYIT YOK</td></tr>";renderPager(pag, 'history');return}
     tb.innerHTML=trades.map(t=>{
       const isL=(t.direction||"").toUpperCase()==="LONG",pnl=t.net_pnl||0,st=(t.status||"").toUpperCase(),win=st==="WIN"||(st==="MANUAL"&&pnl>0),dur=t.duration_str||(t.duration_min?Math.round(t.duration_min)+"dk":"—");
       return "<tr><td class='td-sym'>"+(t.symbol||"—")+"</td><td><span class='badge "+(isL?"b-long":"b-short")+"'>"+(t.direction||"—")+"</span></td><td>"+f(t.entry,5)+"</td><td>"+f(t.exit_price,5)+"</td><td class='"+(pnl>=0?"pos-c":"neg-c")+"'>"+fp(pnl)+"</td><td class='gld-c'>"+f(t.r_multiple,2)+"R</td><td><span class='dur'>"+dur+"</span></td><td><span class='badge "+(win?"b-win":"b-loss")+"'>"+st+"</span></td></tr>";
-    }).join("");renderPager(pag);
+    }).join("");renderPager(pag, 'history');
   }catch(e){console.error(e)}
 }
 
-function renderPager(pag){
-  const wrap=document.getElementById("pager"),tot=pag.total_pages||1,cur=pag.page||1;
+async function loadArchive(page=1){
+  try{
+    const j=await(await fetch(BASE+"/api/signal_archive?page="+page+"&limit=10")).json();if(!j.ok)return;
+    const signals=j.data||[],pag=j;
+    document.getElementById("archiveCount").textContent=(pag.total_count||0)+" sinyal";
+    const tb=document.getElementById("archiveBody");
+    if(!signals.length){tb.innerHTML="<tr><td colspan='8' style='text-align:center;color:var(--text-muted);padding:28px;font-family:var(--orb);letter-spacing:.16em;font-size:8.5px'>KAYIT YOK</td></tr>";renderPager(pag, 'archive');return}
+    tb.innerHTML=signals.map(s=>{
+      const mfe=s.mfe||0, mae=s.mae||0, win=s.would_have_won===1;
+      const date=s.created_at ? s.created_at.substring(5,16) : "—";
+      return "<tr><td class='td-sym'>"+(s.symbol||"—")+"</td><td><span class='badge b-long'>"+(s.setup_quality||"—")+"</span></td><td>"+f(s.final_score,1)+"</td><td><span class='badge "+(s.decision==='ALLOW'?'b-win':'b-loss')+"'>"+(s.decision||"—")+"</span></td><td class='pos-c'>"+f(mfe,2)+"</td><td class='neg-c'>"+f(mae,2)+"</td><td><span class='badge "+(win?'b-win':'b-loss')+"'>"+(win?'WIN':'LOSS')+"</span></td><td><span class='dur'>"+date+"</span></td></tr>";
+    }).join("");renderPager(pag, 'archive');
+  }catch(e){console.error(e)}
+}
+
+function renderPager(pag, type){
+  const wrapId = type === 'history' ? 'pager' : 'archivePager';
+  const loadFn = type === 'history' ? 'loadHistory' : 'loadArchive';
+  const wrap=document.getElementById(wrapId),tot=pag.total_pages||1,cur=pag.page||1;
   if(tot<=1){wrap.innerHTML="";return}
-  let h="<button class='pb' "+(cur<=1?"disabled":"")+" onclick='loadHistory("+(cur-1)+")'>&#8249;</button>";
-  for(let i=1;i<=tot;i++){if(i===1||i===tot||Math.abs(i-cur)<=2)h+="<button class='pb "+(i===cur?"active":"")+"' onclick='loadHistory("+i+")'>"+i+"</button>";else if(Math.abs(i-cur)===3)h+="<span class='pinfo'>&#8230;</span>"}
-  h+="<button class='pb' "+(cur>=tot?"disabled":"")+" onclick='loadHistory("+(cur+1)+")'>&#8250;</button><span class='pinfo'>"+cur+" / "+tot+"</span>";
+  let h="<button class='pb' "+(cur<=1?"disabled":"")+" onclick='"+loadFn+"("+(cur-1)+")'>&#8249;</button>";
+  for(let i=1;i<=tot;i++){if(i===1||i===tot||Math.abs(i-cur)<=2)h+="<button class='pb "+(i===cur?"active":"")+"' onclick='"+loadFn+"("+i+")'>"+i+"</button>";else if(Math.abs(i-cur)===3)h+="<span class='pinfo'>&#8230;</span>"}
+  h+="<button class='pb' "+(cur>=tot?"disabled":"")+" onclick='"+loadFn+"("+(cur+1)+")'>&#8250;</button><span class='pinfo'>"+cur+" / "+tot+"</span>";
   wrap.innerHTML=h;
 }
 
