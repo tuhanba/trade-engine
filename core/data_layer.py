@@ -121,6 +121,7 @@ def trade_to_dict(trade: TradeData) -> dict:
     return d
 
 
+<<<<<<< HEAD
 # ── Legacy normalleştirme ───────────────────────────────────────────
 
 def normalize_signal(raw: dict) -> SignalData:
@@ -184,3 +185,36 @@ def normalize_signal(raw: dict) -> SignalData:
         ),
         metadata=raw.get("metadata"),
     )
+=======
+data_layer = DataLayer()
+
+
+def calculate_duration(open_time_str) -> tuple:
+    """
+    open_time string'inden geçen süreyi hesaplar.
+    Returns: (duration_seconds: int, duration_str: str)
+    """
+    from datetime import datetime, timezone
+    if not open_time_str:
+        return 0, "0s"
+    try:
+        opened = datetime.fromisoformat(
+            str(open_time_str).replace("Z", "+00:00")
+        )
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=timezone.utc)
+        secs = int((datetime.now(timezone.utc) - opened).total_seconds())
+        secs = max(0, secs)
+        if secs < 60:
+            return secs, f"{secs}s"
+        elif secs < 3600:
+            dk = secs // 60
+            ys = secs % 60
+            return secs, f"{dk}dk {ys}s"
+        else:
+            sa = secs // 3600
+            dk = (secs % 3600) // 60
+            return secs, f"{sa}sa {dk}dk"
+    except Exception:
+        return 0, "?"
+>>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b

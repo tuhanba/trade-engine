@@ -98,10 +98,24 @@ def is_live_trading_allowed() -> bool:
     )
 
 
+<<<<<<< HEAD
 def is_private_api_allowed() -> bool:
     return USE_BINANCE_PRIVATE_API is True
+=======
+# ── Veritabanı ───────────────────────────────────────────────────────────────
+DB_PATH = os.getenv("DB_PATH", "/home/ubuntu/trade-engine-work/trade_engine.db")
+
+# ── Paper/Live Mod (ek sabitler) ─────────────────────────────────────────────
+DRY_RUN              = os.getenv("DRY_RUN", "true").lower() == "true"
+LIVE_TRADING_ENABLED = os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
+
+# ── Ek Risk Sabitleri ─────────────────────────────────────────────────────────
+MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3"))
+MAX_MARGIN_LOSS_PCT    = float(os.getenv("MAX_MARGIN_LOSS_PCT", "0.40"))  # %40 margin kaybı limiti
+>>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
 
+<<<<<<< HEAD
 def safety_summary() -> dict:
     return {
         "execution_mode": EXECUTION_MODE,
@@ -112,3 +126,37 @@ def safety_summary() -> dict:
         "live_allowed": is_live_trading_allowed(),
         "private_api_allowed": is_private_api_allowed(),
     }
+=======
+# ── Coin Evreni ──────────────────────────────────────────────────────────────
+# v2.3: 207 coin backtest ile genişletildi — 92 coin, PF ≥ 1.0, ≥5 trade
+# Test tarihi: 2026-05-01 | BTC 4H: BULLISH | Paralel backtest
+COIN_UNIVERSE = [
+    "ALLOUSDT", "DYDXUSDT", "SNDKUSDT", "FLUIDUSDT", "ZEREBROUSDT",
+    "HOODUSDT", "GWEIUSDT", "REZUSDT", "TACUSDT", "ARBUSDT",
+    "ADAUSDT", "EIGENUSDT", "1000FLOKIUSDT", "1000SHIBUSDT", "FARTCOINUSDT",
+    "AEROUSDT", "EWYUSDT", "FLOWUSDT", "PENDLEUSDT", "BZUSDT",
+    "BASUSDT", "TIAUSDT", "PIPPINUSDT", "OPUSDT", "BCHUSDT",
+    "XPTUSDT", "MASKUSDT", "UNIUSDT", "SIRENUSDT", "DASHUSDT",
+    "MAGMAUSDT", "MSFTUSDT", "CRCLUSDT", "ENAUSDT", "ICPUSDT",
+    "STRKUSDT", "WLFIUSDT", "MOODENGUSDT", "CLUSDT", "AIOTUSDT",
+    "1000PEPEUSDT", "SPXUSDT", "SOONUSDT", "TRADOORUSDT", "XAGUSDT",
+    "AIGENSYNUSDT", "WIFUSDT", "MSTRUSDT", "DRIFTUSDT", "RAYSOLUSDT",
+    "ETHUSDT", "HUSDT", "USTCUSDT", "COMPUSDT", "BIOUSDT",
+    "APTUSDT", "CHZUSDT", "AXSUSDT", "NEIROUSDT", "BLUAIUSDT",
+    "CRVUSDT", "RENDERUSDT", "NAORISUSDT", "BEATUSDT", "DOTUSDT",
+    "CGPTUSDT", "TAOUSDT", "PIEVERSEUSDT", "LINEAUSDT", "SKYAIUSDT",
+    "AXLUSDT", "PUMPUSDT", "ARCUSDT", "POLUSDT", "ACHUSDT",
+    "HBARUSDT", "ASTERUSDT", "BSBUSDT", "ZBTUSDT", "BERAUSDT",
+    "FILUSDT", "PENGUUSDT", "1000BONKUSDT", "CFXUSDT", "ETHFIUSDT",
+    "AIXBTUSDT", "B2USDT", "HUMAUSDT", "ATOMUSDT", "LITUSDT",
+    "ZECUSDT", "GOOGLUSDT",
+]
+
+# ── Fee ──────────────────────────────────────────────────────────────────────
+DEFAULT_FEE_RATE = float(os.getenv("DEFAULT_FEE_RATE", "0.0004"))  # Binance Futures maker/taker
+
+# ── Log ──────────────────────────────────────────────────────────────────────
+LOG_DIR      = os.getenv("LOG_DIR", "/home/ubuntu/trade-engine-work/logs")
+LOG_MAX_DAYS = int(os.getenv("LOG_MAX_DAYS", "7"))
+LOG_MAX_MB   = int(os.getenv("LOG_MAX_MB", "50"))
+>>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b

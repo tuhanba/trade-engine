@@ -16,9 +16,17 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+<<<<<<< HEAD
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+=======
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+from core.signal_intelligence import SignalIntelligence
+>>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
 from core.data_layer import SignalData, SignalDecision
 
@@ -27,6 +35,7 @@ logger = logging.getLogger("ax.ai_decision")
 
 # ── AI Decision Result ───────────────────────────────────────────────
 
+<<<<<<< HEAD
 @dataclass
 class AIDecisionResult:
     """AI karar sonucu."""
@@ -35,6 +44,32 @@ class AIDecisionResult:
     confidence: float = 0.0
     score_adjusted: float = 0.0
     ghost_insight: str = ""
+=======
+class AIDecisionEngine:
+    def __init__(self, db_path="trade_engine.db"):
+        self.db_path = db_path
+        self.daily_signals = 0
+        self.max_daily_signals = 40  # Backtest: kalite > miktar
+        self.recent_coins = []
+        self.last_reset_date = datetime.now(timezone.utc).date()
+        self.thresholds = {
+            "data": DATA_THRESHOLD,
+            "watchlist": WATCHLIST_THRESHOLD,
+            "telegram": TELEGRAM_THRESHOLD,
+            "trade": TRADE_THRESHOLD,
+        }
+        
+        # Dinamik parametreler
+        self.params = {
+            "sl_atr_mult": 1.5,
+            "tp_atr_mult": 2.0,
+            "risk_pct": 1.0
+        }
+        
+        self._init_db()
+        self._load_best_params()
+        self.intelligence = SignalIntelligence(db_path=db_path)
+>>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
 
 # ── Ghost Memory Manager ─────────────────────────────────────────────
@@ -58,6 +93,7 @@ class GhostMemoryManager:
         Son N gündeki VETO edilen sinyallerin TP/SL oranı.
         """
         try:
+<<<<<<< HEAD
             cutoff = (
                 datetime.now(timezone.utc) - timedelta(days=days)
             ).isoformat()
@@ -74,6 +110,68 @@ class GhostMemoryManager:
                     """,
                     (symbol, cutoff),
                 ).fetchall()
+=======
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                best = conn.execute("SELECT * FROM best_params ORDER BY profit_factor DESC LIMIT 1").fetchone()
+                if best:
+                    self.params = json.loads(best["params_json"])
+                    logger.info(f"En iyi parametreler yüklendi: {self.params}")
+        except Exception as e:
+            logger.error(f"Parametre yükleme hatası: {e}")
+
+    def _check_daily_reset(self):
+        """Gece yarısı günlük sayacı sıfırlar."""
+        current_date = datetime.now(timezone.utc).date()
+        if current_date > self.last_reset_date:
+            self.daily_signals = 0
+            self.recent_coins = []
+            self.last_reset_date = current_date
+
+    def _get_coin_profile(self, symbol: str) -> dict:
+        """Coin'in geçmiş performans profilini getirir."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("SELECT * FROM coin_profiles WHERE symbol=?", (symbol,)).fetchone()
+                if row:
+                    return dict(row)
+        except Exception as e:
+            logger.error(f"Coin profile okuma hatası: {e}")
+        return {"win_rate": 0.5, "total_trades": 0, "danger_score": 0.0}
+
+    def _get_hourly_heatmap_score(self) -> float:
+        """Mevcut saatin geçmiş performansına göre risk skoru döner."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                trades = conn.execute(
+                    "SELECT created_at, trade_result FROM ai_learning WHERE trade_result IN ('WIN','LOSS')"
+                ).fetchall()
+                
+                by_hour = defaultdict(list)
+                for t in trades:
+                    try:
+                        dt = datetime.fromisoformat(t["created_at"])
+                        by_hour[dt.hour].append(t["trade_result"])
+                    except Exception:
+                        pass
+                
+                current_hour = datetime.now(timezone.utc).hour
+                if current_hour in by_hour and len(by_hour[current_hour]) >= 3:
+                    results = by_hour[current_hour]
+                    wr = len([r for r in results if r == "WIN"]) / len(results)
+                    if wr < 0.3: return -2.0
+                    if wr > 0.6: return 1.0
+        except Exception as e:
+            logger.error(f"Heatmap hesaplama hatası: {e}")
+            
+        # Fallback — Backtest bulgularına göre kalibre edildi
+        current_hour = datetime.now(timezone.utc).hour
+        if current_hour in _BAD_HOURS:  return -2.5  # WR %13-22 — ağır ceza
+        if current_hour in _GOOD_HOURS: return +1.5  # WR %44-51 — bonus
+        return 0.0
+>>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
                 tp_hits = 0
                 sl_hits = 0
@@ -279,6 +377,7 @@ def classify_signal(
             confidence=1.0,
         )
 
+<<<<<<< HEAD
     # ── Score çok düşük ──────────────────────────────────────────
     if signal.score < 5:
         return AIDecisionResult(
@@ -286,6 +385,22 @@ def classify_signal(
             reason=f"Ham score çok düşük: {signal.score}",
             confidence=0.9,
         )
+=======
+        # 5. Historical Intelligence Boost
+        intel_boost = self.intelligence.get_ai_boost_recommendation(signal_data.symbol, signal_data.setup_quality)
+        ai_adj += intel_boost
+        
+        # 6. ML Sinyal Skoru Etkisi
+        ml_score = getattr(signal_data, "ml_score", 50)
+        if ml_score > 75:
+            ai_adj += 1.5
+        elif ml_score > 60:
+            ai_adj += 0.5
+        elif ml_score < 35:
+            ai_adj -= 2.0
+        elif ml_score < 45:
+            ai_adj -= 1.0
+>>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
     # ── Adaptif score hesapla ────────────────────────────────────
     adjusted_score = scorer.compute_adjusted_score(signal, ctx)
@@ -406,3 +521,177 @@ def get_learning_summary() -> dict:
             "total_candidates": 0, "tp_hits": 0, "sl_hits": 0,
             "pending": 0, "ghost_winrate": 0.0, "top_symbols": [],
         }
+<<<<<<< HEAD
+=======
+
+    def _optimize_params(self):
+        """Geçmiş işlemlere göre parametreleri optimize eder."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                trades = conn.execute("SELECT * FROM ai_learning ORDER BY id DESC LIMIT 50").fetchall()
+                
+                if len(trades) < MIN_TRADES_FOR_RISK_UPDATE:
+                    return
+                    
+                wins = [t for t in trades if t["trade_result"] == "WIN"]
+                losses = [t for t in trades if t["trade_result"] == "LOSS"]
+                
+                wr = len(wins) / len(trades)
+                gwin = sum(t["pnl"] for t in wins)
+                gloss = abs(sum(t["pnl"] for t in losses))
+                pf = gwin / gloss if gloss > 0 else 0
+                
+                markov = self._calc_markov_matrix()
+                
+                # Optimizasyon Kuralları
+                if markov and markov["cold_streak"]:
+                    self.params["risk_pct"] = clamp(self.params["risk_pct"] - 0.20, *PARAM_BOUNDS["risk_pct"])
+                elif markov and markov["hot_streak"]:
+                    self.params["risk_pct"] = clamp(self.params["risk_pct"] + 0.15, *PARAM_BOUNDS["risk_pct"])
+                    
+                if wr < 0.32:
+                    self.params["sl_atr_mult"] = clamp(self.params["sl_atr_mult"] - 0.08, *PARAM_BOUNDS["sl_atr_mult"])
+                elif wr > 0.60 and pf > 1.8:
+                    self.params["risk_pct"] = clamp(self.params["risk_pct"] + 0.10, *PARAM_BOUNDS["risk_pct"])
+                    self.params["tp_atr_mult"] = clamp(self.params["tp_atr_mult"] + 0.15, *PARAM_BOUNDS["tp_atr_mult"])
+                    
+                # En iyi parametreleri kaydet
+                if wr > 0.40 and pf > 1.0 and len(trades) >= MIN_CANDIDATES_FOR_THRESHOLD_UPDATE:
+                    best = conn.execute("SELECT * FROM best_params ORDER BY profit_factor DESC LIMIT 1").fetchone()
+                    if not best or (pf > best["profit_factor"] and wr > best["win_rate"]):
+                        conn.execute("""
+                            INSERT INTO best_params
+                                (data, params_json, win_rate, profit_factor)
+                            VALUES (?, ?, ?, ?)
+                        """, (json.dumps(self.params), json.dumps(self.params), wr, pf))
+                        conn.commit()
+                        logger.info(f"Yeni en iyi parametreler kaydedildi: {self.params}")
+                        
+        except Exception as e:
+            logger.error(f"Parametre optimizasyon hatası: {e}")
+
+    def learn_from_paper_outcome(
+        self,
+        symbol: str,
+        tracked_from: str,
+        would_have_won: int,
+        mfe_r: float,
+        mae_r: float,
+        first_touch: str,
+        skip_correct: int,
+    ):
+        """Girilmeyen fırsatların çıktısı — gerçek trade Markov zincirine karışmasın."""
+        try:
+            tr = "PAPER_WIN" if would_have_won else "PAPER_LOSS"
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    """INSERT INTO ai_learning (symbol, trade_result, pnl, setup_quality)
+                       VALUES (?, ?, 0.0, ?)""",
+                    (
+                        symbol,
+                        tr,
+                        f"paper:{tracked_from}:{first_touch}:mfe={mfe_r}:mae={mae_r}:skip_ok={skip_correct}",
+                    ),
+                )
+
+                conn.execute(
+                    """INSERT INTO adaptive_stats (
+                        id, scope, key, sample_size, win_rate, expectancy, avg_r,
+                        threshold_data, threshold_watchlist, threshold_telegram, threshold_trade,
+                        action_taken, notes)
+                       VALUES (?, 'paper_tracking', ?, 1, ?, 0.0, 0.0, 0, 0, 0, 0, '', ?)""",
+                    (
+                        str(uuid.uuid4()),
+                        f"{tracked_from}:{first_touch}:{symbol}",
+                        float(would_have_won),
+                        json.dumps({"mfe_r": mfe_r, "mae_r": mae_r, "skip_correct": skip_correct}),
+                    ),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.debug(f"Paper outcome learn atlandı: {e}")
+
+    def learn_from_trade(self, symbol: str, result: str, pnl: float, setup_quality: str):
+        """Kapanan işlemlerden öğrenir, coin profillerini günceller ve parametreleri optimize eder."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO ai_learning (symbol, trade_result, pnl, setup_quality)
+                    VALUES (?, ?, ?, ?)
+                """, (symbol, result, pnl, setup_quality))
+                
+                trades = conn.execute("""
+                    SELECT trade_result FROM ai_learning WHERE symbol=? ORDER BY id DESC LIMIT 20
+                """, (symbol,)).fetchall()
+                
+                if trades:
+                    total = len(trades)
+                    wins = sum(1 for t in trades if t[0] == "WIN")
+                    win_rate = wins / total
+                    
+                    danger = 0.0
+                    if total >= MIN_CANDIDATES_FOR_COIN_LEARNING and all(t[0] == "LOSS" for t in trades[:3]):
+                        danger = 0.8
+                    elif win_rate < 0.3:
+                        danger = 0.6
+                        
+                    conn.execute("""
+                        INSERT OR REPLACE INTO coin_profiles (symbol, win_rate, total_trades, danger_score, updated_at)
+                        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (symbol, win_rate, total, danger))
+                conn.commit()
+                
+            # Parametreleri optimize et
+            self._optimize_params()
+
+        except Exception as e:
+            logger.error(f"AI öğrenme hatası: {e}")
+
+    def learn_from_outcome(self, symbol: str, net_pnl: float, reason: str):
+        """
+        Trade sonucundan öğren. Coin profilini tam olarak güncelle.
+        execution_engine._finalize() tarafından çağrılır.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute("""
+                    SELECT net_pnl, tp1_hit, tp2_hit, r_multiple, duration_seconds
+                    FROM trades
+                    WHERE symbol=? AND status='closed' AND is_valid_for_stats=1
+                    ORDER BY id DESC LIMIT 30
+                """, (symbol,)).fetchall()
+
+            if not rows:
+                return
+
+            total  = len(rows)
+            wins   = sum(1 for r in rows if (r["net_pnl"] or 0) > 0)
+            tp1s   = sum(1 for r in rows if r["tp1_hit"])
+            tp2s   = sum(1 for r in rows if r["tp2_hit"])
+            avg_r  = sum(float(r["r_multiple"] or 0) for r in rows) / total
+            gp = sum(float(r["net_pnl"] or 0) for r in rows if (r["net_pnl"] or 0) > 0)
+            gl = abs(sum(float(r["net_pnl"] or 0) for r in rows if (r["net_pnl"] or 0) < 0))
+            pf     = round(gp / gl, 2) if gl > 0 else 0
+            avg_dur = sum(float(r["duration_seconds"] or 0) for r in rows) / total / 60
+
+            import sys as _sys, os as _os
+            _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+            from database import update_coin_profile
+            update_coin_profile(symbol, {
+                "win_rate":       round(wins / total, 4),
+                "avg_r":          round(avg_r, 3),
+                "profit_factor":  pf,
+                "tp1_hit_rate":   round(tp1s / total, 4),
+                "tp2_hit_rate":   round(tp2s / total, 4),
+                "avg_duration":   round(avg_dur, 1),
+                "sample_size":    total,
+                "danger_score":   round(max(0, 1 - (wins / total)), 2),
+            })
+            logger.info(
+                f"[AI] {symbol} profil: wr={wins/total:.1%} pf={pf} avg_r={avg_r:.2f} n={total}"
+            )
+        except Exception as e:
+            logger.warning(f"[AI] learn_from_outcome hatası {symbol}: {e}")
+>>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
