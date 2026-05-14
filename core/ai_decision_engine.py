@@ -1,275 +1,408 @@
 """
-core/ai_decision_engine.py — AX AI Brain v5.0 (PAPER-ONLY / LIVE-BLOCKED)
-===========================================================
-FAZ 10: Ghost Learning + Coin Personality + Expectancy
+core/ai_decision_engine.py — AX Ghost Learning & AI Decision Engine v5.0
+=========================================================================
+Ghost Learning sistemi: açılmayan sinyalleri takip eder, 
+pattern öğrenir ve AI kararlarını adaptif olarak geliştir.
 
-Sistem açtığı VE açmadığı trade'lerden öğrenir.
-Tüm sinyaller kaydedilir: ALLOW, WATCH, VETO, SKIPPED_BY_RISK, etc.
-
-Ghost learning:
-- WATCH/VETO/SKIPPED sinyalleri paper outcome ile izlenir.
-- TP1 stop'tan önce gelirse GHOST_WIN.
-- Stop TP1'den önce gelirse GHOST_LOSS.
-- Ağırlık: Gerçek=1.0, Ghost=0.3, Son 30 gün ağır.
-
-Coin profile:
-- win_rate, avg_R, profit_factor, TP1/TP2 hit rate, danger_score, etc.
+Özellikler:
+  - Adaptif scoring (geçmiş performansa göre ağırlık)
+  - Ghost trade memory (açılmayan sinyallerin sonuçları)
+  - Score decaying (zamanla başarısızlık denemelerini azalt)
+  - Market context entegrasyonu
+  - Multi-factor confidence hesabı
 """
+
+from __future__ import annotations
+
 import logging
 import sqlite3
-import json
-import math
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
-logger = logging.getLogger(__name__)
+from core.data_layer import SignalData, SignalDecision
+
+logger = logging.getLogger("ax.ai_decision")
 
 
-class AIDecisionEngine:
-    def __init__(self, db_path="trading.db"):
-        self.db_path = db_path
-        self._init_db()
+# ── AI Decision Result ───────────────────────────────────────────────
 
-    def _init_db(self):
+@dataclass
+class AIDecisionResult:
+    """AI karar sonucu."""
+    decision: str = SignalDecision.WATCH.value
+    reason: str = ""
+    confidence: float = 0.0
+    score_adjusted: float = 0.0
+    ghost_insight: str = ""
+
+
+# ── Ghost Memory Manager ─────────────────────────────────────────────
+
+class GhostMemoryManager:
+    """
+    Ghost learning: açılmayan sinyallerin geçmiş sonuçlarını
+    analiz ederek AI kararına adaptif katkı sağlar.
+    """
+
+    def __init__(self, db_path: str = ""):
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""CREATE TABLE IF NOT EXISTS ai_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event TEXT, symbol TEXT, decision TEXT,
-                    score REAL, confidence REAL, reason TEXT, data TEXT,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )""")
-                conn.execute("""CREATE TABLE IF NOT EXISTS coin_personality (
-                    symbol TEXT PRIMARY KEY,
-                    win_rate REAL DEFAULT 0,
-                    avg_pnl REAL DEFAULT 0,
-                    avg_r REAL DEFAULT 0,
-                    profit_factor REAL DEFAULT 0,
-                    tp1_hit_rate REAL DEFAULT 0,
-                    tp2_hit_rate REAL DEFAULT 0,
-                    runner_contribution REAL DEFAULT 0,
-                    fakeout_rate REAL DEFAULT 0,
-                    fee_drag REAL DEFAULT 0,
-                    best_hour INTEGER,
-                    long_bias REAL DEFAULT 0.5,
-                    danger_score REAL DEFAULT 0,
-                    sample_size INTEGER DEFAULT 0,
-                    ghost_win_rate REAL DEFAULT 0,
-                    ghost_sample INTEGER DEFAULT 0,
-                    volatility_rank INTEGER DEFAULT 3,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )""")
-                conn.commit()
-        except Exception as e:
-            logger.error(f"AI DB init hatası: {e}")
-
-    def decide(self, signal_data) -> tuple:
-        """Sinyali analiz eder ve karar verir. Returns (decision, reason)."""
-        if isinstance(signal_data, dict):
-            symbol = signal_data.get("symbol", "")
-            score = signal_data.get("final_score", 0)
-            confidence = signal_data.get("confidence", 0.8)
-            quality = signal_data.get("setup_quality", "C")
-        else:
-            symbol = getattr(signal_data, 'symbol', "")
-            score = getattr(signal_data, 'final_score', 0)
-            confidence = getattr(signal_data, 'confidence', 0.8)
-            quality = getattr(signal_data, 'setup_quality', "C")
-
-        # Coin personality kontrolü
-        coin_data = self._get_coin_personality(symbol)
-        danger = coin_data.get("danger_score", 0) if coin_data else 0
-        win_rate = coin_data.get("win_rate", 0) if coin_data else 0.5
-        ghost_wr = coin_data.get("ghost_win_rate", 0) if coin_data else 0.5
-        sample = (coin_data.get("sample_size", 0) + coin_data.get("ghost_sample", 0)) if coin_data else 0
-
-        # AI Expectancy Score (Öğrenme tabanlı beklenti)
-        # Sistemi tamamen benzersiz kılan self-optimizing (kendi kendini ayarlayan) eşik mekanizması
-        dynamic_threshold = 7.0
-        blended_wr = 0.5
-        
-        if sample >= 5:
-            # Gerçek trade ağırlıklı (%70), Ghost trade ağırlıklı (%30) karma win_rate
-            blended_wr = (win_rate * 0.7) + (ghost_wr * 0.3)
-            
-            # Öğrendikçe Karar Mekanizmasını Esnet veya Katılaştır:
-            if blended_wr >= 0.65:
-                dynamic_threshold = 5.5  # Çok kârlı coin, eşiği esnet
-            elif blended_wr >= 0.55:
-                dynamic_threshold = 6.0  # Karlı coin
-            elif blended_wr <= 0.35:
-                dynamic_threshold = 8.5  # Çok zararlı coin, mükemmel değilse girme
-            elif blended_wr <= 0.45:
-                dynamic_threshold = 7.5  # Zararlı coin, katı kurallar
-
-        # Karar Mantığı
-        if danger > 0.8:
-            decision = "VETO"
-            reason = f"Yüksek risk (Danger Score: {danger:.2f})"
-        elif score >= dynamic_threshold and quality in ("S", "A+", "A", "B"):
-            if sample >= 5:
-                reason = f"AI Edge: Score={score:.1f} (Hedef: {dynamic_threshold:.1f}) | WR={blended_wr*100:.1f}%"
-            else:
-                reason = f"Score={score:.1f} Quality={quality}"
-            decision = "ALLOW"
-        elif score >= 5.0:
-            decision = "WATCH"
-            reason = f"Ghost tracking: score={score:.1f} (Hedef={dynamic_threshold:.1f})"
-        else:
-            decision = "VETO"
-            reason = f"Düşük skor: {score:.1f} (Gerekli: {dynamic_threshold:.1f})"
-
-        # Log
-        self._log("DECISION", symbol, decision, score, confidence, reason, signal_data)
-        return decision, reason
-
-    def evaluate(self, signal_data):
-        """Uyumluluk wrapper — decide() çağırır."""
-        decision, reason = self.decide(signal_data)
-        return {"decision": decision, "reason": reason}
-
-    def learn_from_outcome(self, symbol, pnl, reason):
-        """Kapanan gerçek trade'den öğren (weight=1.0)."""
-        self._update_personality(symbol, pnl, weight=1.0, source="real")
-
-    def learn_from_trade(self, symbol, result, pnl, setup_quality="B"):
-        """Gerçek trade sonucu öğren."""
-        self._update_personality(symbol, pnl, weight=1.0, source="real")
-        self._log("LEARN_REAL", symbol, result, pnl, 0, f"quality={setup_quality}", {})
-
-    def learn_from_paper_outcome(self, symbol, tracked_from, would_have_won,
-                                  mfe_r=0, mae_r=0, first_touch="",
-                                  skip_correct=0):
-        """Ghost/paper outcome'dan öğren (weight=0.3)."""
-        ghost_pnl = 1.0 if would_have_won else -1.0
-        self._update_personality(symbol, ghost_pnl, weight=0.3, source="ghost")
-
-        # Ghost win/loss log
-        result = "GHOST_WIN" if would_have_won else "GHOST_LOSS"
-        if first_touch == "neither_horizon":
-            result = "EXPIRED"
-
-        self._log("LEARN_GHOST", symbol, result, ghost_pnl, 0,
-                  f"tracked={tracked_from} mfe_r={mfe_r:.2f} mae_r={mae_r:.2f}", {})
-
-    def _update_personality(self, symbol, pnl, weight=1.0, source="real"):
-        """Coin personality güncelle — EMA benzeri decay."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                row = conn.execute(
-                    "SELECT * FROM coin_personality WHERE symbol=?", (symbol,)
-                ).fetchone()
-
-                decay = 0.95  # Son veriler daha ağır
-                is_win = 1 if pnl > 0 else 0
-
-                if row:
-                    old_wr = row["win_rate"] or 0
-                    old_pnl = row["avg_pnl"] or 0
-                    sample = (row["sample_size"] or 0)
-                    ghost_sample = row["ghost_sample"] or 0
-                    ghost_wr = row["ghost_win_rate"] or 0
-
-                    if source == "real":
-                        new_wr = old_wr * decay + is_win * (1 - decay) * weight
-                        new_pnl = old_pnl * decay + pnl * (1 - decay) * weight
-                        sample += 1
-                    else:
-                        new_wr = old_wr
-                        new_pnl = old_pnl
-                        ghost_wr = ghost_wr * decay + is_win * (1 - decay) * weight
-                        ghost_sample += 1
-
-                    # Danger score (düşük win_rate + yüksek sample = tehlikeli)
-                    danger = 0
-                    if sample >= 5 and new_wr < 0.35:
-                        danger = min(1.0, (0.35 - new_wr) * 3)
-
-                    conn.execute("""
-                        UPDATE coin_personality SET
-                        win_rate=?, avg_pnl=?, sample_size=?,
-                        ghost_win_rate=?, ghost_sample=?,
-                        danger_score=?, updated_at=CURRENT_TIMESTAMP
-                        WHERE symbol=?
-                    """, (round(new_wr, 4), round(new_pnl, 4), sample,
-                          round(ghost_wr, 4), ghost_sample,
-                          round(danger, 4), symbol))
-                else:
-                    conn.execute("""
-                        INSERT INTO coin_personality
-                        (symbol, win_rate, avg_pnl, sample_size,
-                         ghost_win_rate, ghost_sample, danger_score)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, (symbol, round(is_win * weight, 4), round(pnl * weight, 4),
-                          1 if source == "real" else 0,
-                          round(is_win * weight, 4) if source == "ghost" else 0,
-                          1 if source == "ghost" else 0, 0))
-
-        except Exception as e:
-            logger.error(f"AI personality update hatası: {e}")
-
-    def _get_coin_personality(self, symbol):
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                row = conn.execute(
-                    "SELECT * FROM coin_personality WHERE symbol=?", (symbol,)
-                ).fetchone()
-                return dict(row) if row else None
+            import config
+            self.db_path = db_path or config.DB_PATH
         except Exception:
-            return None
+            self.db_path = "trading.db"
 
-    def get_expectancy_report(self, days=30):
-        """FAZ 11: Expectancy raporu."""
+    def get_symbol_ghost_stats(self, symbol: str, days: int = 14) -> dict:
+        """
+        Belirli sembol için ghost trade başarı istatistiklerini döner.
+        Son N gündeki VETO edilen sinyallerin TP/SL oranı.
+        """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=days)
+            ).isoformat()
+            conn = sqlite3.connect(self.db_path, timeout=5)
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT status, COUNT(*) as cnt
+                    FROM signal_candidates
+                    WHERE symbol = ? AND created_at >= ?
+                    AND status IN ('TP_HIT', 'SL_HIT')
+                    GROUP BY status
+                    """,
+                    (symbol, cutoff),
+                ).fetchall()
 
-                rows = conn.execute("""
-                    SELECT net_pnl, r_multiple, setup_quality, direction,
-                           symbol, tp1_hit, tp2_hit
-                    FROM trades
-                    WHERE status='closed' AND is_valid_for_stats=1
-                    AND close_time >= ?
-                """, (since,)).fetchall()
+                tp_hits = 0
+                sl_hits = 0
+                for r in rows:
+                    if r["status"] == "TP_HIT":
+                        tp_hits = r["cnt"]
+                    elif r["status"] == "SL_HIT":
+                        sl_hits = r["cnt"]
 
-                if not rows:
-                    return {"expectancy": 0, "total": 0}
-
-                wins = [r for r in rows if r["net_pnl"] > 0]
-                losses = [r for r in rows if r["net_pnl"] <= 0]
-                total = len(rows)
-                win_rate = len(wins) / total if total > 0 else 0
-                avg_win = sum(r["net_pnl"] for r in wins) / len(wins) if wins else 0
-                avg_loss = abs(sum(r["net_pnl"] for r in losses) / len(losses)) if losses else 0
-
-                expectancy = win_rate * avg_win - (1 - win_rate) * avg_loss
-
-                tp1_hits = sum(1 for r in rows if r["tp1_hit"])
-                tp2_hits = sum(1 for r in rows if r["tp2_hit"])
+                total = tp_hits + sl_hits
+                ghost_wr = round(tp_hits / total * 100, 1) if total > 0 else 0.0
 
                 return {
-                    "expectancy": round(expectancy, 4),
                     "total": total,
-                    "win_rate": round(win_rate, 4),
-                    "avg_win": round(avg_win, 4),
-                    "avg_loss": round(avg_loss, 4),
-                    "tp1_hit_rate": round(tp1_hits / total, 4) if total > 0 else 0,
-                    "tp2_hit_rate": round(tp2_hits / total, 4) if total > 0 else 0,
-                    "avg_r": round(sum(r["r_multiple"] or 0 for r in rows) / total, 3) if total else 0,
+                    "tp_hits": tp_hits,
+                    "sl_hits": sl_hits,
+                    "ghost_winrate": ghost_wr,
                 }
-        except Exception as e:
-            logger.error(f"Expectancy report hatası: {e}")
-            return {"error": str(e)}
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.debug("Ghost stats alınamadı [%s]: %s", symbol, exc)
+            return {"total": 0, "tp_hits": 0, "sl_hits": 0, "ghost_winrate": 0.0}
 
-    def _log(self, event, symbol, decision, score, confidence, reason, data):
+    def get_direction_bias(self, symbol: str, days: int = 7) -> dict:
+        """
+        Sembol için yön bias analizi:
+        Son N günde hangi yön (LONG/SHORT) daha başarılı?
+        """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    INSERT INTO ai_logs (event, symbol, decision, score, confidence, reason, data)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (event, symbol, decision, score, confidence, reason,
-                      json.dumps(data) if isinstance(data, dict) else str(data)))
-        except Exception as e:
-            logger.debug(f"AI log hatası: {e}")
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=days)
+            ).isoformat()
+            conn = sqlite3.connect(self.db_path, timeout=5)
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT side, status, COUNT(*) as cnt
+                    FROM signal_candidates
+                    WHERE symbol = ? AND created_at >= ?
+                    AND status IN ('TP_HIT', 'SL_HIT')
+                    GROUP BY side, status
+                    """,
+                    (symbol, cutoff),
+                ).fetchall()
+
+                data = {"LONG": {"tp": 0, "sl": 0}, "SHORT": {"tp": 0, "sl": 0}}
+                for r in rows:
+                    side = r["side"].upper()
+                    if side not in data:
+                        continue
+                    if r["status"] == "TP_HIT":
+                        data[side]["tp"] += r["cnt"]
+                    else:
+                        data[side]["sl"] += r["cnt"]
+
+                result = {}
+                for side, counts in data.items():
+                    total = counts["tp"] + counts["sl"]
+                    wr = round(counts["tp"] / total * 100, 1) if total > 0 else 0.0
+                    result[side] = {"total": total, "winrate": wr}
+
+                return result
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.debug("Direction bias alınamadı: %s", exc)
+            return {}
+
+    def get_score_multiplier(self, symbol: str, side: str) -> float:
+        """
+        Ghost performance'a göre skor çarpanı hesaplar.
+        İyi performans → boost, kötü performans → reduce.
+        Range: 0.5 – 1.5
+        """
+        stats = self.get_symbol_ghost_stats(symbol)
+        if stats["total"] < 3:
+            return 1.0  # Yetersiz veri
+
+        wr = stats["ghost_winrate"]
+        if wr >= 70:
+            return 1.3
+        elif wr >= 55:
+            return 1.1
+        elif wr <= 30:
+            return 0.7
+        elif wr <= 45:
+            return 0.85
+        return 1.0
+
+
+# ── Adaptif Scoring ──────────────────────────────────────────────────
+
+class AdaptiveScorer:
+    """Sinyale adaptif skor atar — ghost history + market context."""
+
+    def __init__(self, ghost_manager: GhostMemoryManager):
+        self.ghost = ghost_manager
+
+    def compute_adjusted_score(
+        self,
+        signal: SignalData,
+        context: dict,
+    ) -> float:
+        """
+        Ham skoru pek çok faktörle ayarlar:
+          1. Ghost history multiplier
+          2. Market trend alignment
+          3. Hour-of-day quality
+          4. Volatility factor
+          5. RR quality bonus
+        """
+        from core.accounting import calculate_rr
+
+        base_score = signal.score
+
+        # 1. Ghost multiplier
+        ghost_mult = self.ghost.get_score_multiplier(signal.symbol, signal.side)
+        adjusted = base_score * ghost_mult
+
+        # 2. Market trend alignment
+        trend = context.get("market_trend", "neutral").lower()
+        if trend == "bullish" and signal.side == "LONG":
+            adjusted *= 1.15
+        elif trend == "bearish" and signal.side == "SHORT":
+            adjusted *= 1.15
+        elif trend == "bullish" and signal.side == "SHORT":
+            adjusted *= 0.85
+        elif trend == "bearish" and signal.side == "LONG":
+            adjusted *= 0.85
+
+        # 3. RR quality bonus
+        tp1 = signal.tp1 or 0
+        if tp1 > 0 and signal.entry_price > 0 and signal.stop_loss > 0:
+            rr = calculate_rr(signal.entry_price, signal.stop_loss, tp1)
+            if rr >= 3.0:
+                adjusted *= 1.2
+            elif rr >= 2.0:
+                adjusted *= 1.1
+            elif rr < 1.5:
+                adjusted *= 0.9
+
+        # 4. Volatility factor
+        vol = context.get("volatility", "normal")
+        if vol == "high":
+            adjusted *= 0.92  # Yüksek volatilite → risk artıyor
+        elif vol == "low":
+            adjusted *= 0.95
+
+        # 5. Volume confirmation
+        vol_ratio = float(context.get("volume_ratio", 1.0))
+        if vol_ratio >= 2.0:
+            adjusted *= 1.1
+        elif vol_ratio < 0.5:
+            adjusted *= 0.9
+
+        return round(min(adjusted, 200.0), 1)
+
+
+# ── Ana AI Decision Engine ───────────────────────────────────────────
+
+# Singleton ghost manager
+_ghost_manager: Optional[GhostMemoryManager] = None
+
+def _get_ghost_manager() -> GhostMemoryManager:
+    global _ghost_manager
+    if _ghost_manager is None:
+        _ghost_manager = GhostMemoryManager()
+    return _ghost_manager
+
+
+def classify_signal(
+    signal: SignalData,
+    context: dict | None = None,
+) -> AIDecisionResult:
+    """
+    Sinyali değerlendirip ALLOW / WATCH / VETO kararı verir.
+
+    context opsiyonel alanlar:
+      - market_trend: "bullish" | "bearish" | "neutral"
+      - volatility: "high" | "normal" | "low"
+      - open_trade_count: int
+      - volume_ratio: float (relative volume)
+    """
+    ctx = context or {}
+    ghost = _get_ghost_manager()
+    scorer = AdaptiveScorer(ghost)
+
+    # ── Temel validasyon ─────────────────────────────────────────
+    if signal.entry_price <= 0 or signal.stop_loss <= 0:
+        return AIDecisionResult(
+            decision=SignalDecision.VETO.value,
+            reason="Geçersiz entry/SL değerleri",
+            confidence=1.0,
+        )
+
+    stop_dist = abs(signal.entry_price - signal.stop_loss)
+    if stop_dist <= 0:
+        return AIDecisionResult(
+            decision=SignalDecision.VETO.value,
+            reason="Stop distance sıfır",
+            confidence=1.0,
+        )
+
+    # ── Score çok düşük ──────────────────────────────────────────
+    if signal.score < 5:
+        return AIDecisionResult(
+            decision=SignalDecision.VETO.value,
+            reason=f"Ham score çok düşük: {signal.score}",
+            confidence=0.9,
+        )
+
+    # ── Adaptif score hesapla ────────────────────────────────────
+    adjusted_score = scorer.compute_adjusted_score(signal, ctx)
+
+    # ── Ghost insight ────────────────────────────────────────────
+    ghost_stats = ghost.get_symbol_ghost_stats(signal.symbol)
+    ghost_insight = ""
+    if ghost_stats["total"] >= 3:
+        ghost_insight = (
+            f"Ghost WR: {ghost_stats['ghost_winrate']}% "
+            f"({ghost_stats['tp_hits']}W/{ghost_stats['sl_hits']}L)"
+        )
+
+    # ── Karar ────────────────────────────────────────────────────
+    decision = SignalDecision.WATCH.value
+    reason = f"Adjusted score: {adjusted_score}"
+    confidence = 0.4
+
+    if adjusted_score >= 30:
+        decision = SignalDecision.ALLOW.value
+        reason = f"Score yeterli: {adjusted_score:.1f} (ham={signal.score:.1f})"
+        confidence = min(0.5 + adjusted_score / 150, 0.95)
+
+    elif adjusted_score >= 15:
+        decision = SignalDecision.WATCH.value
+        reason = f"Orta score: {adjusted_score:.1f} – izleme"
+        confidence = 0.35
+
+    else:
+        decision = SignalDecision.VETO.value
+        reason = f"Ayarlanmış score düşük: {adjusted_score:.1f}"
+        confidence = 0.7
+
+    # Ghost başarı bonusu
+    if ghost_stats["ghost_winrate"] >= 65 and ghost_stats["total"] >= 5:
+        if decision == SignalDecision.WATCH.value:
+            decision = SignalDecision.ALLOW.value
+            reason += f" | Ghost boost ({ghost_stats['ghost_winrate']}% WR)"
+            confidence = min(confidence + 0.15, 0.95)
+
+    result = AIDecisionResult(
+        decision=decision,
+        reason=reason,
+        confidence=round(confidence, 2),
+        score_adjusted=adjusted_score,
+        ghost_insight=ghost_insight,
+    )
+
+    logger.info(
+        "AI karar: %s %s → %s (%.0f%%)  score=%.1f→%.1f  %s",
+        signal.symbol, signal.side,
+        result.decision, result.confidence * 100,
+        signal.score, adjusted_score,
+        ghost_insight or "",
+    )
+    return result
+
+
+# ── Ghost learning summary ────────────────────────────────────────────
+
+def get_learning_summary() -> dict:
+    """Tüm ghost learning istatistiklerini döner."""
+    ghost = _get_ghost_manager()
+    try:
+        conn = sqlite3.connect(ghost.db_path, timeout=5)
+        conn.row_factory = sqlite3.Row
+        try:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM signal_candidates"
+            ).fetchone()[0]
+            tp_hits = conn.execute(
+                "SELECT COUNT(*) FROM signal_candidates WHERE status='TP_HIT'"
+            ).fetchone()[0]
+            sl_hits = conn.execute(
+                "SELECT COUNT(*) FROM signal_candidates WHERE status='SL_HIT'"
+            ).fetchone()[0]
+            pending = total - tp_hits - sl_hits
+
+            # En başarılı semboller
+            top_symbols = conn.execute(
+                """
+                SELECT symbol,
+                    SUM(CASE WHEN status='TP_HIT' THEN 1 ELSE 0 END) as wins,
+                    SUM(CASE WHEN status='SL_HIT' THEN 1 ELSE 0 END) as losses,
+                    COUNT(*) as total
+                FROM signal_candidates
+                WHERE status IN ('TP_HIT', 'SL_HIT')
+                GROUP BY symbol
+                HAVING total >= 3
+                ORDER BY wins * 1.0 / total DESC
+                LIMIT 10
+                """
+            ).fetchall()
+
+            return {
+                "total_candidates": total,
+                "tp_hits": tp_hits,
+                "sl_hits": sl_hits,
+                "pending": pending,
+                "ghost_winrate": round(
+                    tp_hits / (tp_hits + sl_hits) * 100, 1
+                ) if (tp_hits + sl_hits) > 0 else 0.0,
+                "top_symbols": [
+                    {
+                        "symbol": r["symbol"],
+                        "wins": r["wins"],
+                        "losses": r["losses"],
+                        "winrate": round(r["wins"] / r["total"] * 100, 1),
+                    }
+                    for r in top_symbols
+                ],
+            }
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.error("Learning summary hatası: %s", exc)
+        return {
+            "total_candidates": 0, "tp_hits": 0, "sl_hits": 0,
+            "pending": 0, "ghost_winrate": 0.0, "top_symbols": [],
+        }

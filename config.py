@@ -1,90 +1,114 @@
 """
-config.py — AX Sistem Sabitleri v5.0 (PAPER-ONLY / LIVE-BLOCKED)
-===================================================
-Tüm yapılandırma değerleri .env dosyasından okunur.
-Hardcoded token/API key YOKTUR.
+config.py — AX Trade Engine Merkezi Konfigürasyon v5.0
 """
 import os
-from dotenv import load_dotenv
-load_dotenv()
+import logging
+from pathlib import Path
 
-# ── Mod ──────────────────────────────────────────────────────────────────────
-AX_MODE             = os.getenv("AX_MODE", "execute")
-EXECUTION_MODE      = os.getenv("EXECUTION_MODE", "paper")
-PAPER_MODE          = EXECUTION_MODE == "paper"
-LIVE_TRADING_ENABLED = os.getenv("LIVE_TRADING_ENABLED", "False").lower() == "true"
-DRY_RUN             = os.getenv("DRY_RUN", "True").lower() == "true"
-USE_BINANCE_PRIVATE_API = os.getenv("USE_BINANCE_PRIVATE_API", "False").lower() == "true"
-CONFIRM_LIVE_TRADING    = os.getenv("CONFIRM_LIVE_TRADING", "False").lower() == "true"
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
-
-def can_use_live_orders() -> bool:
-    """
-    Canlı emir sadece üç koşul aynı anda sağlanırsa mümkün:
-      LIVE_TRADING_ENABLED=true
-      DRY_RUN=false
-      CONFIRM_LIVE_TRADING=true
-    """
-    return LIVE_TRADING_ENABLED and not DRY_RUN and CONFIRM_LIVE_TRADING
+logger = logging.getLogger("ax.config")
 
 
-# ── API ──────────────────────────────────────────────────────────────────────
-# Paper modda API key/secret ZORUNLU DEĞİLDİR.
-BINANCE_API_KEY    = os.getenv("BINANCE_API_KEY", "")
-BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+def _env(key, default=""): return os.getenv(key, default).strip()
+def _env_bool(key, default=False):
+    v = os.getenv(key, "").strip().lower()
+    return True if v in ("true","1","yes") else (default if v in ("false","0","no","") else default)
+def _env_int(key, default=0):
+    v = os.getenv(key, "").strip()
+    try: return int(v) if v else default
+    except: return default
+def _env_float(key, default=0.0):
+    v = os.getenv(key, "").strip()
+    try: return float(v) if v else default
+    except: return default
 
-# ── Telegram ─────────────────────────────────────────────────────────────────
-# Token ve chat ID SADECE .env dosyasından okunur. Hardcoded default YOKTUR.
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
-# ── Risk ─────────────────────────────────────────────────────────────────────
-RISK_PCT                = float(os.getenv("RISK_PCT", "1.0"))
-MAX_OPEN_TRADES         = int(os.getenv("MAX_OPEN_TRADES", "5"))
-DAILY_MAX_LOSS_PCT      = float(os.getenv("DAILY_MAX_LOSS_PCT", "5.0"))
-CIRCUIT_BREAKER_LOSSES  = int(os.getenv("CIRCUIT_BREAKER_LOSSES", "5"))
-CIRCUIT_BREAKER_MINUTES = int(os.getenv("CIRCUIT_BREAKER_MINUTES", "60"))
-MAX_CORRELATED_TRADES   = int(os.getenv("MAX_CORRELATED_TRADES", "3"))
-MAX_LEVERAGE            = int(os.getenv("MAX_LEVERAGE", "20"))
-MAX_CONSECUTIVE_LOSSES  = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "5"))
-COIN_COOLDOWN_MINUTES   = int(os.getenv("COIN_COOLDOWN_MINUTES", "60"))
-MAX_MARGIN_LOSS_PCT     = float(os.getenv("MAX_MARGIN_LOSS_PCT", "0.40"))
-DEFAULT_FEE_RATE        = float(os.getenv("DEFAULT_FEE_RATE", "0.0004"))
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = str(BASE_DIR / _env("DB_PATH", "trading.db"))
 
-# ── TP / Partial Close ──────────────────────────────────────────────────────
-TP1_CLOSE_PCT    = float(os.getenv("TP1_CLOSE_PCT", "40"))    # TP1'de kapanacak % miktar
-TP2_CLOSE_PCT    = float(os.getenv("TP2_CLOSE_PCT", "30"))    # TP2'de kapanacak % miktar
-RUNNER_CLOSE_PCT = float(os.getenv("RUNNER_CLOSE_PCT", "30")) # Runner / final kalan %
+# ── Execution modu ──────────────────────────────────────────────────
+EXECUTION_MODE = _env("EXECUTION_MODE", "paper")
+LIVE_TRADING_ENABLED = _env_bool("LIVE_TRADING_ENABLED", False)
+DRY_RUN = _env_bool("DRY_RUN", True)
+CONFIRM_LIVE_TRADING = _env_bool("CONFIRM_LIVE_TRADING", False)
+USE_BINANCE_PRIVATE_API = _env_bool("USE_BINANCE_PRIVATE_API", False)
 
-# ── Trailing Stop ────────────────────────────────────────────────────────────
-TRAIL_ATR_MULT = float(os.getenv("TRAIL_ATR_MULT", "1.5"))
+# ── API Keys ─────────────────────────────────────────────────────────
+BINANCE_API_KEY = _env("BINANCE_API_KEY")
+BINANCE_API_SECRET = _env("BINANCE_API_SECRET")
+TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID")
+SECRET_KEY = _env("SECRET_KEY", "ax_secret_prod_2026")
 
-# ── Breakeven ────────────────────────────────────────────────────────────────
-BREAKEVEN_ENABLED    = os.getenv("BREAKEVEN_ENABLED", "True").lower() == "true"
-BREAKEVEN_OFFSET_PCT = float(os.getenv("BREAKEVEN_OFFSET_PCT", "0.05"))
+# ── Risk parametreleri ──────────────────────────────────────────────
+RISK_PCT = _env_float("RISK_PCT", 1.0)
+MAX_OPEN_TRADES = _env_int("MAX_OPEN_TRADES", 5)
+DAILY_MAX_LOSS_PCT = _env_float("DAILY_MAX_LOSS_PCT", 5.0)
+MAX_LEVERAGE = _env_int("MAX_LEVERAGE", 20)
+DEFAULT_FEE_RATE = _env_float("DEFAULT_FEE_RATE", 0.0004)
+MAX_CONSECUTIVE_LOSSES = _env_int("MAX_CONSECUTIVE_LOSSES", 5)
+COIN_COOLDOWN_MINUTES = _env_int("COIN_COOLDOWN_MINUTES", 60)
+MAX_CORRELATED_TRADES = _env_int("MAX_CORRELATED_TRADES", 3)
+MAX_MARGIN_LOSS_PCT = _env_float("MAX_MARGIN_LOSS_PCT", 0.40)
 
-# ── Sinyal Geçitleri ─────────────────────────────────────────────────────────
-DATA_THRESHOLD      = float(os.getenv("DATA_THRESHOLD", "30.0"))
-WATCHLIST_THRESHOLD = float(os.getenv("WATCHLIST_THRESHOLD", "50.0"))
-TELEGRAM_THRESHOLD  = float(os.getenv("TELEGRAM_THRESHOLD", "60.0"))
-TRADE_THRESHOLD     = float(os.getenv("TRADE_THRESHOLD", "70.0"))
+# ── TP Splits ───────────────────────────────────────────────────────
+TP1_CLOSE_PCT = _env_float("TP1_CLOSE_PCT", 40)
+TP2_CLOSE_PCT = _env_float("TP2_CLOSE_PCT", 30)
+RUNNER_CLOSE_PCT = _env_float("RUNNER_CLOSE_PCT", 30)
 
-# ── Filtreler ────────────────────────────────────────────────────────────────
-ADX_MIN_THRESHOLD          = int(os.getenv("ADX_MIN_THRESHOLD", "20"))
-ALLOWED_QUALITIES          = os.getenv("ALLOWED_QUALITIES", "S,A+,A,B,C").split(",")
-BAD_HOURS_UTC              = []  # Tüm saatlere izin ver
-GOOD_HOURS_UTC             = list(range(24))
-SHORT_REQUIRES_BTC_BEARISH = os.getenv("SHORT_REQUIRES_BTC_BEARISH", "False").lower() == "true"
-BTC_TREND_INTERVAL         = os.getenv("BTC_TREND_INTERVAL", "4h")
+# ── Trailing ────────────────────────────────────────────────────────
+TRAIL_ATR_MULT = _env_float("TRAIL_ATR_MULT", 1.5)
+BREAKEVEN_ENABLED = _env_bool("BREAKEVEN_ENABLED", True)
+BREAKEVEN_OFFSET_PCT = _env_float("BREAKEVEN_OFFSET_PCT", 0.05)
 
-# ── Tarama ───────────────────────────────────────────────────────────────────
-SCAN_INTERVAL  = int(os.getenv("SCAN_INTERVAL", "60"))
-DB_PATH        = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading.db")
-MIN_VOLUME_USD = float(os.getenv("MIN_VOLUME_USD", "5000000"))
-COIN_UNIVERSE  = []  # Boş = tüm coinleri tara (top limit yok)
+# ── Paper / Timing ──────────────────────────────────────────────────
+INITIAL_PAPER_BALANCE = _env_float("INITIAL_PAPER_BALANCE", 250.0)
+MAX_HOLD_MINUTES = _env_int("MAX_HOLD_MINUTES", 240)
 
-# ── Paper Account ────────────────────────────────────────────────────────────
-INITIAL_PAPER_BALANCE = float(os.getenv("INITIAL_PAPER_BALANCE", "250.0"))
+# ── Scan ────────────────────────────────────────────────────────────
+SCAN_INTERVAL_SECONDS = _env_int("SCAN_INTERVAL_SECONDS", 60)
+MIN_VOLUME_USDT = _env_float("MIN_VOLUME_USDT", 5_000_000.0)
+MIN_MOVE_PCT = _env_float("MIN_MOVE_PCT", 0.5)
 
-# ── Max Hold ─────────────────────────────────────────────────────────────────
-MAX_HOLD_MINUTES = int(os.getenv("MAX_HOLD_MINUTES", "240"))
+# ── Dashboard / Flask ────────────────────────────────────────────────
+FLASK_HOST = _env("FLASK_HOST", "0.0.0.0")
+FLASK_PORT = _env_int("FLASK_PORT", 5000)
+
+# ── Trigger Engine ──────────────────────────────────────────────────
+ALLOWED_QUALITIES = ["S", "A+", "A", "B"]
+BAD_HOURS_UTC = [1, 4, 5, 6, 10, 11, 12, 13, 14, 16, 19, 20, 21, 22]
+GOOD_HOURS_UTC = [0, 3, 7, 9, 17, 23]
+SHORT_REQUIRES_BTC_BEARISH = True
+BTC_TREND_INTERVAL = "4h"
+ADX_MIN_THRESHOLD = 28
+
+
+# ── Güvenlik ────────────────────────────────────────────────────────
+
+def is_live_trading_allowed() -> bool:
+    return (
+        EXECUTION_MODE == "live"
+        and LIVE_TRADING_ENABLED is True
+        and CONFIRM_LIVE_TRADING is True
+    )
+
+
+def is_private_api_allowed() -> bool:
+    return USE_BINANCE_PRIVATE_API is True
+
+
+def safety_summary() -> dict:
+    return {
+        "execution_mode": EXECUTION_MODE,
+        "live_trading_enabled": LIVE_TRADING_ENABLED,
+        "dry_run": DRY_RUN,
+        "confirm_live_trading": CONFIRM_LIVE_TRADING,
+        "use_binance_private_api": USE_BINANCE_PRIVATE_API,
+        "live_allowed": is_live_trading_allowed(),
+        "private_api_allowed": is_private_api_allowed(),
+    }

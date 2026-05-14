@@ -1,353 +1,220 @@
 """
-scalp_bot_v3.py — AX Scalp Engine v5.1 — PAPER ENGINE / LIVE-BLOCKED + FALLBACK
-================================================================
-Ana tarama döngüsü. Binance public market data bağlantısı, yoksa CoinGecko fallback.
-Adaptive scan interval, watchdog, graceful shutdown.
-Hardcoded token/API key YOKTUR.
+scalp_bot_v3.py – Ana bot runner.
+
+Paper mode default. Ctrl+C ile graceful shutdown.
+Telegram/Binance eksikse crash olmaz.
 """
-import asyncio
+
+from __future__ import annotations
+
 import logging
 import signal
-import time
-import os
 import sys
-from binance.client import Client
-from config import (
-    BINANCE_API_KEY, BINANCE_API_SECRET, SCAN_INTERVAL, DB_PATH,
-    ALLOWED_QUALITIES, ADX_MIN_THRESHOLD, COIN_UNIVERSE,
-    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+import time
+import traceback
+from datetime import datetime, timezone
+
+import config
+import database
+from core.market_data import get_public_tickers, get_current_price
+from core.coin_library import build_symbol_universe, rank_symbols_by_activity
+from core.signal_engine import generate_signal
+from core.ai_decision_engine import classify_signal
+from core.risk_engine import should_open_trade
+from core.paper_tracker import register_candidate, update_candidate_outcome
+from core.data_layer import SignalDecision
+from execution_engine import ExecutionEngine
+from telegram_delivery import TelegramDelivery
+
+# ── Logging ─────────────────────────────────────────────────────────
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s – %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+    ],
 )
-from core.async_market_scanner import AsyncMarketScanner
-from core.advanced_trend_engine import AdvancedTrendEngine
-from core.trigger_engine import TriggerEngine
-from core.advanced_risk_engine import AdvancedRiskEngine
-from core.ai_decision_engine import AIDecisionEngine
-from core.fallback_data_provider import FallbackDataProvider, test_binance_connectivity
-from core.watchdog import SystemWatchdog
-from database import (
-    init_db, get_paper_balance, get_open_trades,
-    save_signal_candidate, save_paper_trade,
-)
-from core.data_layer import SignalData
-from telegram_delivery import deliver_signal, send_message
-from execution_engine import open_trade, monitor_trades
-from core.paper_tracker import process_pending_paper_results
+logger = logging.getLogger("ax.bot")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-logger = logging.getLogger("scalp_bot_v3")
+# ── Graceful shutdown ───────────────────────────────────────────────
+_running = True
 
-# ── Graceful Shutdown ──
-_shutdown_event = asyncio.Event() if sys.platform != "win32" else None
-_shutdown_flag = False
 
-def _signal_handler(sig, frame):
-    global _shutdown_flag
-    logger.info(f"[Bot] Sinyal alındı ({sig}) — graceful shutdown...")
-    _shutdown_flag = True
-    if _shutdown_event:
-        _shutdown_event.set()
+def _shutdown_handler(signum, frame):
+    global _running
+    logger.info("Shutdown sinyali alındı – döngü durduruluyor…")
+    _running = False
 
-# ── Adaptive Scan ──
-def get_adaptive_interval(base_interval: int, hour_utc: int, open_trades: int) -> int:
-    """
-    Saat ve açık trade sayısına göre tarama aralığını ayarla.
-    - Yoğun saatler (08-20 UTC): daha sık
-    - Sakin saatler (00-07 UTC): daha seyrek
-    - Açık trade varsa: daha sık (yönetim için)
-    """
-    if open_trades > 0:
-        return max(15, base_interval // 2)  # Açık trade varsa 2x hızlı
 
-    if 8 <= hour_utc <= 20:
-        return base_interval  # Normal
-    elif 3 <= hour_utc <= 7:
-        return int(base_interval * 2)  # Gece: 2x yavaş
-    else:
-        return int(base_interval * 1.5)  # Geçiş: 1.5x yavaş
+signal.signal(signal.SIGINT, _shutdown_handler)
+signal.signal(signal.SIGTERM, _shutdown_handler)
 
-async def main_loop():
-    global _shutdown_flag
-    logger.info("=== AX Scalp Engine v5.1 (PAPER ENGINE + FALLBACK) Başlatılıyor ===")
-    init_db()
 
-    # Signal handlers
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            signal.signal(sig, _signal_handler)
-        except (OSError, ValueError):
-            pass
+# ── Safety check ────────────────────────────────────────────────────
 
-    # Watchdog başlat
-    watchdog = SystemWatchdog(db_path=DB_PATH, check_interval=120)
-    watchdog.start()
+def safety_check() -> bool:
+    """Güvenlik kontrollerini yapar. Sorun varsa False döner."""
+    summary = config.safety_summary()
+    logger.info("Güvenlik durumu: %s", summary)
 
-    # Fallback provider
-    fallback = FallbackDataProvider()
-    use_fallback = False
+    if summary["live_allowed"]:
+        logger.error("LIVE TRADING AKTİF – bu bot sadece paper mode!")
+        return False
 
-    # Binance Client — bağlantı retry + proxy desteği
-    client = None
-    max_retries = 5
-    proxy = os.getenv("HTTPS_PROXY") or os.getenv("https_proxy")
-    binance_tld = os.getenv("BINANCE_TLD", "com")
-    use_testnet = os.getenv("BINANCE_TESTNET", "").lower() in ("true", "1", "yes")
+    if summary["private_api_allowed"]:
+        logger.error("PRIVATE API AKTİF – sadece public data kullanılmalı!")
+        return False
 
-    req_params = {}
-    if proxy:
-        req_params["proxies"] = {"https": proxy, "http": proxy}
-        logger.info(f"Proxy aktif: {proxy[:30]}...")
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            client = Client(
-                BINANCE_API_KEY, BINANCE_API_SECRET,
-                testnet=use_testnet,
-                tld=binance_tld,
-                requests_params=req_params if req_params else None,
-            )
-            mode_str = "TESTNET PUBLIC DATA" if use_testnet else f"PUBLIC MARKET DATA (.{binance_tld})"
-            logger.info(f"Binance public market data bağlantısı kuruldu: {mode_str}")
-            break
-        except Exception as e:
-            logger.warning(f"Binance bağlantı denemesi {attempt}/{max_retries} başarısız: {e}")
-            if attempt < max_retries:
-                wait = min(30, 5 * attempt)
-                logger.info(f"  {wait}s sonra tekrar denenecek...")
-                await asyncio.sleep(wait)
-            else:
-                logger.warning("Binance API erişilemiyor — CoinGecko FALLBACK modu aktif.")
-                use_fallback = True
-                if fallback.is_available():
-                    logger.info("CoinGecko erişilebilir — paper trading devam edecek.")
-                    send_message(
-                        "⚠️ <b>AX Engine:</b> Binance API erişilemiyor!\n"
-                        "📊 CoinGecko fallback modu aktif — paper trading devam ediyor."
-                    )
-                else:
-                    logger.error("CoinGecko da erişilemiyor — çıkılıyor.")
-                    send_message("❌ <b>AX Engine:</b> Hiçbir veri kaynağına erişilemiyor!")
-                    watchdog.stop()
-                    return
-
-    # Engine bileşenleri — Binance varsa normal, yoksa None
-    scanner = AsyncMarketScanner(db_path=DB_PATH) if not use_fallback else None
-    trend = AdvancedTrendEngine(client) if client else None
-    trigger = TriggerEngine(client) if client else None
-    risk = AdvancedRiskEngine(client, db_path=DB_PATH)
-    ai_engine = AIDecisionEngine(db_path=DB_PATH)
-
-    startup_msg = (
-        "👑 <b>AX Engine v5.1 Başlatıldı!</b>\n"
-        f"📊 Mod: {'CoinGecko Fallback' if use_fallback else 'Binance Public Data'}\n"
-        f"⚙️ Paper trading aktif, real order blocked\n"
-        f"🔄 Scan: {SCAN_INTERVAL}s (adaptive)"
+    logger.info(
+        "✓ Paper mode aktif  |  DRY_RUN=%s  |  MODE=%s",
+        config.DRY_RUN, config.EXECUTION_MODE,
     )
-    send_message(startup_msg)
+    return True
 
-    scan_count = 0
-    consecutive_errors = 0
 
-    while not _shutdown_flag:
+# ── Ana döngü ──────────────────────────────────────────────────────
+
+def run_scan_loop():
+    """Tek bir scan döngüsü çalıştırır."""
+    engine = ExecutionEngine()
+
+    # 1. Market data çek
+    tickers = get_public_tickers()
+    if not tickers:
+        logger.warning("Ticker verisi alınamadı – döngü atlanıyor")
+        return
+
+    # 2. Symbol universe oluştur (filtre dahil)
+    universe = build_symbol_universe(
+        tickers,
+        min_volume_usdt=config.MIN_VOLUME_USDT,
+        min_move_pct=config.MIN_MOVE_PCT,
+    )
+    universe = rank_symbols_by_activity(universe)
+
+    # İlk N sembol
+    top_symbols = universe[:20]
+
+    logger.info("Taranacak sembol sayısı: %d", len(top_symbols))
+
+    # 3. Açık trade'leri güncelle
+    engine.update_open_trades()
+
+    # 4. Mevcut açık trade'ler
+    open_trades = database.get_open_trades()
+
+    # 5. Bakiye
+    stats = database.get_dashboard_stats()
+    balance = stats.get("balance", 1000.0)
+
+    # 6. Her sembol için sinyal üret ve değerlendir
+    for ticker in top_symbols:
+        if not _running:
+            break
+
+        symbol = ticker.get("symbol", "")
+        if not symbol:
+            continue
+
+        # Market context
+        market_ctx = {
+            "last_price": float(ticker.get("lastPrice", 0)),
+            "price_change_pct": float(ticker.get("priceChangePercent", 0)),
+            "volume_usdt": float(ticker.get("quoteVolume", 0)),
+            "high_24h": float(ticker.get("highPrice", 0)),
+            "low_24h": float(ticker.get("lowPrice", 0)),
+        }
+
+        # Sinyal üret
+        sig = generate_signal(symbol, market_ctx)
+        if sig is None:
+            continue
+
+        # AI karar
+        ai_result = classify_signal(sig)
+
+        # AI VETO ise kaydet ve geç
+        if ai_result.decision == SignalDecision.VETO.value:
+            register_candidate(sig, ai_result.decision, ai_result.reason)
+            continue
+
+        # Risk filtresi
+        can_open, decision, reason = should_open_trade(
+            sig, open_trades, balance,
+        )
+
+        if can_open:
+            trade_id = engine.process_signal(sig)
+            if trade_id:
+                # Açık trade listesini güncelle
+                open_trades = database.get_open_trades()
+        else:
+            # Açılmayan sinyal → candidate olarak kaydet
+            register_candidate(sig, decision, reason)
+
+        # Ghost tracking güncelle
+        update_candidate_outcome(symbol, market_ctx["last_price"])
+
+
+def main():
+    """Ana bot giriş noktası."""
+    logger.info("=" * 60)
+    logger.info("AX Trade Engine v3 başlatılıyor…")
+    logger.info("=" * 60)
+
+    # DB init
+    database.init_db()
+    database.migrate_db()
+
+    # Safety check
+    if not safety_check():
+        logger.error("Güvenlik kontrolü başarısız – çıkılıyor!")
+        sys.exit(1)
+
+    telegram = TelegramDelivery()
+    telegram.send_message("🤖 AX Bot başlatıldı (paper mode)")
+
+    # Heartbeat
+    database.update_bot_status("status", "running")
+    database.update_bot_status(
+        "heartbeat",
+        datetime.now(timezone.utc).isoformat(),
+    )
+
+    loop_count = 0
+    while _running:
+        loop_count += 1
         try:
-            scan_count += 1
-            from datetime import datetime, timezone as tz
-            now_utc = datetime.now(tz.utc)
-            hour_utc = now_utc.hour
+            logger.info("── Scan #%d ──", loop_count)
+            run_scan_loop()
 
-            # Tarama — Binance veya CoinGecko
-            if use_fallback:
-                from config import MIN_VOLUME_USD
-                candidates = fallback.get_market_candidates(min_volume=MIN_VOLUME_USD)
-            else:
-                try:
-                    candidates = await scanner.scan()
-                except Exception as scan_err:
-                    logger.warning(f"Binance scan hatası, fallback deneniyor: {scan_err}")
-                    candidates = fallback.get_market_candidates()
+            # Heartbeat güncelle
+            database.update_bot_status(
+                "heartbeat",
+                datetime.now(timezone.utc).isoformat(),
+            )
 
-            if not candidates:
-                open_trades = get_open_trades()
-                interval = get_adaptive_interval(SCAN_INTERVAL, hour_utc, len(open_trades))
-                logger.debug(f"Scan #{scan_count}: 0 aday — {interval}s bekleniyor")
-                await asyncio.sleep(interval)
-                continue
+        except Exception as exc:
+            error_msg = f"{type(exc).__name__}: {exc}"
+            logger.error("Scan hatası: %s", error_msg)
+            logger.debug(traceback.format_exc())
 
-            balance = get_paper_balance()
-            open_trades = get_open_trades()
+            database.update_bot_status("last_error", error_msg)
+            telegram.send_error("Scan Hatası", error_msg)
 
-            for coin in candidates[:30]:
-                if _shutdown_flag:
-                    break
+        if _running:
+            logger.info(
+                "Sonraki scan %ds sonra…",
+                config.SCAN_INTERVAL_SECONDS,
+            )
+            time.sleep(config.SCAN_INTERVAL_SECONDS)
 
-                symbol = coin["symbol"]
+    # Shutdown
+    database.update_bot_status("status", "stopped")
+    telegram.send_message("🛑 AX Bot durduruldu")
+    logger.info("Bot durduruldu.")
 
-                # Zaten açık trade varsa atla
-                if any(t["symbol"] == symbol for t in open_trades):
-                    continue
-
-                # Fallback modda trend/trigger analizi yapılamaz — basit sinyal üret
-                if use_fallback or trigger is None:
-                    # CoinGecko'dan gelen price_change ve tradeability_score ile basit karar
-                    if coin.get("status") != "Eligible":
-                        continue
-                    if coin.get("tradeability_score", 0) < 5.0:
-                        continue
-
-                    entry = coin.get("price", 0)
-                    if entry <= 0:
-                        continue
-
-                    # Basit yön: 24h change > 0 → LONG, < 0 → SHORT
-                    direction = "LONG" if coin.get("price_change", 0) > 0 else "SHORT"
-                    quality = "B"
-                    score = coin.get("tradeability_score", 5.0)
-                else:
-                    trend_res = trend.analyze(symbol)
-                    if trend_res["direction"] == "NO TRADE":
-                        continue
-
-                    trigger_res = trigger.analyze(symbol, trend_res["direction"])
-                    if trigger_res.get("quality", "D") == "D":
-                        continue
-
-                    entry = trigger_res["entry"]
-                    direction = trend_res["direction"]
-                    quality = trigger_res["quality"]
-                    score = trigger_res.get("score", 0)
-
-                # Risk kontrolü
-                atr_pct = trigger_res.get("atr_pct") if not use_fallback and 'trigger_res' in locals() else None
-                risk_res = risk.calculate(symbol, direction, entry, quality, balance, open_trades, atr_pct=atr_pct)
-
-                # SignalData Tek Schema Oluşturma
-                from core.data_layer import SignalData
-                
-                sig_obj = SignalData(
-                    symbol=symbol,
-                    direction=direction,
-                    entry_zone=entry,
-                    stop_loss=risk_res.get("sl", entry * (0.98 if direction == "LONG" else 1.02)),
-                    tp1=risk_res.get("tp1", entry * (1.02 if direction == "LONG" else 0.98)),
-                    tp2=risk_res.get("tp2", entry * (1.04 if direction == "LONG" else 0.96)),
-                    tp3=risk_res.get("tp2", entry * (1.04 if direction == "LONG" else 0.96)) * (1.01 if direction == "LONG" else 0.99),
-                    setup_quality=quality,
-                    final_score=score,
-                    confidence=0.8,
-                    leverage_suggestion=risk_res.get("leverage", 10),
-                    risk_percent=risk_res.get("risk_pct", 1.0),
-                    reason=f"Score: {score:.1f}" + (" [CG]" if use_fallback else "")
-                )
-                
-                if not sig_obj.is_valid():
-                    from database import update_system_state
-                    update_system_state("last_error", f"Invalid Signal Schema: {symbol}")
-                    # Log invalid candidate
-                    sig_obj.status = "invalid_candidate"
-                    sig_obj.reject_reason = "Eksik Schema Verisi"
-                    save_signal_candidate({**sig_obj.to_dict(), "decision": "VETO", "reason": sig_obj.reject_reason})
-                    continue
-
-                # Sistem Geriye Dönük Uyumluluk için Dict kullanımı
-                sig_data = sig_obj.to_dict()
-                # Ek legacy alanlar
-                sig_data["id"] = sig_obj.id[:8]
-                sig_data["entry"] = sig_obj.entry_zone
-                sig_data["sl"] = sig_obj.stop_loss
-                sig_data["leverage"] = sig_obj.leverage_suggestion
-                sig_data["risk_usd"] = risk_res.get("risk_usd", 0)
-                sig_data["market_regime"] = "fallback" if use_fallback else "live"
-
-                # AI karar
-                decision, reason = ai_engine.decide(sig_data)
-
-                # Sinyal kaydet (her karar için)
-                save_signal_candidate({
-                    **sig_data,
-                    "uuid": sig_data["id"],
-                    "decision": decision,
-                    "reason": reason,
-                })
-
-                # Paper result kaydet (ghost learning için)
-                save_paper_trade(sig_data, tracked_from=decision)
-
-                if decision == "ALLOW":
-                    if risk_res.get("valid", False):
-                        if client and not use_fallback:
-                            logger.info(f"🚀 TRADE SİNYALİ: {symbol} {direction}")
-                            trade_id = open_trade(client, sig_data)
-                            if trade_id:
-                                open_trades = get_open_trades()
-                        else:
-                            logger.info(f"📊 FALLBACK SİNYAL: {symbol} {direction} "
-                                       f"(paper-only, gerçek trade açılamaz)")
-                    else:
-                        logger.info(f"⚠️ Risk red: {symbol} - {risk_res.get('reason')}")
-                elif decision == "WATCH":
-                    logger.debug(f"👀 WATCH: {symbol} - {reason}")
-                else:
-                    logger.debug(f"🚫 VETO: {symbol} - {reason}")
-
-            # Monitor Trades
-            if client and not use_fallback:
-                try:
-                    closed_list = monitor_trades(client)
-                    if closed_list:
-                        logger.info(f"Kapanan işlemler: {closed_list}")
-                except Exception as monitor_err:
-                    logger.error(f"Trade monitor hatası: {monitor_err}")
-                
-            # AI Ghost Tracking Process
-            try:
-                if scan_count % 3 == 0:
-                    processed_ghosts = process_pending_paper_results(client, limit=10)
-                    if processed_ghosts > 0:
-                        logger.info(f"👻 AI Ghost Tracking: {processed_ghosts} paper trade sonuçlandırıldı ve öğrenildi.")
-                        try:
-                            from database import update_system_state
-                            update_system_state("last_paper_result_process_at", datetime.now(tz.utc).isoformat())
-                        except: pass
-            except Exception as ghost_err:
-                logger.error(f"AI Ghost Tracker hatası: {ghost_err}")
-
-            # Adaptive interval
-            interval = get_adaptive_interval(SCAN_INTERVAL, hour_utc, len(open_trades))
-            consecutive_errors = 0
-            
-            # ── SYSTEM STATE GÜNCELLEMESİ (HEARTBEAT) ──
-            try:
-                from database import update_system_state
-                update_system_state("bot_heartbeat_at", datetime.now(tz.utc).isoformat())
-                update_system_state("last_scan_time", datetime.now(tz.utc).isoformat())
-                update_system_state("last_scan_status", "OK")
-                update_system_state("last_scan_symbol_count", str(len(candidates) if candidates else 0))
-                if client and not use_fallback:
-                    update_system_state("last_trade_monitor_at", datetime.now(tz.utc).isoformat())
-            except Exception as e:
-                logger.error(f"Heartbeat yazılamadı: {e}")
-                
-            logger.info(f"Scan #{scan_count}: {len(candidates) if candidates else 0} aday | "
-                           f"açık: {len(open_trades)} | "
-                           f"sonraki: {interval}s | "
-                           f"{'fallback' if use_fallback else 'binance'}")
-
-            await asyncio.sleep(interval)
-
-        except Exception as e:
-            consecutive_errors += 1
-            logger.error(f"Ana döngü hatası ({consecutive_errors}): {e}")
-            if consecutive_errors >= 10:
-                logger.critical("10 ardışık hata — 5 dakika bekleniyor!")
-                send_message("⚠️ <b>AX Engine:</b> 10 ardışık hata! 5dk bekleniyor...")
-                await asyncio.sleep(300)
-                consecutive_errors = 0
-            else:
-                await asyncio.sleep(min(30, 10 * consecutive_errors))
-
-    # Graceful shutdown
-    watchdog.stop()
-    logger.info("=== AX Engine düzgün şekilde kapatıldı ===")
-    send_message("🛑 <b>AX Engine</b> kapatıldı.")
 
 if __name__ == "__main__":
-    asyncio.run(main_loop())
+    main()

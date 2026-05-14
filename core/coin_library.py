@@ -1,49 +1,97 @@
 """
-core/coin_library.py — AX Coin Kütüphanesi v4.8
-===============================================
-Aşama 8: Tüm USDT-M Futures coinlerini çeker ve filtreler.
+core/coin_library.py – Tradable sembol kütüphanesi ve filtre modülü.
+
+USDT pariteleri hacim ve hareketle filtrelenir.
+Düşük hacimli / istenmeyen pariteler elenir.
 """
+
+from __future__ import annotations
+
 import logging
-import time
+from typing import Any
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ax.coin_library")
 
-class CoinLibrary:
-    def __init__(self, client):
-        self.client = client
-        self.coins = {}
-        self.last_update = 0
+# İstenmeyen base coinler
+_SKIP_BASES = {"BUSD", "USDC", "TUSD", "DAI", "FDUSD"}
 
-    def update_coin_info(self):
-        """
-        Binance'den tüm USDT-M Futures coinlerini çeker.
-        """
+# Leveraged / kaldıraçlı token etiketleri
+_SKIP_TAGS = ("UP", "DOWN", "BULL", "BEAR")
+
+
+def build_symbol_universe(
+    tickers: list[dict],
+    min_volume_usdt: float = 5_000_000.0,
+    min_move_pct: float = 0.5,
+) -> list[dict]:
+    """
+    Ticker listesinden tradable USDT sembollerini filtreler.
+
+    Args:
+        tickers: Binance ticker verisi listesi
+        min_volume_usdt: Minimum 24h USDT hacmi
+        min_move_pct: Minimum |priceChangePercent|
+
+    Returns:
+        Filtrelenmiş ticker listesi
+    """
+    universe = []
+    for t in tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+
+        base = sym.replace("USDT", "")
+        if base in _SKIP_BASES:
+            continue
+        if any(tag in base for tag in _SKIP_TAGS):
+            continue
+
         try:
-            info = self.client.futures_exchange_info()
-            new_coins = {}
-            for s in info['symbols']:
-                if s['quoteAsset'] == 'USDT' and s['status'] == 'TRADING':
-                    symbol = s['symbol']
-                    filters = {f['filterType']: f for f in s['filters']}
-                    
-                    new_coins[symbol] = {
-                        'min_qty': float(filters['LOT_SIZE']['minQty']),
-                        'step_size': float(filters['LOT_SIZE']['stepSize']),
-                        'tick_size': float(filters['PRICE_FILTER']['tickSize']),
-                        'min_notional': float(filters.get('MIN_NOTIONAL', {}).get('notional', 5.0)),
-                        'status': s['status']
-                    }
-            
-            self.coins = new_coins
-            self.last_update = time.time()
-            logger.info(f"Coin Library güncellendi: {len(self.coins)} aktif coin.")
-        except Exception as e:
-            logger.error(f"Coin Library güncelleme hatası: {e}")
+            vol = float(t.get("quoteVolume", 0))
+            change = abs(float(t.get("priceChangePercent", 0)))
+        except (ValueError, TypeError):
+            continue
 
-    def get_active_coins(self):
-        if time.time() - self.last_update > 3600: # Saatlik güncelle
-            self.update_coin_info()
-        return list(self.coins.keys())
+        if vol >= min_volume_usdt and change >= min_move_pct:
+            universe.append(t)
 
-    def get_coin_filters(self, symbol):
-        return self.coins.get(symbol)
+    logger.info(
+        "Symbol universe: %d/%d sembol (vol>=%.0f, move>=%.1f%%)",
+        len(universe), len(tickers), min_volume_usdt, min_move_pct,
+    )
+    return universe
+
+
+def rank_symbols_by_activity(symbols: list[dict]) -> list[dict]:
+    """
+    Sembolleri hacim * hareket skoru ile sıralar (en aktif en üstte).
+    """
+    scored = []
+    for s in symbols:
+        try:
+            vol = float(s.get("quoteVolume", 0))
+            change = abs(float(s.get("priceChangePercent", 0)))
+        except (ValueError, TypeError):
+            vol, change = 0, 0
+        scored.append((vol * change, s))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [s for _, s in scored]
+
+
+def exclude_bad_symbols(symbols: list[dict]) -> list[dict]:
+    """
+    İstenmeyen / sorunlu sembolleri eler.
+    Şu an: stablecoin base ve leveraged token filtreleme.
+    İleride: blacklist, delist uyarısı gibi filtreler eklenebilir.
+    """
+    result = []
+    for s in symbols:
+        sym = s.get("symbol", "")
+        base = sym.replace("USDT", "")
+        if base in _SKIP_BASES:
+            continue
+        if any(tag in base for tag in _SKIP_TAGS):
+            continue
+        result.append(s)
+    return result

@@ -1,631 +1,344 @@
 """
-execution_engine.py — AX Paper Execution Motoru v5.1 (PAPER-SAFE)
-=================================================================
-Trade Lifecycle:
-  open → tp1_hit → tp2_hit/runner → closed
+execution_engine.py — AX Execution Engine v5.0 (Production)
+=============================================================
+Paper trade yaşam döngüsü yöneticisi.
 
-KURALLAR:
-- Local _calc_qty / _calc_pnl YOK. Tümü core/accounting.py üzerinden.
-- TP1 sadece qty_tp1 kapatır. TP2 sadece qty_tp2 kapatır.
-- Final/SL/timeout/trailing sadece remaining_qty kapatır.
-- partial_closes ve balance_ledger doğru yazılır.
-- trades.net_pnl = TP1 + TP2 + runner/final net toplamı.
-- duration_seconds = close_time - open_time (saniye).
-
-PAPER MODE KURALLARI:
-- Binance private endpoint ÇAĞRILMAZ (order, account, position).
-- Binance public endpoint SERBEST (exchangeInfo, ticker, kline).
-- Trade aç/kapat DB'ye simülasyon olarak yazılır.
-- Paper balance local DB (paper_account + balance_ledger) üzerinden.
-- Canlı emir sadece: LIVE_TRADING_ENABLED=true + DRY_RUN=false + CONFIRM_LIVE_TRADING=true
+Yenilikler:
+  - Tam TP1/TP2/TP3 partial close desteği
+  - TrailingEngine entegrasyonu (state-sync)
+  - Breakeven otomasyonu
+  - Max hold time timeout sistemi
+  - Partial PnL hesabı ve balance güncelleme
+  - Trade state metadata'da saklanır (DB crash-safe)
+  - Gerçek emir gönderilmez — paper only
 """
-import math
+
+from __future__ import annotations
+
+import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from typing import Optional
 
-from config import (
-    RISK_PCT, TP1_CLOSE_PCT, TP2_CLOSE_PCT, RUNNER_CLOSE_PCT,
-    TRAIL_ATR_MULT, EXECUTION_MODE, MAX_HOLD_MINUTES,
-    BREAKEVEN_ENABLED, BREAKEVEN_OFFSET_PCT,
-    LIVE_TRADING_ENABLED, DRY_RUN, DEFAULT_FEE_RATE,
-    MAX_OPEN_TRADES, MAX_CONSECUTIVE_LOSSES, COIN_COOLDOWN_MINUTES,
-    DAILY_MAX_LOSS_PCT, MAX_CORRELATED_TRADES,
-    PAPER_MODE, USE_BINANCE_PRIVATE_API, can_use_live_orders,
-)
+import config
+import database
+from core.data_layer import SignalData, TradeData, TradeStatus
 from core.accounting import (
-    calculate_pnl, calculate_fee, calculate_notional_and_margin,
-    calculate_position_size, calculate_partial_close_pnl,
-    calculate_runner_unrealized_pnl, calculate_close_pnl,
-    calculate_r_multiple, calculate_max_loss_after_fee,
-    calculate_margin_loss_pct, validate_trade_risk,
+    build_trade_from_signal,
+    calculate_unrealized_pnl,
+    calculate_realized_pnl,
 )
-from database import (
-    save_trade, update_trade, close_trade as db_close_trade,
-    get_open_trades, get_paper_balance, add_ledger_entry,
-    save_partial_close, get_stats, get_trade_by_id,
-    save_trade_event,
-)
+from core.market_data import get_current_price
+from core.trailing_engine import TrailingEngine, TradeExitState
+from telegram_delivery import TelegramDelivery
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ax.execution")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# YARDIMCI
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _get_filters(client, symbol: str) -> dict:
-    """
-    LOT_SIZE ve PRICE_FILTER filtrelerini al.
-    Paper modda: önce DB coin_library'den, yoksa Binance public exchangeInfo.
-    exchangeInfo public endpoint'tir — paper modda kullanılabilir.
-    """
-    defaults = {"step_size": 0.001, "min_qty": 0.001, "tick_size": 0.01, "min_notional": 5.0}
-
-    # 1. DB coin_library'den dene
-    try:
-        from database import get_conn
-        with get_conn() as conn:
-            row = conn.execute(
-                "SELECT min_qty, step_size, tick_size, min_notional FROM coin_library WHERE symbol = ?",
-                (symbol,)
-            ).fetchone()
-            if row and row[0]:
-                return {
-                    "min_qty": float(row[0]),
-                    "step_size": float(row[1]),
-                    "tick_size": float(row[2]),
-                    "min_notional": float(row[3]) if row[3] else 5.0,
-                }
-    except Exception:
-        pass
-
-    # 2. Binance exchangeInfo (PUBLIC endpoint — paper modda izinli)
-    if client:
-        try:
-            info = client.futures_exchange_info()
-            for s in info["symbols"]:
-                if s["symbol"] == symbol:
-                    filters = {f["filterType"]: f for f in s["filters"]}
-                    lot = filters.get("LOT_SIZE", {})
-                    price_f = filters.get("PRICE_FILTER", {})
-                    result = {
-                        "step_size":    float(lot.get("stepSize", "0.001")),
-                        "min_qty":      float(lot.get("minQty", "0.001")),
-                        "tick_size":    float(price_f.get("tickSize", "0.01")),
-                        "min_notional": float(filters.get("MIN_NOTIONAL", {}).get("notional", "5.0")),
-                    }
-                    # DB'ye kaydet (sonraki kullanımlar için)
-                    try:
-                        from database import save_coin_library
-                        save_coin_library(symbol, result)
-                    except Exception:
-                        pass
-                    return result
-        except Exception as e:
-            logger.warning(f"[Execution] Filtre alınamadı {symbol}: {e}")
-
-    return defaults
+# ── Config ───────────────────────────────────────────────────────────
+try:
+    MAX_HOLD_MINUTES = int(getattr(config, "MAX_HOLD_MINUTES", 240))
+    TP1_CLOSE_PCT = float(getattr(config, "TP1_CLOSE_PCT", 40))
+    TP2_CLOSE_PCT = float(getattr(config, "TP2_CLOSE_PCT", 30))
+    RUNNER_CLOSE_PCT = float(getattr(config, "RUNNER_CLOSE_PCT", 30))
+except Exception:
+    MAX_HOLD_MINUTES = 240
+    TP1_CLOSE_PCT = 40
+    TP2_CLOSE_PCT = 30
+    RUNNER_CLOSE_PCT = 30
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# RISK KONTROLLERI
-# ─────────────────────────────────────────────────────────────────────────────
+class ExecutionEngine:
+    """Paper trade yaşam döngüsü yöneticisi."""
 
-def _check_daily_loss(balance: float) -> bool:
-    """Günlük kayıp limiti kontrolü."""
-    try:
-        from database import get_conn
-        with get_conn() as conn:
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            row = conn.execute(
-                "SELECT SUM(net_pnl) FROM trades WHERE DATE(close_time)=? AND status='closed'",
-                (today,)
-            ).fetchone()
-            daily_loss = abs(min(0, row[0] or 0))
-            max_loss = balance * (DAILY_MAX_LOSS_PCT / 100)
-            return daily_loss < max_loss
-    except Exception:
-        return True
+    def __init__(self):
+        self.telegram = TelegramDelivery()
+        self.trailing = TrailingEngine()
 
+    # ── Paper trade açma ─────────────────────────────────────────
 
-def _check_consecutive_losses() -> bool:
-    """Ardışık kayıp kontrolü."""
-    try:
-        from database import get_conn
-        with get_conn() as conn:
-            rows = conn.execute(
-                "SELECT net_pnl FROM trades WHERE status='closed' ORDER BY id DESC LIMIT ?",
-                (MAX_CONSECUTIVE_LOSSES,)
-            ).fetchall()
-            if len(rows) < MAX_CONSECUTIVE_LOSSES:
-                return True
-            return not all(r[0] <= 0 for r in rows)
-    except Exception:
-        return True
+    def open_paper_trade(self, signal: SignalData) -> Optional[int]:
+        """
+        Sinyalden paper trade oluşturur ve DB'ye kaydeder.
+        Returns: trade_id veya None
+        """
+        stats = database.get_dashboard_stats()
+        balance = stats.get("balance", config.INITIAL_PAPER_BALANCE if hasattr(config, "INITIAL_PAPER_BALANCE") else 250.0)
 
+        trade = build_trade_from_signal(
+            signal, balance, config.DEFAULT_FEE_RATE, config.MAX_LEVERAGE,
+        )
+        if trade is None:
+            logger.warning("Trade oluşturulamadı: %s", signal.symbol)
+            return None
 
-def _check_coin_cooldown(symbol: str) -> bool:
-    """Coin cooldown kontrolü."""
-    try:
-        from database import get_conn
-        with get_conn() as conn:
-            row = conn.execute("""
-                SELECT close_time FROM trades
-                WHERE symbol=? AND status='closed'
-                ORDER BY id DESC LIMIT 1
-            """, (symbol,)).fetchone()
-            if not row or not row[0]:
-                return True
-            closed = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
-            if closed.tzinfo is None:
-                closed = closed.replace(tzinfo=timezone.utc)
-            elapsed = (datetime.now(timezone.utc) - closed).total_seconds() / 60
-            return elapsed >= COIN_COOLDOWN_MINUTES
-    except Exception:
-        return True
+        # Initial exit state metadata'ya gömülür
+        initial_state = TradeExitState(
+            current_sl=trade.stop_loss,
+            highest_price=trade.entry_price,
+        )
+        state_json = json.dumps(initial_state.to_dict())
 
+        trade_id = database.create_trade(trade, metadata=state_json)
+        if trade_id is None:
+            logger.error("Trade DB'ye yazılamadı: %s", signal.symbol)
+            return None
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TRADE AÇ
-# ─────────────────────────────────────────────────────────────────────────────
+        logger.info(
+            "Paper trade açıldı: #%s %s %s @ %.4f  TP1=%.4f  SL=%.4f",
+            trade_id, signal.symbol, signal.side,
+            signal.entry_price, signal.tp1 or 0, signal.stop_loss,
+        )
 
-def open_trade(client, signal: dict, ax_decision: dict = None,
-               risk_pct: float = None) -> int | None:
-    """
-    Paper trade aç. Tüm hesaplamalar core/accounting.py üzerinden.
-    PAPER modda: DB'ye simülasyon yazılır, Binance order endpoint ÇAĞRILMAZ.
-    """
-    # ── PAPER GUARD ──
-    if can_use_live_orders():
-        logger.info("[Execution] LIVE MODE — gerçek emir açılacak")
-    else:
-        logger.info("[Execution] PAPER MODE — simülasyon trade")
-    symbol    = signal["symbol"]
-    direction = signal["direction"]
-    entry     = signal["entry"]
-    sl        = signal["sl"]
-    tp1       = signal["tp1"]
-    tp2       = signal.get("tp2", tp1 * 1.02 if direction == "LONG" else tp1 * 0.98)
-    tp3       = signal.get("tp3", signal.get("runner_target", tp2 * 1.01 if direction == "LONG" else tp2 * 0.99))
-    leverage  = signal.get("leverage", 10)
+        # Telegram bildirimi
+        self.telegram.send_trade_open({
+            "symbol": trade.symbol,
+            "side": trade.side,
+            "entry_price": trade.entry_price,
+            "stop_loss": trade.stop_loss,
+            "tp1": trade.tp1 or 0,
+            "tp2": trade.tp2 or 0,
+            "tp3": trade.tp3 or 0,
+            "leverage": trade.leverage,
+            "risk_pct": trade.risk_pct,
+            "risk_usd": trade.risk_usd,
+            "margin_used": trade.margin_used,
+            "notional": trade.notional,
+        })
 
-    if not direction or not entry or not sl:
-        return None
+        return trade_id
 
-    # Risk kontrolleri
-    open_trades = get_open_trades()
-    if len(open_trades) >= MAX_OPEN_TRADES:
-        logger.warning(f"[Execution] Max açık trade limiti: {MAX_OPEN_TRADES}")
-        return None
+    # ── Açık trade güncelleme ────────────────────────────────────
 
-    # Aynı coin kontrolü
-    if any(t["symbol"] == symbol for t in open_trades):
-        logger.warning(f"[Execution] {symbol} zaten açık trade var")
-        return None
+    def update_open_trades(self) -> None:
+        """Tüm açık trade'lerin fiyatını, PnL'ini ve exit koşullarını günceller."""
+        open_trades = database.get_open_trades()
+        for trade in open_trades:
+            try:
+                self._process_single_trade(trade)
+            except Exception as exc:
+                logger.error(
+                    "Trade güncelleme hatası [#%s %s]: %s",
+                    trade.get("id"), trade.get("symbol"), exc,
+                )
 
-    balance = get_paper_balance()
+    def _process_single_trade(self, trade: dict) -> None:
+        """Tek trade'i değerlendirir."""
+        trade_id = trade["id"]
+        symbol = trade["symbol"]
 
-    if not _check_daily_loss(balance):
-        logger.warning("[Execution] Günlük kayıp limiti aşıldı")
-        return None
+        # Güncel fiyat
+        current = get_current_price(symbol)
+        if current is None or current <= 0:
+            logger.debug("Fiyat alınamadı: %s", symbol)
+            return
 
-    if not _check_consecutive_losses():
-        logger.warning("[Execution] Ardışık kayıp limiti aşıldı")
-        return None
+        # Unrealized PnL
+        upnl = calculate_unrealized_pnl(
+            side=trade["side"],
+            entry_price=trade["entry_price"],
+            current_price=current,
+            quantity=trade["quantity"],
+            fee_rate=config.DEFAULT_FEE_RATE,
+        )
+        database.update_trade_price(trade_id, current, upnl)
 
-    if not _check_coin_cooldown(symbol):
-        logger.warning(f"[Execution] {symbol} cooldown süresi dolmadı")
-        return None
+        # Max hold time kontrolü
+        if self._is_timeout(trade):
+            logger.info(
+                "[Execution] Timeout: #%s %s → kapatılıyor (max_hold=%dm)",
+                trade_id, symbol, MAX_HOLD_MINUTES,
+            )
+            self.close_trade(trade, current, "MAX_HOLD_TIMEOUT")
+            return
 
-    # Trade risk doğrulama
-    rp = risk_pct or RISK_PCT
-    is_safe, reason = validate_trade_risk(balance, entry, sl, leverage, rp, DEFAULT_FEE_RATE)
-    if not is_safe:
-        logger.warning(f"[Execution] Risk red: {reason}")
-        return None
+        # Exit state yükle (metadata'dan)
+        state = self._load_exit_state(trade)
 
-    # Pozisyon büyüklüğü hesapla
-    filters = _get_filters(client, symbol)
-    pos = calculate_position_size(balance, rp, entry, sl, leverage, DEFAULT_FEE_RATE, filters)
-    if not pos.get("valid", False):
-        logger.warning(f"[Execution] Pozisyon hesaplanamadı: {pos.get('reason')}")
-        return None
+        # ATR tahminli (yoksa None)
+        atr = self._estimate_atr(trade, current)
 
-    now = datetime.now(timezone.utc).isoformat()
+        # TrailingEngine değerlendirmesi
+        result = self.trailing.evaluate(trade, current, state, atr)
 
-    trade = {
-        "symbol":           symbol,
-        "direction":        direction,
-        "status":           "open",
-        "entry":            entry,
-        "sl":               sl,
-        "tp1":              tp1,
-        "tp2":              tp2,
-        "tp3":              tp3,
-        "original_qty":     pos["qty"],
-        "remaining_qty":    pos["qty"],
-        "qty_tp1":          pos["qty_tp1"],
-        "qty_tp2":          pos["qty_tp2"],
-        "qty_runner":       pos["qty_runner"],
-        "leverage":         leverage,
-        "notional_size":    pos["notional_size"],
-        "margin_used":      pos["margin_used"],
-        "risk_pct":         rp,
-        "risk_usd":         pos["risk_usd"],
-        "max_loss_after_fee": pos["max_loss_after_fee"],
-        "open_fee":         pos["open_fee"],
-        "fee_rate":         DEFAULT_FEE_RATE,
-        "total_fee":        pos["open_fee"],
-        "setup_quality":    signal.get("setup_quality", signal.get("quality")),
-        "final_score":      signal.get("final_score", signal.get("score")),
-        "market_regime":    signal.get("market_regime"),
-        "open_time":        now,
-    }
+        # ── Full close ──────────────────────────────────────────
+        if result.should_full_close:
+            self.close_trade(trade, result.close_at_price or current, result.full_close_reason)
+            return
 
-    trade_id = save_trade(trade)
+        # ── Partial close ────────────────────────────────────────
+        if result.should_partial_close:
+            self._handle_partial_close(trade, current, result, state)
+            return
 
-    # Ledger: open fee
-    add_ledger_entry(trade_id, symbol, "OPEN_FEE", -pos["open_fee"],
-                     f"Entry fee {symbol}")
+        # ── State güncelle (SL değişmişse) ───────────────────────
+        if result.new_sl and result.new_sl != (state.current_sl or trade.get("stop_loss", 0)):
+            database.update_trade_sl(trade_id, result.new_sl)
 
-    # Telegram açılış bildirimi
-    try:
-        from telegram_delivery import send_trade_open
-        msg_data = {
-            **trade, "id": trade_id,
-            "confidence": signal.get("confidence", 0.8),
-            "reason": signal.get("reason", ""),
-            "rr": signal.get("rr", 0),
-        }
-        if not can_use_live_orders():
-            msg_data["reason"] = f"[PAPER/DRY-RUN] {msg_data['reason']}"
-        send_trade_open(msg_data)
-    except Exception as e:
-        logger.warning(f"[Execution] Telegram open hatası: {e}")
+        # Exit state'i DB'ye yaz
+        self._save_exit_state(trade_id, state)
 
-    logger.info(
-        f"[Execution] AÇILDI #{trade_id} {symbol} {direction} "
-        f"entry={entry:.6f} sl={sl:.6f} qty={pos['qty']} risk=${pos['risk_usd']:.2f}"
-    )
-    return trade_id
+    def _handle_partial_close(
+        self,
+        trade: dict,
+        current_price: float,
+        result,
+        state: TradeExitState,
+    ) -> None:
+        """Partial close işlemi."""
+        trade_id = trade["id"]
+        symbol = trade["symbol"]
+        close_pct = result.close_pct / 100.0
+        qty_to_close = trade["quantity"] * close_pct
 
+        partial_pnl = calculate_realized_pnl(
+            side=trade["side"],
+            entry_price=trade["entry_price"],
+            exit_price=current_price,
+            quantity=qty_to_close,
+            fee_rate=config.DEFAULT_FEE_RATE,
+        )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TRADE MONİTÖRÜ
-# ─────────────────────────────────────────────────────────────────────────────
+        # DB: partial close kaydı
+        database.record_partial_close(
+            trade_id=trade_id,
+            close_qty=qty_to_close,
+            close_pct=result.close_pct,
+            close_price=current_price,
+            partial_pnl=partial_pnl,
+            reason=result.reason,
+            new_sl=result.new_sl,
+        )
 
-def monitor_trades(client) -> list:
-    """Tüm açık trade'leri kontrol et."""
-    trades = get_open_trades()
-    closed = []
-    for t in trades:
-        try:
-            result = _check_trade(client, t)
-            if result:
-                closed.append(t["id"])
-        except Exception as e:
-            logger.error(f"[Execution] Monitor hata {t['id']}: {e}")
-    return closed
+        # Exit state kaydet
+        self._save_exit_state(trade_id, state)
 
+        logger.info(
+            "[Execution] Partial close: #%s %s @ %.4f  reason=%s  qty=%.4f  pnl=%.4f",
+            trade_id, symbol, current_price, result.reason, qty_to_close, partial_pnl,
+        )
 
-def _get_price(client, symbol: str) -> float:
-    try:
-        ticker = client.futures_ticker(symbol=symbol)
-        return float(ticker["lastPrice"])
-    except Exception:
-        return 0.0
+        # Telegram
+        self.telegram.send_message(
+            f"🔀 <b>Partial Close</b>\n"
+            f"#{trade_id} {symbol} {trade['side']}\n"
+            f"Reason: {result.reason}\n"
+            f"Close: {result.close_pct:.0f}%  @ ${current_price:.4f}\n"
+            f"PnL: ${partial_pnl:+.4f}\n"
+            f"New SL: {result.new_sl:.4f}" if result.new_sl else ""
+        )
 
+    # ── Trade kapatma ────────────────────────────────────────────
 
-def _check_trade(client, t: dict) -> bool:
-    """Tek trade'i kontrol et. Kapandıysa True döner."""
-    trade_id  = t["id"]
-    symbol    = t["symbol"]
-    direction = t["direction"]
-    status    = t["status"]
-    entry     = t["entry"]
-    sl        = t["sl"]
-    tp1       = t["tp1"]
-    tp2       = t.get("tp2")
-    fee_rate  = t.get("fee_rate", DEFAULT_FEE_RATE)
+    def close_trade(
+        self, trade: dict, exit_price: float, reason: str,
+    ) -> None:
+        """Trade'i kapatır, realized PnL hesaplar, DB ve Telegram günceller."""
+        rpnl = calculate_realized_pnl(
+            side=trade["side"],
+            entry_price=trade["entry_price"],
+            exit_price=exit_price,
+            quantity=trade["quantity"],
+            fee_rate=config.DEFAULT_FEE_RATE,
+        )
 
-    qty_tp1    = t.get("qty_tp1") or 0
-    qty_tp2    = t.get("qty_tp2") or 0
-    remaining  = t.get("remaining_qty") or t.get("original_qty", 0)
-
-    price = _get_price(client, symbol)
-    if not price:
-        return False
-
-    is_long = direction == "LONG"
-
-    # ── PnL ve Fiyat Güncellemesi (Dashboard için) ───────────────
-    if price > 0:
-        if is_long:
-            unrealized_pnl = (price - entry) * remaining
-            sl_dist = ((price - sl) / entry) * 100
-            tp1_dist = ((tp1 - price) / entry) * 100 if tp1 else 0
-            tp2_dist = ((tp2 - price) / entry) * 100 if tp2 else 0
-            tp3_dist = ((t.get("tp3") or tp2 - price) / entry) * 100 if t.get("tp3") else 0
-            current_r = (price - entry) / abs(entry - sl) if abs(entry - sl) > 0 else 0
-        else:
-            unrealized_pnl = (entry - price) * remaining
-            sl_dist = ((sl - price) / entry) * 100
-            tp1_dist = ((price - tp1) / entry) * 100 if tp1 else 0
-            tp2_dist = ((price - tp2) / entry) * 100 if tp2 else 0
-            tp3_dist = ((price - t.get("tp3", tp2)) / entry) * 100 if t.get("tp3") else 0
-            current_r = (entry - price) / abs(entry - sl) if abs(entry - sl) > 0 else 0
+        # Eğer partial close'lar olduysa toplam PnL düzeltilir
+        # (database.py zaten accumulated partial_pnl'i saklıyor)
+        accumulated = trade.get("accumulated_pnl", 0.0) or 0.0
+        remaining_qty_pct = trade.get("remaining_qty_pct", 100.0) or 100.0
         
+        # Kalan kısım için PnL
+        remaining_qty = trade["quantity"] * (remaining_qty_pct / 100.0)
+        remaining_pnl = calculate_realized_pnl(
+            side=trade["side"],
+            entry_price=trade["entry_price"],
+            exit_price=exit_price,
+            quantity=remaining_qty,
+            fee_rate=config.DEFAULT_FEE_RATE,
+        )
+        total_pnl = round(accumulated + remaining_pnl, 6)
+
+        database.close_trade(
+            trade_id=trade["id"],
+            exit_price=exit_price,
+            realized_pnl=total_pnl,
+            close_reason=reason,
+        )
+
+        logger.info(
+            "Trade kapatıldı: #%s %s %s → %s  PnL=%.4f (accumulated=%.4f + remaining=%.4f)",
+            trade["id"], trade["symbol"], trade["side"], reason,
+            total_pnl, accumulated, remaining_pnl,
+        )
+
+        self.telegram.send_trade_close({
+            "symbol": trade["symbol"],
+            "side": trade["side"],
+            "exit_price": exit_price,
+            "realized_pnl": total_pnl,
+            "close_reason": reason,
+        })
+
+    # ── Sinyal işleme ────────────────────────────────────────────
+
+    def process_signal(self, signal: SignalData) -> Optional[int]:
+        """
+        Sinyali alır, paper trade açar.
+        Live trading kontrolü burada yapılır.
+        Returns: trade_id veya None
+        """
+        if config.is_live_trading_allowed():
+            logger.error("LIVE TRADING İSTENDİ AMA BU ENGINE SADECE PAPER MODE!")
+            return None
+
+        return self.open_paper_trade(signal)
+
+    # ── Yardımcı metodlar ─────────────────────────────────────────
+
+    def _is_timeout(self, trade: dict) -> bool:
+        """Max hold time aşıldı mı?"""
         try:
-            update_trade(trade_id, {
-                "current_price": price,
-                "unrealized_pnl": unrealized_pnl,
-                "current_R": current_r,
-                "distance_to_sl": sl_dist,
-                "distance_to_tp1": tp1_dist,
-                "distance_to_tp2": tp2_dist,
-                "distance_to_tp3": tp3_dist
-            })
-        except Exception as e:
-            logger.error(f"[Execution] Fiyat güncelleme hatası {trade_id}: {e}")
+            opened = trade.get("opened_at", "")
+            if not opened:
+                return False
+            opened_dt = datetime.fromisoformat(opened.replace("Z", "+00:00"))
+            now_dt = datetime.now(timezone.utc)
+            elapsed = (now_dt - opened_dt).total_seconds() / 60.0
+            return elapsed > MAX_HOLD_MINUTES
+        except Exception:
+            return False
 
-    # ── SL Kontrolü ──────────────────────────────────────────────────────
-    sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
-    if sl_hit:
-        return _handle_final_close(trade_id, t, price, "SL", fee_rate)
-
-    # ── TP1 Kontrolü ─────────────────────────────────────────────────────
-    if status == "open" and qty_tp1 > 0:
-        tp1_hit = (is_long and price >= tp1) or (not is_long and price <= tp1)
-        if tp1_hit:
-            return _handle_tp1(trade_id, t, tp1, fee_rate, is_long)
-
-    # ── TP2 Kontrolü ─────────────────────────────────────────────────────
-    if status == "tp1_hit" and qty_tp2 > 0 and tp2:
-        tp2_hit = (is_long and price >= tp2) or (not is_long and price <= tp2)
-        if tp2_hit:
-            return _handle_tp2(client, trade_id, t, tp2, fee_rate, is_long)
-
-    # ── Runner: Trailing Stop ────────────────────────────────────────────
-    if status == "runner":
-        return _handle_runner(client, trade_id, t, price, fee_rate, is_long)
-
-    # ── Max Hold Süresi ──────────────────────────────────────────────────
-    open_t = t.get("open_time")
-    if open_t:
+    def _load_exit_state(self, trade: dict) -> TradeExitState:
+        """Trade metadata'sından exit state yükler."""
         try:
-            opened = datetime.fromisoformat(str(open_t).replace("Z", "+00:00"))
-            if opened.tzinfo is None:
-                opened = opened.replace(tzinfo=timezone.utc)
-            elapsed = (datetime.now(timezone.utc) - opened).total_seconds() / 60
-            if elapsed > MAX_HOLD_MINUTES:
-                return _handle_final_close(trade_id, t, price, "timeout", fee_rate)
+            meta_raw = trade.get("metadata", "")
+            if meta_raw and meta_raw.strip().startswith("{"):
+                meta = json.loads(meta_raw)
+                return TradeExitState.from_dict(meta)
+        except Exception as exc:
+            logger.debug("Exit state yüklenemedi: %s", exc)
+        # Yeni state oluştur
+        return TradeExitState(
+            current_sl=float(trade.get("stop_loss", 0) or 0),
+            highest_price=float(trade.get("entry_price", 0) or 0),
+        )
+
+    def _save_exit_state(self, trade_id: int, state: TradeExitState) -> None:
+        """Exit state'i trade metadata'sına yazar."""
+        try:
+            database.update_trade_metadata(trade_id, json.dumps(state.to_dict()))
+        except Exception as exc:
+            logger.error("Exit state kaydedilemedi [#%s]: %s", trade_id, exc)
+
+    def _estimate_atr(self, trade: dict, current_price: float) -> Optional[float]:
+        """
+        ATR tahmini — gerçek ATR yoksa entry-sl farkından hesaplanır.
+        Trailing için kullanılır.
+        """
+        try:
+            entry = float(trade.get("entry_price", 0))
+            sl = float(trade.get("stop_loss", 0))
+            if entry > 0 and sl > 0:
+                return abs(entry - sl)
         except Exception:
             pass
-
-    return False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TP/SL/FINAL HANDLERS
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _handle_tp1(trade_id, t, tp1_price, fee_rate, is_long):
-    """TP1: sadece qty_tp1 kapatır."""
-    symbol = t["symbol"]
-    entry = t["entry"]
-    qty_tp1 = t.get("qty_tp1", 0)
-    if qty_tp1 <= 0:
-        return False
-
-    net_pnl, fee = calculate_partial_close_pnl(t["direction"], entry, tp1_price, qty_tp1, fee_rate)
-    remaining = (t.get("remaining_qty") or t.get("original_qty", 0)) - qty_tp1
-
-    # Breakeven SL
-    try:
-        offset = entry * (BREAKEVEN_OFFSET_PCT / 100)
-        new_sl = (entry + offset) if is_long else (entry - offset)
-    except Exception:
-        new_sl = entry
-
-    if not BREAKEVEN_ENABLED:
-        new_sl = entry
-
-    update_trade(trade_id, {
-        "status":       "tp1_hit",
-        "tp1_hit":      1,
-        "realized_pnl": net_pnl,
-        "total_fee":    (t.get("total_fee") or 0) + fee,
-        "remaining_qty": remaining,
-        "sl":           round(new_sl, 8),
-    })
-
-    # Partial close kaydı
-    save_partial_close(trade_id, symbol, "TP1", qty_tp1, tp1_price, net_pnl, fee)
-
-    # Ledger
-    add_ledger_entry(trade_id, symbol, "TP1", net_pnl,
-                     f"TP1 {symbol} qty={qty_tp1}")
-
-    # Telegram
-    try:
-        from telegram_delivery import send_tp_hit
-        send_tp_hit(symbol, 1, net_pnl, remaining)
-    except Exception:
-        pass
-
-    logger.info(f"[Execution] TP1 #{trade_id} {symbol} +{net_pnl:.3f}$ BE→{new_sl:.6f}")
-    return False
-
-
-def _handle_tp2(client, trade_id, t, tp2_price, fee_rate, is_long):
-    """TP2: sadece qty_tp2 kapatır, runner başlatır."""
-    symbol = t["symbol"]
-    entry = t["entry"]
-    qty_tp2 = t.get("qty_tp2", 0)
-    if qty_tp2 <= 0:
-        return False
-
-    net_pnl, fee = calculate_partial_close_pnl(t["direction"], entry, tp2_price, qty_tp2, fee_rate)
-    realized = (t.get("realized_pnl") or 0) + net_pnl
-    remaining = (t.get("remaining_qty") or 0) - qty_tp2
-
-    # Trail stop koy
-    atr_val = _get_atr(client, symbol)
-    if is_long:
-        trail = tp2_price - atr_val * TRAIL_ATR_MULT
-    else:
-        trail = tp2_price + atr_val * TRAIL_ATR_MULT
-
-    update_trade(trade_id, {
-        "status":       "runner",
-        "tp2_hit":      1,
-        "realized_pnl": realized,
-        "total_fee":    (t.get("total_fee") or 0) + fee,
-        "remaining_qty": remaining,
-    })
-
-    save_partial_close(trade_id, symbol, "TP2", qty_tp2, tp2_price, net_pnl, fee)
-    add_ledger_entry(trade_id, symbol, "TP2", net_pnl,
-                     f"TP2 {symbol} qty={qty_tp2}")
-
-    try:
-        from telegram_delivery import send_tp_hit
-        send_tp_hit(symbol, 2, net_pnl, remaining)
-    except Exception:
-        pass
-
-    logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{net_pnl:.3f}$ → RUNNER trail={trail:.6f}")
-    return False
-
-
-def _handle_runner(client, trade_id, t, price, fee_rate, is_long):
-    """Runner fazı: trailing stop güncelle, vurulursa kapat."""
-    symbol = t["symbol"]
-    entry = t["entry"]
-    remaining = t.get("remaining_qty", 0)
-    if remaining <= 0:
-        return _handle_final_close(trade_id, t, price, "runner_empty", fee_rate)
-
-    atr_val = _get_atr(client, symbol)
-    trail = t.get("trail_stop") or t.get("sl") or entry
-
-    if is_long:
-        new_trail = price - atr_val * TRAIL_ATR_MULT
-        trail = max(trail, new_trail)
-    else:
-        new_trail = price + atr_val * TRAIL_ATR_MULT
-        trail = min(trail, new_trail)
-
-    update_trade(trade_id, {"sl": trail})
-
-    trail_hit = (is_long and price <= trail) or (not is_long and price >= trail)
-    if trail_hit:
-        return _handle_final_close(trade_id, t, price, "trail", fee_rate)
-
-    return False
-
-
-def _handle_final_close(trade_id, t, close_price, reason, fee_rate):
-    """Final kapanış: remaining_qty için PnL hesapla, trade'i kapat."""
-    symbol = t["symbol"]
-    direction = t["direction"]
-    entry = t["entry"]
-    remaining = t.get("remaining_qty") or t.get("original_qty", 0)
-    realized = t.get("realized_pnl") or 0
-    risk_usd = t.get("risk_usd") or 0
-
-    # Runner/final PnL
-    if remaining > 0:
-        runner_pnl, runner_fee = calculate_partial_close_pnl(
-            direction, entry, close_price, remaining, fee_rate
-        )
-    else:
-        runner_pnl, runner_fee = 0.0, 0.0
-
-    # Toplam net PnL = TP1 + TP2 + runner
-    total_net_pnl = calculate_close_pnl(realized, runner_pnl)
-    total_fee = (t.get("total_fee") or 0) + runner_fee
-    r_multiple = calculate_r_multiple(total_net_pnl, risk_usd)
-
-    # DB kapat
-    db_close_trade(trade_id, total_net_pnl, total_fee, reason, r_multiple)
-
-    # Partial close kaydı
-    if remaining > 0:
-        save_partial_close(trade_id, symbol, reason.upper(), remaining,
-                           close_price, runner_pnl, runner_fee)
-
-    # Ledger: sadece runner/final PnL (TP1/TP2 zaten yazıldı)
-    add_ledger_entry(trade_id, symbol, reason.upper(), runner_pnl,
-                     f"{reason} {symbol} qty={remaining}")
-
-    # Telegram kapanış
-    try:
-        open_t = t.get("open_time", "")
-        opened = datetime.fromisoformat(str(open_t).replace("Z", "+00:00"))
-        if opened.tzinfo is None:
-            opened = opened.replace(tzinfo=timezone.utc)
-        hold_sec = int((datetime.now(timezone.utc) - opened).total_seconds())
-        hold_min = hold_sec / 60
-        if hold_min >= 60:
-            duration_str = f"{hold_min/60:.1f}sa"
-        else:
-            duration_str = f"{hold_min:.0f}dk"
-    except Exception:
-        duration_str = "?"
-        hold_min = 0
-
-    try:
-        from telegram_delivery import send_trade_close
-        balance = get_paper_balance()
-        send_trade_close(symbol, total_net_pnl, total_fee, reason,
-                         duration_str, direction=direction,
-                         r_multiple=r_multiple, balance_after=balance)
-    except Exception as e:
-        logger.warning(f"[Execution] Telegram close hatası: {e}")
-
-    # AI Öğrenme
-    result = "WIN" if total_net_pnl > 0 else "LOSS"
-    try:
-        from core.ai_decision_engine import AIDecisionEngine
-        from config import DB_PATH
-        ai = AIDecisionEngine(db_path=DB_PATH)
-        ai.learn_from_outcome(symbol, total_net_pnl, reason)
-    except Exception as e:
-        logger.warning(f"[Execution] AI learn hatası: {e}")
-
-    logger.info(
-        f"[Execution] KAPANDI #{trade_id} {symbol} {direction} "
-        f"{reason.upper()} pnl={total_net_pnl:+.3f}$ R={r_multiple:.2f}"
-    )
-    return True
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# YARDIMCILAR
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> float:
-    """Trailing stop için anlık ATR."""
-    try:
-        import pandas as pd
-        klines = client.futures_klines(symbol=symbol, interval=interval, limit=period + 5)
-        df = pd.DataFrame(klines, columns=[
-            "time","open","high","low","close","volume",
-            "ct","qav","nt","tbbav","tbqav","ignore"
-        ])
-        for col in ("high","low","close"):
-            df[col] = df[col].astype(float)
-        tr = pd.concat([
-            df["high"] - df["low"],
-            (df["high"] - df["close"].shift()).abs(),
-            (df["low"]  - df["close"].shift()).abs(),
-        ], axis=1).max(axis=1)
-        return float(tr.rolling(period).mean().iloc[-1])
-    except Exception:
-        try:
-            # Fallback to current ticker price if pandas/klines fail
-            ticker = client.futures_ticker(symbol=symbol)
-            return float(ticker["lastPrice"]) * 0.005
-        except Exception:
-            return 0.01
+        return None
