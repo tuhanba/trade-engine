@@ -615,3 +615,32 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
         f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
         f"{reason.upper()} pnl={net_pnl:+.3f}$ hold={hold_min:.0f}dk"
     )
+
+
+def open_trade(client, signal_dict: dict, ax_result: dict):
+    """scalp_bot.py için module-level wrapper."""
+    try:
+        from core.data_layer import SignalData
+        sig = SignalData()
+        sig.symbol      = signal_dict.get("symbol", "")
+        sig.side        = signal_dict.get("direction", "LONG")
+        sig.entry_price = float(signal_dict.get("entry", 0))
+        sig.stop_loss   = float(signal_dict.get("sl", 0))
+        sig.tp1         = float(signal_dict.get("tp1", 0))
+        sig.tp2         = float(signal_dict.get("tp2", 0))
+        sig.tp3         = float(signal_dict.get("runner_target", 0))
+        sig.score       = float(signal_dict.get("score", ax_result.get("score", 0)))
+        sig.risk_pct    = 1.0
+        sig.source      = "scalp_bot"
+        sig.metadata    = {"candidate_id": signal_dict.get("candidate_id")}
+        balance  = database.get_paper_balance() or 250.0
+        trade    = build_trade_from_signal(sig, balance, config.DEFAULT_FEE_RATE, config.MAX_LEVERAGE)
+        if trade is None:
+            return None
+        trade_id = database.create_trade(trade)
+        if trade_id:
+            logger.info("open_trade: #%s %s %s @ %.4f", trade_id, sig.symbol, sig.side, sig.entry_price)
+        return trade_id
+    except Exception as e:
+        logger.error("open_trade hata: %s", e)
+        return None

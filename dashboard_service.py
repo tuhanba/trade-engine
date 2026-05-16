@@ -127,3 +127,123 @@ def get_trades(limit: int = 100) -> list[dict]:
 def get_signals(limit: int = 100) -> list[dict]:
     """Son sinyal adayları listesi."""
     return database.get_recent_signals(limit)
+
+
+def get_ax_status() -> dict:
+    """Bot durumu, mod, heartbeat, circuit breaker."""
+    try:
+        bot_status = database.get_bot_status()
+        heartbeat  = bot_status.get("heartbeat", {}).get("value", "")
+        status     = bot_status.get("status", {}).get("value", "unknown")
+        bot_alive  = False
+        last_seen  = None
+        if heartbeat:
+            try:
+                hb = datetime.fromisoformat(heartbeat.replace("Z", "+00:00"))
+                if hb.tzinfo is None:
+                    hb = hb.replace(tzinfo=timezone.utc)
+                delta = (datetime.now(timezone.utc) - hb).total_seconds()
+                last_seen = int(delta)
+                bot_alive = delta < 120
+            except Exception:
+                pass
+        cb_until  = database.get_state("circuit_breaker_until") or ""
+        cb_active = False
+        if cb_until:
+            try:
+                cb = datetime.fromisoformat(cb_until.replace("Z", "+00:00"))
+                if cb.tzinfo is None:
+                    cb = cb.replace(tzinfo=timezone.utc)
+                cb_active = cb > datetime.now(timezone.utc)
+            except Exception:
+                pass
+        balance = 0.0
+        try:
+            balance = database.get_paper_balance() or 0.0
+        except Exception:
+            pass
+        return {
+            "bot_running": bot_alive, "bot_status": status,
+            "heartbeat": heartbeat, "last_seen_seconds": last_seen,
+            "execution_mode": config.EXECUTION_MODE, "ax_mode": config.AX_MODE,
+            "paper_mode": config.PAPER_MODE,
+            "circuit_breaker_active": cb_active, "circuit_breaker_until": cb_until,
+            "paper_balance": round(balance, 2),
+        }
+    except Exception as e:
+        logger.error("get_ax_status hata: %s", e)
+        return {"bot_running": False, "bot_status": "error", "paper_balance": 0.0}
+
+
+def get_calendar_data(days: int = 30) -> list:
+    """Günlük PnL takvimi."""
+    try:
+        conn = database.get_connection()
+        rows = conn.execute("""
+            SELECT date(closed_at) AS day,
+                   COALESCE(SUM(realized_pnl),0) AS pnl,
+                   COUNT(*) AS trades,
+                   SUM(CASE WHEN realized_pnl>0 THEN 1 ELSE 0 END) AS wins
+            FROM trades
+            WHERE closed_at IS NOT NULL AND closed_at >= date('now',?)
+            GROUP BY day ORDER BY day ASC
+        """, (f"-{days} days",)).fetchall()
+        conn.close()
+        return [{"day": r["day"], "pnl": round(float(r["pnl"]), 4),
+                 "trades": r["trades"], "wins": r["wins"]} for r in rows]
+    except Exception as e:
+        logger.error("get_calendar_data hata: %s", e)
+        return []
+
+
+def get_weekly_data(weeks: int = 8) -> list:
+    """Haftalık PnL özeti."""
+    try:
+        conn = database.get_connection()
+        rows = conn.execute("""
+            SELECT strftime('%Y-W%W', closed_at) AS week,
+                   COALESCE(SUM(realized_pnl),0) AS pnl,
+                   COUNT(*) AS trades,
+                   SUM(CASE WHEN realized_pnl>0 THEN 1 ELSE 0 END) AS wins
+            FROM trades
+            WHERE closed_at IS NOT NULL AND closed_at >= date('now',?)
+            GROUP BY week ORDER BY week ASC
+        """, (f"-{weeks*7} days",)).fetchall()
+        conn.close()
+        return [{"week": r["week"], "pnl": round(float(r["pnl"]), 4),
+                 "trades": r["trades"], "wins": r["wins"],
+                 "winrate": round(r["wins"] / r["trades"] * 100, 1) if r["trades"] else 0.0}
+                for r in rows]
+    except Exception as e:
+        logger.error("get_weekly_data hata: %s", e)
+        return []
+
+
+def get_learning_metrics(days: int = 14) -> dict:
+    """Ghost + paper learning metrikleri."""
+    try:
+        conn   = database.get_connection()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        def q(sql, *args):
+            return conn.execute(sql, args).fetchone()[0] or 0
+
+        ghost_tp  = q("SELECT COUNT(*) FROM signal_candidates WHERE status='TP_HIT' AND created_at>=?", cutoff)
+        ghost_sl  = q("SELECT COUNT(*) FROM signal_candidates WHERE status='SL_HIT' AND created_at>=?", cutoff)
+        ghost_pnl = q("SELECT COALESCE(SUM(ghost_pnl),0) FROM signal_candidates WHERE status IN ('TP_HIT','SL_HIT') AND created_at>=?", cutoff)
+        p_done    = q("SELECT COUNT(*) FROM paper_results WHERE status='completed' AND created_at>=?", cutoff)
+        p_wins    = q("SELECT COUNT(*) FROM paper_results WHERE would_have_won=1 AND created_at>=?", cutoff)
+        conn.close()
+
+        res = ghost_tp + ghost_sl
+        return {
+            "days": days,
+            "ghost_tp_hits": ghost_tp, "ghost_sl_hits": ghost_sl,
+            "ghost_winrate": round(ghost_tp / res * 100, 1) if res else 0.0,
+            "ghost_pnl": round(float(ghost_pnl), 4),
+            "paper_completed": p_done, "paper_wins": p_wins,
+            "paper_winrate": round(p_wins / p_done * 100, 1) if p_done else 0.0,
+        }
+    except Exception as e:
+        logger.error("get_learning_metrics hata: %s", e)
+        return {"days": days, "ghost_winrate": 0.0, "paper_winrate": 0.0}
