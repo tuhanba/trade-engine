@@ -148,6 +148,9 @@ COIN_UNIVERSE = [
     "ZECUSDT","GOOGLUSDT",
 ]
 
+# Ghost Learning
+GHOST_WEIGHT = _env_float("GHOST_WEIGHT", 0.30)
+
 # Guvenlik
 def is_live_trading_allowed() -> bool:
     return (EXECUTION_MODE == "live" and LIVE_TRADING_ENABLED and CONFIRM_LIVE_TRADING)

@@ -130,6 +130,50 @@ CREATE TABLE IF NOT EXISTS partial_closes (
 )
 """
 
+_PAPER_RESULTS_DDL = """
+CREATE TABLE IF NOT EXISTS paper_results (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id               TEXT,
+    candidate_id            TEXT,
+    symbol                  TEXT NOT NULL,
+    direction               TEXT NOT NULL,
+    preview_entry           REAL DEFAULT 0,
+    preview_sl              REAL DEFAULT 0,
+    preview_tp1             REAL DEFAULT 0,
+    preview_tp2             REAL DEFAULT 0,
+    preview_tp3             REAL DEFAULT 0,
+    tracked_from            TEXT DEFAULT 'candidate',
+    horizon_minutes         REAL DEFAULT 240,
+    reject_reason_snap      TEXT DEFAULT '',
+    final_score_snap        REAL DEFAULT 0,
+    leverage_hint           INTEGER DEFAULT 10,
+    hit_tp                  INTEGER DEFAULT 0,
+    hit_stop_first          INTEGER DEFAULT 0,
+    time_to_move_minutes    REAL DEFAULT 0,
+    max_favorable_excursion REAL DEFAULT 0,
+    max_adverse_excursion   REAL DEFAULT 0,
+    setup_worked            INTEGER DEFAULT 0,
+    would_have_won          INTEGER DEFAULT 0,
+    first_touch             TEXT DEFAULT '',
+    skip_decision_correct   INTEGER DEFAULT 0,
+    status                  TEXT DEFAULT 'pending',
+    finalized_at            TEXT,
+    created_at              TEXT DEFAULT (datetime('now'))
+)
+"""
+
+_SIGNAL_EVENTS_DDL = """
+CREATE TABLE IF NOT EXISTS signal_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id     TEXT,
+    stage         TEXT,
+    symbol        TEXT,
+    reject_reason TEXT,
+    data          TEXT,
+    created_at    TEXT DEFAULT (datetime('now'))
+)
+"""
+
 # ── Migration kolonları ──────────────────────────────────────────────
 
 _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
@@ -174,6 +218,8 @@ def init_db() -> None:
         conn.execute(_BALANCE_LEDGER_DDL)
         conn.execute(_BOT_STATUS_DDL)
         conn.execute(_PARTIAL_CLOSES_DDL)
+        conn.execute(_PAPER_RESULTS_DDL)
+        conn.execute(_SIGNAL_EVENTS_DDL)
         # İndeksler (performans)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status)"
