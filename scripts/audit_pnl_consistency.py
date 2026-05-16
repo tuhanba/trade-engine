@@ -1,5 +1,4 @@
 """
-<<<<<<< HEAD
 scripts/audit_pnl_consistency.py – PnL/DB audit script.
 
 Kontroller:
@@ -140,36 +139,32 @@ if __name__ == "__main__":
     database.migrate_db()
     result = audit()
     sys.exit(1 if result["errors"] else 0)
-=======
-scripts/audit_pnl_consistency.py — AX PnL Tutarlılık Denetimi v5.1
-====================================================================
-12 kontrol noktası. Hepsi ERROR seviyesinde değerlendirilir.
-"""
-import os
-import sys
-import sqlite3
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import DB_PATH
-
-TOLERANCE = 0.01
-errors = 0
-warnings = 0
 
 
-def err(msg):
-    global errors
-    errors += 1
+# ── Extended 12-point audit functions (v5.1) ──────────────────────────────────
+
+import sqlite3 as _sqlite3
+
+from config import DB_PATH as _DB_PATH
+
+_TOLERANCE = 0.01
+_errors = 0
+_warnings = 0
+
+
+def _err(msg):
+    global _errors
+    _errors += 1
     print(f"  [ERROR] {msg}")
 
 
-def warn(msg):
-    global warnings
-    warnings += 1
+def _warn(msg):
+    global _warnings
+    _warnings += 1
     print(f"  [WARN]  {msg}")
 
 
-def ok(msg):
+def _ok(msg):
     print(f"  [OK]    {msg}")
 
 
@@ -184,9 +179,9 @@ def audit_schema(conn):
     existing = {row[0] for row in cursor.fetchall()}
     for tbl in required_tables:
         if tbl not in existing:
-            err(f"Tablo eksik: {tbl}")
+            _err(f"Tablo eksik: {tbl}")
         else:
-            ok(f"Tablo mevcut: {tbl}")
+            _ok(f"Tablo mevcut: {tbl}")
 
     required_cols = {
         "symbol", "direction", "status", "entry", "sl", "tp1", "tp2", "tp3",
@@ -203,9 +198,9 @@ def audit_schema(conn):
     existing_cols = {row[1] for row in cursor.fetchall()}
     missing = required_cols - existing_cols
     if missing:
-        err(f"trades tablosunda eksik kolonlar: {missing}")
+        _err(f"trades tablosunda eksik kolonlar: {missing}")
     else:
-        ok("trades tablosu tüm zorunlu kolonlara sahip")
+        _ok("trades tablosu tüm zorunlu kolonlara sahip")
 
 
 def audit_ledger(conn):
@@ -214,7 +209,7 @@ def audit_ledger(conn):
         "SELECT id, symbol, net_pnl, open_fee FROM trades WHERE status='closed'"
     ).fetchall()
     if not trades:
-        warn("Kapalı trade yok — ledger denetimi atlandı.")
+        _warn("Kapalı trade yok — ledger denetimi atlandı.")
         return
     mismatches = 0
     for t in trades:
@@ -225,14 +220,14 @@ def audit_ledger(conn):
             (tid,)
         ).fetchone()
         ledger_total = float(ledger_rows[0])
-        if abs(ledger_total - net_pnl) > TOLERANCE:
-            err(
+        if abs(ledger_total - net_pnl) > _TOLERANCE:
+            _err(
                 f"Trade #{tid} ({t['symbol']}): "
                 f"ledger_total={ledger_total:.4f} ≠ net_pnl={net_pnl:.4f}"
             )
             mismatches += 1
     if mismatches == 0:
-        ok(f"Ledger kontrolü geçti ({len(trades)} trade)")
+        _ok(f"Ledger kontrolü geçti ({len(trades)} trade)")
 
 
 def audit_partial_closes(conn):
@@ -249,14 +244,14 @@ def audit_partial_closes(conn):
             (tid,)
         ).fetchone()
         pc_sum = float(pc[0])
-        if abs(pc_sum - realized) > TOLERANCE:
-            err(
+        if abs(pc_sum - realized) > _TOLERANCE:
+            _err(
                 f"Trade #{tid} ({t['symbol']}): "
                 f"partial_closes={pc_sum:.4f} ≠ realized_pnl={realized:.4f}"
             )
             mismatches += 1
     if mismatches == 0:
-        ok(f"Partial close kontrolü geçti ({len(trades)} trade)")
+        _ok(f"Partial close kontrolü geçti ({len(trades)} trade)")
 
 
 def audit_duplicate_tp(conn):
@@ -268,9 +263,9 @@ def audit_duplicate_tp(conn):
         ).fetchall()
         if rows:
             for r in rows:
-                err(f"Trade #{r['trade_id']}: {tp_type} {r['cnt']} kez kapanmış")
+                _err(f"Trade #{r['trade_id']}: {tp_type} {r['cnt']} kez kapanmış")
         else:
-            ok(f"Duplicate {tp_type} yok")
+            _ok(f"Duplicate {tp_type} yok")
 
 
 def audit_remaining_qty(conn):
@@ -280,18 +275,18 @@ def audit_remaining_qty(conn):
     ).fetchall()
     if neg:
         for r in neg:
-            err(f"Trade #{r['id']} ({r['symbol']}): negatif remaining_qty={r['remaining_qty']}")
+            _err(f"Trade #{r['id']} ({r['symbol']}): negatif remaining_qty={r['remaining_qty']}")
     else:
-        ok("Negatif remaining_qty yok")
+        _ok("Negatif remaining_qty yok")
 
     closed_rem = conn.execute(
         "SELECT id, symbol, remaining_qty FROM trades WHERE status='closed' AND remaining_qty > 0.0001"
     ).fetchall()
     if closed_rem:
         for r in closed_rem:
-            err(f"Trade #{r['id']} ({r['symbol']}): closed ama remaining_qty={r['remaining_qty']}")
+            _err(f"Trade #{r['id']} ({r['symbol']}): closed ama remaining_qty={r['remaining_qty']}")
     else:
-        ok("Kapalı trade remaining_qty=0 tutarlı")
+        _ok("Kapalı trade remaining_qty=0 tutarlı")
 
 
 def audit_duration(conn):
@@ -303,10 +298,10 @@ def audit_duration(conn):
     for r in rows:
         if (r["duration_seconds"] is None or r["duration_seconds"] <= 0):
             if r["open_time"] and r["close_time"]:
-                err(f"Trade #{r['id']} ({r['symbol']}): duration_seconds=0 ama open/close_time var")
+                _err(f"Trade #{r['id']} ({r['symbol']}): duration_seconds=0 ama open/close_time var")
                 bad += 1
     if bad == 0:
-        ok(f"Duration kontrolü geçti ({len(rows)} kapalı trade)")
+        _ok(f"Duration kontrolü geçti ({len(rows)} kapalı trade)")
 
 
 def audit_live_api():
@@ -316,18 +311,17 @@ def audit_live_api():
         resp = requests.get("http://127.0.0.1:5000/api/live", timeout=5)
         data = resp.json()
         api_count = data.get("data", {}).get("open_count", -1)
-        import sqlite3 as _sq
-        c2 = _sq.connect(DB_PATH)
+        c2 = _sqlite3.connect(_DB_PATH)
         db_count = c2.execute(
             "SELECT COUNT(*) FROM trades WHERE status NOT IN ('closed') AND status IS NOT NULL"
         ).fetchone()[0]
         c2.close()
         if api_count != db_count:
-            err(f"/api/live open_count={api_count} ≠ DB açık trade={db_count}")
+            _err(f"/api/live open_count={api_count} ≠ DB açık trade={db_count}")
         else:
-            ok(f"/api/live open_count={api_count} = DB açık trade={db_count}")
+            _ok(f"/api/live open_count={api_count} = DB açık trade={db_count}")
     except Exception as e:
-        warn(f"/api/live testi atlandı (servis çalışmıyor olabilir): {e}")
+        _warn(f"/api/live testi atlandı (servis çalışmıyor olabilir): {e}")
 
 
 _SECRET_PATTERNS = ["BOT_TOKEN", "CHAT_ID", "API_KEY", "API_SECRET"]
@@ -354,17 +348,16 @@ def audit_hardcoded_secrets():
                             continue
                         if "os.getenv" in line or "os.environ" in line:
                             continue
-                        # Only flag lines that assign a quoted literal (not a variable)
                         for pat in _SECRET_PATTERNS:
                             if (pat in line and "=" in line
                                     and ('"' in line or "'" in line)
                                     and not any(kw in line for kw in ["json=", "data=", "params=", "f\"", "f'", ":", "patterns"])):
-                                err(f"Olası hardcoded secret: {rel}:{lineno} — {stripped[:80]}")
+                                _err(f"Olası hardcoded secret: {rel}:{lineno} — {stripped[:80]}")
                                 found += 1
             except Exception:
                 pass
     if found == 0:
-        ok("Hardcoded secret bulunamadı")
+        _ok("Hardcoded secret bulunamadı")
 
 
 def audit_fee_double_count(conn):
@@ -383,32 +376,32 @@ def audit_fee_double_count(conn):
         notional = qty * entry
         expected_max = notional * fee_rate * 2 * 1.15
         if total_fee > expected_max:
-            err(
+            _err(
                 f"Trade #{t['id']} ({t['symbol']}): "
                 f"total_fee={total_fee:.4f} > expected_max={expected_max:.4f}"
             )
             suspect += 1
     if suspect == 0:
-        ok(f"Fee double-count şüphesi yok ({len(trades)} trade)")
+        _ok(f"Fee double-count şüphesi yok ({len(trades)} trade)")
 
 
 def audit_balance(conn):
     print("\n── 10. Paper Balance Tutarlılığı ────────────────────────────")
     row = conn.execute("SELECT balance, initial_balance FROM paper_account WHERE id=1").fetchone()
     if not row:
-        err("paper_account tablosunda kayıt yok")
+        _err("paper_account tablosunda kayıt yok")
         return
     current = float(row[0])
     initial = float(row[1])
     ledger = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM balance_ledger").fetchone()[0]
     expected = initial + float(ledger)
-    if abs(expected - current) > TOLERANCE:
-        err(
+    if abs(expected - current) > _TOLERANCE:
+        _err(
             f"paper_account.balance={current:.2f} ≠ "
             f"initial({initial:.2f}) + ledger({float(ledger):.2f}) = {expected:.2f}"
         )
     else:
-        ok(f"Paper balance tutarlı: {current:.2f} USDT")
+        _ok(f"Paper balance tutarlı: {current:.2f} USDT")
 
 
 def audit_close_price(conn):
@@ -418,11 +411,11 @@ def audit_close_price(conn):
             "SELECT id, symbol FROM trades WHERE status='closed' AND (close_price IS NULL OR close_price = 0)"
         ).fetchall()
         if rows:
-            warn(f"{len(rows)} kapalı trade'de close_price=0/NULL (eski kayıtlar olabilir)")
+            _warn(f"{len(rows)} kapalı trade'de close_price=0/NULL (eski kayıtlar olabilir)")
         else:
-            ok("Tüm kapalı trade'lerde close_price mevcut")
+            _ok("Tüm kapalı trade'lerde close_price mevcut")
     except Exception as e:
-        warn(f"close_price kolonu bulunamadı — migration gerekli: {e}")
+        _warn(f"close_price kolonu bulunamadı — migration gerekli: {e}")
 
 
 def audit_signal_decisions(conn):
@@ -431,29 +424,31 @@ def audit_signal_decisions(conn):
         "SELECT decision, COUNT(*) as cnt FROM signal_candidates GROUP BY decision ORDER BY cnt DESC"
     ).fetchall()
     if not rows:
-        warn("signal_candidates tablosu boş — ghost learning verisi yok")
+        _warn("signal_candidates tablosu boş — ghost learning verisi yok")
         return
     all_allow = all(r["decision"] == "ALLOW" for r in rows)
     if all_allow and len(rows) > 0:
-        err("Tüm sinyaller decision='ALLOW' — ghost learning verisi bozuk olabilir")
+        _err("Tüm sinyaller decision='ALLOW' — ghost learning verisi bozuk olabilir")
     else:
         for r in rows:
-            ok(f"Decision '{r['decision']}': {r['cnt']} sinyal")
+            _ok(f"Decision '{r['decision']}': {r['cnt']} sinyal")
 
 
 def main():
-    global errors, warnings
+    global _errors, _warnings
+    _errors = 0
+    _warnings = 0
     print("=" * 60)
     print("AX PnL Tutarlılık Denetimi v5.1")
-    print(f"DB: {DB_PATH}")
+    print(f"DB: {_DB_PATH}")
     print("=" * 60)
 
-    if not os.path.exists(DB_PATH):
-        print(f"[FATAL] DB bulunamadı: {DB_PATH}")
+    if not os.path.exists(_DB_PATH):
+        print(f"[FATAL] DB bulunamadı: {_DB_PATH}")
         sys.exit(1)
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = _sqlite3.connect(_DB_PATH)
+    conn.row_factory = _sqlite3.Row
 
     audit_schema(conn)
     audit_ledger(conn)
@@ -471,17 +466,12 @@ def main():
     conn.close()
 
     print("\n" + "=" * 60)
-    print(f"SONUÇ: {errors} ERROR, {warnings} WARNING")
-    if errors == 0 and warnings == 0:
+    print(f"SONUÇ: {_errors} ERROR, {_warnings} WARNING")
+    if _errors == 0 and _warnings == 0:
         print("TUM DENETIMLER GECTI")
-    elif errors == 0:
+    elif _errors == 0:
         print("ERROR yok ama WARNING var — gözden geçir")
     else:
         print("FINAL READY DEGIL — ERROR'lar giderilmeli")
     print("=" * 60)
-    sys.exit(0 if errors == 0 else 1)
-
-
-if __name__ == "__main__":
-    main()
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
+    sys.exit(0 if _errors == 0 else 1)

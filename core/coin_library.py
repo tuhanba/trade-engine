@@ -1,5 +1,4 @@
 """
-<<<<<<< HEAD
 core/coin_library.py – Tradable sembol kütüphanesi ve filtre modülü.
 
 USDT pariteleri hacim ve hareketle filtrelenir.
@@ -9,7 +8,9 @@ Düşük hacimli / istenmeyen pariteler elenir.
 from __future__ import annotations
 
 import logging
-from typing import Any
+import sqlite3
+import time
+from typing import Any, Dict, List, Set
 
 logger = logging.getLogger("ax.coin_library")
 
@@ -96,15 +97,7 @@ def exclude_bad_symbols(symbols: list[dict]) -> list[dict]:
             continue
         result.append(s)
     return result
-=======
-Coin Library — Dinamik Sembol Yönetimi ve Kalite Filtreleri
-"""
-import logging
-import sqlite3
-import time
-from typing import List, Dict, Set
 
-logger = logging.getLogger(__name__)
 
 class CoinLibrary:
     def __init__(self, client, db_path="trade_engine.db"):
@@ -123,7 +116,7 @@ class CoinLibrary:
             logger.info("Coin evreni güncelleniyor...")
             tickers = self.client.futures_ticker()
             exchange_info = self.client.futures_exchange_info()
-            
+
             # Geçerli semboller (USDT Perpetual)
             valid_symbols = {
                 s["symbol"]: s for s in exchange_info["symbols"]
@@ -140,18 +133,18 @@ class CoinLibrary:
 
                 volume = float(t["quoteVolume"])
                 price_change = abs(float(t["priceChangePercent"]))
-                
+
                 # 1. Hacim Filtresi
                 if volume < self.MIN_VOLUME_24H:
                     continue
-                
+
                 # 2. Volatilite Filtresi (Aşırı pump/dump veya ölü tahta)
                 if price_change > self.MAX_VOLATILITY_24H or price_change < self.MIN_VOLATILITY_24H:
                     continue
 
                 # 3. Skorlama (Hacim ve Volatilite ağırlıklı)
                 score = (volume / 100_000_000) * 5.0 + (price_change / 10.0) * 5.0
-                
+
                 candidates.append({
                     "symbol": symbol,
                     "score": score,
@@ -162,7 +155,7 @@ class CoinLibrary:
             # Skora göre sırala ve ilk N tanesini al
             candidates.sort(key=lambda x: x["score"], reverse=True)
             top_coins = [c["symbol"] for c in candidates[:self.TOP_N_COINS]]
-            
+
             # BTC ve ETH her zaman dahil olmalı
             for essential in ["BTCUSDT", "ETHUSDT"]:
                 if essential not in top_coins:
@@ -199,6 +192,7 @@ class CoinLibrary:
         except Exception:
             return []
 
+
 def get_coin_params(symbol: str) -> Dict:
     """Coin'e özel hassasiyet ve geçmiş performans verilerini döner."""
     # Varsayılan değerler
@@ -208,4 +202,3 @@ def get_coin_params(symbol: str) -> Dict:
         "volatility_mult": 1.0,
         "cooldown_minutes": 30
     }
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b

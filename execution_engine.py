@@ -20,7 +20,6 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-<<<<<<< HEAD
 import config
 import database
 from core.data_layer import SignalData, TradeData, TradeStatus
@@ -32,20 +31,6 @@ from core.accounting import (
 from core.market_data import get_current_price
 from core.trailing_engine import TrailingEngine, TradeExitState
 from telegram_delivery import TelegramDelivery
-=======
-from config import (
-    RISK_PCT, TP1_CLOSE_PCT, TP2_CLOSE_PCT, RUNNER_CLOSE_PCT,
-    TRAIL_ATR_MULT, EXECUTION_MODE,
-    BREAKEVEN_ENABLED, BREAKEVEN_OFFSET_PCT,
-)
-from database import (
-    save_trade, update_trade, close_trade as db_close_trade,
-    get_open_trades, update_paper_balance, get_paper_balance,
-    save_postmortem, save_trade_event,
-)
-from websocket_events import event_manager
-from core.accounting import calculate_runner_unrealized_pnl
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
 logger = logging.getLogger("ax.execution")
 
@@ -124,136 +109,10 @@ class ExecutionEngine:
 
     # ── Açık trade güncelleme ────────────────────────────────────
 
-<<<<<<< HEAD
     def update_open_trades(self) -> None:
         """Tüm açık trade'lerin fiyatını, PnL'ini ve exit koşullarını günceller."""
         open_trades = database.get_open_trades()
         for trade in open_trades:
-=======
-    qty = _calc_qty(balance, entry, sl, rp,
-                    filters["step_size"], filters["min_qty"], filters["min_notional"])
-    if qty <= 0:
-        logger.warning(f"[Execution] {symbol} qty hesplanamadı")
-        return None
-
-    qty_tp1    = round(qty * TP1_CLOSE_PCT / 100, 8)
-    qty_tp2    = round(qty * TP2_CLOSE_PCT / 100, 8)
-    qty_runner = round(qty - qty_tp1 - qty_tp2, 8)
-
-    trade = {
-        "symbol":         symbol,
-        "direction":      direction,
-        "status":         "open",
-        "environment":    EXECUTION_MODE,
-        "ax_mode":        "execute",
-        "entry":          entry,
-        "sl":             sl,
-        "tp1":            tp1,
-        "tp2":            tp2,
-        "trail_stop":     None,
-        "qty":            qty,
-        "qty_tp1":        qty_tp1,
-        "qty_tp2":        qty_tp2,
-        "qty_runner":     qty_runner,
-        "linked_candidate_id": None,
-        "linked_candidate_uuid": signal.get("candidate_id"),
-        "open_time":      datetime.now(timezone.utc).isoformat(),
-    }
-
-    trade_id = save_trade(trade)
-    save_trade_event(trade_id, "OPEN", f"entry={entry} sl={sl} tp1={tp1} tp2={tp2} qty={qty}")
-    logger.info(
-        f"[Execution] AÇILDI #{trade_id} {symbol} {direction} "
-        f"entry={entry:.6f} sl={sl:.6f} tp1={tp1:.6f} tp2={tp2:.6f} qty={qty}"
-    )
-    if event_manager: event_manager.broadcast_live_update(get_open_trades())
-    return trade_id
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TRADE MONİTÖRÜ
-# ─────────────────────────────────────────────────────────────────────────────
-
-def monitor_trades(client) -> list:
-    """
-    Tüm açık trade'leri kontrol et:
-    - SL tetiklendi mi?
-    - TP1 / TP2 tetiklendi mi?
-    - Runner trailing stop güncelle
-
-    Returns:
-        Kapanan trade'lerin ID listesi.
-    """
-    trades = get_open_trades()
-    closed = []
-
-    for t in trades:
-        try:
-            result = _check_trade(client, t)
-            if result:
-                closed.append(t["id"])
-        except Exception as e:
-            logger.error(f"[Execution] Monitor hata {t['id']}: {e}")
-
-    return closed
-
-
-def _get_price(client, symbol: str) -> float:
-    try:
-        ticker = client.futures_ticker(symbol=symbol)
-        return float(ticker["lastPrice"])
-    except Exception:
-        return 0.0
-
-
-def _check_trade(client, t: dict) -> bool:
-    """
-    Tek trade'i kontrol et. Kapandıysa True döner.
-    """
-    trade_id  = t["id"]
-    symbol    = t["symbol"]
-    direction = t["direction"]
-    status    = t["status"]
-    entry     = t["entry"]
-    sl        = t["sl"]
-    tp1       = t["tp1"]
-    tp2       = t["tp2"]
-    trail     = t.get("trail_stop")
-    qty       = t["qty"]
-    qty_tp1   = t.get("qty_tp1") or qty * TP1_CLOSE_PCT / 100
-    qty_tp2   = t.get("qty_tp2") or qty * TP2_CLOSE_PCT / 100
-    qty_runner= t.get("qty_runner") or qty - qty_tp1 - qty_tp2
-    atr       = 0   # Trail için atr hesaplanacak
-
-    price = _get_price(client, symbol)
-    if not price:
-        return False
-
-    is_long = direction == "LONG"
-
-    # unrealized_pnl'i accounting modülü üzerinden güncelle
-    remaining_qty = t.get("qty_runner") or (qty - (t.get("qty_tp1") or 0) - (t.get("qty_tp2") or 0))
-    if status in ("runner",) and remaining_qty > 0:
-        unreal = calculate_runner_unrealized_pnl(direction, entry, price, remaining_qty)
-        update_trade(trade_id, {"unrealized_pnl": unreal, "current_price": price})
-        if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), unreal, t.get("realized_pnl", 0))
-
-    # ── SL Kontrolü ─────────────────────────────────────────────────────────
-    sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
-    if sl_hit:
-        pnl = _calc_pnl(direction, entry, price, qty)
-        save_trade_event(trade_id, "SL_HIT", f"price={price} pnl={pnl}")
-        _finalize(trade_id, price, pnl, "sl", t)
-        return True
-
-    # ── TP1 Kontrolü ────────────────────────────────────────────────────────
-    if status == "open":
-        tp1_hit = (is_long and price >= tp1) or (not is_long and price <= tp1)
-        if tp1_hit:
-            pnl_tp1 = _calc_pnl(direction, entry, tp1, qty_tp1)
-            # ── Breakeven SL — Backtest: Max Loss serisi 17, Loss→Loss %80.2 ──
-            # TP1 tetiklenince SL entry + buffer'a çekilir (sıfır riskli runner)
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
             try:
                 self._process_single_trade(trade)
             except Exception as exc:
@@ -262,7 +121,6 @@ def _check_trade(client, t: dict) -> bool:
                     trade.get("id"), trade.get("symbol"), exc,
                 )
 
-<<<<<<< HEAD
     def _process_single_trade(self, trade: dict) -> None:
         """Tek trade'i değerlendirir."""
         trade_id = trade["id"]
@@ -286,19 +144,6 @@ def _check_trade(client, t: dict) -> bool:
 
         # Max hold time kontrolü
         if self._is_timeout(trade):
-=======
-            new_sl = be_sl if be_enabled else entry
-            update_trade(trade_id, {
-                "status":       "tp1_hit",
-                "tp1_hit":      1,
-                "realized_pnl": pnl_tp1,
-                "sl":           round(new_sl, 6),   # Breakeven SL
-            })
-            update_paper_balance(pnl_tp1)
-            save_trade_event(trade_id, "TP1_HIT", f"price={tp1} pnl={pnl_tp1:.4f} new_sl={new_sl:.6f}")
-            if event_manager: event_manager.broadcast_live_update(get_open_trades())
-            if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), t.get("realized_pnl", 0) + pnl_tp1)
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
             logger.info(
                 "[Execution] Timeout: #%s %s → kapatılıyor (max_hold=%dm)",
                 trade_id, symbol, MAX_HOLD_MINUTES,
@@ -306,36 +151,8 @@ def _check_trade(client, t: dict) -> bool:
             self.close_trade(trade, current, "MAX_HOLD_TIMEOUT")
             return
 
-<<<<<<< HEAD
         # Exit state yükle (metadata'dan)
         state = self._load_exit_state(trade)
-=======
-    # ── TP2 Kontrolü ────────────────────────────────────────────────────────
-    if status == "tp1_hit":
-        tp2_hit = (is_long and price >= tp2) or (not is_long and price <= tp2)
-        if tp2_hit:
-            pnl_tp2 = _calc_pnl(direction, entry, tp2, qty_tp2)
-            realized = (t.get("realized_pnl") or 0) + pnl_tp2
-            # Runner'ı başlat — trail stop koy
-            atr_val = _get_atr(client, symbol)
-            if is_long:
-                new_trail = tp2 - atr_val * TRAIL_ATR_MULT
-            else:
-                new_trail = tp2 + atr_val * TRAIL_ATR_MULT
-            update_trade(trade_id, {
-                "status":       "runner",
-                "tp2_hit":      1,
-                "realized_pnl": realized,
-                "trail_stop":   new_trail,
-                "sl":           entry,
-            })
-            update_paper_balance(pnl_tp2)
-            save_trade_event(trade_id, "TP2_HIT", f"price={tp2} pnl={pnl_tp2:.4f} trail={new_trail:.6f}")
-            if event_manager: event_manager.broadcast_live_update(get_open_trades())
-            if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), realized)
-            logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ → RUNNER trail={new_trail:.6f}")
-            return False
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
         # ATR tahminli (yoksa None)
         atr = self._estimate_atr(trade, current)
@@ -428,7 +245,7 @@ def _check_trade(client, t: dict) -> bool:
         # (database.py zaten accumulated partial_pnl'i saklıyor)
         accumulated = trade.get("accumulated_pnl", 0.0) or 0.0
         remaining_qty_pct = trade.get("remaining_qty_pct", 100.0) or 100.0
-        
+
         # Kalan kısım için PnL
         remaining_qty = trade["quantity"] * (remaining_qty_pct / 100.0)
         remaining_pnl = calculate_realized_pnl(
@@ -524,9 +341,155 @@ def _check_trade(client, t: dict) -> bool:
                 return abs(entry - sl)
         except Exception:
             pass
-<<<<<<< HEAD
         return None
-=======
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRADE MONİTÖRÜ
+# ─────────────────────────────────────────────────────────────────────────────
+
+def monitor_trades(client) -> list:
+    """
+    Tüm açık trade'leri kontrol et:
+    - SL tetiklendi mi?
+    - TP1 / TP2 tetiklendi mi?
+    - Runner trailing stop güncelle
+
+    Returns:
+        Kapanan trade'lerin ID listesi.
+    """
+    from database import get_open_trades
+    trades = get_open_trades()
+    closed = []
+
+    for t in trades:
+        try:
+            result = _check_trade(client, t)
+            if result:
+                closed.append(t["id"])
+        except Exception as e:
+            logger.error(f"[Execution] Monitor hata {t['id']}: {e}")
+
+    return closed
+
+
+def _get_price(client, symbol: str) -> float:
+    try:
+        ticker = client.futures_ticker(symbol=symbol)
+        return float(ticker["lastPrice"])
+    except Exception:
+        return 0.0
+
+
+def _check_trade(client, t: dict) -> bool:
+    """
+    Tek trade'i kontrol et. Kapandıysa True döner.
+    """
+    from database import (
+        update_trade, close_trade as db_close_trade,
+        get_open_trades, update_paper_balance, get_paper_balance,
+        save_trade_event,
+    )
+    from core.accounting import calculate_runner_unrealized_pnl
+    try:
+        from websocket_events import event_manager
+    except Exception:
+        event_manager = None
+
+    try:
+        TRAIL_ATR_MULT = float(getattr(config, "TRAIL_ATR_MULT", 1.5))
+        BREAKEVEN_ENABLED = bool(getattr(config, "BREAKEVEN_ENABLED", True))
+        BREAKEVEN_OFFSET_PCT = float(getattr(config, "BREAKEVEN_OFFSET_PCT", 0.1))
+    except Exception:
+        TRAIL_ATR_MULT = 1.5
+        BREAKEVEN_ENABLED = True
+        BREAKEVEN_OFFSET_PCT = 0.1
+
+    trade_id  = t["id"]
+    symbol    = t["symbol"]
+    direction = t["direction"]
+    status    = t["status"]
+    entry     = t["entry"]
+    sl        = t["sl"]
+    tp1       = t["tp1"]
+    tp2       = t["tp2"]
+    trail     = t.get("trail_stop")
+    qty       = t["qty"]
+    qty_tp1   = t.get("qty_tp1") or qty * TP1_CLOSE_PCT / 100
+    qty_tp2   = t.get("qty_tp2") or qty * TP2_CLOSE_PCT / 100
+    qty_runner= t.get("qty_runner") or qty - qty_tp1 - qty_tp2
+
+    price = _get_price(client, symbol)
+    if not price:
+        return False
+
+    is_long = direction == "LONG"
+
+    # unrealized_pnl'i accounting modülü üzerinden güncelle
+    remaining_qty = t.get("qty_runner") or (qty - (t.get("qty_tp1") or 0) - (t.get("qty_tp2") or 0))
+    if status in ("runner",) and remaining_qty > 0:
+        unreal = calculate_runner_unrealized_pnl(direction, entry, price, remaining_qty)
+        update_trade(trade_id, {"unrealized_pnl": unreal, "current_price": price})
+        if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), unreal, t.get("realized_pnl", 0))
+
+    # ── SL Kontrolü ─────────────────────────────────────────────────────────
+    sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
+    if sl_hit:
+        pnl = _calc_pnl(direction, entry, price, qty)
+        save_trade_event(trade_id, "SL_HIT", f"price={price} pnl={pnl}")
+        _finalize(trade_id, price, pnl, "sl", t)
+        return True
+
+    # ── TP1 Kontrolü ────────────────────────────────────────────────────────
+    if status == "open":
+        tp1_hit = (is_long and price >= tp1) or (not is_long and price <= tp1)
+        if tp1_hit:
+            pnl_tp1 = _calc_pnl(direction, entry, tp1, qty_tp1)
+            # ── Breakeven SL — Backtest: Max Loss serisi 17, Loss→Loss %80.2 ──
+            # TP1 tetiklenince SL entry + buffer'a çekilir (sıfır riskli runner)
+            be_enabled = BREAKEVEN_ENABLED
+            if be_enabled:
+                offset = entry * BREAKEVEN_OFFSET_PCT / 100
+                be_sl = (entry + offset) if is_long else (entry - offset)
+            else:
+                be_sl = entry
+            new_sl = be_sl if be_enabled else entry
+            update_trade(trade_id, {
+                "status":       "tp1_hit",
+                "tp1_hit":      1,
+                "realized_pnl": pnl_tp1,
+                "sl":           round(new_sl, 6),   # Breakeven SL
+            })
+            update_paper_balance(pnl_tp1)
+            save_trade_event(trade_id, "TP1_HIT", f"price={tp1} pnl={pnl_tp1:.4f} new_sl={new_sl:.6f}")
+            if event_manager: event_manager.broadcast_live_update(get_open_trades())
+            if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), t.get("realized_pnl", 0) + pnl_tp1)
+
+    # ── TP2 Kontrolü ────────────────────────────────────────────────────────
+    if status == "tp1_hit":
+        tp2_hit = (is_long and price >= tp2) or (not is_long and price <= tp2)
+        if tp2_hit:
+            pnl_tp2 = _calc_pnl(direction, entry, tp2, qty_tp2)
+            realized = (t.get("realized_pnl") or 0) + pnl_tp2
+            # Runner'ı başlat — trail stop koy
+            atr_val = _get_atr(client, symbol)
+            if is_long:
+                new_trail = tp2 - atr_val * TRAIL_ATR_MULT
+            else:
+                new_trail = tp2 + atr_val * TRAIL_ATR_MULT
+            update_trade(trade_id, {
+                "status":       "runner",
+                "tp2_hit":      1,
+                "realized_pnl": realized,
+                "trail_stop":   new_trail,
+                "sl":           entry,
+            })
+            update_paper_balance(pnl_tp2)
+            save_trade_event(trade_id, "TP2_HIT", f"price={tp2} pnl={pnl_tp2:.4f} trail={new_trail:.6f}")
+            if event_manager: event_manager.broadcast_live_update(get_open_trades())
+            if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), realized)
+            logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ → RUNNER trail={new_trail:.6f}")
+            return False
 
     return False
 
@@ -568,6 +531,16 @@ def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> flo
 def _finalize(trade_id: int, close_price: float, net_pnl: float,
               reason: str, t: dict):
     """Trade'i kapat, bakiyeyi güncelle."""
+    from database import (
+        close_trade as db_close_trade,
+        update_paper_balance, get_paper_balance,
+        save_trade_event,
+    )
+    try:
+        from websocket_events import event_manager
+    except Exception:
+        event_manager = None
+
     open_t = t.get("open_time", "")
     try:
         opened   = datetime.fromisoformat(open_t.replace("Z", "+00:00"))
@@ -642,4 +615,3 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
         f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
         f"{reason.upper()} pnl={net_pnl:+.3f}$ hold={hold_min:.0f}dk"
     )
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b

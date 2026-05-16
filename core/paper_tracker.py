@@ -5,11 +5,19 @@ Ghost tracking: açılmayan sinyallerin sonuçlarını takip eder.
 """
 from __future__ import annotations
 import logging
+from datetime import datetime, timezone
 from core.data_layer import SignalData
 from core.accounting import calculate_realized_pnl
 import database
 
 logger = logging.getLogger("ax.paper_tracker")
+
+try:
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from config import DB_PATH
+except ImportError:
+    DB_PATH = "/root/trade_engine/trading.db"
 
 
 def register_candidate(signal: SignalData, decision: str, reason: str = "") -> None:
@@ -91,13 +99,76 @@ def summarize_ghost_results() -> dict:
             "ghost_pnl": round(float(ghost_pnl), 4),
             "ghost_winrate": round(tp_hits / (tp_hits + sl_hits) * 100, 1) if (tp_hits + sl_hits) > 0 else 0.0,
         }
-<<<<<<< HEAD
     except Exception as exc:
         logger.error("Ghost summary hatası: %s", exc)
         return {"total_candidates": 0, "tp_hits": 0, "sl_hits": 0, "pending": 0, "ghost_pnl": 0.0, "ghost_winrate": 0.0}
     finally:
         conn.close()
-=======
+
+
+# ── Paper Result Simulation Helpers ───────────────────────────────────────────
+
+def _resolve_bar(direction: str, high: float, low: float, sl: float, tp1: float) -> str:
+    """
+    Bir mum içinde önce hangisi vurulmuş: stop mu, tp1 mi?
+    SL önceliklidir (worst-case / conservative assumption).
+    """
+    if direction == "LONG":
+        hit_sl = low <= sl
+        hit_tp = high >= tp1
+    else:
+        hit_sl = high >= sl
+        hit_tp = low <= tp1
+
+    if hit_sl:
+        return "stop"
+    if hit_tp:
+        return "tp1"
+    return "neither"
+
+
+def _parse_created_at(value) -> datetime:
+    """created_at alanını datetime nesnesine çevirir."""
+    if value is None:
+        return datetime.now(timezone.utc)
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
+def _simulate_path(
+    kl: list,
+    direction: str,
+    entry: float,
+    sl: float,
+    tp1: float,
+    start_ms: int,
+    horizon_minutes: float,
+) -> dict:
+    """
+    Kline listesi üzerinde SL/TP simülasyonu yapar.
+    Döndürür: first_touch, hit_tp, hit_stop_first, ttm, mfe_r, mae_r,
+              setup_worked, would_have_won.
+    """
+    if not kl:
+        return {
+            "first_touch": "no_data",
+            "hit_tp": 0,
+            "hit_stop_first": 0,
+            "setup_worked": False,
+            "would_have_won": False,
+            "ttm": 0.0,
+            "mfe_r": 0.0,
+            "mae_r": 0.0,
+        }
 
     sl_dist = abs(entry - sl) + 1e-12
 
@@ -189,6 +260,7 @@ def finalize_paper_row(client, row: dict) -> bool:
         return False
 
     now = datetime.now(timezone.utc).isoformat()
+    from database import update_paper_result
     update_paper_result(
         row["id"],
         {
@@ -225,6 +297,7 @@ def finalize_paper_row(client, row: dict) -> bool:
 
 
 def process_pending_paper_results(client, limit: int = 35) -> int:
+    from database import get_pending_paper_results
     rows = get_pending_paper_results(limit=limit)
     done = 0
     for row in rows:
@@ -234,4 +307,3 @@ def process_pending_paper_results(client, limit: int = 35) -> int:
         except Exception as e:
             logger.warning(f"[paper_tracker] finalize hata {row.get('symbol')}: {e}")
     return done
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b

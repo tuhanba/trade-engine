@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """
 app.py — AX Trade Engine Dashboard API v5.0 (Production)
 =========================================================
@@ -20,67 +19,35 @@ Endpoints:
 from __future__ import annotations
 
 import json
+import os
 import logging
 import time
-=======
-import os, json, re
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 from datetime import datetime, timezone
 
-from flask import Flask, Response, jsonify, render_template, stream_with_context
+from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
-<<<<<<< HEAD
+try:
+    from flask_socketio import SocketIO
+    SOCKETIO_AVAILABLE = True
+except ImportError:
+    SOCKETIO_AVAILABLE = False
+    class SocketIO:
+        def __init__(self, app, **kw): pass
+        def emit(self, *a, **kw): pass
+        def run(self, app, **kw): app.run(**kw)
+
 import config
 import database
 import dashboard_service
+from database import get_conn, get_closed_trades, get_open_trades, get_paper_balance
 
 logger = logging.getLogger("ax.app")
 
+N8N_AVAILABLE = False
+
 app = Flask(__name__)
 app.secret_key = getattr(config, "SECRET_KEY", "ax_secret_2026")
-=======
-from flask_socketio import SocketIO
-from dotenv import load_dotenv
-from websocket_events import initialize_websocket_events
-from database import (
-    init_db, get_stats, get_closed_trades, get_open_trades,
-    get_paper_balance, get_conn, get_system_state,
-)
-
-# Geriye dönük uyumluluk alias'ları
-def get_trades(limit=200, status="closed"):
-    return get_closed_trades(limit=limit, valid_only=(status == "closed"))
-
-def get_current_params():
-    return None  # Artık system_state üzerinden okunuyor
-import dashboard_service as dash_svc
-
-load_dotenv()
-
-_static_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-os.makedirs(_static_folder, exist_ok=True)
-
-app = Flask(__name__, template_folder="templates", static_folder="static")
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "scalp2026")
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
-event_manager = initialize_websocket_events(socketio)
-if N8N_AVAILABLE:
-    app.register_blueprint(n8n_bp)
-
-try:
-    from binance.client import Client as _BinanceClient
-    client = _BinanceClient(
-        os.getenv("BINANCE_API_KEY", ""),
-        os.getenv("BINANCE_API_SECRET", ""),
-    )
-except Exception as _e:
-    import logging as _logging
-    _logging.getLogger(__name__).warning(f"Binance client başlatılamadı: {_e}")
-    client = None
-
-init_db()
-dash_svc.start()
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
+socketio = SocketIO(app)
 
 
 # ── CORS ─────────────────────────────────────────────────────────────
@@ -103,6 +70,23 @@ def _error(msg: str, code: int = 500):
     return jsonify({"ok": False, "error": str(msg)}), code
 
 
+def _fmt_duration(open_time=None, close_time=None):
+    """İki zaman damgası arasındaki süreyi biçimlendirir."""
+    try:
+        if not open_time:
+            return "", 0
+        fmt = "%Y-%m-%d %H:%M:%S"
+        t0 = datetime.strptime(str(open_time)[:19], fmt).replace(tzinfo=timezone.utc)
+        t1 = datetime.strptime(str(close_time)[:19], fmt).replace(tzinfo=timezone.utc) if close_time else datetime.now(timezone.utc)
+        mins = int((t1 - t0).total_seconds() / 60)
+        if mins < 60:
+            return f"{mins}dk", mins
+        h, m = divmod(mins, 60)
+        return f"{h}s{m}dk", mins
+    except Exception:
+        return "", 0
+
+
 # ── Dashboard HTML ───────────────────────────────────────────────────
 
 @app.route("/")
@@ -116,96 +100,70 @@ def index():
 
 # ── Core API Endpoints ───────────────────────────────────────────────
 
-<<<<<<< HEAD
-=======
-
-# ── /api/trades ───────────────────────────────────────────────────────────────
-@app.route("/api/trades")
-def api_trades():
+@app.route("/api/health")
+def api_health():
+    """Sistem sağlık durumu."""
     try:
-        page  = int(request.args.get("page", 1))
-        # Frontend hem "limit" hem "per_page" gönderebilir
-        limit = int(request.args.get("limit", request.args.get("per_page", 10)))
-        all_trades  = get_trades(limit=10000, status="closed")
-        total_count = len(all_trades)
-        total_pages = max(1, (total_count + limit - 1) // limit)
-        page   = max(1, min(page, total_pages))
-        offset = (page - 1) * limit
-        trades = all_trades[offset:offset + limit]
-        result = []
-        for t in trades:
-            dur_str, dur_min = _fmt_duration(t.get("open_time"), t.get("close_time"))
-            result.append({**t, "duration_str": dur_str, "duration_min": dur_min})
-        return jsonify({
-            "ok": True, "data": result,
-            "page": page, "total_pages": total_pages,
-            "total_count": total_count, "limit": limit,
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return _ok(dashboard_service.get_health())
+    except Exception as exc:
+        return _error(str(exc))
 
 
-# ── /api/live ─────────────────────────────────────────────────────────────────
 @app.route("/api/live")
 def api_live():
+    """Açık trade'ler (gerçek zamanlı)."""
     try:
-        open_trades      = get_open_trades()
-        live             = []
-        total_unrealized = 0.0
+        return _ok(dashboard_service.get_live_trades())
+    except Exception as exc:
+        return _error(str(exc))
 
-        for t in open_trades:
-            symbol    = t["symbol"]
-            entry     = t["entry"] or 0
-            sl        = t["sl"] or 0
-            tp        = t.get("tp1") or t.get("tp") or 0
-            qty       = t["qty"] or 0
-            direction = t["direction"]
-            hold_str, hold_min = _fmt_duration(t.get("open_time"))
 
-            try:
-                if client is None:
-                    raise RuntimeError("Binance client kullanılamıyor")
-                ticker = client.futures_symbol_ticker(symbol=symbol)
-                mark   = float(ticker["price"])
-                raw_pnl = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
-                sl_dist     = abs(entry - sl)
-                tp_dist     = abs(tp - entry)
-                current_rr  = round(raw_pnl / (sl_dist * qty + 1e-10), 3) if sl_dist else 0
-                sl_dist_pct = round(abs(mark - sl) / (mark + 1e-10) * 100, 2)
-                progress    = round(min(abs(mark - entry) / (tp_dist + 1e-10) * 100, 100), 1) if tp_dist else 0
-                total_unrealized += raw_pnl
-                live.append({
-                    **t,
-                    "current_price":   round(mark, 6),
-                    "unrealized_pnl":  round(raw_pnl, 4),
-                    "unrealized_pct":  round(raw_pnl / (entry * qty + 1e-10) * 100, 2),
-                    "current_rr":      current_rr,
-                    "sl_distance_pct": sl_dist_pct,
-                    "tp_progress":     progress,
-                    "hold_str":        hold_str,
-                    "hold_min":        hold_min,
-                })
-            except Exception:
-                live.append({
-                    **t,
-                    "current_price": 0, "unrealized_pnl": 0,
-                    "unrealized_pct": 0, "current_rr": 0,
-                    "sl_distance_pct": 0, "tp_progress": 0,
-                    "hold_str": hold_str, "hold_min": hold_min,
-                })
+@app.route("/api/stats")
+def api_stats():
+    """İstatistikler."""
+    try:
+        return _ok(dashboard_service.get_stats())
+    except Exception as exc:
+        return _error(str(exc))
 
-        closed         = get_trades(limit=500, status="closed")
-        total_realized = sum(t["net_pnl"] or 0 for t in closed)
 
-        return jsonify({"ok": True, "data": {
-            "live":             live,
-            "total_unrealized": round(total_unrealized, 4),
-            "total_realized":   round(total_realized, 4),
-            "total_pnl":        round(total_unrealized + total_realized, 4),
-            "open_count":       len(live),
-        }})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+@app.route("/api/trades")
+def api_trades():
+    """Son trade'ler (limit=100)."""
+    try:
+        return _ok(dashboard_service.get_trades())
+    except Exception as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/signals")
+@app.route("/api/scalp_signals")
+def api_signals():
+    """Son sinyal adayları."""
+    try:
+        return _ok(dashboard_service.get_signals())
+    except Exception as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/learning")
+def api_learning():
+    """Ghost learning özeti."""
+    try:
+        from core.ai_decision_engine import get_learning_summary
+        return _ok(get_learning_summary())
+    except Exception as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/partial-closes/<int:trade_id>")
+def api_partial_closes(trade_id: int):
+    """Belirli trade'in partial close'larını döner."""
+    try:
+        closes = database.get_partial_closes(trade_id)
+        return _ok(closes)
+    except Exception as exc:
+        return _error(str(exc))
 
 
 # ── /api/balance ──────────────────────────────────────────────────────────────
@@ -226,7 +184,7 @@ def api_balance():
 @app.route("/api/params")
 def api_params():
     try:
-        p = get_current_params()
+        p = None
         if not p:
             p = {
                 "sl_atr_mult": 1.5, "tp_atr_mult": 2.5,
@@ -274,6 +232,7 @@ def api_ml_status():
 # ── /api/logs ─────────────────────────────────────────────────────────────────
 @app.route("/api/logs")
 def api_logs():
+    import re
     LOG_PATHS = [
         "/root/trade_engine/logs/ax_bot.log",
         "/root/trade_engine/logs/bot.log",
@@ -374,7 +333,7 @@ def api_coin_library_update(symbol):
 def api_daily_pnl():
     try:
         days = int(request.args.get("days", 30))
-        data = dash_svc.get_calendar_data(days)
+        data = dashboard_service.get_calendar_data(days)
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -385,7 +344,7 @@ def api_daily_pnl():
 def api_weekly():
     try:
         weeks = int(request.args.get("weeks", 8))
-        data  = dash_svc.get_weekly_data(weeks)
+        data  = dashboard_service.get_weekly_data(weeks)
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -395,7 +354,7 @@ def api_weekly():
 @app.route("/api/ax_status")
 def api_ax_status():
     try:
-        data = dash_svc.get_ax_status()
+        data = dashboard_service.get_ax_status()
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -496,19 +455,6 @@ def api_learning_metrics():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ── /api/scalp_signals ────────────────────────────────────────────────────────
-@app.route("/api/signals")
-@app.route("/api/scalp_signals")
-def api_scalp_signals():
-    try:
-        from database import get_active_scalp_signals
-        signals = get_active_scalp_signals(limit=100)
-        clean = [s for s in signals if s.get("direction") and s.get("entry_zone", 0) > 0]
-        return jsonify({"ok": True, "data": clean, "total": len(clean)})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
 # ── /api/scalp_signal_stats ───────────────────────────────────────────────────
 @app.route("/api/scalp_signal_stats")
 def api_scalp_signal_stats():
@@ -535,110 +481,6 @@ def api_paper_state():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ── /api/health ───────────────────────────────────────────────────────────────
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
-@app.route("/api/health")
-def api_health():
-    """Sistem sağlık durumu."""
-    try:
-        return _ok(dashboard_service.get_health())
-    except Exception as exc:
-        return _error(str(exc))
-
-
-<<<<<<< HEAD
-@app.route("/api/live")
-def api_live():
-    """Açık trade'ler (gerçek zamanlı)."""
-    try:
-        return _ok(dashboard_service.get_live_trades())
-    except Exception as exc:
-        return _error(str(exc))
-
-
-@app.route("/api/stats")
-def api_stats():
-    """İstatistikler."""
-    try:
-        return _ok(dashboard_service.get_stats())
-    except Exception as exc:
-        return _error(str(exc))
-
-
-@app.route("/api/trades")
-def api_trades():
-    """Son trade'ler (limit=100)."""
-    try:
-        return _ok(dashboard_service.get_trades())
-    except Exception as exc:
-        return _error(str(exc))
-
-
-@app.route("/api/signals")
-def api_signals():
-    """Son sinyal adayları."""
-    try:
-        return _ok(dashboard_service.get_signals())
-    except Exception as exc:
-        return _error(str(exc))
-
-
-@app.route("/api/learning")
-def api_learning():
-    """Ghost learning özeti."""
-    try:
-        from core.ai_decision_engine import get_learning_summary
-        return _ok(get_learning_summary())
-    except Exception as exc:
-        return _error(str(exc))
-
-
-@app.route("/api/partial-closes/<int:trade_id>")
-def api_partial_closes(trade_id: int):
-    """Belirli trade'in partial close'larını döner."""
-    try:
-        closes = database.get_partial_closes(trade_id)
-        return _ok(closes)
-    except Exception as exc:
-        return _error(str(exc))
-
-
-# ── SSE Real-time Stream ─────────────────────────────────────────────
-
-@app.route("/stream")
-def stream():
-    """
-    Server-Sent Events ile gerçek zamanlı veri akışı.
-    Dashboard bu endpoint'e bağlanır, her 5sn'de güncelleme alır.
-    """
-    def event_generator():
-        while True:
-            try:
-                # Tüm dashboard verisini tek seferde çek
-                payload = {
-                    "health": dashboard_service.get_health(),
-                    "stats": dashboard_service.get_stats(),
-                    "live": dashboard_service.get_live_trades(),
-                    "trades": dashboard_service.get_trades(20),
-                    "signals": dashboard_service.get_signals(20),
-                    "ts": datetime.now(timezone.utc).isoformat(),
-                }
-                data = json.dumps(payload)
-                yield f"data: {data}\n\n"
-            except Exception as exc:
-                logger.error("SSE stream hatası: %s", exc)
-                yield f"data: {json.dumps({'error': str(exc)})}\n\n"
-            time.sleep(5)
-
-    return Response(
-        stream_with_context(event_generator()),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-=======
 # ── /api/history ──────────────────────────────────────────────────────────────
 @app.route("/api/history")
 def api_history():
@@ -672,17 +514,15 @@ def api_signal_archive():
     try:
         page  = int(request.args.get("page", 1))
         limit = int(request.args.get("limit", 10))
-        
+
         with get_conn() as conn:
-            # Toplam sayıyı al
             total_count = conn.execute("SELECT COUNT(*) FROM signal_candidates").fetchone()[0]
             total_pages = max(1, (total_count + limit - 1) // limit)
             page = max(1, min(page, total_pages))
             offset = (page - 1) * limit
-            
-            # Verileri çek (paper_results ile join yaparak MFE/MAE bilgilerini de al)
+
             rows = conn.execute("""
-                SELECT 
+                SELECT
                     sc.*,
                     pr.max_favorable_excursion as mfe,
                     pr.max_adverse_excursion as mae,
@@ -692,28 +532,102 @@ def api_signal_archive():
                 ORDER BY sc.id DESC
                 LIMIT ? OFFSET ?
             """, (limit, offset)).fetchall()
-            
+
             signals = [dict(r) for r in rows]
-            
+
         return jsonify({
-            "ok": True, 
+            "ok": True,
             "data": signals,
-            "page": page, 
+            "page": page,
             "total_pages": total_pages,
-            "total_count": total_count, 
+            "total_count": total_count,
             "limit": limit,
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ── ENTRY POINT ───────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    socketio.run(
-        app, host="0.0.0.0", port=5000,
-        debug=False, use_reloader=False,
-        allow_unsafe_werkzeug=True,
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
+# ── /api/paper/stats ──────────────────────────────────────────────────────────
+@app.route("/api/paper/stats")
+def api_paper_stats():
+    try:
+        with get_conn() as conn:
+            ghost = conn.execute("""
+                SELECT tracked_from, COUNT(*) as total,
+                       SUM(CASE WHEN outcome LIKE 'TP%' THEN 1 ELSE 0 END) as wins,
+                       SUM(CASE WHEN outcome='SL' THEN 1 ELSE 0 END) as losses,
+                       ROUND(AVG(outcome_pnl_r),3) as avg_r
+                FROM paper_results WHERE outcome IS NOT NULL
+                GROUP BY tracked_from
+            """).fetchall()
+            bal = conn.execute("SELECT balance FROM paper_account LIMIT 1").fetchone()
+        return jsonify({
+            "ok": True,
+            "balance": float(bal[0]) if bal else 250.0,
+            "ghost_tracking": [dict(zip(
+                ["tracked_from","total","wins","losses","avg_r"], r
+            )) for r in ghost],
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/circuit_breaker ──────────────────────────────────────────────────────
+@app.route("/api/circuit_breaker")
+def api_circuit_breaker():
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM bot_status WHERE key='circuit_breaker_until'"
+            ).fetchone()
+        cb_until = row[0] if row else None
+        active, remaining = False, 0
+        if cb_until:
+            until = datetime.fromisoformat(cb_until)
+            if until.tzinfo is None: until = until.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            if now < until:
+                active = True
+                remaining = int((until - now).total_seconds() / 60)
+        return jsonify({"ok": True, "active": active, "remaining_minutes": remaining})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── SSE Real-time Stream ─────────────────────────────────────────────
+
+@app.route("/stream")
+def stream():
+    """
+    Server-Sent Events ile gerçek zamanlı veri akışı.
+    Dashboard bu endpoint'e bağlanır, her 5sn'de güncelleme alır.
+    """
+    def event_generator():
+        while True:
+            try:
+                payload = {
+                    "health": dashboard_service.get_health(),
+                    "stats": dashboard_service.get_stats(),
+                    "live": dashboard_service.get_live_trades(),
+                    "trades": dashboard_service.get_trades(20),
+                    "signals": dashboard_service.get_signals(20),
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                }
+                data = json.dumps(payload)
+                yield f"data: {data}\n\n"
+            except Exception as exc:
+                logger.error("SSE stream hatası: %s", exc)
+                yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            time.sleep(5)
+
+    return Response(
+        stream_with_context(event_generator()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 

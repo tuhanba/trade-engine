@@ -8,11 +8,22 @@ Telegram API hatası botu durdurmaz.
 from __future__ import annotations
 
 import logging
+import time
+import threading
+from collections import deque
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
 
 import config
+
+try:
+    from config import EXECUTION_MODE
+    from database import save_telegram_message
+except Exception:
+    EXECUTION_MODE = "paper"
+    def save_telegram_message(*a, **kw): return True
 
 logger = logging.getLogger("ax.telegram")
 
@@ -59,22 +70,73 @@ class TelegramDelivery:
             resp = requests.post(url, json=payload, timeout=_TIMEOUT)
             if resp.status_code == 200:
                 return True
-<<<<<<< HEAD
             logger.warning(
                 "Telegram yanıt hatası: %s – %s",
                 resp.status_code,
                 resp.text[:200],
             )
-=======
-            if resp.status_code == 429:
-                wait = resp.json().get("parameters", {}).get("retry_after", 5)
-                time.sleep(wait)
-                continue
-        except Exception as e:
-            logger.debug(f"Telegram gönderim hatası: {e}")
-        if attempt < retries:
-            time.sleep(2 ** attempt)
-    return False
+            return False
+        except requests.RequestException as exc:
+            logger.error("Telegram gönderim hatası: %s", exc)
+            return False
+
+    # ── Trade bildirimleri ───────────────────────────────────────
+
+    def send_trade_open(self, trade: dict[str, Any]) -> bool:
+        """Trade açılış mesajı gönderir."""
+        text = (
+            "📈 <b>Trade Açıldı</b>\n"
+            f"Symbol : {trade.get('symbol', '?')}\n"
+            f"Side   : {trade.get('side', '?')}\n"
+            f"Entry  : {trade.get('entry_price', 0)}\n"
+            f"SL     : {trade.get('stop_loss', 0)}\n"
+            f"TP1    : {trade.get('tp1', 0)}\n"
+            f"TP2    : {trade.get('tp2', 0)}\n"
+            f"TP3    : {trade.get('tp3', 0)}\n"
+            f"Lev    : {trade.get('leverage', 1)}x\n"
+            f"Risk%  : {trade.get('risk_pct', 0)}%\n"
+            f"RiskUSD: ${trade.get('risk_usd', 0)}\n"
+            f"Margin : ${trade.get('margin_used', 0)}\n"
+            f"Notional: ${trade.get('notional', 0)}"
+        )
+        return self.send_message(text)
+
+    def send_trade_close(self, trade: dict[str, Any]) -> bool:
+        """Trade kapanış mesajı gönderir."""
+        pnl = trade.get("realized_pnl", 0)
+        emoji = "✅" if pnl >= 0 else "❌"
+        text = (
+            f"{emoji} <b>Trade Kapandı</b>\n"
+            f"Symbol : {trade.get('symbol', '?')}\n"
+            f"Side   : {trade.get('side', '?')}\n"
+            f"Exit   : {trade.get('exit_price', 0)}\n"
+            f"PnL    : ${pnl}\n"
+            f"Reason : {trade.get('close_reason', '')}"
+        )
+        return self.send_message(text)
+
+    def send_error(self, title: str, error: Any) -> bool:
+        """Hata bildirimi gönderir."""
+        text = f"⚠️ <b>{title}</b>\n{str(error)[:500]}"
+        return self.send_message(text)
+
+
+def _send_raw(text: str, parse_mode: str = "HTML") -> bool:
+    token = config.TELEGRAM_BOT_TOKEN
+    chat_id = config.TELEGRAM_CHAT_ID
+    if not token or not chat_id:
+        return False
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode},
+            timeout=10,
+        )
+        return resp.status_code == 200
+    except Exception as e:
+        logger.debug(f"_send_raw error: {e}")
+        return False
+
 
 class _Queue:
     def __init__(self):
@@ -83,10 +145,12 @@ class _Queue:
         self._event  = threading.Event()
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
+
     def push(self, text, parse_mode="HTML", dedupe_key=None):
         with self._lock:
             self._q.append((text, parse_mode, dedupe_key))
         self._event.set()
+
     def _worker(self):
         while True:
             self._event.wait()
@@ -109,13 +173,16 @@ class _Queue:
                         pass
                 time.sleep(0.5)
 
+
 _queue = _Queue()
+
 
 def _fmt(val, decimals=4):
     try:
         return f"{float(val):.{decimals}f}"
     except Exception:
         return str(val)
+
 
 def format_signal(sig):
     quality   = sig.setup_quality or "B"
@@ -163,6 +230,7 @@ def format_signal(sig):
         msg += "\n<i>⚠️ B kalite — yarım pozisyon önerilir</i>"
     return msg
 
+
 def format_trade_open(trade):
     dir_emoji = "📈" if trade.get("direction") == "LONG" else "📉"
     return (
@@ -175,6 +243,7 @@ def format_trade_open(trade):
         f"⚖️ RR:    <b>{_fmt(trade.get('rr', 0), 2)}R</b>\n"
         f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
     )
+
 
 def format_trade_close(trade, pnl, reason):
     result = "WIN 🟢" if pnl > 0 else "LOSS 🔴"
@@ -195,39 +264,16 @@ def format_trade_close(trade, pnl, reason):
         f"⏰ {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
     )
 
+
 _sent_ids: deque = deque(maxlen=1000)
 _sent_ids_set: set = set()
+
 
 def deliver_signal(sig):
     try:
         if sig.id in _sent_ids_set:
             logger.debug(f"Duplicate sinyal engellendi: {sig.symbol}")
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
             return False
-        except requests.RequestException as exc:
-            logger.error("Telegram gönderim hatası: %s", exc)
-            return False
-<<<<<<< HEAD
-
-    # ── Trade bildirimleri ───────────────────────────────────────
-
-    def send_trade_open(self, trade: dict[str, Any]) -> bool:
-        """Trade açılış mesajı gönderir."""
-        text = (
-            "📈 <b>Trade Açıldı</b>\n"
-            f"Symbol : {trade.get('symbol', '?')}\n"
-            f"Side   : {trade.get('side', '?')}\n"
-            f"Entry  : {trade.get('entry_price', 0)}\n"
-            f"SL     : {trade.get('stop_loss', 0)}\n"
-            f"TP1    : {trade.get('tp1', 0)}\n"
-            f"TP2    : {trade.get('tp2', 0)}\n"
-            f"TP3    : {trade.get('tp3', 0)}\n"
-            f"Lev    : {trade.get('leverage', 1)}x\n"
-            f"Risk%  : {trade.get('risk_pct', 0)}%\n"
-            f"RiskUSD: ${trade.get('risk_usd', 0)}\n"
-            f"Margin : ${trade.get('margin_used', 0)}\n"
-            f"Notional: ${trade.get('notional', 0)}"
-=======
         if sig.setup_quality not in ["S", "A+", "A", "B"]:
             return False
         if not sig.is_valid():
@@ -245,30 +291,13 @@ def deliver_signal(sig):
         logger.info(
             f"Telegram gönderildi: {sig.symbol} {sig.direction} "
             f"{sig.setup_quality} RR={_fmt(sig.rr, 2)}"
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
         )
-        return self.send_message(text)
+        return True
+    except Exception as e:
+        logger.error(f"deliver_signal hatası: {e}")
+        return False
 
-<<<<<<< HEAD
-    def send_trade_close(self, trade: dict[str, Any]) -> bool:
-        """Trade kapanış mesajı gönderir."""
-        pnl = trade.get("realized_pnl", 0)
-        emoji = "✅" if pnl >= 0 else "❌"
-        text = (
-            f"{emoji} <b>Trade Kapandı</b>\n"
-            f"Symbol : {trade.get('symbol', '?')}\n"
-            f"Side   : {trade.get('side', '?')}\n"
-            f"Exit   : {trade.get('exit_price', 0)}\n"
-            f"PnL    : ${pnl}\n"
-            f"Reason : {trade.get('close_reason', '')}"
-        )
-        return self.send_message(text)
 
-    def send_error(self, title: str, error: Any) -> bool:
-        """Hata bildirimi gönderir."""
-        text = f"⚠️ <b>{title}</b>\n{str(error)[:500]}"
-        return self.send_message(text)
-=======
 def send_trade_open(data: dict):
     """
     Trade açılış bildirimi. PAPER/DRY-RUN etiketi zorunludur.
@@ -354,4 +383,3 @@ def send_message(text):
         _queue.push(text)
     except Exception as e:
         logger.error(f"Telegram mesaj hatası: {e}")
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
