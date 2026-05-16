@@ -212,20 +212,30 @@ else
     echo ""
 
     # Açık tradeleri listele
-    "$PYTHON" - << PYEOF 2>/dev/null || true
+    "$PYTHON" - << 'PYEOF' 2>/dev/null || true
 import sqlite3, os
-DB = os.environ.get("DB_PATH", "/root/trade_engine/trading.db")
+
+candidates = ["/root/trade_engine/trade-engine/trading.db", "/root/trade_engine/trading.db"]
+DB = next((p for p in candidates if os.path.exists(p)), candidates[-1])
 conn = sqlite3.connect(DB)
+conn.row_factory = sqlite3.Row
 try:
-    rows = conn.execute("""
-        SELECT id, symbol, direction, entry_price, quantity, leverage, created_at
-        FROM trades WHERE status='open'
-        ORDER BY created_at DESC
-    """).fetchall()
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(trades)").fetchall()]
+    price_col = next((c for c in ["entry_price","open_price","price","avg_price"] if c in cols), None)
+    qty_col   = next((c for c in ["quantity","qty","amount","size"] if c in cols), None)
+    dir_col   = next((c for c in ["direction","side","type","trade_type"] if c in cols), None)
+    lv_col    = next((c for c in ["leverage","lv"] if c in cols), None)
+    ts_col    = next((c for c in ["created_at","opened_at","timestamp"] if c in cols), None)
+    rows = conn.execute("SELECT * FROM trades WHERE status='open' ORDER BY id DESC").fetchall()
     print(f"  {'ID':>4}  {'Sembol':<12} {'Yön':<6} {'Giriş':>10} {'Adet':>8} {'Lv':>4}  {'Açılış'}")
     print(f"  {'─'*4}  {'─'*12} {'─'*6} {'─'*10} {'─'*8} {'─'*4}  {'─'*19}")
     for r in rows:
-        print(f"  {r[0]:>4}  {r[1]:<12} {r[2]:<6} {r[3]:>10.4f} {r[4]:>8.4f} {r[5]:>4}x  {r[6]}")
+        ep  = f"{r[price_col]:>10.4f}" if price_col else "        ?"
+        qty = f"{r[qty_col]:>8.4f}"   if qty_col   else "       ?"
+        sid = r[dir_col][:6]           if dir_col   else "?"
+        lv  = f"{r[lv_col]:>4}x"      if lv_col    else "   ?"
+        ts  = r[ts_col][:19]           if ts_col    else "?"
+        print(f"  {r['id']:>4}  {r['symbol']:<12} {sid:<6} {ep} {qty} {lv}  {ts}")
 except Exception as e:
     print(f"  Tablo okunamadı: {e}")
 conn.close()
@@ -249,51 +259,57 @@ PYEOF
     if [ "$CLOSE_TRADES" = true ] && [ "$DRY_RUN" = false ]; then
         run "Paper trade'ler 'system_update' gerekçesiyle kapatılıyor..."
         "$PYTHON" - << 'PYEOF' 2>&1 | sed 's/^/    /'
-import sys, os, sqlite3
-sys.path.insert(0, "/root/trade_engine/trade-engine")
-os.chdir(sys.path[0])
+import sqlite3, os, sys
+from datetime import datetime
 
-try:
-    import database
-    from core.accounting import calculate_realized_pnl
-except Exception as e:
-    print(f"Import hatası: {e}")
-    sys.exit(1)
-
-FEE_RATE = 0.0004
-DB_PATH = getattr(__import__('config'), 'DB_PATH', '/root/trade_engine/trading.db')
+# DB yolunu bul
+candidates = [
+    "/root/trade_engine/trade-engine/trading.db",
+    "/root/trade_engine/trading.db",
+]
+DB_PATH = next((p for p in candidates if os.path.exists(p)), None)
+if not DB_PATH:
+    print("HATA: trading.db bulunamadı"); sys.exit(1)
 
 conn = sqlite3.connect(DB_PATH)
-try:
-    rows = conn.execute(
-        "SELECT id, symbol, direction, entry_price, quantity FROM trades WHERE status='open'"
-    ).fetchall()
+conn.row_factory = sqlite3.Row
 
-    for trade_id, symbol, direction, entry_price, qty in rows:
-        close_price = entry_price   # fiyat bilgisi yoksa entry'den kapat (sıfır raw PnL)
-        fee = round((qty * entry_price + qty * close_price) * FEE_RATE, 6)
-        pnl = calculate_realized_pnl(
-            side=direction,
-            entry_price=entry_price,
-            exit_price=close_price,
-            quantity=qty,
-            fee_rate=FEE_RATE
-        )
-        database.close_trade(
-            trade_id,
-            net_pnl=round(pnl, 6),
-            total_fee=round(fee, 6),
-            reason="system_update",
-            close_price=close_price
-        )
-        print(f"Kapatıldı → #{trade_id} {symbol} {direction}  PnL={pnl:+.4f}")
+# Gerçek kolon adlarını oku
+cols = [r[1] for r in conn.execute("PRAGMA table_info(trades)").fetchall()]
+print(f"Kolon listesi: {cols}")
 
-    print(f"\nToplam {len(rows)} trade kapatıldı.")
-except Exception as e:
-    print(f"Hata: {e}")
-    sys.exit(1)
-finally:
-    conn.close()
+# Fiyat kolonunu tespit et
+price_col = next((c for c in ["entry_price","open_price","price","avg_price"] if c in cols), None)
+qty_col   = next((c for c in ["quantity","qty","amount","size"] if c in cols), None)
+dir_col   = next((c for c in ["direction","side","type","trade_type"] if c in cols), None)
+
+rows = conn.execute("SELECT * FROM trades WHERE status='open'").fetchall()
+now  = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+closed = 0
+for row in rows:
+    tid    = row["id"]
+    symbol = row["symbol"] if "symbol" in cols else "?"
+    ep     = row[price_col] if price_col else 0.0
+    qty    = row[qty_col]   if qty_col   else 0.0
+    side   = row[dir_col]   if dir_col   else "?"
+    fee    = round(ep * qty * 0.0004 * 2, 6) if ep and qty else 0.0
+
+    # Direkt SQL ile güncelle — hiçbir custom import gerekmez
+    updates = {"status": "closed", "close_reason": "system_update",
+               "net_pnl": -fee, "closed_at": now}
+    if "close_price" in cols: updates["close_price"] = ep
+    if "total_fee"   in cols: updates["total_fee"]   = fee
+
+    set_clause = ", ".join(f"{k}=?" for k in updates)
+    conn.execute(f"UPDATE trades SET {set_clause} WHERE id=?",
+                 list(updates.values()) + [tid])
+    print(f"Kapatıldı → #{tid} {symbol} {side}  fee={fee:.4f}")
+    closed += 1
+
+conn.commit()
+conn.close()
+print(f"\nToplam {closed} trade kapatıldı.")
 PYEOF
         ok "Trade'ler güvenle kapatıldı"
     elif [ "$CLOSE_TRADES" = false ]; then
