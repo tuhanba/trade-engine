@@ -478,11 +478,14 @@ fi
 if [ "$NO_AUDIT" = false ] && [ "$DRY_RUN" = false ]; then
     run "audit_pnl_consistency.py çalıştırılıyor..."
     AUDIT_OUT=$("$PYTHON" scripts/audit_pnl_consistency.py 2>&1 || true)
-    ERROR_COUNT=$(echo "$AUDIT_OUT" | grep -c "ERROR" || echo "0")
-    WARN_COUNT=$(echo "$AUDIT_OUT"  | grep -c "WARNING" || echo "0")
-    echo "$AUDIT_OUT" | grep -E "ERROR|WARNING|PASS|OK" | head -15 | sed 's/^/    /' || true
-    if [ "$ERROR_COUNT" -gt 0 ]; then
-        fail "Audit: $ERROR_COUNT ERROR — DB bütünlük sorunu var!"
+    # Sadece "ERROR :" veya "✗ ERROR" ile başlayan satırları say (özet satırındaki "ERROR: 0" hariç)
+    ERROR_COUNT=$(echo "$AUDIT_OUT" | grep -cE "^(✗|ERR|ERROR\s*:)\s" || echo "0")
+    WARN_COUNT=$(echo "$AUDIT_OUT"  | grep -cE "^(⚠|WARN|WARNING\s*:)\s" || echo "0")
+    echo "$AUDIT_OUT" | tail -20 | sed 's/^/    /'
+    # Özet satırından gerçek hata sayısını da çek
+    REAL_ERRORS=$(echo "$AUDIT_OUT" | grep -oE "ERROR:\s*[0-9]+" | grep -oE "[0-9]+" | tail -1 || echo "0")
+    if [ "${REAL_ERRORS:-0}" -gt 0 ]; then
+        fail "Audit: $REAL_ERRORS ERROR — DB bütünlük sorunu var!"
     else
         ok "Audit: 0 ERROR, $WARN_COUNT WARNING"
     fi
@@ -495,12 +498,26 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 step "8/9 ${SYM_UP}  SERVİSLER BAŞLATILIYOR"
 
-# Systemd unit dosyalarını repo'dan kopyala
+# Log dizini oluştur (service dosyaları buna yazar)
+dry mkdir -p "$ROOT_DIR/logs"
+
+# Systemd unit dosyalarını kopyala ve Python yolunu düzelt
 for SVC in "aurvex-bot" "aurvex-dashboard"; do
     SVC_FILE="$TRADE_DIR/${SVC}.service"
+    DEST="/etc/systemd/system/${SVC}.service"
     if [ -f "$SVC_FILE" ]; then
-        dry cp "$SVC_FILE" "/etc/systemd/system/${SVC}.service"
-        dim "Service dosyası güncellendi: /etc/systemd/system/${SVC}.service"
+        if [ "$DRY_RUN" = false ]; then
+            cp "$SVC_FILE" "$DEST"
+            # ExecStart'taki python yolunu tespit edilen venv ile değiştir
+            sed -i "s|ExecStart=.*/python[0-9.]* |ExecStart=$PYTHON |g" "$DEST"
+            # WorkingDirectory ve EnvironmentFile yollarını garanti et
+            sed -i "s|WorkingDirectory=.*|WorkingDirectory=$TRADE_DIR|g" "$DEST"
+            dim "Service güncellendi: $DEST (Python=$PYTHON)"
+        else
+            dim "[DRY-RUN] cp $SVC_FILE → $DEST  (Python=$PYTHON)"
+        fi
+    else
+        warn "Service dosyası bulunamadı: $SVC_FILE"
     fi
 done
 
