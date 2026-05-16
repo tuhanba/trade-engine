@@ -55,8 +55,24 @@ dry() {
 # ── Sabitler ───────────────────────────────────────────────────────────────────
 TRADE_DIR="/root/trade_engine/trade-engine"
 ROOT_DIR="/root/trade_engine"
-DB_PATH="$ROOT_DIR/trading.db"
-VENV="$TRADE_DIR/.venv"
+
+# DB: trade-engine içinde varsa onu kullan, yoksa üst dizinden
+if [ -f "$TRADE_DIR/trading.db" ]; then
+    DB_PATH="$TRADE_DIR/trading.db"
+else
+    DB_PATH="$ROOT_DIR/trading.db"
+fi
+
+# Venv: birkaç olası yeri dene
+if   [ -f "$TRADE_DIR/.venv/bin/python3" ]; then  VENV="$TRADE_DIR/.venv"
+elif [ -f "$ROOT_DIR/.venv/bin/python3"  ]; then  VENV="$ROOT_DIR/.venv"
+elif [ -f "$ROOT_DIR/venv/bin/python3"   ]; then  VENV="$ROOT_DIR/venv"
+elif [ -f "$TRADE_DIR/venv/bin/python3"  ]; then  VENV="$TRADE_DIR/venv"
+else
+    echo -e "  ${RED}❌ Python venv bulunamadı! Lütfen önce venv kurun.${NC}"
+    exit 1
+fi
+
 PYTHON="$VENV/bin/python3"
 PIP="$VENV/bin/pip"
 BRANCH="main"
