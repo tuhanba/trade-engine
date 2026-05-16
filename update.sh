@@ -250,33 +250,34 @@ PYEOF
         run "Paper trade'ler 'system_update' gerekçesiyle kapatılıyor..."
         "$PYTHON" - << 'PYEOF' 2>&1 | sed 's/^/    /'
 import sys, os, sqlite3
-sys.path.insert(0, os.environ.get("TRADE_DIR", "/root/trade_engine/trade-engine"))
+sys.path.insert(0, "/root/trade_engine/trade-engine")
 os.chdir(sys.path[0])
-DB = os.environ.get("DB_PATH", "/root/trade_engine/trading.db")
 
 try:
     import database
-    from core.accounting import calculate_realized_pnl, DEFAULT_FEE_RATE
+    from core.accounting import calculate_realized_pnl
 except Exception as e:
     print(f"Import hatası: {e}")
     sys.exit(1)
 
-conn = sqlite3.connect(DB)
+FEE_RATE = 0.0004
+DB_PATH = getattr(__import__('config'), 'DB_PATH', '/root/trade_engine/trading.db')
+
+conn = sqlite3.connect(DB_PATH)
 try:
     rows = conn.execute(
         "SELECT id, symbol, direction, entry_price, quantity FROM trades WHERE status='open'"
     ).fetchall()
 
     for trade_id, symbol, direction, entry_price, qty in rows:
-        # Mevcut fiyat yoksa entry fiyatıyla kapat (net 0 PnL, sadece fee)
-        close_price = entry_price
-        fee = round(qty * close_price * DEFAULT_FEE_RATE * 2, 6)
+        close_price = entry_price   # fiyat bilgisi yoksa entry'den kapat (sıfır raw PnL)
+        fee = round((qty * entry_price + qty * close_price) * FEE_RATE, 6)
         pnl = calculate_realized_pnl(
-            direction=direction,
+            side=direction,
             entry_price=entry_price,
             exit_price=close_price,
             quantity=qty,
-            total_fee=fee
+            fee_rate=FEE_RATE
         )
         database.close_trade(
             trade_id,
