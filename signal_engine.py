@@ -24,7 +24,7 @@ from config import (
     SL_ATR_MULT, TP1_R, TP2_R, TP3_R, TRAIL_ATR_MULT,
     MIN_RR, MIN_EXPECTED_MFE_R,
 )
-from coin_library import get_coin_params
+from core.coin_library import get_coin_params
 
 logger = logging.getLogger(__name__)
 

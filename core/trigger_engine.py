@@ -92,37 +92,18 @@ class TriggerEngine:
             return 0.0
 
     def analyze(self, symbol: str, direction: str, btc_trend: str = "NEUTRAL") -> dict:
-<<<<<<< HEAD
         if direction == "NO TRADE":
             return {"quality": "D", "score": 0, "entry": 0}
-=======
-        """Trigger analizi yapar ve setup kalitesi döner."""
-        if not direction:
-            return {"quality": "D", "score": 0, "entry": 0, "adx": 0.0}
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
         current_hour = datetime.now(timezone.utc).hour
         if current_hour in BAD_HOURS_UTC:
-<<<<<<< HEAD
             return {"quality": "D", "score": 0, "entry": 0}
-=======
-            logger.debug(f"[{symbol}] Kötü saat filtresi: {current_hour}:00 UTC — trade yok")
-            return {"quality": "D", "score": 0, "entry": 0, "adx": 0.0}
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
         if SHORT_REQUIRES_BTC_BEARISH:
             if direction == "SHORT" and btc_trend == "BULLISH":
-<<<<<<< HEAD
                 return {"quality": "D", "score": 0, "entry": 0}
             if direction == "LONG" and btc_trend == "BEARISH":
                 return {"quality": "D", "score": 0, "entry": 0}
-=======
-                logger.debug(f"[{symbol}] SHORT engellendi: BTC 4H BULLISH")
-                return {"quality": "D", "score": 0, "entry": 0, "adx": 0.0}
-            if direction == "LONG" and btc_trend == "BEARISH":
-                logger.debug(f"[{symbol}] LONG engellendi: BTC 4H BEARISH")
-                return {"quality": "D", "score": 0, "entry": 0, "adx": 0.0}
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
         df5 = self.get_candles(symbol, "5m", 150)
         if df5.empty or len(df5) < 50:
@@ -134,7 +115,6 @@ class TriggerEngine:
         e50_5 = self._ema(df5["close"], 50)
         rsi5 = self._rsi(df5["close"], 14)
 
-<<<<<<< HEAD
         try:
             high = df5["high"]
             low  = df5["low"]
@@ -151,48 +131,16 @@ class TriggerEngine:
         except Exception:
             adx_val = 20
             atr_val = c5 * 0.02 # Fallback ATR %2
-=======
-        # ── ADX Trend Gücü Filtresi ────────────────────────────────────────────
-        # Backtest: ADX < 25 olan sinyallerde WR düşük — trend gücü zayıf
-        high = df5["high"]
-        low  = df5["low"]
-        close = df5["close"]
-        tr = pd.concat([
-            high - low,
-            (high - close.shift()).abs(),
-            (low  - close.shift()).abs()
-        ], axis=1).max(axis=1)
-        atr14 = tr.rolling(14).mean()
-        plus_dm  = (high.diff()).where((high.diff() > 0) & (high.diff() > -low.diff()), 0)
-        minus_dm = (-low.diff()).where((-low.diff() > 0) & (-low.diff() > high.diff()), 0)
-        plus_di  = 100 * (plus_dm.rolling(14).mean()  / (atr14 + 1e-10))
-        minus_di = 100 * (minus_dm.rolling(14).mean() / (atr14 + 1e-10))
-        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10)
-        adx_series = dx.rolling(14).mean().dropna()
-        if adx_series.empty:
-            adx_val = 0.0
-        else:
-            adx_val = float(adx_series.iloc[-1])
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
         # ADX Filtresini esnettik (AI karar verecek)
         if adx_val < 15:
             return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
 
-<<<<<<< HEAD
         # AI beynine daha fazla veri sağlamak için RSI şartlarını esnettik (Sıkı filtreyi AI yapacak)
-        bull5 = direction == "LONG" and e9_5.iloc[-1] > e21_5.iloc[-1] and 30 < rsi5 < 80
-        bear5 = direction == "SHORT" and e9_5.iloc[-1] < e21_5.iloc[-1] and 20 < rsi5 < 70
-=======
-        try:
-            rsi5_val = float(rsi5.iloc[-1]) if hasattr(rsi5, 'iloc') else float(rsi5)
-        except:
-            rsi5_val = 50.0
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
+        rsi5_val = float(rsi5)
+        bull5 = direction == "LONG" and e9_5.iloc[-1] > e21_5.iloc[-1] and 30 < rsi5_val < 80
+        bear5 = direction == "SHORT" and e9_5.iloc[-1] < e21_5.iloc[-1] and 20 < rsi5_val < 70
 
-        bull5 = direction == "LONG" and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5_val < 75
-        bear5 = direction == "SHORT" and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5_val < 65
-            
         if not bull5 and not bear5:
             return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1), "rsi5": round(float(rsi5_val), 1)}
 
@@ -207,27 +155,12 @@ class TriggerEngine:
         mom3c = self._momentum_3c(df1)
         vwap_val = self._vwap(df1)
 
-<<<<<<< HEAD
         if bull5 and not (25 < rsi1 < 85): return {"quality": "D", "score": 0, "entry": 0}
         if bear5 and not (15 < rsi1 < 75): return {"quality": "D", "score": 0, "entry": 0}
-=======
-        # RSI 1m giriş onayı
-        if bull5 and not (32 < rsi1 < 75):
-            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1), "rsi5": round(rsi5.iloc[-1], 1), "rsi1": round(rsi1, 1)}
-        if bear5 and not (25 < rsi1 < 68):
-            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1), "rsi5": round(rsi5.iloc[-1], 1), "rsi1": round(rsi1, 1)}
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
         funding = self.get_funding_rate(symbol)
-<<<<<<< HEAD
         if direction == "LONG" and funding > 0.001: return {"quality": "D", "score": 0, "entry": 0}
         if direction == "SHORT" and funding < -0.001: return {"quality": "D", "score": 0, "entry": 0}
-=======
-        if direction == "LONG" and funding > 0.001:
-            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
-        if direction == "SHORT" and funding < -0.001:
-            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
         score = 5.0
         quality = "C"
@@ -254,17 +187,12 @@ class TriggerEngine:
         if abs(rsi5 - 55) <= 15: s_score += 2
         if rv >= 2.0: s_score += 2
         if abs(mom3c) >= 1.8: s_score += 2
-        
+
         if s_score >= 6: quality = "S"
         elif quality == "A" and score >= 7.5: quality = "A+"
 
         if quality not in ALLOWED_QUALITIES:
-<<<<<<< HEAD
             return {"quality": "D", "score": 0, "entry": 0}
-=======
-            logger.debug(f"[{symbol}] Kalite filtresi: {quality} izin verilenler={ALLOWED_QUALITIES}")
-            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
         return {
             "quality": quality,

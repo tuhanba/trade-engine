@@ -1,5 +1,4 @@
 """
-<<<<<<< HEAD
 database.py — AX SQLite Data Layer v5.0 (Production)
 =====================================================
 Tablolar: trades, signal_candidates, balance_ledger, bot_status.
@@ -14,22 +13,6 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
-=======
-database.py — AX Merkezi Veritabanı v5.1 (PAPER-ONLY / LIVE-BLOCKED)
-======================================================
-DEĞİŞİKLİKLER v5.1:
-- close_trade() artık close_price parametresi alır ve yazar.
-- get_closed_trades() eklendi.
-- get_trade_events() eklendi.
-- save_scalp_signal() decision parametresini dışarıdan alır (ghost learning fix).
-- _TRADE_COLUMNS cache migration sonrasında sıfırlanabilir.
-"""
-import sqlite3
-import json
-import logging
-from datetime import datetime, timezone
-from config import DB_PATH
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
 import config
 from core.data_layer import SignalData, TradeData
@@ -37,7 +20,6 @@ from core.data_layer import SignalData, TradeData
 logger = logging.getLogger("ax.database")
 
 
-<<<<<<< HEAD
 # ── Bağlantı ────────────────────────────────────────────────────────
 
 def get_connection() -> sqlite3.Connection:
@@ -48,6 +30,15 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA cache_size=-8000")  # 8MB cache
+    return conn
+
+
+def get_conn() -> sqlite3.Connection:
+    """get_connection alias — v5.1 compat (check_same_thread=False)."""
+    conn = sqlite3.connect(config.DB_PATH, timeout=30, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
@@ -545,431 +536,6 @@ def get_trade_by_id(trade_id: int) -> Optional[dict]:
         return None
     finally:
         conn.close()
-=======
-def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
-
-
-def init_db():
-    with get_conn() as conn:
-        conn.executescript("""
-        CREATE TABLE IF NOT EXISTS trades (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol TEXT NOT NULL,
-            direction TEXT NOT NULL,
-            status TEXT DEFAULT 'open',
-            entry REAL, sl REAL, tp1 REAL, tp2 REAL, tp3 REAL,
-            original_qty REAL, remaining_qty REAL,
-            qty_tp1 REAL, qty_tp2 REAL, qty_runner REAL,
-            leverage INTEGER DEFAULT 10,
-            notional_size REAL DEFAULT 0,
-            margin_used REAL DEFAULT 0,
-            risk_pct REAL DEFAULT 1.0,
-            risk_usd REAL DEFAULT 0,
-            max_loss_after_fee REAL DEFAULT 0,
-            current_price REAL DEFAULT 0,
-            close_price REAL DEFAULT 0,
-            mark_price REAL DEFAULT 0,
-            last_update TEXT,
-            source TEXT DEFAULT 'bot',
-            realized_pnl REAL DEFAULT 0,
-            unrealized_pnl REAL DEFAULT 0,
-            net_pnl REAL DEFAULT 0,
-            total_fee REAL DEFAULT 0,
-            open_fee REAL DEFAULT 0,
-            close_fee REAL DEFAULT 0,
-            fee_rate REAL DEFAULT 0.0004,
-            tp1_hit INTEGER DEFAULT 0,
-            tp2_hit INTEGER DEFAULT 0,
-            open_time TEXT,
-            close_time TEXT,
-            duration_seconds INTEGER DEFAULT 0,
-            close_reason TEXT,
-            r_multiple REAL DEFAULT 0,
-            mfe REAL DEFAULT 0,
-            mae REAL DEFAULT 0,
-            setup_quality TEXT,
-            final_score REAL,
-            market_regime TEXT,
-            is_valid_for_stats INTEGER DEFAULT 1,
-            archived_reason TEXT,
-            entry_zone REAL DEFAULT 0,
-            invalidation_level REAL DEFAULT 0,
-            stop_reason TEXT,
-            target_reason TEXT,
-            trigger_score REAL DEFAULT 0,
-            current_R REAL DEFAULT 0,
-            distance_to_sl REAL DEFAULT 0,
-            distance_to_tp1 REAL DEFAULT 0,
-            distance_to_tp2 REAL DEFAULT 0,
-            distance_to_tp3 REAL DEFAULT 0,
-            qty REAL,
-            hold_minutes REAL,
-            open_time_str TEXT,
-            ax_mode TEXT,
-            environment TEXT,
-            session TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS partial_closes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_id INTEGER NOT NULL,
-            symbol TEXT,
-            close_type TEXT,
-            close_qty REAL,
-            close_price REAL,
-            net_pnl REAL,
-            fee REAL,
-            timestamp TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (trade_id) REFERENCES trades(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS balance_ledger (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_id INTEGER,
-            symbol TEXT,
-            event_type TEXT,
-            amount REAL,
-            balance_before REAL,
-            balance_after REAL,
-            timestamp TEXT DEFAULT (datetime('now')),
-            note TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS paper_account (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            balance REAL DEFAULT 250.0,
-            initial_balance REAL DEFAULT 250.0
-        );
-        INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, 250.0, 250.0);
-
-        CREATE TABLE IF NOT EXISTS signal_candidates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            uuid TEXT,
-            symbol TEXT,
-            direction TEXT,
-            entry REAL, sl REAL, tp1 REAL, tp2 REAL, tp3 REAL,
-            setup_quality TEXT,
-            final_score REAL,
-            decision TEXT,
-            reason TEXT,
-            market_regime TEXT,
-            risk_status TEXT,
-            margin_loss_pct REAL DEFAULT 0,
-            spread REAL DEFAULT 0,
-            volume REAL DEFAULT 0,
-            volatility REAL DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS paper_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            signal_id TEXT,
-            candidate_id TEXT,
-            symbol TEXT,
-            direction TEXT,
-            preview_entry REAL,
-            preview_sl REAL,
-            preview_tp1 REAL,
-            preview_tp2 REAL,
-            preview_tp3 REAL,
-            tracked_from TEXT,
-            horizon_minutes REAL DEFAULT 480,
-            hit_tp INTEGER DEFAULT 0,
-            hit_stop_first INTEGER DEFAULT 0,
-            time_to_move_minutes REAL DEFAULT 0,
-            max_favorable_excursion REAL DEFAULT 0,
-            max_adverse_excursion REAL DEFAULT 0,
-            setup_worked INTEGER DEFAULT 0,
-            would_have_won INTEGER DEFAULT 0,
-            first_touch TEXT,
-            skip_decision_correct INTEGER,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT DEFAULT (datetime('now')),
-            finalized_at TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS signal_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            signal_id TEXT,
-            stage TEXT,
-            symbol TEXT,
-            reject_reason TEXT,
-            data TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS ai_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event TEXT,
-            symbol TEXT,
-            decision TEXT,
-            score REAL,
-            confidence REAL,
-            reason TEXT,
-            data TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS coin_profiles (
-            symbol TEXT PRIMARY KEY,
-            win_rate REAL DEFAULT 0,
-            avg_r REAL DEFAULT 0,
-            profit_factor REAL DEFAULT 0,
-            tp1_hit_rate REAL DEFAULT 0,
-            tp2_hit_rate REAL DEFAULT 0,
-            runner_contribution REAL DEFAULT 0,
-            avg_duration REAL DEFAULT 0,
-            fakeout_rate REAL DEFAULT 0,
-            fee_drag REAL DEFAULT 0,
-            best_hour INTEGER,
-            best_session TEXT,
-            long_bias REAL DEFAULT 0.5,
-            short_bias REAL DEFAULT 0.5,
-            regime_performance TEXT,
-            danger_score REAL DEFAULT 0,
-            sample_size INTEGER DEFAULT 0,
-            last_updated TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS coin_library (
-            symbol TEXT PRIMARY KEY,
-            min_qty REAL,
-            step_size REAL,
-            tick_size REAL,
-            min_notional REAL DEFAULT 5.0,
-            status TEXT DEFAULT 'TRADING',
-            last_updated TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS trade_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_id INTEGER,
-            event_type TEXT,
-            data TEXT,
-            timestamp TEXT DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS daily_summary (
-            date TEXT PRIMARY KEY,
-            trade_count INTEGER DEFAULT 0,
-            win_count INTEGER DEFAULT 0,
-            loss_count INTEGER DEFAULT 0,
-            win_rate REAL DEFAULT 0,
-            gross_pnl REAL DEFAULT 0,
-            net_pnl REAL DEFAULT 0,
-            avg_r REAL DEFAULT 0,
-            max_drawdown REAL DEFAULT 0,
-            balance_eod REAL DEFAULT 0,
-            sent INTEGER DEFAULT 0,
-            best_coin TEXT,
-            worst_coin TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS weekly_summary (
-            week_start TEXT PRIMARY KEY,
-            trade_count INTEGER DEFAULT 0,
-            win_count INTEGER DEFAULT 0,
-            loss_count INTEGER DEFAULT 0,
-            win_rate REAL DEFAULT 0,
-            net_pnl REAL DEFAULT 0,
-            avg_r REAL DEFAULT 0,
-            best_day TEXT,
-            worst_day TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS system_state (
-            key TEXT PRIMARY KEY,
-            value TEXT,
-            updated_at TEXT DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS coin_cooldown (
-            symbol TEXT PRIMARY KEY,
-            until TEXT,
-            reason TEXT,
-            consec_losses INTEGER DEFAULT 0
-        );
-        """)
-    _migrate()
-    logger.info("[DB] init_db tamamlandı.")
-
-
-def _migrate():
-    migrations = [
-        ("trades", "qty",                "REAL"),
-        ("trades", "hold_minutes",       "REAL"),
-        ("trades", "open_time_str",      "TEXT"),
-        ("trades", "ax_mode",            "TEXT"),
-        ("trades", "environment",        "TEXT"),
-        ("trades", "session",            "TEXT"),
-        ("trades", "close_price",        "REAL DEFAULT 0"),
-        ("trades", "mark_price",         "REAL DEFAULT 0"),
-        ("trades", "last_update",        "TEXT"),
-        ("trades", "source",             "TEXT DEFAULT 'bot'"),
-        ("trades", "current_price",      "REAL DEFAULT 0"),
-        ("trades", "unrealized_pnl",     "REAL DEFAULT 0"),
-        ("trades", "open_fee",           "REAL DEFAULT 0"),
-        ("trades", "close_fee",          "REAL DEFAULT 0"),
-        ("trades", "fee_rate",           "REAL DEFAULT 0.0004"),
-        ("trades", "notional_size",      "REAL DEFAULT 0"),
-        ("trades", "margin_used",        "REAL DEFAULT 0"),
-        ("trades", "risk_pct",           "REAL DEFAULT 1.0"),
-        ("trades", "risk_usd",           "REAL DEFAULT 0"),
-        ("trades", "max_loss_after_fee", "REAL DEFAULT 0"),
-        ("trades", "duration_seconds",   "INTEGER DEFAULT 0"),
-        ("trades", "market_regime",      "TEXT"),
-        ("trades", "is_valid_for_stats", "INTEGER DEFAULT 1"),
-        ("trades", "archived_reason",    "TEXT"),
-        ("trades", "tp3",                "REAL"),
-        ("trades", "remaining_qty",      "REAL"),
-        ("trades", "original_qty",       "REAL"),
-        ("trades", "qty_tp1",            "REAL DEFAULT 0"),
-        ("trades", "qty_tp2",            "REAL DEFAULT 0"),
-        ("trades", "qty_runner",         "REAL DEFAULT 0"),
-        ("trades", "mfe",                "REAL DEFAULT 0"),
-        ("trades", "mae",                "REAL DEFAULT 0"),
-        ("trades", "entry_zone",         "REAL DEFAULT 0"),
-        ("trades", "invalidation_level", "REAL DEFAULT 0"),
-        ("trades", "stop_reason",        "TEXT"),
-        ("trades", "target_reason",      "TEXT"),
-        ("trades", "trigger_score",      "REAL DEFAULT 0"),
-        ("trades", "current_R",          "REAL DEFAULT 0"),
-        ("trades", "distance_to_sl",     "REAL DEFAULT 0"),
-        ("trades", "distance_to_tp1",    "REAL DEFAULT 0"),
-        ("trades", "distance_to_tp2",    "REAL DEFAULT 0"),
-        ("trades", "distance_to_tp3",    "REAL DEFAULT 0"),
-        ("daily_summary", "sent",        "INTEGER DEFAULT 0"),
-        ("daily_summary", "best_coin",   "TEXT"),
-        ("daily_summary", "worst_coin",  "TEXT"),
-        ("coin_cooldown", "consec_losses", "INTEGER DEFAULT 0"),
-        ("coin_profiles", "short_bias",  "REAL DEFAULT 0.5"),
-        ("coin_profiles", "tp1_hit_rate","REAL DEFAULT 0"),
-        ("coin_profiles", "tp2_hit_rate","REAL DEFAULT 0"),
-        ("coin_profiles", "runner_contribution", "REAL DEFAULT 0"),
-        ("coin_profiles", "avg_duration","REAL DEFAULT 0"),
-        ("coin_profiles", "fakeout_rate","REAL DEFAULT 0"),
-        ("coin_profiles", "fee_drag",    "REAL DEFAULT 0"),
-        ("coin_profiles", "best_hour",   "INTEGER"),
-        ("coin_profiles", "best_session","TEXT"),
-        ("coin_profiles", "long_bias",   "REAL DEFAULT 0.5"),
-        ("coin_profiles", "regime_performance", "TEXT"),
-        ("coin_profiles", "danger_score","REAL DEFAULT 0"),
-        ("coin_profiles", "sample_size", "INTEGER DEFAULT 0"),
-        ("trades", "total_fee",    "REAL DEFAULT 0"),
-        ("trades", "setup_quality","TEXT"),
-        ("trades", "final_score",  "REAL"),
-        ("trades", "leverage",     "INTEGER DEFAULT 10"),
-        ("trades", "realized_pnl", "REAL DEFAULT 0"),
-        ("trades", "tp1_hit",      "INTEGER DEFAULT 0"),
-        ("trades", "tp2_hit",      "INTEGER DEFAULT 0"),
-        ("trades", "r_multiple",   "REAL DEFAULT 0"),
-        ("trades", "close_reason", "TEXT"),
-        ("trades", "close_time",   "TEXT"),
-        ("trades", "open_time",    "TEXT"),
-        ("signal_candidates", "risk_status",     "TEXT"),
-        ("signal_candidates", "margin_loss_pct", "REAL DEFAULT 0"),
-        ("signal_candidates", "spread",          "REAL DEFAULT 0"),
-        ("signal_candidates", "volume",          "REAL DEFAULT 0"),
-        ("signal_candidates", "volatility",      "REAL DEFAULT 0"),
-    ]
-    with get_conn() as conn:
-        for table, col, col_type in migrations:
-            try:
-                existing = {
-                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
-                }
-                if col not in existing:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
-            except Exception:
-                pass
-
-
-_TRADE_COLUMNS = None
-
-
-def _get_trade_columns(conn):
-    global _TRADE_COLUMNS
-    if _TRADE_COLUMNS is None:
-        cursor = conn.execute("PRAGMA table_info(trades)")
-        _TRADE_COLUMNS = {row[1] for row in cursor.fetchall()}
-    return _TRADE_COLUMNS
-
-
-def save_trade(trade: dict) -> int:
-    with get_conn() as conn:
-        cols = _get_trade_columns(conn)
-        filtered = {k: v for k, v in trade.items() if k in cols and k != "id"}
-        if not filtered:
-            raise ValueError("save_trade: No valid columns to insert")
-        col_names = ", ".join(filtered.keys())
-        placeholders = ", ".join(["?"] * len(filtered))
-        cursor = conn.execute(
-            f"INSERT INTO trades ({col_names}) VALUES ({placeholders})",
-            list(filtered.values())
-        )
-        trade_id = cursor.lastrowid
-        logger.info(f"[DB] Trade #{trade_id} kaydedildi: {trade.get('symbol')}")
-        return trade_id
-
-
-def update_trade(trade_id: int, updates: dict):
-    with get_conn() as conn:
-        cols = _get_trade_columns(conn)
-        filtered = {k: v for k, v in updates.items() if k in cols and k != "id"}
-        if not filtered:
-            return
-        set_clause = ", ".join([f"{k} = ?" for k in filtered.keys()])
-        conn.execute(
-            f"UPDATE trades SET {set_clause} WHERE id = ?",
-            list(filtered.values()) + [trade_id]
-        )
-
-
-def close_trade(trade_id: int, net_pnl: float, total_fee: float,
-                reason: str, r_multiple: float = 0,
-                close_price: float = 0):
-    now = datetime.now(timezone.utc).isoformat()
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT open_time FROM trades WHERE id = ?", (trade_id,)
-        ).fetchone()
-        duration_seconds = 0
-        if row and row["open_time"]:
-            try:
-                opened = datetime.fromisoformat(
-                    str(row["open_time"]).replace("Z", "+00:00")
-                )
-                if opened.tzinfo is None:
-                    opened = opened.replace(tzinfo=timezone.utc)
-                duration_seconds = int(
-                    (datetime.now(timezone.utc) - opened).total_seconds()
-                )
-            except Exception:
-                pass
-        conn.execute("""
-            UPDATE trades SET
-                status           = 'closed',
-                net_pnl          = ?,
-                total_fee        = ?,
-                remaining_qty    = 0,
-                close_price      = ?,
-                close_time       = ?,
-                close_reason     = ?,
-                r_multiple       = ?,
-                duration_seconds = ?,
-                last_update      = ?
-            WHERE id = ?
-        """, (
-            net_pnl, total_fee, close_price, now,
-            reason, r_multiple, duration_seconds, now, trade_id
-        ))
-
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
 
 
 def get_partial_closes(trade_id: int) -> list[dict]:
@@ -977,7 +543,6 @@ def get_partial_closes(trade_id: int) -> list[dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
-<<<<<<< HEAD
             "SELECT * FROM partial_closes WHERE trade_id = ? ORDER BY id",
             (trade_id,),
         ).fetchall()
@@ -1005,38 +570,9 @@ def get_dashboard_stats() -> dict:
 
         rpnl_row = conn.execute(
             "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE status='CLOSED'"
-=======
-            "SELECT * FROM trades WHERE status NOT IN ('closed') AND status IS NOT NULL"
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-
-def get_closed_trades(limit: int = 200, valid_only: bool = True) -> list:
-    with get_conn() as conn:
-        if valid_only:
-            rows = conn.execute(
-                """SELECT * FROM trades
-                   WHERE status = 'closed' AND is_valid_for_stats = 1
-                   ORDER BY id DESC LIMIT ?""",
-                (limit,)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM trades WHERE status = 'closed' ORDER BY id DESC LIMIT ?",
-                (limit,)
-            ).fetchall()
-        return [dict(r) for r in rows]
-
-
-def get_trade_by_id(trade_id: int) -> dict:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM trades WHERE id = ?", (trade_id,)
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
         ).fetchone()
         realized_pnl = float(rpnl_row[0]) if rpnl_row else 0.0
 
-<<<<<<< HEAD
         upnl_row = conn.execute(
             "SELECT COALESCE(SUM(unrealized_pnl), 0) FROM trades WHERE status='OPEN'"
         ).fetchone()
@@ -1195,7 +731,157 @@ def get_latest_balance(default: float = 250.0) -> float:
         return default
     finally:
         conn.close()
-=======
+
+
+# ── v5.1 Ek fonksiyonlar ─────────────────────────────────────────────
+
+def _migrate():
+    migrations = [
+        ("trades", "qty",                "REAL"),
+        ("trades", "hold_minutes",       "REAL"),
+        ("trades", "open_time_str",      "TEXT"),
+        ("trades", "ax_mode",            "TEXT"),
+        ("trades", "environment",        "TEXT"),
+        ("trades", "session",            "TEXT"),
+        ("trades", "close_price",        "REAL DEFAULT 0"),
+        ("trades", "mark_price",         "REAL DEFAULT 0"),
+        ("trades", "last_update",        "TEXT"),
+        ("trades", "source",             "TEXT DEFAULT 'bot'"),
+        ("trades", "current_price",      "REAL DEFAULT 0"),
+        ("trades", "unrealized_pnl",     "REAL DEFAULT 0"),
+        ("trades", "open_fee",           "REAL DEFAULT 0"),
+        ("trades", "close_fee",          "REAL DEFAULT 0"),
+        ("trades", "fee_rate",           "REAL DEFAULT 0.0004"),
+        ("trades", "notional_size",      "REAL DEFAULT 0"),
+        ("trades", "margin_used",        "REAL DEFAULT 0"),
+        ("trades", "risk_pct",           "REAL DEFAULT 1.0"),
+        ("trades", "risk_usd",           "REAL DEFAULT 0"),
+        ("trades", "max_loss_after_fee", "REAL DEFAULT 0"),
+        ("trades", "duration_seconds",   "INTEGER DEFAULT 0"),
+        ("trades", "market_regime",      "TEXT"),
+        ("trades", "is_valid_for_stats", "INTEGER DEFAULT 1"),
+        ("trades", "archived_reason",    "TEXT"),
+        ("trades", "tp3",                "REAL"),
+        ("trades", "remaining_qty",      "REAL"),
+        ("trades", "original_qty",       "REAL"),
+        ("trades", "qty_tp1",            "REAL DEFAULT 0"),
+        ("trades", "qty_tp2",            "REAL DEFAULT 0"),
+        ("trades", "qty_runner",         "REAL DEFAULT 0"),
+        ("trades", "mfe",                "REAL DEFAULT 0"),
+        ("trades", "mae",                "REAL DEFAULT 0"),
+        ("trades", "entry_zone",         "REAL DEFAULT 0"),
+        ("trades", "invalidation_level", "REAL DEFAULT 0"),
+        ("trades", "stop_reason",        "TEXT"),
+        ("trades", "target_reason",      "TEXT"),
+        ("trades", "trigger_score",      "REAL DEFAULT 0"),
+        ("trades", "current_R",          "REAL DEFAULT 0"),
+        ("trades", "distance_to_sl",     "REAL DEFAULT 0"),
+        ("trades", "distance_to_tp1",    "REAL DEFAULT 0"),
+        ("trades", "distance_to_tp2",    "REAL DEFAULT 0"),
+        ("trades", "distance_to_tp3",    "REAL DEFAULT 0"),
+        ("daily_summary", "sent",        "INTEGER DEFAULT 0"),
+        ("daily_summary", "best_coin",   "TEXT"),
+        ("daily_summary", "worst_coin",  "TEXT"),
+        ("coin_cooldown", "consec_losses", "INTEGER DEFAULT 0"),
+        ("coin_profiles", "short_bias",  "REAL DEFAULT 0.5"),
+        ("coin_profiles", "tp1_hit_rate","REAL DEFAULT 0"),
+        ("coin_profiles", "tp2_hit_rate","REAL DEFAULT 0"),
+        ("coin_profiles", "runner_contribution", "REAL DEFAULT 0"),
+        ("coin_profiles", "avg_duration","REAL DEFAULT 0"),
+        ("coin_profiles", "fakeout_rate","REAL DEFAULT 0"),
+        ("coin_profiles", "fee_drag",    "REAL DEFAULT 0"),
+        ("coin_profiles", "best_hour",   "INTEGER"),
+        ("coin_profiles", "best_session","TEXT"),
+        ("coin_profiles", "long_bias",   "REAL DEFAULT 0.5"),
+        ("coin_profiles", "regime_performance", "TEXT"),
+        ("coin_profiles", "danger_score","REAL DEFAULT 0"),
+        ("coin_profiles", "sample_size", "INTEGER DEFAULT 0"),
+        ("trades", "total_fee",    "REAL DEFAULT 0"),
+        ("trades", "setup_quality","TEXT"),
+        ("trades", "final_score",  "REAL"),
+        ("trades", "leverage",     "INTEGER DEFAULT 10"),
+        ("trades", "realized_pnl", "REAL DEFAULT 0"),
+        ("trades", "tp1_hit",      "INTEGER DEFAULT 0"),
+        ("trades", "tp2_hit",      "INTEGER DEFAULT 0"),
+        ("trades", "r_multiple",   "REAL DEFAULT 0"),
+        ("trades", "close_reason", "TEXT"),
+        ("trades", "close_time",   "TEXT"),
+        ("trades", "open_time",    "TEXT"),
+        ("signal_candidates", "risk_status",     "TEXT"),
+        ("signal_candidates", "margin_loss_pct", "REAL DEFAULT 0"),
+        ("signal_candidates", "spread",          "REAL DEFAULT 0"),
+        ("signal_candidates", "volume",          "REAL DEFAULT 0"),
+        ("signal_candidates", "volatility",      "REAL DEFAULT 0"),
+    ]
+    with get_conn() as conn:
+        for table, col, col_type in migrations:
+            try:
+                existing = {
+                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+                }
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
+
+
+_TRADE_COLUMNS = None
+
+
+def _get_trade_columns(conn):
+    global _TRADE_COLUMNS
+    if _TRADE_COLUMNS is None:
+        cursor = conn.execute("PRAGMA table_info(trades)")
+        _TRADE_COLUMNS = {row[1] for row in cursor.fetchall()}
+    return _TRADE_COLUMNS
+
+
+def save_trade(trade: dict) -> int:
+    with get_conn() as conn:
+        cols = _get_trade_columns(conn)
+        filtered = {k: v for k, v in trade.items() if k in cols and k != "id"}
+        if not filtered:
+            raise ValueError("save_trade: No valid columns to insert")
+        col_names = ", ".join(filtered.keys())
+        placeholders = ", ".join(["?"] * len(filtered))
+        cursor = conn.execute(
+            f"INSERT INTO trades ({col_names}) VALUES ({placeholders})",
+            list(filtered.values())
+        )
+        trade_id = cursor.lastrowid
+        logger.info(f"[DB] Trade #{trade_id} kaydedildi: {trade.get('symbol')}")
+        return trade_id
+
+
+def update_trade(trade_id: int, updates: dict):
+    with get_conn() as conn:
+        cols = _get_trade_columns(conn)
+        filtered = {k: v for k, v in updates.items() if k in cols and k != "id"}
+        if not filtered:
+            return
+        set_clause = ", ".join([f"{k} = ?" for k in filtered.keys()])
+        conn.execute(
+            f"UPDATE trades SET {set_clause} WHERE id = ?",
+            list(filtered.values()) + [trade_id]
+        )
+
+
+def get_closed_trades(limit: int = 200, valid_only: bool = True) -> list:
+    with get_conn() as conn:
+        if valid_only:
+            rows = conn.execute(
+                """SELECT * FROM trades
+                   WHERE status = 'closed' AND is_valid_for_stats = 1
+                   ORDER BY id DESC LIMIT ?""",
+                (limit,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE status = 'closed' ORDER BY id DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
 
 def get_stats() -> dict:
     with get_conn() as conn:
@@ -1270,15 +956,6 @@ def save_partial_close(trade_id, symbol, close_type, close_qty,
         """, (trade_id, symbol, close_type, close_qty, close_price, net_pnl, fee))
 
 
-def get_partial_closes(trade_id) -> list:
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM partial_closes WHERE trade_id = ? ORDER BY id",
-            (trade_id,)
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-
 def archive_invalid_trade(trade_id, reason="manual_archive"):
     with get_conn() as conn:
         conn.execute("""
@@ -1287,34 +964,12 @@ def archive_invalid_trade(trade_id, reason="manual_archive"):
         """, (reason, trade_id))
 
 
-def save_signal_candidate(data: dict):
-    with get_conn() as conn:
-        conn.execute("""
-            INSERT INTO signal_candidates
-                (uuid, symbol, direction, entry, sl, tp1, tp2, tp3,
-                 setup_quality, final_score, decision, reason, market_regime,
-                 risk_status, margin_loss_pct, spread, volume, volatility)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data.get("uuid"), data.get("symbol"), data.get("direction"),
-            data.get("entry"), data.get("sl"), data.get("tp1"),
-            data.get("tp2"), data.get("tp3"),
-            data.get("setup_quality"), data.get("final_score"),
-            data.get("decision"), data.get("reason"), data.get("market_regime"),
-            data.get("risk_status"),
-            data.get("margin_loss_pct", 0),
-            data.get("spread", 0),
-            data.get("volume", 0),
-            data.get("volatility", 0),
-        ))
-
-
 def save_scalp_signal(data: dict, decision: str = "ALLOW"):
     """
     decision parametresi dışarıdan alınır.
     Hardcoded 'ALLOW' kaldırıldı — ghost learning veri bütünlüğü için kritik.
     """
-    save_signal_candidate({
+    save_signal_candidate_dict({
         "uuid":            data.get("id"),
         "symbol":          data.get("symbol"),
         "direction":       data.get("direction"),
@@ -1334,6 +989,29 @@ def save_scalp_signal(data: dict, decision: str = "ALLOW"):
         "volume":          data.get("volume", 0),
         "volatility":      data.get("volatility", 0),
     })
+
+
+def save_signal_candidate_dict(data: dict):
+    """Dict tabanlı sinyal adayını signal_candidates tablosuna kaydeder."""
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO signal_candidates
+                (uuid, symbol, direction, entry, sl, tp1, tp2, tp3,
+                 setup_quality, final_score, decision, reason, market_regime,
+                 risk_status, margin_loss_pct, spread, volume, volatility)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data.get("uuid"), data.get("symbol"), data.get("direction"),
+            data.get("entry"), data.get("sl"), data.get("tp1"),
+            data.get("tp2"), data.get("tp3"),
+            data.get("setup_quality"), data.get("final_score"),
+            data.get("decision"), data.get("reason"), data.get("market_regime"),
+            data.get("risk_status"),
+            data.get("margin_loss_pct", 0),
+            data.get("spread", 0),
+            data.get("volume", 0),
+            data.get("volatility", 0),
+        ))
 
 
 def get_active_scalp_signals(limit: int = 100) -> list:
@@ -1751,7 +1429,6 @@ def is_coin_in_cooldown(symbol: str) -> bool:
 def init_paper_account():
     """Paper account yoksa başlangıç bakiyesiyle oluşturur."""
     try:
-        from config import DB_PATH as _db
         with get_conn() as conn:
             existing = conn.execute(
                 "SELECT id FROM paper_account WHERE id=1"
@@ -1832,7 +1509,7 @@ def update_candidate_status(candidate_id: int, **kwargs):
             "lifecycle_stage": None,   # kolon yok, atla
             "execution_status": None,  # kolon yok, atla
         }
-        valid_cols = {r[1] for r in __import__('sqlite3').connect(DB_PATH).execute(
+        valid_cols = {r[1] for r in __import__('sqlite3').connect(config.DB_PATH).execute(
             "PRAGMA table_info(signal_candidates)"
         ).fetchall()}
         updates = {}
@@ -1873,4 +1550,3 @@ def get_daily_signal_count() -> dict:
     except Exception as e:
         logger.warning(f"get_daily_signal_count: {e}")
         return {"total": 0}
->>>>>>> 0797c70b8640d2006e47a50d5580ffae4606199b
