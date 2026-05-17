@@ -110,12 +110,19 @@ def build_eligible_scan_subset(candidates: list) -> list:
 def correlation_blocks(open_trades: list, direction: str) -> bool:
     if not direction or direction == "NO TRADE":
         return False
-    n = sum(1 for t in open_trades if t.get("direction") == direction)
+    # DB has 'side', not 'direction'
+    n = sum(1 for t in open_trades
+            if (t.get("direction") or t.get("side", "")) == direction)
     return n >= MAX_CORRELATED_TRADES
 
 
 def exposure_blocks(open_trades: list, extra_notional: float, balance: float) -> bool:
-    expo = sum((t.get("qty") or 0) * (t.get("entry") or 0) for t in open_trades)
+    # DB has 'quantity'/'notional', not 'qty'/'entry'
+    expo = sum(
+        float(t.get("notional") or
+              (t.get("quantity") or t.get("qty") or 0) * (t.get("entry_price") or t.get("entry") or 0))
+        for t in open_trades
+    )
     cap = balance * MAX_PORTFOLIO_EXPOSURE_PCT / 100.0
     return expo + max(0.0, extra_notional or 0) > cap + 1e-8
 
@@ -217,10 +224,10 @@ def main():
                 today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 with get_conn() as _conn:
                     _row = _conn.execute(
-                        "SELECT SUM(net_pnl) FROM trades WHERE DATE(close_time)=? AND close_time IS NOT NULL",
+                        "SELECT COALESCE(SUM(realized_pnl),0) FROM trades WHERE DATE(closed_at)=? AND status='CLOSED'",
                         (today_str,)
                     ).fetchone()
-                today_loss = _row[0] or 0.0
+                today_loss = float(_row[0] or 0.0)
                 balance = get_paper_balance()
                 max_loss_abs = balance * (DAILY_MAX_LOSS_PCT / 100.0)
                 if today_loss < -max_loss_abs:

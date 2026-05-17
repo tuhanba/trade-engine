@@ -20,11 +20,11 @@ try:
     )
 except ImportError:
     ALLOWED_QUALITIES        = ["S", "A+", "A", "B"]
-    BAD_HOURS_UTC            = [1,4,5,6,10,11,12,13,14,16,19,20,21,22]
-    GOOD_HOURS_UTC           = [0,3,7,9,17,23]
+    BAD_HOURS_UTC            = [4, 5, 6, 11, 12, 13]
+    GOOD_HOURS_UTC           = [0, 1, 2, 3, 7, 8, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
     SHORT_REQUIRES_BTC_BEARISH = True
     BTC_TREND_INTERVAL       = "4h"
-    ADX_MIN_THRESHOLD        = 28
+    ADX_MIN_THRESHOLD        = 20
 
 class TriggerEngine:
     def __init__(self, client):
