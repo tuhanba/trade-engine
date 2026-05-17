@@ -407,14 +407,16 @@ def _check_trade(client, t: dict) -> bool:
 
     trade_id  = t["id"]
     symbol    = t["symbol"]
-    direction = t["direction"]
-    status    = t["status"]
-    entry     = t["entry"]
-    sl        = t["sl"]
-    tp1       = t["tp1"]
-    tp2       = t["tp2"]
-    trail     = t.get("trail_stop")
-    qty       = t["qty"]
+    # BUG FIX: DB sutun ismi normalizasyonu
+    direction = t.get("direction") or t.get("side", "LONG")
+    # BUG FIX: status 'OPEN'→'open' normalize (TP1/TP2 icin kritik)
+    status    = (t.get("status") or "OPEN").lower()
+    entry     = float(t.get("entry") or t.get("entry_price") or 0)
+    sl        = float(t.get("sl") or t.get("stop_loss") or 0)
+    tp1       = float(t.get("tp1") or 0)
+    tp2       = float(t.get("tp2") or 0)
+    trail     = t.get("trail_stop") or t.get("trailing_sl")
+    qty       = float(t.get("qty") or t.get("quantity") or 1)
     qty_tp1   = t.get("qty_tp1") or qty * TP1_CLOSE_PCT / 100
     qty_tp2   = t.get("qty_tp2") or qty * TP2_CLOSE_PCT / 100
     qty_runner= t.get("qty_runner") or qty - qty_tp1 - qty_tp2
@@ -458,7 +460,8 @@ def _check_trade(client, t: dict) -> bool:
                 "status":       "tp1_hit",
                 "tp1_hit":      1,
                 "realized_pnl": pnl_tp1,
-                "sl":           round(new_sl, 6),   # Breakeven SL
+                "stop_loss":    round(new_sl, 6),  # BUG FIX: DB kolonu
+                "sl":           round(new_sl, 6),  # compat
             })
             update_paper_balance(pnl_tp1)
             save_trade_event(trade_id, "TP1_HIT", f"price={tp1} pnl={pnl_tp1:.4f} new_sl={new_sl:.6f}")
@@ -482,7 +485,8 @@ def _check_trade(client, t: dict) -> bool:
                 "tp2_hit":      1,
                 "realized_pnl": realized,
                 "trail_stop":   new_trail,
-                "sl":           entry,
+                "stop_loss":    entry,  # BUG FIX: DB kolonu
+                "sl":           entry,  # compat
             })
             update_paper_balance(pnl_tp2)
             save_trade_event(trade_id, "TP2_HIT", f"price={tp2} pnl={pnl_tp2:.4f} trail={new_trail:.6f}")
@@ -548,10 +552,16 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     except Exception:
         hold_min = 0
 
-    db_close_trade(trade_id, net_pnl=net_pnl, total_fee=0,
-                   reason=reason, close_price=close_price)
+    # BUG FIX: database.close_trade(id, exit_price, realized_pnl, close_reason)
+    db_close_trade(
+        trade_id,
+        exit_price=close_price,
+        realized_pnl=net_pnl,
+        close_reason=reason,
+    )
     update_paper_balance(net_pnl - (t.get("realized_pnl") or 0))
-    if event_manager: event_manager.broadcast_trade_closed(t["symbol"], t["direction"], net_pnl, reason)
+    _dir = t.get("direction") or t.get("side", "LONG")
+    if event_manager: event_manager.broadcast_trade_closed(t["symbol"], _dir, net_pnl, reason)
     if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), 0, net_pnl)
     save_trade_event(trade_id, "CLOSE", f"reason={reason} close_price={close_price} net_pnl={net_pnl:.4f}")
 

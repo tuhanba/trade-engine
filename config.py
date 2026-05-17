@@ -32,7 +32,7 @@ DB_PATH  = str(BASE_DIR / _env("DB_PATH", "trading.db"))
 
 # Execution
 EXECUTION_MODE          = _env("EXECUTION_MODE", "paper")
-AX_MODE                 = _env("AX_MODE", "signal")
+AX_MODE                 = _env("AX_MODE", "execute")
 PAPER_MODE              = _env_bool("PAPER_MODE", True)
 LIVE_TRADING_ENABLED    = _env_bool("LIVE_TRADING_ENABLED", False)
 DRY_RUN                 = _env_bool("DRY_RUN", True)
