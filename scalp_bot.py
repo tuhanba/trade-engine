@@ -664,6 +664,11 @@ def main():
                     logger.error(f"Coin işleme hatası {symbol}: {e}", exc_info=True)
                     continue
 
+            try:
+                set_state("heartbeat", datetime.now(timezone.utc).isoformat())
+                set_state("status", "running")
+            except Exception:
+                pass
             time.sleep(SCAN_INTERVAL)
             # ── AI Brain Periyodik Adaptasyon (30 dakikada bir) ─────────────
             _now_ts = time.time()
@@ -682,6 +687,11 @@ def main():
             break
         except Exception as e:
             logger.error(f"Ana döngü hatası: {e}", exc_info=True)
+            try:
+                set_state("status", "error")
+                set_state("last_error", str(e)[:500])
+            except Exception:
+                pass
             time.sleep(10)
 
 # ─────────────────────────────────────────────────────────────────────────────
