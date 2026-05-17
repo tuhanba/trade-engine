@@ -8,9 +8,10 @@ Tüm modüller SignalData / TradeData üzerinden konuşur.
 from __future__ import annotations
 
 import enum
+import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 
 # ── Yardımcı fonksiyonlar ──────────────────────────────────────────
@@ -184,6 +185,107 @@ def normalize_signal(raw: dict) -> SignalData:
         ),
         metadata=raw.get("metadata"),
     )
+
+
+class _SignalRecord:
+    """
+    Sinyal pipeline boyunca taşınan mutable kayıt.
+    DataLayer.create_signal() tarafından oluşturulur.
+    """
+    def __init__(self, symbol: str):
+        self.id: str = str(uuid.uuid4())
+        self.symbol: str = symbol
+        self.direction: str = ""
+        self.coin_score: float = 0.0
+        self.trend_score: float = 0.0
+        self.trigger_score: float = 0.0
+        self.risk_score: float = 0.0
+        self.setup_quality: str = ""
+        self.ml_score: float = 50.0
+        self.entry_zone: float = 0.0
+        self.stop_loss: float = 0.0
+        self.tp1: Optional[float] = None
+        self.tp2: Optional[float] = None
+        self.tp3: Optional[float] = None
+        self.rr: float = 0.0
+        self.risk_percent: float = 0.0
+        self.position_size: float = 0.0
+        self.notional_size: float = 0.0
+        self.leverage_suggestion: int = 10
+        self.max_loss: float = 0.0
+        self.status: str = "pending"
+        self.dashboard_status: str = ""
+        self.final_score: float = 0.0
+        self.confidence: float = 0.0
+        self.reason: str = ""
+        self.candidate_id: Optional[int] = None
+        self.reject_reason: str = ""
+        self.telegram_status: str = ""
+        self.ai_veto_reason: str = ""
+        self.created_at: str = datetime.now(timezone.utc).isoformat()
+
+    def is_valid(self) -> bool:
+        return bool(
+            self.symbol
+            and self.direction
+            and self.entry_zone > 0
+            and self.stop_loss > 0
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "symbol": self.symbol,
+            "direction": self.direction,
+            "entry_zone": self.entry_zone,
+            "stop_loss": self.stop_loss,
+            "tp1": self.tp1,
+            "tp2": self.tp2,
+            "tp3": self.tp3,
+            "rr": self.rr,
+            "setup_quality": self.setup_quality,
+            "final_score": self.final_score,
+            "confidence": self.confidence,
+            "reason": self.reason,
+            "risk_percent": self.risk_percent,
+            "position_size": self.position_size,
+            "notional_size": self.notional_size,
+            "leverage_suggestion": self.leverage_suggestion,
+            "max_loss": self.max_loss,
+            "coin_score": self.coin_score,
+            "trend_score": self.trend_score,
+            "trigger_score": self.trigger_score,
+            "risk_score": self.risk_score,
+            "ml_score": self.ml_score,
+            "status": self.status,
+            "telegram_status": self.telegram_status,
+            "reject_reason": self.reject_reason,
+            "created_at": self.created_at,
+        }
+
+
+class DataLayer:
+    """
+    Pipeline boyunca sinyal nesnelerini bellekte tutar.
+    Thread-safe değil — tek thread (ana bot döngüsü) kullanır.
+    """
+
+    def __init__(self):
+        self._signals: Dict[str, _SignalRecord] = {}
+
+    def create_signal(self, symbol: str) -> _SignalRecord:
+        record = _SignalRecord(symbol)
+        self._signals[record.id] = record
+        if len(self._signals) > 500:
+            oldest = next(iter(self._signals))
+            del self._signals[oldest]
+        return record
+
+    def get_signal(self, signal_id: str) -> Optional[_SignalRecord]:
+        return self._signals.get(signal_id)
+
+
+data_layer = DataLayer()
 
 
 def calculate_duration(open_time_str) -> tuple:
