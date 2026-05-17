@@ -239,3 +239,138 @@ def should_open_trade(
     )
 
     return can_open, decision, reason
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RiskEngine CLASS — scalp_bot line 49: from core.risk_engine import RiskEngine
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RiskEngine:
+    """ATR bazlı SL/TP hesaplayan ve risk filtreleyen class."""
+
+    def __init__(self, client, db_path: str = "trading.db"):
+        self.client = client
+        self.db_path = db_path
+
+    def calculate(self, symbol: str, direction: str, entry: float, quality: str, balance: float) -> dict:
+        try:
+            from core.accounting import calculate_position_size, calculate_rr as _calc_rr
+            import database
+
+            quality_mult = {"S": 2.0, "A+": 1.5, "A": 1.0, "B": 0.5}.get(quality, 0)
+            if quality_mult == 0:
+                return {"valid": False, "score": 0, "risk_reject_reason": f"quality_{quality}_blocked"}
+
+            open_trades = database.get_open_trades()
+            if len(open_trades) >= int(getattr(config, "MAX_OPEN_TRADES", 5)):
+                return {"valid": False, "score": 0, "risk_reject_reason": "max_open_trades"}
+
+            if symbol in {t.get("symbol") for t in open_trades}:
+                return {"valid": False, "score": 0, "risk_reject_reason": "duplicate_symbol"}
+
+            if not check_daily_loss_limit(balance):
+                return {"valid": False, "score": 0, "risk_reject_reason": "daily_loss_limit"}
+
+            if not check_coin_cooldown(symbol):
+                return {"valid": False, "score": 0, "risk_reject_reason": "coin_cooldown"}
+
+            sl_atr_mult = float(getattr(config, "SL_ATR_MULT", 1.2))
+            tp1_r = float(getattr(config, "TP1_R", 1.0))
+            tp2_r = float(getattr(config, "TP2_R", 2.0))
+            tp3_r = float(getattr(config, "TP3_R", 3.0))
+            max_lev = int(getattr(config, "MAX_LEVERAGE", 20))
+            min_rr = float(getattr(config, "MIN_RR", 1.5))
+            fee_rate = float(getattr(config, "DEFAULT_FEE_RATE", 0.0004))
+            risk_pct_base = float(getattr(config, "RISK_PCT", 1.0))
+
+            atr_val = self._get_atr(symbol) or entry * 0.015
+            is_long = direction == "LONG"
+            sl_dist = atr_val * sl_atr_mult
+            sl = (entry - sl_dist) if is_long else (entry + sl_dist)
+            tp1 = (entry + sl_dist * tp1_r) if is_long else (entry - sl_dist * tp1_r)
+            tp2 = (entry + sl_dist * tp2_r) if is_long else (entry - sl_dist * tp2_r)
+            tp3 = (entry + sl_dist * tp3_r) if is_long else (entry - sl_dist * tp3_r)
+            rr = _calc_rr(entry, sl, tp2)
+
+            if rr < min_rr:
+                return {"valid": False, "score": 0, "rr": rr, "risk_reject_reason": f"low_rr_{rr:.2f}"}
+
+            atr_pct = atr_val / (entry + 1e-10)
+            leverage = min(max_lev, max(1, int(0.02 / (atr_pct + 1e-10))))
+            risk_pct = risk_pct_base * quality_mult
+
+            pos = calculate_position_size(
+                balance=balance, risk_pct=risk_pct, entry_price=entry,
+                stop_loss=sl, leverage=leverage, fee_rate=fee_rate,
+            )
+            if pos.get("qty", 0) <= 0:
+                return {"valid": False, "score": 0, "risk_reject_reason": "position_size_invalid"}
+
+            return {
+                "valid": True, "sl": round(sl, 6), "tp1": round(tp1, 6),
+                "tp2": round(tp2, 6), "tp3": round(tp3, 6), "rr": round(rr, 3),
+                "risk_pct": round(risk_pct, 3), "position_size": round(pos.get("qty", 0), 6),
+                "notional": round(pos.get("notional", 0), 4), "leverage": leverage,
+                "max_loss": round(pos.get("risk_usd", 0), 4),
+                "risk_usd": round(pos.get("risk_usd", 0), 4),
+                "score": round(min(10.0, 5.0 + rr * 1.5), 2), "atr": round(atr_val, 6),
+            }
+        except Exception as e:
+            logger.error("RiskEngine.calculate: %s", e, exc_info=True)
+            return {"valid": False, "score": 0, "risk_reject_reason": f"exception_{type(e).__name__}"}
+
+    def preview_for_paper(self, symbol: str, direction: str, entry: float, balance: float) -> dict:
+        try:
+            from core.accounting import calculate_position_size, calculate_rr as _calc_rr
+            sl_atr_mult = float(getattr(config, "SL_ATR_MULT", 1.2))
+            tp1_r = float(getattr(config, "TP1_R", 1.0))
+            tp2_r = float(getattr(config, "TP2_R", 2.0))
+            tp3_r = float(getattr(config, "TP3_R", 3.0))
+            max_lev = int(getattr(config, "MAX_LEVERAGE", 20))
+            risk_pct = float(getattr(config, "RISK_PCT", 1.0))
+            fee_rate = float(getattr(config, "DEFAULT_FEE_RATE", 0.0004))
+            atr_val = self._get_atr(symbol) or entry * 0.015
+            is_long = direction == "LONG"
+            sl_dist = atr_val * sl_atr_mult
+            sl = (entry - sl_dist) if is_long else (entry + sl_dist)
+            tp1 = (entry + sl_dist * tp1_r) if is_long else (entry - sl_dist * tp1_r)
+            tp2 = (entry + sl_dist * tp2_r) if is_long else (entry - sl_dist * tp2_r)
+            tp3 = (entry + sl_dist * tp3_r) if is_long else (entry - sl_dist * tp3_r)
+            rr = _calc_rr(entry, sl, tp2)
+            atr_pct = atr_val / (entry + 1e-10)
+            leverage = min(max_lev, max(1, int(0.02 / (atr_pct + 1e-10))))
+            pos = calculate_position_size(
+                balance=balance, risk_pct=risk_pct, entry_price=entry,
+                stop_loss=sl, leverage=leverage, fee_rate=fee_rate,
+            )
+            return {
+                "valid": True, "sl": round(sl, 6), "tp1": round(tp1, 6),
+                "tp2": round(tp2, 6), "tp3": round(tp3, 6), "rr": round(rr, 3),
+                "risk_pct": risk_pct, "position_size": round(pos.get("qty", 0), 6),
+                "notional": round(pos.get("notional", 0), 4), "leverage": leverage,
+                "max_loss": round(pos.get("risk_usd", 0), 4),
+                "risk_usd": round(pos.get("risk_usd", 0), 4),
+            }
+        except Exception as e:
+            logger.error("preview_for_paper: %s", e)
+            return {"valid": False}
+
+    def _get_atr(self, symbol: str, interval: str = "5m", period: int = 14) -> float:
+        try:
+            import pandas as pd
+            klines = self.client.futures_klines(symbol=symbol, interval=interval, limit=period + 5)
+            df = pd.DataFrame(klines, columns=[
+                "time", "open", "high", "low", "close", "volume",
+                "ct", "qav", "nt", "tbbav", "tbqav", "ignore"
+            ])
+            for col in ("high", "low", "close"):
+                df[col] = df[col].astype(float)
+            tr = pd.concat([
+                df["high"] - df["low"],
+                (df["high"] - df["close"].shift()).abs(),
+                (df["low"] - df["close"].shift()).abs(),
+            ], axis=1).max(axis=1)
+            v = float(tr.rolling(period).mean().iloc[-1])
+            return v if v > 0 else 0.0
+        except Exception:
+            return 0.0
