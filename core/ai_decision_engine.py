@@ -276,6 +276,42 @@ class AIDecisionEngine:
         except Exception as e:
             logger.error(f"AI öğrenme hatası: {e}")
 
+    def evaluate(self, sig) -> dict:
+        """
+        scalp_bot.py line 436: decision = ai_engine.evaluate(sig)
+        classify_signal() fonksiyonunu çağırır, scalp_bot'un beklediği
+        formatta dict döner.
+        """
+        try:
+            if hasattr(sig, 'entry_zone') and (sig.entry_zone or 0) > 0:
+                sig.entry_price = sig.entry_zone
+            if not hasattr(sig, 'score') or not sig.score:
+                sig.score = (
+                    float(getattr(sig, 'trigger_score', 0) or 0) * 0.4 +
+                    float(getattr(sig, 'trend_score', 0) or 0) * 0.3 +
+                    float(getattr(sig, 'risk_score', 0) or 0) * 0.3
+                )
+            result = classify_signal(sig)
+            return {
+                "decision":    result.decision,
+                "final_score": float(result.score_adjusted or sig.score or 50.0),
+                "confidence":  float(result.confidence or 0.5),
+                "reason":      result.reason or "",
+                "ai_score":    float(result.score_adjusted or sig.score or 50.0),
+            }
+        except Exception as e:
+            logger.warning("evaluate() fallback: %s", e)
+            score = float(getattr(sig, 'score', 0) or 0)
+            if score <= 0:
+                score = 50.0
+            return {
+                "decision":    "ALLOW" if score >= 30 else "VETO",
+                "final_score": score,
+                "confidence":  0.5,
+                "reason":      f"fallback_evaluate: {e}",
+                "ai_score":    score,
+            }
+
     def learn_from_outcome(self, symbol: str, net_pnl: float, reason: str):
         """
         Trade sonucundan öğren. Coin profilini tam olarak güncelle.

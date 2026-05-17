@@ -518,6 +518,12 @@ def close_trade(
             (exit_price, realized_pnl, close_reason, now, trade_id),
         )
         conn.commit()
+        # Bakiyeyi otomatik güncelle
+        try:
+            conn.execute("UPDATE paper_account SET balance = balance + ? WHERE id=1", (realized_pnl,))
+            conn.commit()
+        except Exception as _be:
+            logger.warning("close_trade balance update: %s", _be)
     except Exception as exc:
         logger.error("Trade kapatılamadı [%s]: %s", trade_id, exc)
     finally:
@@ -646,11 +652,12 @@ def get_dashboard_stats() -> dict:
         ).fetchone()
         today_pnl = float(today_row[0]) if today_row else 0.0
 
-        # Bakiye: ledger + realized PnL
-        initial_balance = get_latest_balance(
-            getattr(config, "INITIAL_PAPER_BALANCE", 250.0)
-        )
-        balance = initial_balance + realized_pnl
+        # Bakiye: paper_account tek kaynak of truth
+        try:
+            _bal_row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+            balance = float(_bal_row[0]) if _bal_row else getattr(config, 'INITIAL_PAPER_BALANCE', 250.0)
+        except Exception:
+            balance = getattr(config, 'INITIAL_PAPER_BALANCE', 250.0)
 
         # Ghost tracking özeti
         ghost_tp = conn.execute(
@@ -1480,8 +1487,10 @@ def init_paper_account():
                 "SELECT id FROM paper_account WHERE id=1"
             ).fetchone()
             if not existing:
+                init_bal = getattr(config, 'INITIAL_PAPER_BALANCE', 250.0)
                 conn.execute(
-                    "INSERT INTO paper_account (id, balance, initial_balance) VALUES (1, 250.0, 250.0)"
+                    "INSERT INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
+                    (init_bal, init_bal)
                 )
             logger.info("[DB] paper_account hazır.")
     except Exception as e:
