@@ -26,7 +26,11 @@ class MarketScanner:
     def __init__(self, client, db_path="trade_engine.db"):
         self.client = client
         self.db_path = db_path
-        self.min_volume = 10_000_000  # 10M USD (Production-grade)
+        try:
+            from config import MIN_VOLUME_USDT
+            self.min_volume = MIN_VOLUME_USDT
+        except Exception:
+            self.min_volume = 5_000_000
         self.min_price = 0.0001
         self.coin_lib = CoinLibrary(client, db_path) if CoinLibrary else None
         self.coin_universe = set()

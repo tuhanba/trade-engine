@@ -1,13 +1,14 @@
 [Unit]
-Description=AURVEX.Ai Scalp Bot (AX Trading Engine)
-After=network.target
+Description=AurvexAI Scalp Bot
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/root/trade_engine/trade-engine
 EnvironmentFile=-/root/trade_engine/trade-engine/.env
-ExecStart=/usr/local/bin/python3 /root/trade_engine/trade-engine/scalp_bot.py
+ExecStart=/root/trade_engine/trade-engine/.venv/bin/python /root/trade_engine/trade-engine/scalp_bot.py
 Restart=always
 RestartSec=15
 StandardOutput=append:/root/trade_engine/logs/bot.log
