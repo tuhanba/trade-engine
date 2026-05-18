@@ -25,6 +25,18 @@ from collections import defaultdict
 
 from core.data_layer import SignalData, SignalDecision
 
+try:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    from database import open_db as _open_db
+except Exception:
+    def _open_db(db_path=None, timeout=15):  # type: ignore[misc]
+        conn = sqlite3.connect(db_path or "trading.db", timeout=timeout)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
+
 logger = logging.getLogger("ax.ai_decision")
 
 
@@ -92,8 +104,7 @@ class AIDecisionEngine:
 
     def _load_best_params(self):
         try:
-            with __import__('sqlite3').connect(self.db_path) as conn:
-                conn.row_factory = __import__('sqlite3').Row
+            with _open_db(self.db_path) as conn:
                 best = conn.execute("SELECT * FROM best_params ORDER BY profit_factor DESC LIMIT 1").fetchone()
                 if best:
                     self.params = json.loads(best["params_json"])
@@ -111,7 +122,7 @@ class AIDecisionEngine:
     def _get_coin_profile(self, symbol: str) -> dict:
         """Coin'in geçmiş performans profilini getirir."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with _open_db(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 row = conn.execute("SELECT * FROM coin_profiles WHERE symbol=?", (symbol,)).fetchone()
                 if row:
@@ -123,7 +134,7 @@ class AIDecisionEngine:
     def _get_hourly_heatmap_score(self) -> float:
         """Mevcut saatin geçmiş performansına göre risk skoru döner."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with _open_db(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 trades = conn.execute(
                     "SELECT created_at, trade_result FROM ai_learning WHERE trade_result IN ('WIN','LOSS')"
@@ -155,7 +166,7 @@ class AIDecisionEngine:
     def _optimize_params(self):
         """Geçmiş işlemlere göre parametreleri optimize eder."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with _open_db(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 trades = conn.execute("SELECT * FROM ai_learning ORDER BY id DESC LIMIT 50").fetchall()
 
@@ -212,7 +223,7 @@ class AIDecisionEngine:
         """Girilmeyen fırsatların çıktısı — gerçek trade Markov zincirine karışmasın."""
         try:
             tr = "PAPER_WIN" if would_have_won else "PAPER_LOSS"
-            with sqlite3.connect(self.db_path) as conn:
+            with _open_db(self.db_path) as conn:
                 conn.execute(
                     """INSERT INTO ai_learning (symbol, trade_result, pnl, setup_quality)
                        VALUES (?, ?, 0.0, ?)""",
@@ -243,7 +254,7 @@ class AIDecisionEngine:
     def learn_from_trade(self, symbol: str, result: str, pnl: float, setup_quality: str):
         """Kapanan işlemlerden öğrenir, coin profillerini günceller ve parametreleri optimize eder."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with _open_db(self.db_path) as conn:
                 conn.execute("""
                     INSERT INTO ai_learning (symbol, trade_result, pnl, setup_quality)
                     VALUES (?, ?, ?, ?)
@@ -318,7 +329,7 @@ class AIDecisionEngine:
         execution_engine._finalize() tarafından çağrılır.
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with _open_db(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute("""
                     SELECT net_pnl, tp1_hit, tp2_hit, r_multiple, duration_seconds
@@ -384,8 +395,7 @@ class GhostMemoryManager:
             cutoff = (
                 datetime.now(timezone.utc) - timedelta(days=days)
             ).isoformat()
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            conn.row_factory = sqlite3.Row
+            conn = _open_db(self.db_path, timeout=15)
             try:
                 rows = conn.execute(
                     """
@@ -430,8 +440,7 @@ class GhostMemoryManager:
             cutoff = (
                 datetime.now(timezone.utc) - timedelta(days=days)
             ).isoformat()
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            conn.row_factory = sqlite3.Row
+            conn = _open_db(self.db_path, timeout=15)
             try:
                 rows = conn.execute(
                     """
@@ -470,7 +479,7 @@ class GhostMemoryManager:
     def get_score_multiplier(self, symbol: str, side: str) -> float:
         """
         Ghost performance'a göre skor çarpanı hesaplar.
-        İyi performans → boost, kötü performans → reduce.
+        Dinamik ghost ağırlığı ile etki büyüklüğü ölçeklenir.
         Range: 0.5 – 1.5
         """
         stats = self.get_symbol_ghost_stats(symbol)
@@ -479,14 +488,25 @@ class GhostMemoryManager:
 
         wr = stats["ghost_winrate"]
         if wr >= 70:
-            return 1.3
+            raw_mult = 1.3
         elif wr >= 55:
-            return 1.1
+            raw_mult = 1.1
         elif wr <= 30:
-            return 0.7
+            raw_mult = 0.7
         elif wr <= 45:
-            return 0.85
-        return 1.0
+            raw_mult = 0.85
+        else:
+            return 1.0
+
+        # Dinamik ağırlık: ghost ne kadar güvenilirse etki o kadar büyük.
+        # weight=0.15 → etki %15, weight=0.45 → etki tam
+        try:
+            from core.ghost_learning import calculate_dynamic_ghost_weight
+            weight = calculate_dynamic_ghost_weight()
+        except Exception:
+            weight = 0.30
+        # Çarpanı 1.0 etrafında ağırlıklı olarak ölçekle
+        return round(1.0 + (raw_mult - 1.0) * (weight / 0.45), 4)
 
 
 # ── Adaptif Scoring ──────────────────────────────────────────────────
@@ -673,8 +693,7 @@ def get_learning_summary() -> dict:
     """Tüm ghost learning istatistiklerini döner."""
     ghost = _get_ghost_manager()
     try:
-        conn = sqlite3.connect(ghost.db_path, timeout=5)
-        conn.row_factory = sqlite3.Row
+        conn = _open_db(ghost.db_path, timeout=15)
         try:
             total = conn.execute(
                 "SELECT COUNT(*) FROM signal_candidates"

@@ -55,7 +55,9 @@ def clamp(v, lo, hi):
 
 
 # ═══════════════════════════════════════════════════════════
-# AX KARAR MOTORu — evaluate_signal()
+# DEPRECATED — evaluate_signal()
+# Yetkili karar motoru: core/ai_decision_engine.py::AIDecisionEngine.evaluate()
+# scalp_bot.py bu fonksiyonu çağırmıyor; geriye dönük uyumluluk için bırakıldı.
 # ═══════════════════════════════════════════════════════════
 
 def evaluate_signal(signal: dict, open_trades: list, balance: float,
@@ -64,129 +66,42 @@ def evaluate_signal(signal: dict, open_trades: list, balance: float,
                     session: str = "UNKNOWN",
                     market_regime: str = "NEUTRAL") -> dict:
     """
-    AX sinyal değerlendirmesi.
-
-    Returns:
-        decision    — ALLOW | VETO | WATCH
-        score       — 0-100 (signal_engine'den gelen + AX düzeltmesi)
-        confidence  — 0-1
-        veto_reason — Neden reddedildi (ALLOW ise None)
-        expected_mfe_r
-        expected_mae_r
+    DEPRECATED — use AIDecisionEngine.evaluate() from core/ai_decision_engine.py.
+    scalp_bot.py uses ai_engine.evaluate(sig) exclusively.
+    This wrapper exists only for legacy callers.
     """
-    symbol    = signal.get("symbol", "")
-    direction = signal.get("direction")
-    rr        = signal.get("rr", 0)
-    mfe_r     = signal.get("expected_mfe_r", 0)
-    score     = signal.get("score", 50)
-    conf      = signal.get("confidence", 0.5)
-
-    def veto(reason: str, score_adj: float = 0):
-        save_ai_log("veto", symbol=symbol, decision="VETO", score=max(0, score + score_adj),
-                    confidence=conf, reason=reason)
+    logger.warning(
+        "[ai_brain] evaluate_signal() is deprecated. "
+        "Use AIDecisionEngine.evaluate() instead."
+    )
+    try:
+        from core.ai_decision_engine import AIDecisionEngine
+        from core.data_layer import SignalData
+        sig_obj = SignalData(
+            symbol=signal.get("symbol", ""),
+            side=signal.get("direction", "LONG"),
+            entry_price=float(signal.get("entry") or signal.get("entry_zone") or 0),
+            stop_loss=float(signal.get("sl") or signal.get("stop_loss") or 0),
+            score=float(signal.get("score", 50)),
+            tp1=float(signal.get("tp1") or 0),
+        )
+        engine = AIDecisionEngine()
+        result = engine.evaluate(sig_obj)
         return {
-            "decision": "VETO", "score": max(0, score + score_adj),
-            "confidence": conf, "veto_reason": reason,
-            "expected_mfe_r": mfe_r, "expected_mae_r": 0,
+            "decision":      result.get("decision", "VETO"),
+            "score":         result.get("final_score", signal.get("score", 50)),
+            "confidence":    result.get("confidence", 0.5),
+            "veto_reason":   None if result.get("decision") == "ALLOW" else result.get("reason"),
+            "expected_mfe_r": signal.get("expected_mfe_r", 0),
+            "expected_mae_r": 0,
         }
-
-    def allow(score_adj: float = 0):
-        final_score = min(100, max(0, score + score_adj))
-        final_conf  = round(final_score / 100, 3)
-        save_ai_log("allow", symbol=symbol, decision="ALLOW", score=final_score,
-                    confidence=final_conf, reason=None)
+    except Exception as e:
+        logger.error(f"[ai_brain] evaluate_signal wrapper hatası: {e}")
         return {
-            "decision": "ALLOW", "score": final_score,
-            "confidence": final_conf, "veto_reason": None,
-            "expected_mfe_r": mfe_r, "expected_mae_r": round(rr * 0.3, 2),
+            "decision": "VETO", "score": 0, "confidence": 0,
+            "veto_reason": f"wrapper_error: {e}",
+            "expected_mfe_r": 0, "expected_mae_r": 0,
         }
-
-    # ── Hard veto'lar ────────────────────────────────────────────────────────
-    if circuit_breaker_active:
-        return veto("circuit_breaker", -30)
-
-    if len(open_trades) >= MAX_OPEN_TRADES:
-        return veto("too_many_open_trades", -20)
-
-    if rr < MIN_RR:
-        return veto("bad_rr", -25)
-
-    if mfe_r < MIN_EXPECTED_MFE_R:
-        return veto("expected_mfe_low", -20)
-
-    if is_coin_in_cooldown(symbol):
-        return veto("coin_cooldown", -20)
-
-    # ── Günlük kayıp limiti ──────────────────────────────────────────────────
-    stats = get_stats(hours=24)
-    daily_loss = abs(min(stats.get("total_pnl", 0), 0))
-    daily_loss_limit = balance * DAILY_MAX_LOSS_PCT / 100
-    if daily_loss >= daily_loss_limit:
-        return veto("daily_loss_limit", -30)
-
-    # ── Skor düzeltmeleri (VETO değil, sadece skor) ──────────────────────────
-    score_adj = 0.0
-
-    # Ardışık kayıp
-    if consecutive_losses >= CIRCUIT_BREAKER_LOSSES - 1:
-        score_adj -= 10  # Son 1 kayıp öncesi uyarı
-    elif consecutive_losses >= 2:
-        score_adj -= 5
-
-    # Chop market
-    if market_regime == "CHOPPY":
-        score_adj -= 10
-        if score + score_adj < 45:
-            return veto("chop_market", score_adj)
-
-    # BTC zıt yön
-    btc_trend = signal.get("btc_trend", "NEUTRAL")
-    if direction == "LONG"  and btc_trend == "BEARISH":
-        score_adj -= 8
-    elif direction == "SHORT" and btc_trend == "BULLISH":
-        score_adj -= 8
-
-    # Asya seansında daha temkinli
-    if session == "ASIA":
-        score_adj -= 8
-
-    # Yüksek fakeout risk (coin profili)
-    from database import get_coin_profile
-    cp = get_coin_profile(symbol)
-    fakeout_rate = cp.get("fakeout_rate", 0)
-    danger_score = cp.get("danger_score", 0)
-
-    if fakeout_rate > 0.4:
-        score_adj -= 10
-        if fakeout_rate > 0.6:
-            return veto("fakeout_risk", score_adj)
-
-    if danger_score > 0.7:
-        score_adj -= 10
-
-    # Zayıf yapı — ADX çok düşük
-    adx15 = signal.get("adx15", 20)
-    if adx15 < 18:
-        return veto("weak_structure", score_adj - 15)
-
-    # ── Düşük volume ─────────────────────────────────────────────────────────
-    vol = signal.get("volume_m", 0)
-    if vol < 5.0:
-        return veto("low_volume", score_adj - 15)
-
-    final_score = score + score_adj
-
-    # WATCH: sinyal var ama güven düşük (sadece logla, execute etme)
-    if final_score < 40:
-        save_ai_log("watch", symbol=symbol, decision="WATCH", score=final_score,
-                    confidence=round(final_score / 100, 3), reason="low_score")
-        return {
-            "decision": "WATCH", "score": final_score,
-            "confidence": round(final_score / 100, 3), "veto_reason": "low_score",
-            "expected_mfe_r": mfe_r, "expected_mae_r": round(rr * 0.3, 2),
-        }
-
-    return allow(score_adj)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -194,8 +109,11 @@ def evaluate_signal(signal: dict, open_trades: list, balance: float,
 # ═══════════════════════════════════════════════════════════
 
 def db():
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-10000")
     conn.execute("""CREATE TABLE IF NOT EXISTS coin_cooldown (
         symbol TEXT PRIMARY KEY,
         until TEXT,

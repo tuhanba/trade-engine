@@ -39,6 +39,22 @@ def get_conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-10000")  # 10MB cache
+    return conn
+
+
+def open_db(db_path: str | None = None, timeout: int = 15) -> sqlite3.Connection:
+    """
+    Herhangi bir yol için WAL modunda bağlantı açar.
+    db_path verilmezse config.DB_PATH kullanılır.
+    AIDecisionEngine ve GhostMemoryManager gibi farklı db_path kullanan modüller için.
+    """
+    path = db_path or config.DB_PATH
+    conn = sqlite3.connect(path, timeout=timeout, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-10000")
     return conn
 
 
