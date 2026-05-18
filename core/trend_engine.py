@@ -148,18 +148,23 @@ class TrendEngine:
         
         c = close.iloc[-1]
         
+        try:
+            from config import MIN_ADX_15M as _MIN_ADX
+        except Exception:
+            _MIN_ADX = 18
+
         # Trend Onayı
         trend_up = (
             e9.iloc[-1] > e21.iloc[-1] > e50.iloc[-1]
             and c > e21.iloc[-1]
-            and adx_v > 20
+            and adx_v > _MIN_ADX
             and pdi > mdi
         )
-        
+
         trend_dn = (
             e9.iloc[-1] < e21.iloc[-1] < e50.iloc[-1]
             and c < e21.iloc[-1]
-            and adx_v > 20
+            and adx_v > _MIN_ADX
             and mdi > pdi
         )
 

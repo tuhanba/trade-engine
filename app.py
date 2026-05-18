@@ -576,7 +576,7 @@ def api_paper_stats():
             bal = conn.execute("SELECT balance FROM paper_account LIMIT 1").fetchone()
         return jsonify({
             "ok": True,
-            "balance": float(bal[0]) if bal else 250.0,
+            "balance": float(bal[0]) if bal else 500.0,
             "ghost_tracking": [dict(zip(
                 ["tracked_from","total","wins","losses","avg_r"], r
             )) for r in ghost],
@@ -843,8 +843,6 @@ def main():
         host=config.FLASK_HOST,
         port=config.FLASK_PORT,
         debug=False,
-        threaded=True,
-        use_reloader=False,
         log_output=False,
     )
 
