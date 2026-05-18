@@ -287,6 +287,54 @@ class AIDecisionEngine:
         except Exception as e:
             logger.error(f"AI öğrenme hatası: {e}")
 
+    def _update_threshold_from_ghost(self):
+        """
+        Ghost sonuclarina gore TRADE_THRESHOLD'u adaptif ayarla.
+        ghost_win_rate > 0.65 -> threshold 2 puan dusur (daha cok trade)
+        ghost_win_rate < 0.35 -> threshold 2 puan artir (daha secici)
+        Degisim ai_learning tablosuna log'lanir.
+        """
+        try:
+            from core.ghost_learning import get_ghost_learning_stats
+            stats = get_ghost_learning_stats()
+            total = stats.get("total", 0)
+            if total < 20:
+                return  # Yetersiz veri
+
+            gwr = stats.get("ghost_win_rate", 0)
+            old_threshold = self.thresholds["trade"]
+            new_threshold = old_threshold
+
+            if gwr > 0.65:
+                new_threshold = max(60.0, old_threshold - 2.0)
+            elif gwr < 0.35:
+                new_threshold = min(85.0, old_threshold + 2.0)
+
+            if new_threshold == old_threshold:
+                return
+
+            self.thresholds["trade"] = new_threshold
+            with _open_db(self.db_path) as conn:
+                conn.execute(
+                    """INSERT INTO ai_learning (symbol, trade_result, pnl, setup_quality)
+                       VALUES ('SYSTEM', 'THRESHOLD_UPDATE', 0.0, ?)""",
+                    (
+                        json.dumps({
+                            "old_threshold": old_threshold,
+                            "new_threshold": new_threshold,
+                            "ghost_win_rate": round(gwr, 4),
+                            "ghost_total": total,
+                        }),
+                    ),
+                )
+                conn.commit()
+            logger.info(
+                f"[AI] TRADE_THRESHOLD {old_threshold:.1f} -> {new_threshold:.1f} "
+                f"(ghost_wr={gwr:.1%} n={total})"
+            )
+        except Exception as e:
+            logger.debug(f"[AI] _update_threshold_from_ghost atlandı: {e}")
+
     def evaluate(self, sig) -> dict:
         """
         scalp_bot.py line 436: decision = ai_engine.evaluate(sig)

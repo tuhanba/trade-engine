@@ -631,6 +631,171 @@ def stream():
     )
 
 
+# ── /api/ghost-stats ────────────────────────────────────────────────────────
+@app.route("/api/ghost-stats")
+def api_ghost_stats():
+    try:
+        from core.ghost_learning import get_ghost_learning_stats, calculate_dynamic_ghost_weight
+        stats = get_ghost_learning_stats()
+        dynamic_weight = calculate_dynamic_ghost_weight()
+
+        with get_conn() as conn:
+            # Son 7 gunluk GHOST_WIN / GHOST_LOSS
+            weekly = conn.execute("""
+                SELECT DATE(created_at) as day,
+                       SUM(CASE WHEN hit_tp=1 THEN 1 ELSE 0 END) as wins,
+                       SUM(CASE WHEN hit_stop_first=1 THEN 1 ELSE 0 END) as losses
+                FROM paper_results
+                WHERE status='finalized'
+                  AND created_at >= DATE('now', '-7 days')
+                GROUP BY day ORDER BY day
+            """).fetchall()
+
+            # Coin bazli ghost dogruluk (en cok correct_skip yapilan coinler)
+            top_correct = conn.execute("""
+                SELECT symbol,
+                       COUNT(*) as total,
+                       SUM(CASE WHEN skip_decision_correct=1 THEN 1 ELSE 0 END) as correct
+                FROM paper_results
+                WHERE status='finalized' AND skip_decision_correct IS NOT NULL
+                GROUP BY symbol
+                HAVING total >= 3
+                ORDER BY (correct * 1.0 / total) DESC, total DESC
+                LIMIT 5
+            """).fetchall()
+
+        accuracy = 0.0
+        total = stats.get("total", 0)
+        if total > 0:
+            accuracy = round(stats.get("correct_skips", 0) / total * 100, 1)
+
+        return jsonify({
+            "ok": True,
+            "total": total,
+            "ghost_wins": stats.get("ghost_wins", 0),
+            "ghost_losses": stats.get("ghost_losses", 0),
+            "ghost_win_rate": round(stats.get("ghost_win_rate", 0) * 100, 1),
+            "correct_skips": stats.get("correct_skips", 0),
+            "accuracy_pct": accuracy,
+            "avg_mfe_r": stats.get("avg_mfe", 0),
+            "avg_mae_r": stats.get("avg_mae", 0),
+            "dynamic_weight": round(dynamic_weight, 3),
+            "weekly": [{"day": r[0], "wins": r[1], "losses": r[2]} for r in weekly],
+            "top_correct_skips": [
+                {
+                    "symbol": r[0],
+                    "total": r[1],
+                    "correct": r[2],
+                    "accuracy": round(r[2] / r[1] * 100, 1) if r[1] > 0 else 0,
+                }
+                for r in top_correct
+            ],
+        })
+    except Exception as e:
+        logger.error(f"[API] /api/ghost-stats hatasi: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/ghost-replay ───────────────────────────────────────────────────────
+@app.route("/api/ghost-replay")
+def api_ghost_replay():
+    """Son 24 saatin ghost sonuclarini veto sebebiyle gruplandirarak dondurur."""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT id, symbol, direction,
+                       preview_entry, preview_sl, preview_tp1,
+                       tracked_from, hit_tp, hit_stop_first,
+                       max_favorable_excursion, max_adverse_excursion,
+                       first_touch, created_at, finalized_at
+                FROM paper_results
+                WHERE created_at >= DATETIME('now', '-24 hours')
+                ORDER BY created_at DESC
+                LIMIT 100
+            """).fetchall()
+
+        result = []
+        for r in rows:
+            outcome = "pending"
+            if r["hit_tp"]:
+                outcome = "GHOST_WIN"
+            elif r["hit_stop_first"]:
+                outcome = "GHOST_LOSS"
+            elif r["first_touch"] == "neither_horizon":
+                outcome = "EXPIRED"
+
+            result.append({
+                "id":            r["id"],
+                "symbol":        r["symbol"],
+                "direction":     r["direction"],
+                "entry":         r["preview_entry"],
+                "sl":            r["preview_sl"],
+                "tp1":           r["preview_tp1"],
+                "tracked_from":  r["tracked_from"],
+                "outcome":       outcome,
+                "mfe_r":         r["max_favorable_excursion"],
+                "mae_r":         r["max_adverse_excursion"],
+                "created_at":    r["created_at"],
+                "finalized_at":  r["finalized_at"],
+            })
+
+        return jsonify({"ok": True, "count": len(result), "items": result})
+    except Exception as e:
+        logger.error(f"[API] /api/ghost-replay hatasi: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/equity-curve ───────────────────────────────────────────────────────
+@app.route("/api/equity-curve")
+def api_equity_curve():
+    """Son 30 gunluk kumulatif PnL serisi."""
+    try:
+        with get_conn() as conn:
+            initial_balance = 250.0
+            bal_row = conn.execute(
+                "SELECT balance FROM balance_ledger ORDER BY id ASC LIMIT 1"
+            ).fetchone()
+            if bal_row:
+                initial_balance = float(bal_row[0])
+
+            daily = conn.execute("""
+                SELECT DATE(closed_at) as day,
+                       SUM(COALESCE(accumulated_pnl, realized_pnl, 0)) as daily_pnl
+                FROM trades
+                WHERE status='CLOSED'
+                  AND closed_at >= DATE('now', '-30 days')
+                  AND closed_at IS NOT NULL
+                GROUP BY day
+                ORDER BY day
+            """).fetchall()
+
+        cum_pnl = 0.0
+        points = []
+        for row in daily:
+            cum_pnl += float(row[1] or 0)
+            points.append({
+                "day":     row[0],
+                "pnl":     round(float(row[1] or 0), 4),
+                "cum_pnl": round(cum_pnl, 4),
+                "balance": round(initial_balance + cum_pnl, 4),
+            })
+
+        current_balance = initial_balance + cum_pnl
+        pct_change = round((cum_pnl / initial_balance * 100), 2) if initial_balance > 0 else 0
+
+        return jsonify({
+            "ok": True,
+            "initial_balance": initial_balance,
+            "current_balance": round(current_balance, 4),
+            "total_pnl": round(cum_pnl, 4),
+            "pct_change": pct_change,
+            "points": points,
+        })
+    except Exception as e:
+        logger.error(f"[API] /api/equity-curve hatasi: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ── Server başlatma ─────────────────────────────────────────────────
 
 def main():
