@@ -376,7 +376,7 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     c5     = df5["close"].iloc[-1]
     atr5   = atr(df5, 14)
 
-    if (atr5 / (c5 + 1e-10) * 100) < 0.03:
+    if (atr5 / (c5 + 1e-10) * 100) < 0.02:
         return {**NULL, "skip_reason": "atr_too_low"}
 
     bull5 = trend_up15 and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5 < 75

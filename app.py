@@ -616,32 +616,31 @@ def stream():
     Dashboard bu endpoint'e bağlanır, her 5sn'de güncelleme alır.
     """
     def event_generator():
-        consecutive_errors = 0
+        err_count = 0
         while True:
             try:
                 payload = {
                     "health": dashboard_service.get_health(),
-                    "stats": dashboard_service.get_stats(),
-                    "live": dashboard_service.get_live_trades(),
-                    "trades": dashboard_service.get_trades(20),
-                    "signals": dashboard_service.get_signals(20),
-                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "live":   dashboard_service.get_live_trades(),
+                    "ts":     int(time.time()),
                 }
                 yield f"data: {json.dumps(payload)}\n\n"
-                consecutive_errors = 0
-                time.sleep(5)
+                err_count = 0
             except GeneratorExit:
-                break
+                return
             except Exception as exc:
-                consecutive_errors += 1
-                logger.warning(f"[SSE] Stream hata #{consecutive_errors}: {exc}")
+                err_count += 1
+                logger.warning("SSE hata #%d: %s", err_count, exc)
                 try:
                     yield f"data: {json.dumps({'error': str(exc), 'ts': int(time.time())})}\n\n"
                 except Exception:
-                    break
-                if consecutive_errors >= 5:
-                    break
+                    return
+                if err_count >= 10:
+                    return
+            try:
                 time.sleep(5)
+            except GeneratorExit:
+                return
 
     return Response(
         stream_with_context(event_generator()),
@@ -844,6 +843,7 @@ def main():
         host=config.FLASK_HOST,
         port=config.FLASK_PORT,
         debug=False,
+        threaded=True,
         use_reloader=False,
         log_output=False,
     )

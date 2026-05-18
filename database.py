@@ -238,6 +238,10 @@ def init_db() -> None:
     """Tabloları oluşturur (var olanları silmez)."""
     conn = get_connection()
     try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA cache_size=10000")
+        conn.commit()
         conn.execute(_TRADES_DDL)
         conn.execute(_SIGNAL_CANDIDATES_DDL)
         conn.execute(_BALANCE_LEDGER_DDL)
@@ -246,6 +250,12 @@ def init_db() -> None:
         conn.execute(_PAPER_RESULTS_DDL)
         conn.execute(_SIGNAL_EVENTS_DDL)
         conn.execute(_PAPER_ACCOUNT_DDL)
+        from config import INITIAL_PAPER_BALANCE
+        conn.execute(
+            "INSERT OR IGNORE INTO paper_account (id, balance) VALUES (1, ?)",
+            (INITIAL_PAPER_BALANCE,)
+        )
+        conn.commit()
         # İndeksler (performans)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status)"
@@ -997,9 +1007,20 @@ def get_stats() -> dict:
 
 
 def get_paper_balance() -> float:
+    try:
+        from config import INITIAL_PAPER_BALANCE
+    except Exception:
+        INITIAL_PAPER_BALANCE = 500.0
     with get_conn() as conn:
         row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
-        return float(row[0]) if row else 250.0
+        if row:
+            return float(row[0])
+        conn.execute(
+            "INSERT OR IGNORE INTO paper_account (id, balance) VALUES (1, ?)",
+            (INITIAL_PAPER_BALANCE,)
+        )
+        conn.commit()
+        return INITIAL_PAPER_BALANCE
 
 
 def update_paper_balance(amount: float) -> float:
