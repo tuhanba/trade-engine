@@ -354,12 +354,16 @@ class AIDecisionEngine:
         try:
             if hasattr(sig, 'entry_zone') and (sig.entry_zone or 0) > 0:
                 sig.entry_price = sig.entry_zone
-            if not hasattr(sig, 'score') or not sig.score:
-                sig.score = (
-                    float(getattr(sig, 'trigger_score', 0) or 0) * 0.4 +
-                    float(getattr(sig, 'trend_score', 0) or 0) * 0.3 +
-                    float(getattr(sig, 'risk_score', 0) or 0) * 0.3
-                )
+            # 0-10 ölçeğini 0-100'e normalize et: *4, *3, *3
+            _trigger = float(getattr(sig, 'trigger_score', 0) or 0)
+            _trend   = float(getattr(sig, 'trend_score',   0) or 0)
+            _risk    = float(getattr(sig, 'risk_score',    0) or 0)
+            sig.score = round(
+                _trigger * 4.0 +   # 0-10 → 0-40
+                _trend   * 3.0 +   # 0-10 → 0-30
+                _risk    * 3.0,    # 0-10 → 0-30
+                1
+            )
             result = classify_signal(sig)
             return {
                 "decision":    result.decision,

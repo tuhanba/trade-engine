@@ -691,7 +691,7 @@ def get_dashboard_stats() -> dict:
         # Bakiye: paper_account tek kaynak of truth
         try:
             _bal_row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
-            balance = float(_bal_row[0]) if _bal_row else getattr(config, 'INITIAL_PAPER_BALANCE', 250.0)
+            balance = float(_bal_row[0]) if _bal_row else getattr(config, 'INITIAL_PAPER_BALANCE', 500.0)
         except Exception:
             balance = getattr(config, 'INITIAL_PAPER_BALANCE', 500.0)
 
@@ -727,7 +727,7 @@ def get_dashboard_stats() -> dict:
             "total_trades": 0, "open_trades": 0, "closed_trades": 0,
             "realized_pnl": 0, "unrealized_pnl": 0, "accumulated_pnl": 0,
             "total_pnl": 0, "today_pnl": 0, "winrate": 0,
-            "balance": getattr(config, "INITIAL_PAPER_BALANCE", 250.0),
+            "balance": getattr(config, "INITIAL_PAPER_BALANCE", 500.0),
             "ghost_tp_hits": 0, "ghost_sl_hits": 0, "ghost_winrate": 0,
         }
     finally:
@@ -806,7 +806,7 @@ def set_balance(balance: float, note: str = "") -> Optional[int]:
         conn.close()
 
 
-def get_latest_balance(default: float = 250.0) -> float:
+def get_latest_balance(default: float = 500.0) -> float:
     """Son bakiye kaydını döner. Kayıt yoksa default döner."""
     conn = get_connection()
     try:
@@ -1008,25 +1008,28 @@ def get_stats() -> dict:
 
 def get_paper_balance() -> float:
     try:
-        from config import INITIAL_PAPER_BALANCE
+        from config import INITIAL_PAPER_BALANCE as _default
     except Exception:
-        INITIAL_PAPER_BALANCE = 500.0
-    with get_conn() as conn:
-        row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
-        if row:
-            return float(row[0])
-        conn.execute(
-            "INSERT OR IGNORE INTO paper_account (id, balance) VALUES (1, ?)",
-            (INITIAL_PAPER_BALANCE,)
-        )
-        conn.commit()
-        return INITIAL_PAPER_BALANCE
+        _default = 500.0
+    try:
+        with get_conn() as conn:
+            row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+            if row:
+                return float(row[0])
+            conn.execute(
+                "INSERT OR IGNORE INTO paper_account (id, balance) VALUES (1, ?)",
+                (_default,)
+            )
+            conn.commit()
+            return _default
+    except Exception:
+        return _default
 
 
 def update_paper_balance(amount: float) -> float:
     with get_conn() as conn:
         row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
-        current = float(row[0]) if row else 250.0
+        current = float(row[0]) if row else 500.0
         new_balance = current + amount
         conn.execute("UPDATE paper_account SET balance = ? WHERE id=1", (new_balance,))
         return new_balance
@@ -1035,7 +1038,7 @@ def update_paper_balance(amount: float) -> float:
 def add_ledger_entry(trade_id, symbol, event_type, amount, note=""):
     with get_conn() as conn:
         row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
-        balance_before = float(row[0]) if row else 250.0
+        balance_before = float(row[0]) if row else 500.0
         balance_after = balance_before + amount
         conn.execute("UPDATE paper_account SET balance = ? WHERE id=1", (balance_after,))
         conn.execute("""
