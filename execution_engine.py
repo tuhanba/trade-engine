@@ -134,10 +134,10 @@ class ExecutionEngine:
 
         # Unrealized PnL
         upnl = calculate_unrealized_pnl(
-            side=trade["side"],
-            entry_price=trade["entry_price"],
+            side=trade.get("direction") or trade.get("side", "LONG"),
+            entry_price=trade.get("entry") or trade.get("entry_price", 0),
             current_price=current,
-            quantity=trade["quantity"],
+            quantity=trade.get("qty") or trade.get("quantity", 0),
             fee_rate=config.DEFAULT_FEE_RATE,
         )
         database.update_trade_price(trade_id, current, upnl)
@@ -171,7 +171,7 @@ class ExecutionEngine:
             return
 
         # ── State güncelle (SL değişmişse) ───────────────────────
-        if result.new_sl and result.new_sl != (state.current_sl or trade.get("stop_loss", 0)):
+        if result.new_sl and result.new_sl != (state.current_sl or trade.get("sl") or trade.get("stop_loss", 0)):
             database.update_trade_sl(trade_id, result.new_sl)
 
         # Exit state'i DB'ye yaz
@@ -188,11 +188,11 @@ class ExecutionEngine:
         trade_id = trade["id"]
         symbol = trade["symbol"]
         close_pct = result.close_pct / 100.0
-        qty_to_close = trade["quantity"] * close_pct
+        qty_to_close = (trade.get("qty") or trade.get("quantity", 0)) * close_pct
 
         partial_pnl = calculate_realized_pnl(
-            side=trade["side"],
-            entry_price=trade["entry_price"],
+            side=trade.get("direction") or trade.get("side", "LONG"),
+            entry_price=trade.get("entry") or trade.get("entry_price", 0),
             exit_price=current_price,
             quantity=qty_to_close,
             fee_rate=config.DEFAULT_FEE_RATE,
@@ -233,24 +233,30 @@ class ExecutionEngine:
         self, trade: dict, exit_price: float, reason: str,
     ) -> None:
         """Trade'i kapatır, realized PnL hesaplar, DB ve Telegram günceller."""
+        _side = trade.get("direction") or trade.get("side", "LONG")
+        _entry = trade.get("entry") or trade.get("entry_price", 0)
+        _qty = trade.get("qty") or trade.get("quantity", 0)
+
         rpnl = calculate_realized_pnl(
-            side=trade["side"],
-            entry_price=trade["entry_price"],
+            side=_side,
+            entry_price=_entry,
             exit_price=exit_price,
-            quantity=trade["quantity"],
+            quantity=_qty,
             fee_rate=config.DEFAULT_FEE_RATE,
         )
 
-        # Eğer partial close'lar olduysa toplam PnL düzeltilir
-        # (database.py zaten accumulated partial_pnl'i saklıyor)
-        accumulated = trade.get("accumulated_pnl", 0.0) or 0.0
-        remaining_qty_pct = trade.get("remaining_qty_pct", 100.0) or 100.0
+        # Partial close'lardan birikmiş PnL (yeni: realized_pnl, eski: accumulated_pnl)
+        accumulated = trade.get("realized_pnl", 0.0) or trade.get("accumulated_pnl", 0.0) or 0.0
+        # Kalan miktar (yeni: remaining_qty absolute, eski: remaining_qty_pct yüzde)
+        if trade.get("remaining_qty") is not None:
+            remaining_qty = float(trade.get("remaining_qty") or _qty)
+        else:
+            remaining_qty_pct = trade.get("remaining_qty_pct", 100.0) or 100.0
+            remaining_qty = _qty * (remaining_qty_pct / 100.0)
 
-        # Kalan kısım için PnL
-        remaining_qty = trade["quantity"] * (remaining_qty_pct / 100.0)
         remaining_pnl = calculate_realized_pnl(
-            side=trade["side"],
-            entry_price=trade["entry_price"],
+            side=_side,
+            entry_price=_entry,
             exit_price=exit_price,
             quantity=remaining_qty,
             fee_rate=config.DEFAULT_FEE_RATE,
@@ -297,7 +303,7 @@ class ExecutionEngine:
     def _is_timeout(self, trade: dict) -> bool:
         """Max hold time aşıldı mı?"""
         try:
-            opened = trade.get("opened_at", "")
+            opened = trade.get("open_time", "") or trade.get("opened_at", "")
             if not opened:
                 return False
             opened_dt = datetime.fromisoformat(opened.replace("Z", "+00:00"))
@@ -318,8 +324,8 @@ class ExecutionEngine:
             logger.debug("Exit state yüklenemedi: %s", exc)
         # Yeni state oluştur
         return TradeExitState(
-            current_sl=float(trade.get("stop_loss", 0) or 0),
-            highest_price=float(trade.get("entry_price", 0) or 0),
+            current_sl=float(trade.get("sl") or trade.get("stop_loss", 0) or 0),
+            highest_price=float(trade.get("entry") or trade.get("entry_price", 0) or 0),
         )
 
     def _save_exit_state(self, trade_id: int, state: TradeExitState) -> None:
@@ -335,8 +341,8 @@ class ExecutionEngine:
         Trailing için kullanılır.
         """
         try:
-            entry = float(trade.get("entry_price", 0))
-            sl = float(trade.get("stop_loss", 0))
+            entry = float(trade.get("entry") or trade.get("entry_price", 0))
+            sl = float(trade.get("sl") or trade.get("stop_loss", 0))
             if entry > 0 and sl > 0:
                 return abs(entry - sl)
         except Exception:

@@ -64,28 +64,58 @@ _TRADES_DDL = """
 CREATE TABLE IF NOT EXISTS trades (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol              TEXT NOT NULL,
-    side                TEXT NOT NULL,
-    entry_price         REAL NOT NULL,
-    stop_loss           REAL DEFAULT 0,
+    direction           TEXT NOT NULL DEFAULT 'LONG',
+    status              TEXT DEFAULT 'OPEN',
+    entry               REAL DEFAULT 0,
+    sl                  REAL DEFAULT 0,
     tp1                 REAL DEFAULT 0,
     tp2                 REAL DEFAULT 0,
     tp3                 REAL DEFAULT 0,
-    quantity            REAL DEFAULT 0,
-    leverage            INTEGER DEFAULT 1,
-    notional            REAL DEFAULT 0,
+    original_qty        REAL DEFAULT 0,
+    remaining_qty       REAL DEFAULT 0,
+    qty_tp1             REAL DEFAULT 0,
+    qty_tp2             REAL DEFAULT 0,
+    qty_runner          REAL DEFAULT 0,
+    qty                 REAL DEFAULT 0,
+    leverage            INTEGER DEFAULT 10,
+    notional_size       REAL DEFAULT 0,
     margin_used         REAL DEFAULT 0,
+    risk_pct            REAL DEFAULT 1.0,
     risk_usd            REAL DEFAULT 0,
-    risk_pct            REAL DEFAULT 0,
-    status              TEXT DEFAULT 'OPEN',
-    opened_at           TEXT,
-    closed_at           TEXT,
+    max_loss_after_fee  REAL DEFAULT 0,
     current_price       REAL DEFAULT 0,
-    unrealized_pnl      REAL DEFAULT 0,
+    close_price         REAL DEFAULT 0,
+    mark_price          REAL DEFAULT 0,
+    last_update         TEXT,
+    source              TEXT DEFAULT 'bot',
     realized_pnl        REAL DEFAULT 0,
-    accumulated_pnl     REAL DEFAULT 0,
-    remaining_qty_pct   REAL DEFAULT 100,
-    exit_price          REAL DEFAULT 0,
+    unrealized_pnl      REAL DEFAULT 0,
+    net_pnl             REAL DEFAULT 0,
+    total_fee           REAL DEFAULT 0,
+    open_fee            REAL DEFAULT 0,
+    close_fee           REAL DEFAULT 0,
+    fee_rate            REAL DEFAULT 0.0004,
+    tp1_hit             INTEGER DEFAULT 0,
+    tp2_hit             INTEGER DEFAULT 0,
+    open_time           TEXT,
+    close_time          TEXT,
+    open_time_str       TEXT,
+    duration_seconds    INTEGER DEFAULT 0,
+    hold_minutes        REAL DEFAULT 0,
     close_reason        TEXT DEFAULT '',
+    stop_reason         TEXT,
+    target_reason       TEXT,
+    r_multiple          REAL DEFAULT 0,
+    current_R           REAL DEFAULT 0,
+    mfe                 REAL DEFAULT 0,
+    mae                 REAL DEFAULT 0,
+    setup_quality       TEXT,
+    final_score         REAL DEFAULT 0,
+    market_regime       TEXT,
+    is_valid_for_stats  INTEGER DEFAULT 1,
+    ax_mode             TEXT,
+    environment         TEXT,
+    session             TEXT,
     metadata            TEXT DEFAULT '{}'
 )
 """
@@ -203,21 +233,35 @@ CREATE TABLE IF NOT EXISTS paper_account (
 
 _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
     "trades": [
-        ("tp2", "REAL DEFAULT 0"),
-        ("tp3", "REAL DEFAULT 0"),
-        ("leverage", "INTEGER DEFAULT 1"),
-        ("notional", "REAL DEFAULT 0"),
-        ("margin_used", "REAL DEFAULT 0"),
-        ("risk_usd", "REAL DEFAULT 0"),
-        ("risk_pct", "REAL DEFAULT 0"),
-        ("current_price", "REAL DEFAULT 0"),
-        ("unrealized_pnl", "REAL DEFAULT 0"),
+        ("direction",    "TEXT DEFAULT 'LONG'"),
+        ("entry",        "REAL DEFAULT 0"),
+        ("sl",           "REAL DEFAULT 0"),
+        ("qty",          "REAL DEFAULT 0"),
+        ("original_qty", "REAL DEFAULT 0"),
+        ("remaining_qty","REAL DEFAULT 0"),
+        ("notional_size","REAL DEFAULT 0"),
+        ("open_time",    "TEXT"),
+        ("close_time",   "TEXT"),
+        ("close_price",  "REAL DEFAULT 0"),
+        ("net_pnl",      "REAL DEFAULT 0"),
+        ("total_fee",    "REAL DEFAULT 0"),
+        ("open_fee",     "REAL DEFAULT 0"),
+        ("close_fee",    "REAL DEFAULT 0"),
+        ("fee_rate",     "REAL DEFAULT 0.0004"),
+        ("tp2",          "REAL DEFAULT 0"),
+        ("tp3",          "REAL DEFAULT 0"),
+        ("tp1_hit",      "INTEGER DEFAULT 0"),
+        ("tp2_hit",      "INTEGER DEFAULT 0"),
+        ("leverage",     "INTEGER DEFAULT 10"),
+        ("margin_used",  "REAL DEFAULT 0"),
+        ("risk_usd",     "REAL DEFAULT 0"),
+        ("risk_pct",     "REAL DEFAULT 1.0"),
+        ("current_price","REAL DEFAULT 0"),
+        ("unrealized_pnl","REAL DEFAULT 0"),
         ("realized_pnl", "REAL DEFAULT 0"),
-        ("accumulated_pnl", "REAL DEFAULT 0"),
-        ("remaining_qty_pct", "REAL DEFAULT 100"),
-        ("exit_price", "REAL DEFAULT 0"),
         ("close_reason", "TEXT DEFAULT ''"),
-        ("metadata", "TEXT DEFAULT '{}'"),
+        ("ax_mode",      "TEXT"),
+        ("metadata",     "TEXT DEFAULT '{}'"),
     ],
     "signal_candidates": [
         ("tp2", "REAL DEFAULT 0"),
@@ -232,6 +276,27 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("metadata", "TEXT DEFAULT '{}'"),
     ],
 }
+
+
+def _verify_schema() -> None:
+    """Kritik sütunların varlığını doğrular, eksikse uyarır."""
+    required = {
+        'trades': ['direction', 'open_time', 'close_time', 'entry', 'sl',
+                   'qty', 'net_pnl', 'close_price', 'tp1', 'tp2', 'tp3'],
+    }
+    conn = get_conn()
+    try:
+        for table, cols in required.items():
+            existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            missing = set(cols) - existing
+            if missing:
+                logger.error("SCHEMA EKSIK — %s tablosunda: %s", table, missing)
+            else:
+                logger.info("Schema OK: %s", table)
+    except Exception as exc:
+        logger.warning("Schema doğrulaması başarısız: %s", exc)
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
@@ -273,6 +338,7 @@ def init_db() -> None:
         logger.info("DB tabloları hazır: %s", config.DB_PATH)
     finally:
         conn.close()
+    _verify_schema()
 
 
 def migrate_db() -> list[str]:
@@ -389,28 +455,46 @@ def update_signal_ghost_pnl(signal_id: int, pnl: float, status: str) -> None:
 def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
     """Yeni trade kaydı oluşturur, id döner."""
     conn = get_connection()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     try:
         cur = conn.execute(
             """
             INSERT INTO trades
-                (symbol, side, entry_price, stop_loss, tp1, tp2, tp3,
-                 quantity, leverage, notional, margin_used, risk_usd,
-                 risk_pct, status, opened_at, current_price,
-                 unrealized_pnl, realized_pnl, accumulated_pnl,
-                 remaining_qty_pct, exit_price, close_reason, metadata)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                (symbol, direction, entry, sl, tp1, tp2, tp3,
+                 qty, leverage, notional_size, margin_used, risk_usd,
+                 risk_pct, status, open_time, current_price,
+                 unrealized_pnl, realized_pnl, net_pnl,
+                 remaining_qty, original_qty, close_price, close_reason,
+                 total_fee, fee_rate, ax_mode, metadata)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                trade.symbol, trade.side, trade.entry_price,
-                trade.stop_loss,
-                trade.tp1 or 0, trade.tp2 or 0, trade.tp3 or 0,
-                trade.quantity, trade.leverage, trade.notional,
-                trade.margin_used, trade.risk_usd, trade.risk_pct,
-                trade.status, trade.opened_at, trade.current_price,
-                trade.unrealized_pnl, trade.realized_pnl,
-                0.0,    # accumulated_pnl
-                100.0,  # remaining_qty_pct
-                trade.exit_price, trade.close_reason,
+                trade.symbol,
+                getattr(trade, 'direction', None) or getattr(trade, 'side', 'LONG'),
+                getattr(trade, 'entry', None) or getattr(trade, 'entry_price', 0),
+                getattr(trade, 'sl', None) or getattr(trade, 'stop_loss', 0),
+                trade.tp1 or 0,
+                trade.tp2 or 0,
+                trade.tp3 or 0,
+                getattr(trade, 'qty', None) or getattr(trade, 'quantity', 0),
+                trade.leverage or 10,
+                getattr(trade, 'notional_size', None) or getattr(trade, 'notional', 0),
+                trade.margin_used or 0,
+                trade.risk_usd or 0,
+                trade.risk_pct or 1.0,
+                trade.status or 'OPEN',
+                getattr(trade, 'open_time', None) or getattr(trade, 'opened_at', None) or now,
+                getattr(trade, 'current_price', 0) or 0,
+                trade.unrealized_pnl or 0,
+                trade.realized_pnl or 0,
+                trade.realized_pnl or 0,
+                getattr(trade, 'qty', None) or getattr(trade, 'quantity', 0),
+                getattr(trade, 'qty', None) or getattr(trade, 'quantity', 0),
+                getattr(trade, 'close_price', None) or getattr(trade, 'exit_price', 0) or 0,
+                trade.close_reason or '',
+                getattr(trade, 'total_fee', 0) or 0,
+                getattr(trade, 'fee_rate', 0.0004) or 0.0004,
+                getattr(trade, 'ax_mode', None),
                 metadata or "{}",
             ),
         )
@@ -451,7 +535,7 @@ def update_trade_sl(trade_id: int, new_sl: float) -> None:
     conn = get_connection()
     try:
         conn.execute(
-            "UPDATE trades SET stop_loss = ? WHERE id = ? AND status = 'OPEN'",
+            "UPDATE trades SET sl = ? WHERE id = ? AND status = 'OPEN'",
             (new_sl, trade_id),
         )
         conn.commit()
@@ -502,16 +586,16 @@ def record_partial_close(
         # trades tablosu güncelle
         update_sql = """
             UPDATE trades
-            SET accumulated_pnl = accumulated_pnl + ?,
-                remaining_qty_pct = CASE
-                    WHEN remaining_qty_pct - ? < 0 THEN 0
-                    ELSE remaining_qty_pct - ?
+            SET realized_pnl = COALESCE(realized_pnl, 0) + ?,
+                remaining_qty = CASE
+                    WHEN COALESCE(remaining_qty, qty, 0) - ? < 0 THEN 0
+                    ELSE COALESCE(remaining_qty, qty, 0) - ?
                 END
         """
-        params = [partial_pnl, close_pct, close_pct]
+        params = [partial_pnl, close_qty, close_qty]
 
         if new_sl is not None and new_sl > 0:
-            update_sql += ", stop_loss = ?"
+            update_sql += ", sl = ?"
             params.append(new_sl)
 
         update_sql += " WHERE id = ? AND status = 'OPEN'"
@@ -544,14 +628,15 @@ def close_trade(
             """
             UPDATE trades
             SET status = 'CLOSED',
-                exit_price = ?,
+                close_price = ?,
                 realized_pnl = ?,
+                net_pnl = ?,
                 unrealized_pnl = 0,
                 close_reason = ?,
-                closed_at = ?
+                close_time = ?
             WHERE id = ?
             """,
-            (exit_price, realized_pnl, close_reason, now, trade_id),
+            (exit_price, realized_pnl, realized_pnl, close_reason, now, trade_id),
         )
         conn.commit()
         # Bakiyeyi otomatik güncelle
@@ -573,7 +658,7 @@ def get_open_trades() -> list[dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status = 'OPEN' ORDER BY opened_at DESC"
+            "SELECT * FROM trades WHERE status = 'OPEN' ORDER BY open_time DESC"
         ).fetchall()
         return [dict(r) for r in rows]
     except Exception as exc:
@@ -668,7 +753,7 @@ def get_dashboard_stats() -> dict:
 
         # Accumulated partial PnL (açık trade'lerdeki)
         accum_row = conn.execute(
-            "SELECT COALESCE(SUM(accumulated_pnl), 0) FROM trades WHERE status='OPEN'"
+            "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE status='OPEN'"
         ).fetchone()
         accumulated_pnl = float(accum_row[0]) if accum_row else 0.0
 
@@ -682,8 +767,8 @@ def get_dashboard_stats() -> dict:
         # Bugünkü PnL
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         today_row = conn.execute(
-            "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades "
-            "WHERE status='CLOSED' AND DATE(closed_at) = ?",
+            "SELECT COALESCE(SUM(net_pnl), 0) FROM trades "
+            "WHERE status='CLOSED' AND DATE(close_time) = ?",
             (today,),
         ).fetchone()
         today_pnl = float(today_row[0]) if today_row else 0.0

@@ -791,12 +791,12 @@ def api_equity_curve():
                 initial_balance = float(bal_row[0])
 
             daily = conn.execute("""
-                SELECT DATE(closed_at) as day,
-                       SUM(COALESCE(accumulated_pnl, realized_pnl, 0)) as daily_pnl
+                SELECT DATE(close_time) as day,
+                       SUM(COALESCE(net_pnl, realized_pnl, 0)) as daily_pnl
                 FROM trades
                 WHERE status='CLOSED'
-                  AND closed_at >= DATE('now', '-30 days')
-                  AND closed_at IS NOT NULL
+                  AND close_time >= DATE('now', '-30 days')
+                  AND close_time IS NOT NULL
                 GROUP BY day
                 ORDER BY day
             """).fetchall()
