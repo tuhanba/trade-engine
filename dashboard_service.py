@@ -106,9 +106,9 @@ def _get_live_trades_impl() -> list:
             "id": t.get("id"),
             "symbol": t.get("symbol"),
             "side": t.get("side"),
-            "entry_price": t.get("entry_price", 0),
+            "entry_price": t.get("entry") or t.get("entry_price", 0),
             "current_price": t.get("current_price", 0),
-            "stop_loss": t.get("stop_loss", 0),
+            "stop_loss": t.get("sl") or t.get("stop_loss", 0),
             "tp1": t.get("tp1", 0),
             "tp2": t.get("tp2", 0),
             "tp3": t.get("tp3", 0),
@@ -116,12 +116,12 @@ def _get_live_trades_impl() -> list:
             "margin_used": t.get("margin_used", 0),
             "risk_usd": t.get("risk_usd", 0),
             "unrealized_pnl": t.get("unrealized_pnl", 0),
-            "accumulated_pnl": t.get("accumulated_pnl", 0),
+            "accumulated_pnl": t.get("realized_pnl") or t.get("accumulated_pnl", 0),
             "remaining_qty_pct": t.get("remaining_qty_pct", 100),
             "total_pnl": round(
-                (t.get("unrealized_pnl") or 0) + (t.get("accumulated_pnl") or 0), 4
+                (t.get("unrealized_pnl") or 0) + (t.get("realized_pnl") or t.get("accumulated_pnl") or 0), 4
             ),
-            "opened_at": t.get("opened_at", ""),
+            "opened_at": t.get("open_time") or t.get("opened_at", ""),
             # Exit state
             "tp1_hit": exit_state.get("tp1_hit", False),
             "tp2_hit": exit_state.get("tp2_hit", False),
@@ -199,12 +199,12 @@ def get_calendar_data(days: int = 30) -> list:
     try:
         conn = database.get_connection()
         rows = conn.execute("""
-            SELECT date(closed_at) AS day,
-                   COALESCE(SUM(realized_pnl),0) AS pnl,
+            SELECT date(close_time) AS day,
+                   COALESCE(SUM(net_pnl),0) AS pnl,
                    COUNT(*) AS trades,
-                   SUM(CASE WHEN realized_pnl>0 THEN 1 ELSE 0 END) AS wins
+                   SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) AS wins
             FROM trades
-            WHERE closed_at IS NOT NULL AND closed_at >= date('now',?)
+            WHERE close_time IS NOT NULL AND close_time >= date('now',?)
             GROUP BY day ORDER BY day ASC
         """, (f"-{days} days",)).fetchall()
         conn.close()
@@ -220,12 +220,12 @@ def get_weekly_data(weeks: int = 8) -> list:
     try:
         conn = database.get_connection()
         rows = conn.execute("""
-            SELECT strftime('%Y-W%W', closed_at) AS week,
-                   COALESCE(SUM(realized_pnl),0) AS pnl,
+            SELECT strftime('%Y-W%W', close_time) AS week,
+                   COALESCE(SUM(net_pnl),0) AS pnl,
                    COUNT(*) AS trades,
-                   SUM(CASE WHEN realized_pnl>0 THEN 1 ELSE 0 END) AS wins
+                   SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) AS wins
             FROM trades
-            WHERE closed_at IS NOT NULL AND closed_at >= date('now',?)
+            WHERE close_time IS NOT NULL AND close_time >= date('now',?)
             GROUP BY week ORDER BY week ASC
         """, (f"-{weeks*7} days",)).fetchall()
         conn.close()
