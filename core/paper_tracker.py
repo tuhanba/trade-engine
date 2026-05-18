@@ -13,11 +13,11 @@ import database
 logger = logging.getLogger("ax.paper_tracker")
 
 try:
-    import sys, os
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from config import DB_PATH
-except ImportError:
-    DB_PATH = "/root/trade_engine/trading.db"
+    import config as _cfg
+    DB_PATH = _cfg.DB_PATH
+except Exception:
+    import os
+    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "trading.db")
 
 
 def register_candidate(signal: SignalData, decision: str, reason: str = "") -> None:

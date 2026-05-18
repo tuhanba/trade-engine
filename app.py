@@ -806,11 +806,13 @@ def main():
         "Dashboard API başlatılıyor %s:%s",
         config.FLASK_HOST, config.FLASK_PORT,
     )
-    app.run(
+    socketio.run(
+        app,
         host=config.FLASK_HOST,
         port=config.FLASK_PORT,
         debug=False,
-        threaded=True,
+        use_reloader=False,
+        log_output=False,
     )
 
 
