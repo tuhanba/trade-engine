@@ -187,7 +187,7 @@ def get_ax_status() -> dict:
             "paper_mode": config.PAPER_MODE,
             "circuit_breaker_active": cb_active, "circuit_breaker_until": cb_until,
             "paper_balance": round(balance, 2),
-            "initial_balance": getattr(config, 'INITIAL_PAPER_BALANCE', 500.0),
+            "initial_balance": database.get_paper_balance(),
         }
     except Exception as e:
         logger.error("get_ax_status hata: %s", e)

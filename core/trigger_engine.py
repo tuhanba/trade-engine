@@ -117,12 +117,13 @@ class TriggerEngine:
         if current_hour in BAD_HOURS_UTC:
             return {"quality": "D", "score": 0, "entry": 0}
 
-        if SHORT_REQUIRES_BTC_BEARISH:
-            btc_ok, btc_lev_mult = _btc_allows(direction, btc_trend)
-            if not btc_ok:
-                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "btc_trend_block"}
-        else:
-            btc_lev_mult = 1.0
+        # BTC NEUTRAL → geçir (hem LONG hem SHORT açılabilir)
+        # Sadece kesin karşı trend'de engelle
+        if btc_trend == "BEARISH" and direction == "LONG":
+            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "btc_bearish_no_long"}
+        if btc_trend == "BULLISH" and direction == "SHORT":
+            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "btc_bullish_no_short"}
+        _, btc_lev_mult = _btc_allows(direction, btc_trend)
 
         df5 = self.get_candles(symbol, "5m", 150)
         if df5.empty or len(df5) < 50:
