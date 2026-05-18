@@ -224,6 +224,11 @@ class _SignalRecord:
         self.ai_veto_reason: str = ""
         self.created_at: str = datetime.now(timezone.utc).isoformat()
 
+    @property
+    def side(self) -> str:
+        """AI engine uyumluluğu — direction alanından oku."""
+        return getattr(self, 'direction', 'LONG') or 'LONG'
+
     def is_valid(self) -> bool:
         return bool(
             self.symbol

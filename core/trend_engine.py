@@ -112,9 +112,9 @@ class TrendEngine:
             e55 = self._ema(df4h["close"], 55)
             adx_v, pdi, mdi = self._adx(df4h)
             c = df4h["close"].iloc[-1]
-            if e21.iloc[-1] > e55.iloc[-1] and c > e21.iloc[-1] and adx_v > 20 and pdi > mdi:
+            if e21.iloc[-1] > e55.iloc[-1] and c > e21.iloc[-1] and adx_v > 15 and pdi > mdi:
                 trend = "BULLISH"
-            elif e21.iloc[-1] < e55.iloc[-1] and c < e21.iloc[-1] and adx_v > 20 and mdi > pdi:
+            elif e21.iloc[-1] < e55.iloc[-1] and c < e21.iloc[-1] and adx_v > 15 and mdi > pdi:
                 trend = "BEARISH"
             else:
                 trend = "NEUTRAL"
