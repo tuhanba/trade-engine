@@ -109,6 +109,23 @@ def _calc_excursions(entry: float, sl: float, current_price: float, is_long: boo
     return round(mfe, 4), round(mae, 4)
 
 
+def _calc_skip_correctness(hit_tp: int, hit_stop_first: int, tracked_from: str) -> int:
+    """
+    Atlama kararı doğru muydu?
+    VETO/SKIP kararı + SL vuruldu → doğru atladık (1)
+    VETO/SKIP kararı + TP vuruldu → yanlış atladık (0)
+    İzleme verisi → -1 (geçersiz, kaydedilmez)
+    """
+    if tracked_from in ("VETO", "SKIPPED_BY_RISK", "SKIPPED_BY_REGIME",
+                        "SKIPPED_BY_LOW_SCORE", "SKIPPED_BY_COOLDOWN",
+                        "SKIPPED_BY_SPREAD", "SKIPPED_BY_MARGIN_RISK"):
+        if hit_stop_first == 1 and hit_tp == 0:
+            return 1   # Doğru atladık
+        elif hit_tp == 1 and hit_stop_first == 0:
+            return 0   # Yanlış atladık
+    return -1  # İzleme verisi veya belirsiz
+
+
 def _process_single(record: dict, client, now: datetime):
     """Tek bir paper_result kaydını işle."""
     from database import update_paper_result
@@ -166,34 +183,42 @@ def _process_single(record: dict, client, now: datetime):
     new_mfe  = max(prev_mfe, cur_mfe)
     new_mae  = max(prev_mae, cur_mae)
 
+    tracked_from = str(record.get("tracked_from") or "")
+
     if tp1_hit:
-        update_paper_result(record_id, {
+        correctness = _calc_skip_correctness(1, 0, tracked_from)
+        updates = {
             "status":                "finalized",
             "finalized_at":          now.isoformat(),
             "hit_tp":                1,
             "hit_stop_first":        0,
             "setup_worked":          1,
             "would_have_won":        1,
-            "skip_decision_correct": 0,  # Geçilseydi kâr ederdi
             "max_favorable_excursion": new_mfe,
             "max_adverse_excursion":   new_mae,
             "first_touch":           "tp1",
-        })
+        }
+        if correctness >= 0:
+            updates["skip_decision_correct"] = correctness
+        update_paper_result(record_id, updates)
         logger.info(f"[Ghost] #{record_id} {symbol} GHOST_WIN (TP1 ulaşıldı) MFE={new_mfe:.2f}R MAE={new_mae:.2f}R")
 
     elif sl_hit:
-        update_paper_result(record_id, {
+        correctness = _calc_skip_correctness(0, 1, tracked_from)
+        updates = {
             "status":                "finalized",
             "finalized_at":          now.isoformat(),
             "hit_tp":                0,
             "hit_stop_first":        1,
             "setup_worked":          0,
             "would_have_won":        0,
-            "skip_decision_correct": 1,  # Geçilmesi doğruydu
             "max_favorable_excursion": new_mfe,
             "max_adverse_excursion":   new_mae,
             "first_touch":           "stop",
-        })
+        }
+        if correctness >= 0:
+            updates["skip_decision_correct"] = correctness
+        update_paper_result(record_id, updates)
         logger.info(f"[Ghost] #{record_id} {symbol} GHOST_LOSS (SL vuruldu) MFE={new_mfe:.2f}R MAE={new_mae:.2f}R")
 
     else:
@@ -218,32 +243,28 @@ def _get_price(client, symbol: str) -> float:
 
 def calculate_dynamic_ghost_weight() -> float:
     """
-    Ghost learning doğruluğuna göre adaptif ağırlık hesapla.
-    _GHOST_WEIGHT_FLOOR config'den minimum sınır olarak gelir.
+    Gerçek trade sayısına göre ghost ağırlığını dinamik hesapla.
+    Az trade → yüksek ghost ağırlık (daha fazla öğren).
+    Çok trade → düşük ghost ağırlık (gerçek data baskın).
     """
     try:
         from database import get_conn
         with get_conn() as conn:
-            row = conn.execute("""
-                SELECT COUNT(*) as total,
-                       SUM(CASE WHEN skip_decision_correct=1 THEN 1 ELSE 0 END) as correct_skips
-                FROM paper_results WHERE status='finalized'
-            """).fetchone()
+            row = conn.execute(
+                "SELECT COUNT(*) FROM trades WHERE status='CLOSED'"
+            ).fetchone()
+        real_trades = row[0] if row else 0
 
-        total   = row[0] or 0 if row else 0
-        correct = row[1] or 0 if row else 0
-
-        if total < 10:
-            return _GHOST_WEIGHT_FLOOR
-
-        accuracy = correct / total
-        if accuracy > 0.70:
+        if real_trades < 10:
             return 0.45
-        if accuracy > 0.55:
-            return 0.30
-        if accuracy > 0.40:
-            return 0.20
-        return max(_GHOST_WEIGHT_FLOOR, 0.15)
+        elif real_trades < 30:
+            return 0.35
+        elif real_trades < 100:
+            return 0.25
+        elif real_trades < 300:
+            return 0.15
+        else:
+            return max(_GHOST_WEIGHT_FLOOR, 0.10)
     except Exception:
         return _GHOST_WEIGHT_FLOOR
 

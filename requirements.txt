@@ -1,8 +1,9 @@
-# AX Trade Engine v5.2 — Production Dependencies
+# AX Trade Engine v9.0 — Production Dependencies
 # Core framework
 flask>=3.0.0
 flask-socketio>=5.3.0
 eventlet>=0.35.0
+gunicorn>=21.2.0
 # Data science
 pandas>=2.0.0
 numpy>=1.24.0

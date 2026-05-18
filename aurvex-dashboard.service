@@ -1,5 +1,5 @@
 [Unit]
-Description=AurvexAI Dashboard (Flask)
+Description=AurvexAI Dashboard (Gunicorn+Eventlet)
 After=network-online.target
 Wants=network-online.target
 
@@ -8,11 +8,18 @@ Type=simple
 User=root
 WorkingDirectory=/root/trade_engine/trade-engine
 EnvironmentFile=-/root/trade_engine/trade-engine/.env
-ExecStart=/root/trade_engine/trade-engine/.venv/bin/python /root/trade_engine/trade-engine/app.py
+ExecStart=/root/trade_engine/trade-engine/.venv/bin/gunicorn \
+    --worker-class eventlet \
+    --workers 1 \
+    --bind 0.0.0.0:5000 \
+    --timeout 120 \
+    --keepalive 5 \
+    --log-level info \
+    --access-logfile logs/dashboard_access.log \
+    --error-logfile logs/dashboard_error.log \
+    app:app
 Restart=always
-RestartSec=10
-StandardOutput=append:/root/trade_engine/trade-engine/logs/dashboard.log
-StandardError=append:/root/trade_engine/trade-engine/logs/dashboard.log
+RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/root/trade_engine/trade-engine
 

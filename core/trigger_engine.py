@@ -16,7 +16,7 @@ try:
     from config import (
         ALLOWED_QUALITIES, BAD_HOURS_UTC, GOOD_HOURS_UTC,
         SHORT_REQUIRES_BTC_BEARISH, BTC_TREND_INTERVAL,
-        ADX_MIN_THRESHOLD
+        ADX_MIN_THRESHOLD, MIN_ADX_5M, FUNDING_LONG_MAX, FUNDING_SHORT_MIN,
     )
 except ImportError:
     ALLOWED_QUALITIES        = ["S", "A+", "A", "B"]
@@ -24,7 +24,25 @@ except ImportError:
     GOOD_HOURS_UTC           = [0, 1, 2, 3, 7, 8, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
     SHORT_REQUIRES_BTC_BEARISH = True
     BTC_TREND_INTERVAL       = "4h"
-    ADX_MIN_THRESHOLD        = 20
+    ADX_MIN_THRESHOLD        = 18
+    MIN_ADX_5M               = 13
+    FUNDING_LONG_MAX         = 0.003
+    FUNDING_SHORT_MIN        = -0.003
+
+
+def _btc_allows(direction: str, btc_trend: str) -> tuple:
+    """(allowed: bool, leverage_multiplier: float)"""
+    if btc_trend == "NEUTRAL":
+        return True, 0.8    # İzin ver ama leverage kısıtlı
+    if direction == "LONG" and btc_trend == "BULLISH":
+        return True, 1.0    # En iyi senaryo
+    if direction == "SHORT" and btc_trend == "BEARISH":
+        return True, 1.0
+    if direction == "LONG" and btc_trend == "BEARISH":
+        return False, 0.0   # Kontrend — engelle
+    if direction == "SHORT" and btc_trend == "BULLISH":
+        return False, 0.0   # Kontrend — engelle
+    return True, 0.8
 
 class TriggerEngine:
     def __init__(self, client):
@@ -100,10 +118,11 @@ class TriggerEngine:
             return {"quality": "D", "score": 0, "entry": 0}
 
         if SHORT_REQUIRES_BTC_BEARISH:
-            if direction == "SHORT" and btc_trend == "BULLISH":
-                return {"quality": "D", "score": 0, "entry": 0}
-            if direction == "LONG" and btc_trend == "BEARISH":
-                return {"quality": "D", "score": 0, "entry": 0}
+            btc_ok, btc_lev_mult = _btc_allows(direction, btc_trend)
+            if not btc_ok:
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "btc_trend_block"}
+        else:
+            btc_lev_mult = 1.0
 
         df5 = self.get_candles(symbol, "5m", 150)
         if df5.empty or len(df5) < 50:
@@ -132,9 +151,8 @@ class TriggerEngine:
             adx_val = 20
             atr_val = c5 * 0.02 # Fallback ATR %2
 
-        # ADX Filtresini esnettik (AI karar verecek)
-        if adx_val < 15:
-            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
+        if adx_val < MIN_ADX_5M:
+            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1), "reject_reason": f"adx_too_low_{adx_val:.1f}"}
 
         # AI beynine daha fazla veri sağlamak için RSI şartlarını esnettik (Sıkı filtreyi AI yapacak)
         rsi5_val = float(rsi5)
@@ -159,8 +177,10 @@ class TriggerEngine:
         if bear5 and not (15 < rsi1 < 75): return {"quality": "D", "score": 0, "entry": 0}
 
         funding = self.get_funding_rate(symbol)
-        if direction == "LONG" and funding > 0.001: return {"quality": "D", "score": 0, "entry": 0}
-        if direction == "SHORT" and funding < -0.001: return {"quality": "D", "score": 0, "entry": 0}
+        if direction == "LONG" and funding > FUNDING_LONG_MAX:
+            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"funding_too_high_{funding:.4f}"}
+        if direction == "SHORT" and funding < FUNDING_SHORT_MIN:
+            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"funding_too_low_{funding:.4f}"}
 
         score = 5.0
         quality = "C"
@@ -208,6 +228,7 @@ class TriggerEngine:
             "macd_hist": round(hist, 6),
             "funding": round(funding * 100, 4),
             "btc_trend": btc_trend,
+            "btc_leverage_mult": btc_lev_mult if SHORT_REQUIRES_BTC_BEARISH else 1.0,
             "hour_utc": current_hour,
             "good_hour": current_hour in GOOD_HOURS_UTC,
             "adx": round(adx_val, 1),
