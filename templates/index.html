@@ -267,7 +267,7 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
       <div class="sc-gl" style="background:var(--gold)"></div>
       <div class="sc-lb">Bakiye</div>
       <div class="sc-vl gold" id="v-bal">—</div>
-      <div class="sc-sb" id="v-bal-s">Başlangıç: $250</div>
+      <div class="sc-sb" id="v-bal-s">Başlangıç: $<span id="v-init-bal">500</span></div>
     </div>
     <div class="sc">
       <div class="sc-ln" id="pnl-ln" style="background:linear-gradient(90deg,transparent,var(--em),transparent)"></div>
@@ -428,6 +428,7 @@ async function fStats(){
   try{const d=(await(await fetch('/api/stats')).json()).data||{};
   const bal=N(d.balance),rpnl=N(d.realized_pnl),upnl=N(d.unrealized_pnl),tpnl=N(d.total_pnl)||rpnl+upnl,today=N(d.today_pnl),wr=N(d.winrate),opens=~~(d.open_trades),closed=~~(d.closed_trades),wins=~~(d.win_trades),gtp=~~(d.ghost_tp_hits),gsl=~~(d.ghost_sl_hits),gwr=N(d.ghost_winrate);
   $('v-bal').textContent=`$${bal.toFixed(2)}`;$('sb-bal').textContent=`$${bal.toFixed(2)}`;
+  const initBal=document.getElementById('v-init-bal');if(initBal&&d.initial_balance)initBal.textContent=N(d.initial_balance).toFixed(0);
   const pEl=$('v-pnl');pEl.textContent=pS(tpnl);pEl.className='sc-vl '+(tpnl>=0?'em':'ru');
   $('pnl-ln').style.background=`linear-gradient(90deg,transparent,var(--${tpnl>=0?'em':'ru'}),transparent)`;
   $('pnl-gl').style.background=`var(--${tpnl>=0?'em':'ru'})`;

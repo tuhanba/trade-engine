@@ -169,10 +169,11 @@ def get_ax_status() -> dict:
             "paper_mode": config.PAPER_MODE,
             "circuit_breaker_active": cb_active, "circuit_breaker_until": cb_until,
             "paper_balance": round(balance, 2),
+            "initial_balance": getattr(config, 'INITIAL_PAPER_BALANCE', 500.0),
         }
     except Exception as e:
         logger.error("get_ax_status hata: %s", e)
-        return {"bot_running": False, "bot_status": "error", "paper_balance": 0.0}
+        return {"bot_running": False, "bot_status": "error", "paper_balance": 0.0, "initial_balance": 500.0}
 
 
 def get_calendar_data(days: int = 30) -> list:
