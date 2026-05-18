@@ -36,13 +36,15 @@ banner(){ echo -e "${BOLD}${CYAN}$1${NC}"; }
 SKIP_DEPS=false; FORCE=false; DRY_RUN=false; NO_AUDIT=false; STATUS_ONLY=false
 for arg in "$@"; do
     case $arg in
-        --skip-deps) SKIP_DEPS=true ;;
-        --force)     FORCE=true ;;
-        --dry-run)   DRY_RUN=true ;;
-        --no-audit)  NO_AUDIT=true ;;
-        --status)    STATUS_ONLY=true ;;
+        --skip-deps)     SKIP_DEPS=true ;;
+        --force)         FORCE=true ;;
+        --dry-run)       DRY_RUN=true ;;
+        --no-audit)      NO_AUDIT=true ;;
+        --status)        STATUS_ONLY=true ;;
+        --reset-balance) RESET_BALANCE=true ;;
     esac
 done
+RESET_BALANCE="${RESET_BALANCE:-false}"
 
 dry() {
     if [ "$DRY_RUN" = true ]; then
@@ -155,6 +157,17 @@ try:
     print(f"  💹  Açık trade   : {open_t}   |   Toplam: {total}")
     print(f"  🗄️   Paper results: {paper_t}   |   Pending: {pending}")
 except: pass
+try:
+    bal = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+    done = conn.execute("SELECT COUNT(*) FROM paper_results WHERE status='completed'").fetchone()[0]
+    wins = conn.execute("SELECT COUNT(*) FROM paper_results WHERE would_have_won=1").fetchone()[0]
+    trades_closed = conn.execute("SELECT COUNT(*) FROM trades WHERE UPPER(status)='CLOSED'").fetchone()[0]
+    print(f"  💰  Bakiye       : ${bal[0]:.2f}" if bal else "  💰  Bakiye: N/A")
+    print(f"  📊  Paper done   : {done}")
+    print(f"  🎯  Winrate      : {wins/done*100:.1f}%" if done > 0 else "  🎯  Winrate: veri yok")
+    print(f"  💹  Kapanan trade: {trades_closed}")
+except Exception as ex:
+    print(f"  ⚠️   DB özet: {ex}")
 conn.close()
 PYEOF
     fi
@@ -671,6 +684,24 @@ except Exception as e:
     print(f"DB özet alınamadı: {e}")
 conn.close()
 PYEOF
+
+if [ "${RESET_BALANCE}" = "true" ]; then
+    echo ""
+    info "Bakiye \$500'a sıfırlanıyor..."
+    "$PYTHON" - << 'PYEOF'
+import sys; sys.path.insert(0, '/root/trade_engine/trade-engine')
+try:
+    import database
+    conn = database.get_connection()
+    conn.execute("UPDATE paper_account SET balance=500.0, initial_balance=500.0 WHERE id=1")
+    conn.commit()
+    bal = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+    print(f"  ✅ Yeni bakiye: ${bal[0]:.2f}" if bal else "  ⚠️  paper_account bulunamadı")
+    conn.close()
+except Exception as e:
+    print(f"  ⚠️  {e}")
+PYEOF
+fi
 
 fi  # DRY_RUN check biter
 

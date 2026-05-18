@@ -122,7 +122,15 @@ def api_live():
 def api_stats():
     """İstatistikler."""
     try:
-        return _ok(dashboard_service.get_stats())
+        stats = dashboard_service.get_stats()
+        ax_status = dashboard_service.get_ax_status()
+        return _ok({
+            **stats,
+            "balance": stats.get("balance", ax_status.get("paper_balance", 0)),
+            "initial_balance": stats.get("initial_balance", ax_status.get("initial_balance", 500.0)),
+            "bot_running": ax_status.get("bot_running", False),
+            "execution_mode": ax_status.get("execution_mode", "paper"),
+        })
     except Exception as exc:
         return _error(str(exc))
 

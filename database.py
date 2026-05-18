@@ -190,6 +190,15 @@ CREATE TABLE IF NOT EXISTS signal_events (
 )
 """
 
+_PAPER_ACCOUNT_DDL = """
+CREATE TABLE IF NOT EXISTS paper_account (
+    id              INTEGER PRIMARY KEY,
+    balance         REAL NOT NULL DEFAULT 500.0,
+    initial_balance REAL NOT NULL DEFAULT 500.0,
+    updated_at      TEXT DEFAULT (datetime('now'))
+)
+"""
+
 # ── Migration kolonları ──────────────────────────────────────────────
 
 _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
@@ -236,6 +245,7 @@ def init_db() -> None:
         conn.execute(_PARTIAL_CLOSES_DDL)
         conn.execute(_PAPER_RESULTS_DDL)
         conn.execute(_SIGNAL_EVENTS_DDL)
+        conn.execute(_PAPER_ACCOUNT_DDL)
         # İndeksler (performans)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status)"
@@ -673,7 +683,7 @@ def get_dashboard_stats() -> dict:
             _bal_row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
             balance = float(_bal_row[0]) if _bal_row else getattr(config, 'INITIAL_PAPER_BALANCE', 250.0)
         except Exception:
-            balance = getattr(config, 'INITIAL_PAPER_BALANCE', 250.0)
+            balance = getattr(config, 'INITIAL_PAPER_BALANCE', 500.0)
 
         # Ghost tracking özeti
         ghost_tp = conn.execute(
@@ -694,6 +704,7 @@ def get_dashboard_stats() -> dict:
             "today_pnl": round(today_pnl, 4),
             "winrate": winrate,
             "balance": round(balance, 4),
+            "initial_balance": getattr(config, 'INITIAL_PAPER_BALANCE', 500.0),
             "ghost_tp_hits": ghost_tp,
             "ghost_sl_hits": ghost_sl,
             "ghost_winrate": round(
@@ -1499,16 +1510,19 @@ def init_paper_account():
     """Paper account yoksa başlangıç bakiyesiyle oluşturur."""
     try:
         with get_conn() as conn:
+            conn.execute(_PAPER_ACCOUNT_DDL)
             existing = conn.execute(
                 "SELECT id FROM paper_account WHERE id=1"
             ).fetchone()
             if not existing:
-                init_bal = getattr(config, 'INITIAL_PAPER_BALANCE', 250.0)
+                init_bal = getattr(config, 'INITIAL_PAPER_BALANCE', 500.0)
                 conn.execute(
-                    "INSERT INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
+                    "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
                     (init_bal, init_bal)
                 )
-            logger.info("[DB] paper_account hazır.")
+                logger.info(f"[DB] paper_account oluşturuldu: ${init_bal}")
+            else:
+                logger.info("[DB] paper_account hazır.")
     except Exception as e:
         logger.warning(f"init_paper_account: {e}")
 
