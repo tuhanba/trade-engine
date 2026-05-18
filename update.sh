@@ -73,6 +73,9 @@ else
     exit 1
 fi
 
+# BUG FIX #1: DB_PATH ve TRADE_DIR'ı export et — Python heredoc'ları görsün
+export DB_PATH TRADE_DIR
+
 PYTHON="$VENV/bin/python3"
 PIP="$VENV/bin/pip"
 BRANCH="main"
@@ -142,13 +145,15 @@ os.chdir(sys.path[0])
 import sqlite3
 DB = os.environ.get("DB_PATH", "/root/trade_engine/trading.db")
 conn = sqlite3.connect(DB)
-open_t = conn.execute("SELECT COUNT(*) FROM trades WHERE status='open'").fetchone()[0]
+# BUG FIX #2: UPPER(status) — database.py 'OPEN'/'CLOSED' uppercase yazar
+open_t = conn.execute("SELECT COUNT(*) FROM trades WHERE UPPER(status)='OPEN'").fetchone()[0]
 total  = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
 try:
     paper_t = conn.execute("SELECT COUNT(*) FROM paper_results").fetchone()[0]
     pending = conn.execute("SELECT COUNT(*) FROM paper_results WHERE status='pending'").fetchone()[0]
-    print(f"  {SYM_TRADE}  Açık trade   : {open_t}   |   Toplam: {total}")
-    print(f"  {SYM_DB}  Paper results: {paper_t}   |   Pending: {pending}")
+    # BUG FIX #3: SYM_TRADE/SYM_DB bash değişkenleri Python'da tanımsız — hardcode emoji kullan
+    print(f"  💹  Açık trade   : {open_t}   |   Toplam: {total}")
+    print(f"  🗄️   Paper results: {paper_t}   |   Pending: {pending}")
 except: pass
 conn.close()
 PYEOF
@@ -187,17 +192,32 @@ fi
 step "2/9 ${SYM_TRADE}  AÇIK TRADE KONTROLÜ"
 
 OPEN_TRADE_COUNT=0
+IS_PAPER_MODE="true"
 if [ -f "$DB_PATH" ]; then
+    # BUG FIX #2: UPPER(status)='OPEN' — uppercase convention database.py ile uyumlu
     OPEN_TRADE_COUNT=$("$PYTHON" - << 'PYEOF' 2>/dev/null || echo "0"
 import sqlite3, os
 DB = os.environ.get("DB_PATH", "/root/trade_engine/trading.db")
 conn = sqlite3.connect(DB)
 try:
-    n = conn.execute("SELECT COUNT(*) FROM trades WHERE status='open'").fetchone()[0]
+    n = conn.execute("SELECT COUNT(*) FROM trades WHERE UPPER(status)='OPEN'").fetchone()[0]
     print(n)
 except:
     print(0)
 conn.close()
+PYEOF
+)
+    # Paper mode tespiti — config.py'den oku
+    IS_PAPER_MODE=$("$PYTHON" - << 'PYEOF' 2>/dev/null || echo "true"
+import sys, os
+sys.path.insert(0, os.environ.get("TRADE_DIR", "/root/trade_engine/trade-engine"))
+os.chdir(sys.path[0])
+try:
+    from config import PAPER_MODE, EXECUTION_MODE
+    is_paper = PAPER_MODE or (EXECUTION_MODE.lower() == "paper")
+    print("true" if is_paper else "false")
+except:
+    print("true")
 PYEOF
 )
 fi
@@ -208,7 +228,11 @@ if [ "$OPEN_TRADE_COUNT" -eq 0 ]; then
     ok "Açık trade yok — güvenle devam edilebilir"
 else
     echo ""
-    warn "${OPEN_TRADE_COUNT} açık trade tespit edildi:"
+    if [ "$IS_PAPER_MODE" = "true" ]; then
+        warn "${OPEN_TRADE_COUNT} açık paper trade tespit edildi (paper mode — piyasa riski yok):"
+    else
+        warn "${OPEN_TRADE_COUNT} açık CANLI trade tespit edildi — DİKKAT!"
+    fi
     echo ""
 
     # Açık tradeleri listele
@@ -249,8 +273,12 @@ PYEOF
     elif [ "$DRY_RUN" = true ]; then
         info "[DRY-RUN] Gerçek çalışmada kullanıcıya sorulacak"
         CLOSE_TRADES=false
+    elif [ "$IS_PAPER_MODE" = "true" ]; then
+        # BUG FIX #4: Paper modda otomatik kapat — piyasa riski yok, sormaya gerek yok
+        info "Paper mode tespit edildi — paper trade'ler otomatik kapatılıyor (piyasa riski yok)"
+        CLOSE_TRADES=true
     else
-        echo -en "  ${YELLOW}${BOLD}Güncelleme öncesi tüm açık trade'ler kapatılsın mı? (paper modda güvenlidir) [y/N]: ${NC}"
+        echo -en "  ${RED}${BOLD}⚠️  CANLI trade'ler mevcut! Güncelleme öncesi kapatılsın mı? [y/N]: ${NC}"
         read -r -t 30 REPLY || REPLY="n"
         echo ""
         [[ "$REPLY" =~ ^[Yy]$ ]] && CLOSE_TRADES=true || CLOSE_TRADES=false
@@ -295,10 +323,10 @@ for row in rows:
     side   = row[dir_col]   if dir_col   else "?"
     fee    = round(ep * qty * 0.0004 * 2, 6) if ep and qty else 0.0
 
-    # Direkt SQL ile güncelle — hiçbir custom import gerekmez
-    updates = {"status": "closed", "close_reason": "system_update",
-               "net_pnl": -fee, "closed_at": now}
-    if "close_price" in cols: updates["close_price"] = ep
+    # BUG FIX #3: 'CLOSED' uppercase — database.py convention ile uyumlu
+    updates = {"status": "CLOSED", "close_reason": "system_update",
+               "realized_pnl": -fee, "closed_at": now}
+    if "exit_price"  in cols: updates["exit_price"]  = ep
     if "total_fee"   in cols: updates["total_fee"]   = fee
 
     set_clause = ", ".join(f"{k}=?" for k in updates)
@@ -364,8 +392,10 @@ if [ "$DRY_RUN" = false ]; then
     LEFTOVER=$(pgrep -f "scalp_bot.py\|scalp_bot_v3.py\|app.py" 2>/dev/null || true)
     if [ -n "$LEFTOVER" ]; then
         warn "Arka planda kalan Python süreçleri kapatılıyor..."
-        pkill -f "scalp_bot.py"   2>/dev/null || true
+        pkill -f "scalp_bot.py"    2>/dev/null || true
         pkill -f "scalp_bot_v3.py" 2>/dev/null || true
+        # BUG FIX #6: app.py de öldürülmeli — dashboard eski process'i geride bırakıyor
+        pkill -f "app.py"          2>/dev/null || true
         sleep 2
         ok "Artık süreçler temizlendi"
     fi
@@ -632,7 +662,7 @@ try:
     pending = conn.execute("SELECT COUNT(*) FROM paper_results WHERE status='pending'").fetchone()[0]
     done    = conn.execute("SELECT COUNT(*) FROM paper_results WHERE status='completed'").fetchone()[0]
     wins    = conn.execute("SELECT COUNT(*) FROM paper_results WHERE would_have_won=1").fetchone()[0]
-    open_t  = conn.execute("SELECT COUNT(*) FROM trades WHERE status='open'").fetchone()[0]
+    open_t  = conn.execute("SELECT COUNT(*) FROM trades WHERE UPPER(status)='OPEN'").fetchone()[0]
     print(f"💹 Açık trade    : {open_t}")
     print(f"📊 Paper results : {total} toplam | {pending} pending | {done} completed")
     if done > 0:
