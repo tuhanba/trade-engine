@@ -19,6 +19,16 @@ logger = logging.getLogger("ax.dashboard_service")
 
 _telegram = None
 
+
+def _safe_call(fn, default, *args, **kwargs):
+    """Crash olmadan güvenli çağrı — exception'ı yakala, default döndür."""
+    try:
+        result = fn(*args, **kwargs)
+        return result if result is not None else default
+    except Exception as e:
+        logger.error(f"[Dashboard] {fn.__name__} hata: {e}")
+        return default
+
 def _get_telegram() -> TelegramDelivery:
     global _telegram
     if _telegram is None:
@@ -28,6 +38,10 @@ def _get_telegram() -> TelegramDelivery:
 
 def get_health() -> dict:
     """Sistem sağlık durumu."""
+    return _safe_call(_get_health_impl, {"ok": False, "error": "service_unavailable"})
+
+
+def _get_health_impl() -> dict:
     bot_status = database.get_bot_status()
     telegram = _get_telegram()
 
@@ -69,8 +83,12 @@ def get_health() -> dict:
     }
 
 
-def get_live_trades() -> list[dict]:
+def get_live_trades() -> list:
     """Açık trade'lerin detaylı listesi."""
+    return _safe_call(_get_live_trades_impl, [])
+
+
+def _get_live_trades_impl() -> list:
     trades = database.get_open_trades()
     result = []
     for t in trades:
@@ -116,7 +134,7 @@ def get_live_trades() -> list[dict]:
 
 def get_stats() -> dict:
     """Özet istatistikler (genişletilmiş)."""
-    return database.get_dashboard_stats()
+    return _safe_call(database.get_dashboard_stats, {})
 
 
 def get_trades(limit: int = 100) -> list[dict]:

@@ -188,6 +188,28 @@ def main():
     risk     = RiskEngine(client, db_path=DB_PATH)
     ai_engine = AIDecisionEngine(db_path=DB_PATH)
 
+    # Ghost learning — bağımsız thread (ana bot döngüsünden bağımsız)
+    _ghost_stop = threading.Event()
+
+    def _ghost_worker(binance_client, stop_event):
+        logger.info("[Ghost] Worker thread başladı")
+        while not stop_event.is_set():
+            try:
+                from core.ghost_learning import process_pending_results
+                process_pending_results(binance_client)
+            except Exception as _ge:
+                logger.warning(f"[Ghost] Worker hata: {_ge}")
+            stop_event.wait(timeout=120)   # 2 dakikada bir çalış
+        logger.info("[Ghost] Worker thread durdu")
+
+    _ghost_thread = threading.Thread(
+        target=_ghost_worker,
+        args=(client, _ghost_stop),
+        daemon=True,
+        name="ghost-worker",
+    )
+    _ghost_thread.start()
+
     # Telegram Manager (komut dinleyici)
     tg_manager = None
     if TG_MANAGER_AVAILABLE:
@@ -288,6 +310,14 @@ def main():
                         logger.debug(f"[AI] threshold update atlandı: {_tge}")
             except Exception as _pte:
                 logger.debug(f"[paper_tracker] atlandı: {_pte}")
+
+            # Diagnostics sayacı
+            try:
+                from core.signal_diagnostics import record_scan, log_hourly
+                record_scan()
+                log_hourly()
+            except Exception:
+                pass
 
             # ── ADIM 1: MARKET SCANNER ─────────────────────────────────────
             candidates = scanner.scan()

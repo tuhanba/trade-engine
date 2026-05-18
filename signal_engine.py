@@ -23,6 +23,7 @@ import pandas as pd
 from config import (
     SL_ATR_MULT, TP1_R, TP2_R, TP3_R, TRAIL_ATR_MULT,
     MIN_RR, MIN_EXPECTED_MFE_R,
+    MIN_BB_WIDTH, MIN_ADX_15M, FUNDING_LONG_MAX, FUNDING_SHORT_MIN,
 )
 from core.coin_library import get_coin_params
 
@@ -341,11 +342,12 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     bb_chg = bb_width_change(df15)
 
     # Coin profiline göre filtre eşikleri
-    min_bb  = coin_p.get("min_bb_width", 1.3)
-    min_adx = coin_p.get("min_adx", 20)
+    min_bb  = coin_p.get("min_bb_width", MIN_BB_WIDTH)
+    min_adx = coin_p.get("min_adx", MIN_ADX_15M)
 
     if bb_w < min_bb:
-        return NULL
+        logger.info(f"[Signal] {symbol} SKIP — bb_width={bb_w:.2f} < {min_bb}")
+        return {**NULL, "skip_reason": f"bb_too_narrow_{bb_w:.2f}"}
 
     trend_up15 = (
         e9_15.iloc[-1] > e21_15.iloc[-1] > e50_15.iloc[-1]
@@ -361,7 +363,8 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     )
 
     if not trend_up15 and not trend_dn15:
-        return NULL
+        logger.info(f"[Signal] {symbol} SKIP — trend_15m_fail adx={adx15:.1f}")
+        return {**NULL, "skip_reason": f"trend_15m_fail_adx{adx15:.1f}"}
 
     # ── 5m Giriş Sinyali ────────────────────────────────────────────────────
     df5 = get_candles(client, symbol, "5m", 150)
@@ -374,13 +377,14 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     atr5   = atr(df5, 14)
 
     if (atr5 / (c5 + 1e-10) * 100) < 0.03:
-        return NULL
+        return {**NULL, "skip_reason": "atr_too_low"}
 
     bull5 = trend_up15 and e9_5.iloc[-1] > e21_5.iloc[-1] > e50_5.iloc[-1] and 35 < rsi5 < 75
     bear5 = trend_dn15 and e9_5.iloc[-1] < e21_5.iloc[-1] < e50_5.iloc[-1] and 25 < rsi5 < 65
 
     if not bull5 and not bear5:
-        return NULL
+        logger.info(f"[Signal] {symbol} SKIP — trend_5m_fail rsi5={rsi5:.1f}")
+        return {**NULL, "skip_reason": f"trend_5m_fail_rsi{rsi5:.1f}"}
 
     # ── 1m Kesin Giriş ──────────────────────────────────────────────────────
     df1 = get_candles(client, symbol, "1m", 100)
@@ -396,9 +400,11 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
 
     # RSI 1m giriş onayı
     if bull5 and not (32 < rsi1 < 75):
-        return NULL
+        logger.info(f"[Signal] {symbol} SKIP — rsi_1m_fail (LONG) rsi1={rsi1:.1f}")
+        return {**NULL, "skip_reason": f"rsi_1m_fail_long_{rsi1:.1f}"}
     if bear5 and not (25 < rsi1 < 68):
-        return NULL
+        logger.info(f"[Signal] {symbol} SKIP — rsi_1m_fail (SHORT) rsi1={rsi1:.1f}")
+        return {**NULL, "skip_reason": f"rsi_1m_fail_short_{rsi1:.1f}"}
 
     # ── Yön Belirle ─────────────────────────────────────────────────────────
     if bull5:
@@ -410,10 +416,12 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
 
     # ── Funding Rate ─────────────────────────────────────────────────────────
     funding = get_funding_rate(client, symbol)
-    if direction == "LONG"  and funding >  0.001:
-        return NULL   # Longs ağır, olumsuz funding
-    if direction == "SHORT" and funding < -0.001:
-        return NULL
+    if direction == "LONG" and funding > FUNDING_LONG_MAX:
+        logger.info(f"[Signal] {symbol} SKIP — funding_too_high funding={funding:.4f}")
+        return {**NULL, "skip_reason": f"funding_too_high_{funding:.4f}"}
+    if direction == "SHORT" and funding < FUNDING_SHORT_MIN:
+        logger.info(f"[Signal] {symbol} SKIP — funding_too_low funding={funding:.4f}")
+        return {**NULL, "skip_reason": f"funding_too_low_{funding:.4f}"}
 
     # ── BTC Trend (bilgi amaçlı, ENGELLEME YOK) ─────────────────────────────
     btc_trend = get_btc_trend(client)
@@ -424,12 +432,14 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     levels = _calc_levels(direction, entry, atr1, coin_p)
 
     if levels["rr"] < MIN_RR:
-        return NULL
+        logger.info(f"[Signal] {symbol} SKIP — rr_too_low rr={levels['rr']:.2f}")
+        return {**NULL, "skip_reason": f"rr_too_low_{levels['rr']:.2f}"}
 
     # ── MFE Tahmini ─────────────────────────────────────────────────────────
     expected_mfe_r = _estimate_mfe_r(bb_w, adx15, mom3c, direction, coin_p)
     if expected_mfe_r < MIN_EXPECTED_MFE_R:
-        return NULL
+        logger.info(f"[Signal] {symbol} SKIP — mfe_too_low mfe={expected_mfe_r:.2f}")
+        return {**NULL, "skip_reason": f"mfe_too_low_{expected_mfe_r:.2f}"}
 
     # ── Skor Hesapla ─────────────────────────────────────────────────────────
     score, confidence = _calc_score(adx15, bb_w, bb_chg, rv, mom3c, direction, rsi5, rsi1)

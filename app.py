@@ -254,8 +254,13 @@ def api_logs():
     for path in LOG_PATHS:
         if os.path.exists(path):
             try:
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    raw_lines = f.readlines()[-n:]
+                with open(path, "rb") as _f:
+                    _f.seek(0, 2)
+                    _fsize = _f.tell()
+                    _read = min(100_000, _fsize)
+                    _f.seek(-_read, 2)
+                    _raw = _f.read().decode("utf-8", errors="replace")
+                raw_lines = _raw.splitlines()[-n:]
                 for raw in raw_lines:
                     raw = raw.rstrip("\n")
                     level = "INFO"
@@ -611,6 +616,7 @@ def stream():
     Dashboard bu endpoint'e bağlanır, her 5sn'de güncelleme alır.
     """
     def event_generator():
+        consecutive_errors = 0
         while True:
             try:
                 payload = {
@@ -621,12 +627,21 @@ def stream():
                     "signals": dashboard_service.get_signals(20),
                     "ts": datetime.now(timezone.utc).isoformat(),
                 }
-                data = json.dumps(payload)
-                yield f"data: {data}\n\n"
+                yield f"data: {json.dumps(payload)}\n\n"
+                consecutive_errors = 0
+                time.sleep(5)
+            except GeneratorExit:
+                break
             except Exception as exc:
-                logger.error("SSE stream hatası: %s", exc)
-                yield f"data: {json.dumps({'error': str(exc)})}\n\n"
-            time.sleep(5)
+                consecutive_errors += 1
+                logger.warning(f"[SSE] Stream hata #{consecutive_errors}: {exc}")
+                try:
+                    yield f"data: {json.dumps({'error': str(exc), 'ts': int(time.time())})}\n\n"
+                except Exception:
+                    break
+                if consecutive_errors >= 5:
+                    break
+                time.sleep(5)
 
     return Response(
         stream_with_context(event_generator()),
@@ -637,6 +652,16 @@ def stream():
             "Connection": "keep-alive",
         },
     )
+
+
+# ── /api/diagnostics ────────────────────────────────────────────────────────
+@app.route("/api/diagnostics")
+def api_diagnostics():
+    try:
+        from core.signal_diagnostics import get_summary
+        return jsonify({"ok": True, "data": get_summary()})
+    except Exception as e:
+        return _error(str(e))
 
 
 # ── /api/ghost-stats ────────────────────────────────────────────────────────

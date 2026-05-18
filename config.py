@@ -92,11 +92,11 @@ WATCHLIST_MIN_SCAN_SCORE = _env_float("WATCHLIST_MIN_SCAN_SCORE", 50.0)
 MAX_COINS_PER_SCAN_LOOP  = _env_int("MAX_COINS_PER_SCAN_LOOP", 30)
 MAX_DAILY_SIGNALS        = _env_int("MAX_DAILY_SIGNALS", 60)
 
-# Sinyal Esikleri
-DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 50.0)
-WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 55.0)
-TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 62.0)
-TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 62.0)
+# Sinyal Esikleri (v9.0 — gevşetilmiş, score max ~75 üretiyor)
+DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 45.0)
+WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 50.0)
+TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 60.0)
+TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 58.0)
 
 # Circuit Breaker
 CIRCUIT_BREAKER_LOSSES  = _env_int("CIRCUIT_BREAKER_LOSSES", 3)
@@ -114,7 +114,14 @@ BAD_HOURS_UTC              = [4, 5, 6, 11, 12, 13]
 GOOD_HOURS_UTC             = [0, 1, 2, 3, 7, 8, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
 SHORT_REQUIRES_BTC_BEARISH = True
 BTC_TREND_INTERVAL         = "4h"
-ADX_MIN_THRESHOLD          = 20
+ADX_MIN_THRESHOLD          = 18  # eskiden 20
+
+# Scalp Filtreler (v9.0 — gevşetilmiş)
+MIN_BB_WIDTH    = _env_float("MIN_BB_WIDTH", 1.0)      # eskiden 1.3
+MIN_ADX_15M     = _env_float("MIN_ADX_15M", 18)        # eskiden 20
+MIN_ADX_5M      = _env_float("MIN_ADX_5M", 13)         # eskiden 15
+FUNDING_LONG_MAX  = _env_float("FUNDING_LONG_MAX", 0.003)   # eskiden 0.001
+FUNDING_SHORT_MIN = _env_float("FUNDING_SHORT_MIN", -0.003)  # eskiden -0.001
 
 # Flask
 FLASK_HOST = _env("FLASK_HOST", "0.0.0.0")
