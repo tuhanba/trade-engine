@@ -31,7 +31,13 @@ try:
     from database import open_db as _open_db
 except Exception:
     def _open_db(db_path=None, timeout=15):  # type: ignore[misc]
-        conn = sqlite3.connect(db_path or "trading.db", timeout=timeout)
+        if db_path is None:
+            try:
+                import config as _cfg
+                db_path = _cfg.DB_PATH
+            except Exception:
+                db_path = "trading.db"
+        conn = sqlite3.connect(db_path, timeout=timeout)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
@@ -76,8 +82,12 @@ except Exception:
 # ── AIDecisionEngine ─────────────────────────────────────────────────
 
 class AIDecisionEngine:
-    def __init__(self, db_path="trade_engine.db"):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        try:
+            import config as _cfg
+            self.db_path = db_path or _cfg.DB_PATH
+        except Exception:
+            self.db_path = db_path or "trading.db"
         self.daily_signals = 0
         self.max_daily_signals = 40  # Backtest: kalite > miktar
         self.recent_coins = []

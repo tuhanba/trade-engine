@@ -161,6 +161,15 @@ def activate_circuit_breaker():
 # ANA DÖNGÜ
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
+    # ── Duplicate process koruması ─────────────────────────────────────
+    import fcntl as _fcntl
+    _lock_file = open("/tmp/aurvex_bot.lock", "w")
+    try:
+        _fcntl.flock(_lock_file, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+    except BlockingIOError:
+        logger.error("HATA: scalp_bot zaten çalışıyor! Çift process engellendi.")
+        import sys; sys.exit(1)
+    # ─────────────────────────────────────────────────────────────────
     logger.info("=== AX Scalp Engine v2.0 başlatılıyor ===")
 
     # DB ve hesap başlat
