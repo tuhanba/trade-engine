@@ -325,6 +325,20 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
         </div>
       </div>
     </div>
+    <div class="sec" style="margin:0">
+      <div class="sh"><div class="st"><div class="st-rule" style="background:var(--am)"></div><div class="st-txt">Ghost Intelligence</div></div></div>
+      <div class="panel panel-p" id="ghost-intel-panel">
+        <div class="grow" style="flex-wrap:wrap;gap:6px">
+          <div class="gc"><div class="gc-v" id="gi-accuracy">—</div><div class="gc-l">Dogruluk</div></div>
+          <div class="gc"><div class="gc-v" id="gi-total">—</div><div class="gc-l">Toplam</div></div>
+          <div class="gc"><div class="gc-v" id="gi-weight">—</div><div class="gc-l">Din. Agirlik</div></div>
+          <div class="gc"><div class="gc-v" id="gi-mfe">—</div><div class="gc-l">Ort. MFE</div></div>
+          <div class="gc"><div class="gc-v" id="gi-mae">—</div><div class="gc-l">Ort. MAE</div></div>
+        </div>
+        <div style="margin-top:8px;font-size:10px;color:var(--dim)" id="gi-top-coins">—</div>
+        <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap" id="gi-weekly-bars"></div>
+      </div>
+    </div>
   </div>
   <div class="sec">
     <div class="sh">
@@ -458,6 +472,32 @@ async function fSigs(){
 async function fChart(){
   try{const list=(await(await fetch('/api/trades')).json()).data||[];const ts=list.filter(t=>t.realized_pnl!==undefined&&t.closed_at).slice(0,50).reverse();if(!chart)return;let cum=0;const lbls=[],data=[];if(!ts.length){lbls.push('—');data.push(0)}else ts.forEach(t=>{cum+=N(t.realized_pnl);lbls.push(fT(t.closed_at));data.push(+cum.toFixed(4))});chart.data.labels=lbls;chart.data.datasets[0].data=data;const last=data[data.length-1]||0;const c=last>=0?'#C8942A':'#FF2D55',bg=last>=0?'rgba(200,148,42,.06)':'rgba(255,45,85,.06)';chart.data.datasets[0].borderColor=c;chart.data.datasets[0].backgroundColor=bg;chart.update('none');}catch(e){console.warn(e)}
 }
+async function fGhostStats(){
+  try{
+    const d=(await(await fetch('/api/ghost-stats')).json());
+    if(!d.ok)return;
+    $('gi-accuracy').textContent=`${d.accuracy_pct}%`;
+    $('gi-total').textContent=d.total||0;
+    $('gi-weight').textContent=d.dynamic_weight||'—';
+    $('gi-mfe').textContent=d.avg_mfe_r?`${d.avg_mfe_r}R`:'—';
+    $('gi-mae').textContent=d.avg_mae_r?`${d.avg_mae_r}R`:'—';
+    const topCoins=(d.top_correct_skips||[]).map(c=>`${c.symbol}(${c.accuracy}%)`).join(', ');
+    $('gi-top-coins').textContent=topCoins?'Top correct skips: '+topCoins:'Henuz veri yok';
+    const bars=(d.weekly||[]).map(w=>{
+      const total=(w.wins||0)+(w.losses||0);
+      const wr=total>0?Math.round(w.wins/total*100):0;
+      const col=wr>=60?'#C8942A':wr>=40?'#E8B84B':'#FF2D55';
+      return`<div title="${w.day} W:${w.wins} L:${w.losses}" style="display:flex;flex-direction:column;align-items:center;gap:2px;cursor:default">
+        <div style="font-size:8px;color:var(--dim)">${(w.day||'').slice(5)}</div>
+        <div style="width:18px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden;height:32px;display:flex;flex-direction:column-reverse">
+          <div style="background:${col};width:100%;height:${wr}%;transition:height .4s"></div>
+        </div>
+        <div style="font-size:8px;color:${col}">${wr}%</div>
+      </div>`;
+    }).join('');
+    $('gi-weekly-bars').innerHTML=bars||'<span style="font-size:10px;color:var(--dim)">Bu hafta veri yok</span>';
+  }catch(e){console.warn('ghost-stats:',e)}
+}
 async function fetchLogs(){
   try{const d=(await(await fetch('/api/logs?n=60')).json()).data||{};const lines=d.lines||[];const box=$('logbox');if(!lines.length){box.innerHTML='<div class="ll">Log bulunamadı.</div>';return}box.innerHTML=lines.map(l=>{let c='';if(/ERROR|CRITICAL|Exception|Traceback/i.test(l))c='e';else if(/WARNING|WARN/i.test(l))c='w';else if(/TRADE ACILDI|TP1|TP2|WIN|LOSS|KAPANDI|ALLOW/i.test(l))c='ok';return`<div class="ll ${c}">${esc(l)}</div>`;}).join('');box.scrollTop=box.scrollHeight;}catch{$('logbox').innerHTML='<div class="ll e">Log yüklenemedi.</div>'}
 }
@@ -466,11 +506,12 @@ function connectSSE(){
 }
 async function init(){
   initChart();
-  await Promise.all([fHealth(),fStats(),fLearn()]);
+  await Promise.all([fHealth(),fStats(),fLearn(),fGhostStats()]);
   await Promise.all([fLive(),fTrades(),fSigs(),fChart()]);
   fetchLogs();connectSSE();
 }
 setInterval(async()=>{await Promise.all([fHealth(),fStats(),fLearn()]);await Promise.all([fLive(),fTrades(),fSigs(),fChart()]);fetchLogs();},8000);
+setInterval(fGhostStats,60000);
 init().catch(console.error);
 </script>
 </body>

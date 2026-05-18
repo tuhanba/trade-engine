@@ -272,6 +272,11 @@ def main():
                 done_p = process_pending_paper_results(client, limit=30)
                 if done_p:
                     logger.info(f"[paper_tracker] finalize {done_p} satır tamamlandı")
+                    # Ghost sonuçlarına göre TRADE_THRESHOLD'u adaptif güncelle
+                    try:
+                        ai_engine._update_threshold_from_ghost()
+                    except Exception as _tge:
+                        logger.debug(f"[AI] threshold update atlandı: {_tge}")
             except Exception as _pte:
                 logger.debug(f"[paper_tracker] atlandı: {_pte}")
 

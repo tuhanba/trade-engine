@@ -16,7 +16,12 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-GHOST_WEIGHT    = 0.30   # Ghost sonuçların gerçek trade'lere oranı
+try:
+    from config import GHOST_WEIGHT as _GHOST_WEIGHT_FLOOR
+except Exception:
+    _GHOST_WEIGHT_FLOOR = 0.15
+
+GHOST_WEIGHT    = _GHOST_WEIGHT_FLOOR   # floor; calculate_dynamic_ghost_weight() için referans
 HORIZON_MINUTES = 480    # 8 saat — sinyal takip süresi
 EXPIRY_HOURS    = 12     # Bu süreden uzun bekleyen sinyaller EXPIRED olur
 
@@ -86,6 +91,24 @@ def process_pending_results(client):
         logger.error(f"[Ghost] process_pending_results hatası: {e}")
 
 
+def _calc_excursions(entry: float, sl: float, current_price: float, is_long: bool) -> tuple[float, float]:
+    """
+    R cinsinden MFE ve MAE hesapla.
+    MFE = max favorable excursion (kazanılan taraf)
+    MAE = max adverse excursion (kaybedilen taraf)
+    """
+    risk = abs(entry - sl)
+    if risk <= 0:
+        return 0.0, 0.0
+    if is_long:
+        mfe = max(0.0, (current_price - entry) / risk)
+        mae = max(0.0, (entry - current_price) / risk)
+    else:
+        mfe = max(0.0, (entry - current_price) / risk)
+        mae = max(0.0, (current_price - entry) / risk)
+    return round(mfe, 4), round(mae, 4)
+
+
 def _process_single(record: dict, client, now: datetime):
     """Tek bir paper_result kaydını işle."""
     from database import update_paper_result
@@ -136,6 +159,13 @@ def _process_single(record: dict, client, now: datetime):
     tp1_hit = (is_long and current_price >= tp1) or (not is_long and current_price <= tp1)
     sl_hit  = (is_long and current_price <= sl)  or (not is_long and current_price >= sl)
 
+    # MFE/MAE hesapla ve kayıtta kayıtlı değerlerle karşılaştır
+    cur_mfe, cur_mae = _calc_excursions(entry, sl, current_price, is_long)
+    prev_mfe = float(record.get("max_favorable_excursion") or 0)
+    prev_mae = float(record.get("max_adverse_excursion") or 0)
+    new_mfe  = max(prev_mfe, cur_mfe)
+    new_mae  = max(prev_mae, cur_mae)
+
     if tp1_hit:
         update_paper_result(record_id, {
             "status":                "finalized",
@@ -145,8 +175,11 @@ def _process_single(record: dict, client, now: datetime):
             "setup_worked":          1,
             "would_have_won":        1,
             "skip_decision_correct": 0,  # Geçilseydi kâr ederdi
+            "max_favorable_excursion": new_mfe,
+            "max_adverse_excursion":   new_mae,
+            "first_touch":           "tp1",
         })
-        logger.info(f"[Ghost] #{record_id} {symbol} GHOST_WIN (TP1 ulaşıldı)")
+        logger.info(f"[Ghost] #{record_id} {symbol} GHOST_WIN (TP1 ulaşıldı) MFE={new_mfe:.2f}R MAE={new_mae:.2f}R")
 
     elif sl_hit:
         update_paper_result(record_id, {
@@ -157,8 +190,19 @@ def _process_single(record: dict, client, now: datetime):
             "setup_worked":          0,
             "would_have_won":        0,
             "skip_decision_correct": 1,  # Geçilmesi doğruydu
+            "max_favorable_excursion": new_mfe,
+            "max_adverse_excursion":   new_mae,
+            "first_touch":           "stop",
         })
-        logger.info(f"[Ghost] #{record_id} {symbol} GHOST_LOSS (SL vuruldu)")
+        logger.info(f"[Ghost] #{record_id} {symbol} GHOST_LOSS (SL vuruldu) MFE={new_mfe:.2f}R MAE={new_mae:.2f}R")
+
+    else:
+        # Henüz sonuçlanmadı — sadece MFE/MAE güncelle (değer artışı varsa)
+        if new_mfe > prev_mfe or new_mae > prev_mae:
+            update_paper_result(record_id, {
+                "max_favorable_excursion": new_mfe,
+                "max_adverse_excursion":   new_mae,
+            })
 
 
 def _get_price(client, symbol: str) -> float:
@@ -172,10 +216,42 @@ def _get_price(client, symbol: str) -> float:
     return 0.0
 
 
+def calculate_dynamic_ghost_weight() -> float:
+    """
+    Ghost learning doğruluğuna göre adaptif ağırlık hesapla.
+    _GHOST_WEIGHT_FLOOR config'den minimum sınır olarak gelir.
+    """
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            row = conn.execute("""
+                SELECT COUNT(*) as total,
+                       SUM(CASE WHEN skip_decision_correct=1 THEN 1 ELSE 0 END) as correct_skips
+                FROM paper_results WHERE status='finalized'
+            """).fetchone()
+
+        total   = row[0] or 0 if row else 0
+        correct = row[1] or 0 if row else 0
+
+        if total < 10:
+            return _GHOST_WEIGHT_FLOOR
+
+        accuracy = correct / total
+        if accuracy > 0.70:
+            return 0.45
+        if accuracy > 0.55:
+            return 0.30
+        if accuracy > 0.40:
+            return 0.20
+        return max(_GHOST_WEIGHT_FLOOR, 0.15)
+    except Exception:
+        return _GHOST_WEIGHT_FLOOR
+
+
 def get_ghost_learning_stats() -> dict:
     """
     Ghost learning istatistiklerini döndür.
-    AI karar motorunun coin profil hesabında kullanılır.
+    AI karar motorunun coin profil hesabında kullanılir.
     """
     try:
         from database import get_conn
@@ -205,6 +281,7 @@ def get_ghost_learning_stats() -> dict:
             "avg_mfe":        round(float(row[4] or 0), 4),
             "avg_mae":        round(float(row[5] or 0), 4),
             "weight":         GHOST_WEIGHT,
+            "dynamic_weight": calculate_dynamic_ghost_weight(),
         }
     except Exception as e:
         logger.error(f"[Ghost] get_ghost_learning_stats hatası: {e}")
