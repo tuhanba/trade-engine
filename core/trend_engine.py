@@ -124,6 +124,34 @@ class TrendEngine:
             logger.debug(f"4H trend hata {symbol}: {e}")
             return "NEUTRAL"
 
+    def get_1h_trend(self, symbol: str) -> str:
+        """Sembol 1H trend. Cache: 4h cache ile paylaşımlı slot kullanır."""
+        cache_key = f"1h_{symbol}"
+        now = time.time()
+        if cache_key in self._4h_cache:
+            trend, ts = self._4h_cache[cache_key]
+            if now - ts < self._4H_TTL:
+                return trend
+        try:
+            df1h = self.get_candles(symbol, "1h", 60)
+            if df1h.empty or len(df1h) < 30:
+                return "NEUTRAL"
+            e21 = self._ema(df1h["close"], 21)
+            e55 = self._ema(df1h["close"], 55)
+            adx_v, pdi, mdi = self._adx(df1h)
+            c = df1h["close"].iloc[-1]
+            if e21.iloc[-1] > e55.iloc[-1] and c > e21.iloc[-1] and adx_v > 15 and pdi > mdi:
+                trend = "BULLISH"
+            elif e21.iloc[-1] < e55.iloc[-1] and c < e21.iloc[-1] and adx_v > 15 and mdi > pdi:
+                trend = "BEARISH"
+            else:
+                trend = "NEUTRAL"
+            self._4h_cache[cache_key] = (trend, now)
+            return trend
+        except Exception as e:
+            logger.debug(f"1H trend hata {symbol}: {e}")
+            return "NEUTRAL"
+
     def analyze(self, symbol: str) -> dict:
         """Trend analizi yapar ve yön/skor döner."""
         df15 = self.get_candles(symbol, "15m", 100)
@@ -189,28 +217,42 @@ class TrendEngine:
         if bb_chg > 0.5: score += 2.0
         elif bb_chg > 0.2: score += 1.0
 
-        # BTC ve 4H Trend Onayı
+        # BTC, 4H ve 1H Trend Onayı
         btc_trend = self.get_btc_trend()
-        trend_4h = self.get_4h_trend(symbol)
-        
+        trend_4h  = self.get_4h_trend(symbol)
+        trend_1h  = self.get_1h_trend(symbol)
+
         if direction == "LONG" and btc_trend == "BULLISH": score += 1.0
         if direction == "SHORT" and btc_trend == "BEARISH": score += 1.0
-        
+
         if direction == "LONG" and trend_4h == "BULLISH": score += 1.0
         if direction == "SHORT" and trend_4h == "BEARISH": score += 1.0
+
+        if direction == "LONG" and trend_1h == "BULLISH": score += 1.0
+        if direction == "SHORT" and trend_1h == "BEARISH": score += 1.0
+
+        # Confluence: 15m(this function) + 1h + 4h — kaç TF yönü onaylıyor?
+        # 5m trigger_engine tarafından eklenir → toplam 4 TF
+        confluence_raw = 1  # 15m zaten doğrulandı (trend_up / trend_dn geçti)
+        if (direction == "LONG" and trend_1h == "BULLISH") or (direction == "SHORT" and trend_1h == "BEARISH"):
+            confluence_raw += 1
+        if (direction == "LONG" and trend_4h == "BULLISH") or (direction == "SHORT" and trend_4h == "BEARISH"):
+            confluence_raw += 1
 
         try:
             adx_val = float(adx_v) if adx_v is not None else 0.0
             if np.isnan(adx_val): adx_val = 0.0
-        except:
+        except Exception:
             adx_val = 0.0
 
         return {
-            "direction": direction,
-            "score": min(10.0, score),
-            "adx15": round(adx_val, 1),
-            "bb_width": bb_w,
-            "bb_width_chg": bb_chg,
-            "btc_trend": btc_trend,
-            "trend_4h": trend_4h
+            "direction":       direction,
+            "score":           min(10.0, score),
+            "adx15":           round(adx_val, 1),
+            "bb_width":        bb_w,
+            "bb_width_chg":    bb_chg,
+            "btc_trend":       btc_trend,
+            "trend_4h":        trend_4h,
+            "trend_1h":        trend_1h,
+            "confluence_raw":  confluence_raw,   # 1-3 (15m/1h/4h); trigger_engine 5m ekler → 1-4
         }

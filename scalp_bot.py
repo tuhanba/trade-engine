@@ -364,7 +364,12 @@ def main():
                     save_signal_event(signal_id, "TREND_CHECKED", symbol=symbol, reason="trend_pass")
 
                     # ── ADIM 3: TRIGGER ENGINE ─────────────────────────────
-                    trigger_result = trigger.analyze(symbol, trend_result["direction"], trend_result.get("btc_trend", "NEUTRAL"))
+                    trigger_result = trigger.analyze(
+                        symbol,
+                        trend_result["direction"],
+                        trend_result.get("btc_trend", "NEUTRAL"),
+                        trend_confluence=trend_result.get("confluence_raw", 1),
+                    )
                     if trigger_result["quality"] == "D":
                         save_signal_event(signal_id, "REJECTED", symbol=symbol, reject_reason="weak_trigger", reason="trigger_quality_d")
                         if event_manager: event_manager.broadcast_signal_rejected(symbol, trend_result["direction"], "weak_trigger")
@@ -713,6 +718,17 @@ def main():
                             "score": sig.final_score,
                             "confidence": sig.confidence,
                             "candidate_id": candidate_id,
+                            # ML training features — live_tracker.record_close() okur
+                            "adx":              trigger_result.get("adx", 0),
+                            "rv":               trigger_result.get("rv", 0),
+                            "rsi5":             trigger_result.get("rsi5", 50),
+                            "rsi1":             trigger_result.get("rsi1", 50),
+                            "btc_trend":        trend_result.get("btc_trend", "NEUTRAL"),
+                            "bb_width_pct":     trend_result.get("bb_width", 0),
+                            "bb_width_chg":     trend_result.get("bb_width_chg", 0),
+                            "momentum_3c":      trigger_result.get("momentum_3c", 0),
+                            "funding_favorable": 1,
+                            "ml_score":         trigger_result.get("ml_score", 50),
                         }
                         ax_result = {
                             "decision": "ALLOW",
