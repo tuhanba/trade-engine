@@ -219,7 +219,8 @@ def main():
         except Exception as e:
             logger.warning(f"TelegramManager başlatılamadı: {e}")
 
-    _last_ai_adapt = 0  # AI Brain periyodik adaptasyon (30 dakikada bir)
+    _last_ai_adapt    = 0   # AI Brain periyodik adaptasyon (30 dakikada bir)
+    _last_nightly_day = ""  # Nightly optimizer son çalışma günü (YYYY-MM-DD)
     send_message(
         f"🚀 <b>AX Scalp Engine v2.0 başlatıldı</b>\n"
         f"Mod: {AX_MODE.upper()} | {EXECUTION_MODE.upper()}\n"
@@ -731,6 +732,21 @@ def main():
                     logger.info("[AI Brain] Periyodik adaptasyon baslatildi.")
                 except Exception as _ae:
                     logger.warning(f"AI Brain adaptasyon hatasi: {_ae}")
+
+            # ── Nightly Per-Coin Optimizer (03:00 UTC) ──────────────────────
+            if AI_BRAIN_AVAILABLE:
+                _utc_now = datetime.now(timezone.utc)
+                _today   = _utc_now.strftime("%Y-%m-%d")
+                if _utc_now.hour == 3 and _today != _last_nightly_day:
+                    _last_nightly_day = _today
+                    def _run_nightly():
+                        try:
+                            from ai_brain import nightly_optimize_coins
+                            nightly_optimize_coins(tg_fn=send_message)
+                        except Exception as _ne:
+                            logger.warning(f"[NightlyOpt] Hata: {_ne}")
+                    threading.Thread(target=_run_nightly, daemon=True).start()
+                    logger.info("[NightlyOpt] Per-coin optimizer baslatildi (%s).", _today)
 
         except KeyboardInterrupt:
             logger.info("Bot durduruldu (KeyboardInterrupt).")
