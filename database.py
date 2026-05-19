@@ -243,14 +243,23 @@ CREATE TABLE IF NOT EXISTS coin_configs (
 _GHOST_SIGNALS_DDL = """
 CREATE TABLE IF NOT EXISTS ghost_signals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    coin            TEXT NOT NULL,
-    side            TEXT NOT NULL,
-    entry_price     REAL NOT NULL,
-    stop_loss       REAL NOT NULL,
-    take_profit     REAL NOT NULL,
-    confidence      REAL DEFAULT 0,
+    candidate_id    INTEGER,
+    symbol          TEXT DEFAULT '',
+    direction       TEXT DEFAULT '',
+    entry_price     REAL DEFAULT 0,
+    stop_loss       REAL DEFAULT 0,
+    tp1             REAL DEFAULT 0,
+    tp2             REAL DEFAULT 0,
+    tp3             REAL DEFAULT 0,
+    atr             REAL DEFAULT 0,
+    final_score     REAL DEFAULT 0,
     reject_reason   TEXT DEFAULT '',
-    trigger_type    TEXT DEFAULT 'unknown',
+    trigger_type    TEXT DEFAULT 'UNKNOWN',
+    market_regime   TEXT DEFAULT 'NEUTRAL',
+    coin            TEXT DEFAULT '',
+    side            TEXT DEFAULT '',
+    take_profit     REAL DEFAULT 0,
+    confidence      REAL DEFAULT 0,
     simulated       INTEGER DEFAULT 0,
     created_at      TEXT DEFAULT (datetime('now'))
 )
@@ -260,11 +269,12 @@ _GHOST_RESULTS_DDL = """
 CREATE TABLE IF NOT EXISTS ghost_results (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     ghost_id        INTEGER NOT NULL,
-    virtual_outcome TEXT NOT NULL,
+    virtual_outcome TEXT DEFAULT 'OPEN',
     virtual_pnl_r   REAL DEFAULT 0,
     virtual_mfe     REAL DEFAULT 0,
     virtual_mae     REAL DEFAULT 0,
     bars_held       INTEGER DEFAULT 0,
+    exit_price      REAL DEFAULT 0,
     pattern_type    TEXT DEFAULT '',
     simulated_at    TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (ghost_id) REFERENCES ghost_signals(id)
@@ -283,6 +293,22 @@ CREATE TABLE IF NOT EXISTS ghost_threshold_suggestions (
     confidence      TEXT DEFAULT 'MEDIUM',
     applied         INTEGER DEFAULT 0,
     created_at      TEXT DEFAULT (datetime('now'))
+)
+"""
+
+_GHOST_SUGGESTIONS_DDL = """
+CREATE TABLE IF NOT EXISTS ghost_suggestions (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol              TEXT NOT NULL,
+    trigger_type        TEXT NOT NULL,
+    current_threshold   REAL DEFAULT 0,
+    suggested_threshold REAL DEFAULT 0,
+    virtual_wr          REAL DEFAULT 0,
+    avg_virtual_r       REAL DEFAULT 0,
+    sample_count        INTEGER DEFAULT 0,
+    confidence          TEXT DEFAULT 'LOW',
+    applied             INTEGER DEFAULT 0,
+    created_at          TEXT DEFAULT (datetime('now'))
 )
 """
 
@@ -332,6 +358,20 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("ghost_pnl", "REAL DEFAULT 0"),
         ("metadata", "TEXT DEFAULT '{}'"),
     ],
+    "ghost_signals": [
+        ("candidate_id",  "INTEGER"),
+        ("symbol",        "TEXT DEFAULT ''"),
+        ("direction",     "TEXT DEFAULT ''"),
+        ("tp1",           "REAL DEFAULT 0"),
+        ("tp2",           "REAL DEFAULT 0"),
+        ("tp3",           "REAL DEFAULT 0"),
+        ("atr",           "REAL DEFAULT 0"),
+        ("final_score",   "REAL DEFAULT 0"),
+        ("market_regime", "TEXT DEFAULT 'NEUTRAL'"),
+    ],
+    "ghost_results": [
+        ("exit_price", "REAL DEFAULT 0"),
+    ],
 }
 
 
@@ -376,6 +416,7 @@ def init_db() -> None:
         conn.execute(_GHOST_SIGNALS_DDL)
         conn.execute(_GHOST_RESULTS_DDL)
         conn.execute(_GHOST_THRESHOLD_SUGGESTIONS_DDL)
+        conn.execute(_GHOST_SUGGESTIONS_DDL)
         from config import INITIAL_PAPER_BALANCE
         conn.execute(
             "INSERT OR IGNORE INTO paper_account (id, balance) VALUES (1, ?)",
@@ -395,6 +436,7 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_signals_created ON signal_candidates(created_at)"
         )
+        init_ghost_tables()   # Ghost Learning 2.0
         conn.commit()
         logger.info("DB tabloları hazır: %s", config.DB_PATH)
     finally:
@@ -1856,6 +1898,64 @@ def save_signal_event(signal_id, event_type: str, **kwargs):
             )
     except Exception as e:
         logger.debug(f"save_signal_event: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GHOST LEARNING 2.0 — DB yardımcıları
+# ─────────────────────────────────────────────────────────────────────────────
+
+def init_ghost_tables() -> None:
+    """Ghost Learning 2.0 tablolarını ve indekslerini oluşturur."""
+    ddls = [
+        _GHOST_SIGNALS_DDL,
+        _GHOST_RESULTS_DDL,
+        _GHOST_SUGGESTIONS_DDL,
+        "CREATE INDEX IF NOT EXISTS idx_ghost_signals_simulated ON ghost_signals(simulated)",
+        "CREATE INDEX IF NOT EXISTS idx_ghost_signals_symbol ON ghost_signals(symbol)",
+        "CREATE INDEX IF NOT EXISTS idx_ghost_results_ghost_id ON ghost_results(ghost_id)",
+    ]
+    with get_conn() as conn:
+        for ddl in ddls:
+            conn.execute(ddl)
+    logger.info("[DB] Ghost Learning 2.0 tabloları hazır.")
+
+
+def get_ghost_stats() -> dict:
+    """Dashboard için ghost learning özet istatistikleri."""
+    try:
+        with get_conn() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM ghost_signals"
+            ).fetchone()[0]
+            pending = conn.execute(
+                "SELECT COUNT(*) FROM ghost_signals WHERE simulated=0"
+            ).fetchone()[0]
+            wins = conn.execute(
+                "SELECT COUNT(*) FROM ghost_results WHERE virtual_outcome='WIN'"
+            ).fetchone()[0]
+            losses = conn.execute(
+                "SELECT COUNT(*) FROM ghost_results WHERE virtual_outcome='LOSS'"
+            ).fetchone()[0]
+            avg_r_row = conn.execute(
+                "SELECT AVG(virtual_pnl_r) FROM ghost_results WHERE virtual_outcome IN ('WIN','LOSS')"
+            ).fetchone()
+            avg_r = float(avg_r_row[0]) if avg_r_row and avg_r_row[0] else 0.0
+            vwr = wins * 100 / (wins + losses) if (wins + losses) > 0 else 0.0
+            return {
+                "ghost_total": total,
+                "ghost_pending": pending,
+                "ghost_wins": wins,
+                "ghost_losses": losses,
+                "ghost_virtual_wr": round(vwr, 1),
+                "ghost_avg_r": round(avg_r, 3),
+            }
+    except Exception as exc:
+        logger.warning("[DB] get_ghost_stats: %s", exc)
+        return {
+            "ghost_total": 0, "ghost_pending": 0,
+            "ghost_wins": 0, "ghost_losses": 0,
+            "ghost_virtual_wr": 0, "ghost_avg_r": 0,
+        }
 
 
 def update_candidate_status(candidate_id: int, **kwargs):
