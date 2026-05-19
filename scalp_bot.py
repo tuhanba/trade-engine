@@ -255,7 +255,7 @@ def main():
                 today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 with get_conn() as _conn:
                     _row = _conn.execute(
-                        "SELECT COALESCE(SUM(net_pnl),0) FROM trades WHERE DATE(close_time)=? AND status='CLOSED'",
+                        "SELECT COALESCE(SUM(net_pnl),0) FROM trades WHERE DATE(close_time)=? AND status='closed'",
                         (today_str,)
                     ).fetchone()
                 today_loss = float(_row[0] or 0.0)

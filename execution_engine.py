@@ -220,7 +220,7 @@ class ExecutionEngine:
         # Telegram
         self.telegram.send_message(
             f"🔀 <b>Partial Close</b>\n"
-            f"#{trade_id} {symbol} {trade['side']}\n"
+            f"#{trade_id} {symbol} {trade.get('direction') or trade.get('side', '?')}\n"
             f"Reason: {result.reason}\n"
             f"Close: {result.close_pct:.0f}%  @ ${current_price:.4f}\n"
             f"PnL: ${partial_pnl:+.4f}\n"
@@ -272,13 +272,13 @@ class ExecutionEngine:
 
         logger.info(
             "Trade kapatıldı: #%s %s %s → %s  PnL=%.4f (accumulated=%.4f + remaining=%.4f)",
-            trade["id"], trade["symbol"], trade["side"], reason,
+            trade["id"], trade["symbol"], trade.get("direction") or trade.get("side", "?"), reason,
             total_pnl, accumulated, remaining_pnl,
         )
 
         self.telegram.send_trade_close({
             "symbol": trade["symbol"],
-            "side": trade["side"],
+            "side": trade.get("direction") or trade.get("side", ""),
             "exit_price": exit_price,
             "realized_pnl": total_pnl,
             "close_reason": reason,

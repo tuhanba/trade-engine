@@ -794,7 +794,7 @@ def api_equity_curve():
                 SELECT DATE(close_time) as day,
                        SUM(COALESCE(net_pnl, realized_pnl, 0)) as daily_pnl
                 FROM trades
-                WHERE status='CLOSED'
+                WHERE status='closed'
                   AND close_time >= DATE('now', '-30 days')
                   AND close_time IS NOT NULL
                 GROUP BY day

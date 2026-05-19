@@ -627,7 +627,7 @@ def close_trade(
         conn.execute(
             """
             UPDATE trades
-            SET status = 'CLOSED',
+            SET status = 'closed',
                 close_price = ?,
                 realized_pnl = ?,
                 net_pnl = ?,
@@ -658,7 +658,7 @@ def get_open_trades() -> list[dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status = 'OPEN' ORDER BY open_time DESC"
+            "SELECT * FROM trades WHERE status IN ('OPEN','tp1_hit','runner') ORDER BY open_time DESC"
         ).fetchall()
         return [dict(r) for r in rows]
     except Exception as exc:
@@ -738,11 +738,11 @@ def get_dashboard_stats() -> dict:
             "SELECT COUNT(*) FROM trades WHERE status='OPEN'"
         ).fetchone()[0]
         closed_count = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE status='CLOSED'"
+            "SELECT COUNT(*) FROM trades WHERE status='closed'"
         ).fetchone()[0]
 
         rpnl_row = conn.execute(
-            "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE status='CLOSED'"
+            "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE status='closed'"
         ).fetchone()
         realized_pnl = float(rpnl_row[0]) if rpnl_row else 0.0
 
@@ -758,7 +758,7 @@ def get_dashboard_stats() -> dict:
         accumulated_pnl = float(accum_row[0]) if accum_row else 0.0
 
         win_count = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE status='CLOSED' AND realized_pnl > 0"
+            "SELECT COUNT(*) FROM trades WHERE status='closed' AND net_pnl > 0"
         ).fetchone()[0]
         winrate = round(
             (win_count / closed_count * 100), 1
@@ -768,7 +768,7 @@ def get_dashboard_stats() -> dict:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         today_row = conn.execute(
             "SELECT COALESCE(SUM(net_pnl), 0) FROM trades "
-            "WHERE status='CLOSED' AND DATE(close_time) = ?",
+            "WHERE status='closed' AND DATE(close_time) = ?",
             (today,),
         ).fetchone()
         today_pnl = float(today_row[0]) if today_row else 0.0
