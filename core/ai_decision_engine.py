@@ -636,6 +636,22 @@ class AdaptiveScorer:
         elif vol_ratio < 0.5:
             adjusted *= 0.9
 
+        # 6. ML score factor (0-100, 50=neutral)
+        ml_score = float(getattr(signal, "ml_score", 50.0) or 50.0)
+        if ml_score >= 70:
+            adjusted *= 1.15
+        elif ml_score >= 60:
+            adjusted *= 1.08
+        elif ml_score <= 30:
+            adjusted *= 0.85
+        elif ml_score <= 40:
+            adjusted *= 0.92
+        if ml_score != 50:
+            logger.debug(
+                "[ML] %s ml_score=%.0f → adjusted=%.1f",
+                getattr(signal, "symbol", "?"), ml_score, adjusted,
+            )
+
         return round(min(adjusted, 200.0), 1)
 
 

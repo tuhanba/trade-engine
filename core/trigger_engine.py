@@ -215,10 +215,31 @@ class TriggerEngine:
         if quality not in ALLOWED_QUALITIES:
             return {"quality": "D", "score": 0, "entry": 0}
 
+        # ML skoru hesapla (funding check geçtiyse favorable=1)
+        try:
+            import sys as _sys, os as _os
+            _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+            from ml_signal_scorer import score_signal as _ml_score_fn
+            _ml_input = {
+                "symbol":            symbol,
+                "adx15":             adx_val,
+                "rv":                rv,
+                "rsi5":              rsi5_val,
+                "rsi1":              float(rsi1),
+                "funding_favorable": 1,
+                "btc_trend":         btc_trend,
+                "direction":         direction,
+                "momentum_3c":       mom3c,
+                "bb_width_chg":      0.0,
+            }
+            ml_score = _ml_score_fn(_ml_input)
+        except Exception:
+            ml_score = 50
+
         return {
             "quality": quality,
             "score": min(10.0, max(0.0, score)),
-            "ml_score": 50,
+            "ml_score": ml_score,
             "entry": c1,
             "atr": round(atr_val, 6),
             "atr_pct": round(atr_val / c1, 4),
