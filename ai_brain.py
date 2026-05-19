@@ -33,6 +33,7 @@ from database import (
     get_conn, save_postmortem, save_ai_log,
     is_coin_in_cooldown, get_stats,
     get_coin_config, save_coin_config,
+    get_pending_ghost_suggestions, mark_ghost_suggestion_applied,
 )
 
 logger = logging.getLogger(__name__)
@@ -1437,6 +1438,66 @@ def _optimize_coin_params(coin, stats, current_config, cf_results=None):
     return p, changes
 
 
+def apply_ghost_suggestions(min_confidence: str = "MEDIUM") -> list:
+    """
+    ghost_suggestions tablosundaki uygulanmamış önerileri okur,
+    ilgili coin'in confidence_cutoff değerini düşürür (daha fazla sinyal geçer),
+    öneriyi 'applied' olarak işaretler.
+
+    Returns: uygulanan değişikliklerin string listesi (Telegram raporu için)
+    """
+    applied_changes = []
+    try:
+        suggestions = get_pending_ghost_suggestions(min_confidence=min_confidence)
+        if not suggestions:
+            logger.info("[GhostApply] Uygulanacak öneri yok.")
+            return []
+
+        # Aynı coin için birden fazla öneri varsa en yüksek avg_r'yi seç
+        best_per_coin = {}
+        for s in suggestions:
+            sym = s["symbol"]
+            if sym not in best_per_coin or s["avg_virtual_r"] > best_per_coin[sym]["avg_virtual_r"]:
+                best_per_coin[sym] = s
+
+        for sym, s in best_per_coin.items():
+            current_cfg = get_coin_config(sym)
+            old_conf = current_cfg.get("confidence_cutoff", s["current_threshold"] or 0.65)
+            new_conf = s["suggested_threshold"]
+
+            # Güvenlik: tek seferde max 0.10 düşür
+            if old_conf - new_conf > 0.10:
+                new_conf = round(old_conf - 0.10, 3)
+
+            if new_conf >= old_conf:
+                mark_ghost_suggestion_applied(s["id"])
+                continue
+
+            current_cfg["confidence_cutoff"] = new_conf
+            current_cfg["ghost_applied_at"]  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            current_cfg["ghost_virtual_wr"]  = s["virtual_wr"]
+            current_cfg["ghost_avg_r"]       = s["avg_virtual_r"]
+            current_cfg["ghost_sample"]      = s["sample_count"]
+
+            save_coin_config(sym, current_cfg)
+            mark_ghost_suggestion_applied(s["id"])
+
+            msg = (
+                f"👻 {sym}: conf {old_conf:.2f}→{new_conf:.2f} "
+                f"[{s['trigger_type']}  VWR:{s['virtual_wr']:.0%}  "
+                f"R:{s['avg_virtual_r']:.2f}  n={s['sample_count']}  {s['confidence']}]"
+            )
+            applied_changes.append(msg)
+            logger.info("[GhostApply] %s", msg)
+
+        logger.info("[GhostApply] %d coin güncellendi.", len(applied_changes))
+        return applied_changes
+
+    except Exception as exc:
+        logger.error("[GhostApply] Hata: %s", exc)
+        return []
+
+
 def nightly_optimize_coins(tg_fn=None):
     """
     Per-coin nightly optimizer — 03:00 UTC'de çalışır.
@@ -1511,6 +1572,15 @@ def nightly_optimize_coins(tg_fn=None):
             f"⬇️  Confidence lowered: {conf_lowered}",
             "━━━━━━━━━━━━━━━━━━━━━━",
         ]
+
+        # ── Ghost Learning önerilerini uygula ────────────────────
+        ghost_changes = apply_ghost_suggestions(min_confidence="MEDIUM")
+        if ghost_changes:
+            lines.append("")
+            lines.append("👻 <b>Ghost Learning Uygulandı</b>")
+            for gc in ghost_changes[:8]:
+                lines.append(f"  {gc}")
+        # ─────────────────────────────────────────────────────────
 
         report = "\n".join(lines)
         logger.info("[NightlyOpt] %s", report.replace("\n", " | "))

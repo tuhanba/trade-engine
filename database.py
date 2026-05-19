@@ -2067,3 +2067,44 @@ def get_all_coin_configs() -> dict:
     except Exception as e:
         logger.warning(f"get_all_coin_configs: {e}")
         return {}
+
+
+def get_pending_ghost_suggestions(min_confidence: str = "MEDIUM") -> list:
+    """Uygulanmamış ghost threshold önerilerini döner."""
+    confidence_order = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+    min_level = confidence_order.get(min_confidence, 1)
+    try:
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT id, symbol, trigger_type,
+                       current_threshold, suggested_threshold,
+                       virtual_wr, avg_virtual_r, sample_count, confidence
+                FROM ghost_suggestions
+                WHERE applied = 0
+                ORDER BY avg_virtual_r DESC
+            """).fetchall()
+            result = []
+            for r in rows:
+                if confidence_order.get(r[8], 0) >= min_level:
+                    result.append({
+                        "id": r[0], "symbol": r[1], "trigger_type": r[2],
+                        "current_threshold": r[3], "suggested_threshold": r[4],
+                        "virtual_wr": r[5], "avg_virtual_r": r[6],
+                        "sample_count": r[7], "confidence": r[8],
+                    })
+            return result
+    except Exception as exc:
+        logger.warning("[DB] get_pending_ghost_suggestions: %s", exc)
+        return []
+
+
+def mark_ghost_suggestion_applied(suggestion_id: int) -> None:
+    """Ghost öneriyi uygulandı olarak işaretler."""
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE ghost_suggestions SET applied = 1 WHERE id = ?",
+                (suggestion_id,)
+            )
+    except Exception as exc:
+        logger.warning("[DB] mark_ghost_suggestion_applied(%s): %s", suggestion_id, exc)
