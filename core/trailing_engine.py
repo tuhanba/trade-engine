@@ -106,7 +106,7 @@ class TrailingEngine:
     
     Kullanım:
         engine = TrailingEngine()
-        state = TradeExitState(current_sl=trade["stop_loss"])
+        state = TradeExitState(current_sl=float(trade.get("sl") or trade.get("stop_loss") or 0))
         result = engine.evaluate(trade, current_price, state, atr)
         if result.should_partial_close:
             # Partial close işlemi yap
@@ -165,9 +165,9 @@ class TrailingEngine:
         state: TradeExitState,
         atr: Optional[float],
     ) -> PartialCloseResult:
-        side = trade.get("side", "LONG").upper()
-        entry = float(trade.get("entry_price", 0))
-        sl = float(trade.get("stop_loss", 0))
+        side = (trade.get("direction") or trade.get("side", "LONG")).upper()
+        entry = float(trade.get("entry") or trade.get("entry_price") or 0)
+        sl = float(trade.get("sl") or trade.get("stop_loss") or 0)
         tp1 = float(trade.get("tp1") or 0)
         tp2 = float(trade.get("tp2") or 0)
         tp3 = float(trade.get("tp3") or 0)
