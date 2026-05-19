@@ -51,6 +51,11 @@ from core.ai_decision_engine import AIDecisionEngine
 from telegram_delivery import deliver_signal, send_message
 from websocket_events import event_manager
 
+try:
+    from core.ghost_learning import maybe_ghost_log as _ghost_log
+except Exception:
+    def _ghost_log(signal, reason): pass  # type: ignore[misc]
+
 # Geriye dönük uyumluluk için eski modüller
 try:
     from ai_brain import post_trade_analysis, set_client as ai_set_client
@@ -457,6 +462,13 @@ def main():
                                     "preview_tp3": prv["tp3"],
                                     "leverage_hint": int(prv.get("leverage") or 10),
                                 })
+                                _ghost_log({
+                                    "symbol": symbol, "direction": trend_result["direction"],
+                                    "entry": trigger_result["entry"],
+                                    "sl": prv["sl"], "tp1": prv["tp1"],
+                                    "confidence": trigger_result["score"] / 10,
+                                    "quality": trigger_result["quality"],
+                                }, reason=risk_result.get("risk_reject_reason", "risk_guard_failed"))
                         continue
                     save_signal_event(signal_id, "RISK_CHECKED", symbol=symbol, reason="risk_pass")
 
@@ -549,6 +561,13 @@ def main():
                                 "preview_tp3": sig.tp3,
                                 "leverage_hint": int(sig.leverage_suggestion or 10),
                             })
+                            _ghost_log({
+                                "symbol": symbol, "direction": sig.direction,
+                                "entry": sig.entry_zone,
+                                "sl": sig.stop_loss, "tp1": sig.tp1,
+                                "confidence": sig.final_score / 100,
+                                "quality": sig.setup_quality,
+                            }, reason="below_data_threshold")
                         continue
 
                     if decision["decision"] == "VETO":
@@ -581,6 +600,13 @@ def main():
                                 "preview_tp3": sig.tp3,
                                 "leverage_hint": int(sig.leverage_suggestion or 10),
                             })
+                        _ghost_log({
+                            "symbol": symbol, "direction": sig.direction,
+                            "entry": sig.entry_zone,
+                            "sl": sig.stop_loss, "tp1": sig.tp1,
+                            "confidence": decision.get("confidence", sig.final_score / 100),
+                            "quality": sig.setup_quality,
+                        }, reason="ai_veto")
                         continue
 
                     sig.status = "approved"

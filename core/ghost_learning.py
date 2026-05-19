@@ -1,18 +1,26 @@
 """
-core/ghost_learning.py — Ghost Learning İşlemcisi v1.0
-=======================================================
-WATCH, VETO ve SKIPPED sinyalleri paper_results tablosuna kaydedilir.
-Bu modül, her sinyal için fiyat hareketini takip eder ve sonucu
-GHOST_WIN, GHOST_LOSS veya EXPIRED olarak kaydeder.
+core/ghost_learning.py — Ghost Learning 2.0
+============================================
+WATCH, VETO ve SKIPPED sinyalleri hem paper_results (v1 uyumu için) hem de
+ayrı ghost_signals tablosuna kaydedilir. Ghost Learning 2.0 şunları ekler:
+
+  - maybe_ghost_log()          : reddedilen sinyali ghost_signals'e yaz
+  - simulate_pending_ghosts()  : mevcut fiyatla hızlı simülasyon
+  - get_pattern_analysis()     : trigger_type × coin bazında WR / R analizi
+  - generate_threshold_suggestions() : AI Brain'e öneri üret
+  - summarize_ghost_results()  : Ajan-1 / dashboard özeti
+  - send_weekly_ghost_report() : Telegram haftalık rapor
+
+v1 fonksiyonları korunmuştur (track_skipped_signal, process_pending_results,
+calculate_dynamic_ghost_weight, get_ghost_learning_stats).
 
 Ağırlıklar:
   Gerçek trade  = 1.0
   Ghost trade   = 0.25–0.35
   Son 30 gün    = daha yüksek ağırlık
-  Eski veri     = azalan ağırlık
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +29,9 @@ try:
 except Exception:
     _GHOST_WEIGHT_FLOOR = 0.15
 
-GHOST_WEIGHT    = _GHOST_WEIGHT_FLOOR   # floor; calculate_dynamic_ghost_weight() için referans
-HORIZON_MINUTES = 480    # 8 saat — sinyal takip süresi
-EXPIRY_HOURS    = 12     # Bu süreden uzun bekleyen sinyaller EXPIRED olur
+GHOST_WEIGHT    = _GHOST_WEIGHT_FLOOR
+HORIZON_MINUTES = 480
+EXPIRY_HOURS    = 12
 
 _TRACKED_DECISIONS = {
     "WATCH", "VETO", "SKIPPED_BY_RISK", "SKIPPED_BY_REGIME",
@@ -32,10 +40,362 @@ _TRACKED_DECISIONS = {
 }
 
 
+# ── Ghost Learning 2.0 ────────────────────────────────────────────────
+
+def maybe_ghost_log(signal: dict, reason: str) -> None:
+    """
+    Reddedilen sinyali ghost_signals tablosuna ekler.
+    Confidence > 0.40 olan sinyaller için çalışır (tamamen berbatları alma).
+    signal: dict with keys: symbol/coin, side/direction, entry, sl, tp1,
+            confidence, trigger_type (opsiyonel)
+    """
+    try:
+        confidence = float(signal.get("confidence") or signal.get("final_score", 0) / 100)
+        if confidence < 0.40:
+            return
+
+        from database import save_ghost_signal
+        ghost_id = save_ghost_signal({
+            "coin":         signal.get("symbol") or signal.get("coin", ""),
+            "side":         signal.get("direction") or signal.get("side", ""),
+            "entry_price":  signal.get("entry") or signal.get("entry_zone") or signal.get("entry_price", 0),
+            "stop_loss":    signal.get("sl") or signal.get("stop_loss", 0),
+            "take_profit":  signal.get("tp1") or signal.get("take_profit", 0),
+            "confidence":   confidence,
+            "reject_reason": reason,
+            "trigger_type": signal.get("trigger_type") or signal.get("setup_quality") or signal.get("quality", "unknown"),
+        })
+        logger.debug(
+            "[Ghost2] %s ghost#%d kaydedildi reason=%s",
+            signal.get("symbol", "?"), ghost_id, reason
+        )
+    except Exception as e:
+        logger.warning("[Ghost2] maybe_ghost_log hatası: %s", e)
+
+
+def simulate_pending_ghosts(client, limit: int = 100) -> int:
+    """
+    Simüle edilmemiş ghost_signals kayıtlarını mevcut fiyatla işler.
+    Returns: simüle edilen kayıt sayısı.
+    """
+    try:
+        from database import get_unsimulated_ghosts, save_ghost_result
+        ghosts = get_unsimulated_ghosts(limit=limit)
+        if not ghosts:
+            return 0
+
+        count = 0
+        now = datetime.now(timezone.utc)
+        for ghost in ghosts:
+            try:
+                _simulate_single_ghost(ghost, client, now)
+                count += 1
+            except Exception as e:
+                logger.warning("[Ghost2] ghost#%s simülasyon hatası: %s", ghost.get("id"), e)
+        return count
+    except Exception as e:
+        logger.error("[Ghost2] simulate_pending_ghosts hatası: %s", e)
+        return 0
+
+
+def _simulate_single_ghost(ghost: dict, client, now: datetime) -> None:
+    """Tek ghost kaydını mevcut fiyatla simüle eder."""
+    from database import save_ghost_result
+
+    ghost_id   = ghost["id"]
+    symbol     = ghost["coin"]
+    side       = str(ghost.get("side", "")).upper()
+    entry      = float(ghost["entry_price"])
+    sl         = float(ghost["stop_loss"])
+    tp         = float(ghost["take_profit"])
+    quality    = ghost.get("trigger_type", "unknown")
+
+    # Zaman aşımı: 12 saatten eski → OPEN olarak kapat
+    try:
+        created = datetime.fromisoformat(str(ghost["created_at"]).replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        elapsed_hours = (now - created).total_seconds() / 3600
+    except Exception:
+        elapsed_hours = 0
+
+    if elapsed_hours > EXPIRY_HOURS:
+        save_ghost_result(ghost_id, {
+            "virtual_outcome": "OPEN",
+            "virtual_pnl_r":   0,
+            "pattern_type":    quality,
+        })
+        return
+
+    price = _get_price(client, symbol)
+    if not price:
+        return
+
+    is_long  = side == "LONG"
+    tp_hit   = (is_long and price >= tp) or (not is_long and price <= tp)
+    sl_hit   = (is_long and price <= sl)  or (not is_long and price >= sl)
+
+    risk = abs(entry - sl)
+    mfe  = 0.0
+    mae  = 0.0
+    if risk > 0:
+        if is_long:
+            mfe = max(0.0, (price - entry) / risk)
+            mae = max(0.0, (entry - price) / risk)
+        else:
+            mfe = max(0.0, (entry - price) / risk)
+            mae = max(0.0, (price - entry) / risk)
+
+    if tp_hit:
+        pnl_r = round((abs(tp - entry) / risk), 2) if risk > 0 else 1.0
+        outcome = "WIN"
+    elif sl_hit:
+        pnl_r   = -1.0
+        outcome = "LOSS"
+    else:
+        pnl_r   = 0.0
+        outcome = "OPEN"
+
+    save_ghost_result(ghost_id, {
+        "virtual_outcome": outcome,
+        "virtual_pnl_r":   pnl_r,
+        "virtual_mfe":     round(mfe, 4),
+        "virtual_mae":     round(mae, 4),
+        "pattern_type":    quality,
+    })
+    logger.debug(
+        "[Ghost2] ghost#%d %s %s → %s pnl_r=%.2f",
+        ghost_id, symbol, side, outcome, pnl_r
+    )
+
+
+def get_pattern_analysis(min_count: int = 5, days: int = 30) -> list:
+    """
+    Hangi trigger_type'lar ghost WIN getiriyor?
+    Dönen liste: [{trigger_type, coin, ghost_count, virtual_wr, avg_virtual_r}, ...]
+    Sadece anlamlı pattern'lar (min_count >= 5, wr > 0).
+    """
+    try:
+        from database import get_ghost_pattern_stats
+        return get_ghost_pattern_stats(min_count=min_count, days=days)
+    except Exception as e:
+        logger.error("[Ghost2] get_pattern_analysis hatası: %s", e)
+        return []
+
+
+def generate_threshold_suggestions(ghost_stats: list | None = None) -> list:
+    """
+    Ghost pattern analizine göre threshold düşürme önerileri üretir.
+    Önerileri ghost_threshold_suggestions tablosuna kaydeder.
+    Returns: önerilerin listesi.
+    """
+    if ghost_stats is None:
+        ghost_stats = get_pattern_analysis()
+
+    suggestions = []
+    try:
+        from database import save_ghost_suggestion
+
+        try:
+            from config import TRADE_THRESHOLD as _current_threshold
+        except Exception:
+            _current_threshold = 72.0
+
+        for stat in ghost_stats:
+            wr  = float(stat.get("virtual_wr", 0))
+            avg = float(stat.get("avg_virtual_r", 0))
+            cnt = int(stat.get("ghost_count", 0))
+
+            if wr > 60 and avg > 0.8:
+                suggested = max(_current_threshold - 5.0, 45.0)
+                confidence = "HIGH" if cnt > 30 else "MEDIUM"
+                sug = {
+                    "coin":           stat.get("coin", "ALL"),
+                    "trigger_type":   stat.get("trigger_type", "unknown"),
+                    "action":         "LOWER_THRESHOLD",
+                    "current_val":    _current_threshold,
+                    "suggested_val":  suggested,
+                    "expected_trades": round(cnt / 4, 1),
+                    "confidence":     confidence,
+                }
+                save_ghost_suggestion(sug)
+                suggestions.append(sug)
+    except Exception as e:
+        logger.error("[Ghost2] generate_threshold_suggestions hatası: %s", e)
+
+    return suggestions
+
+
+def summarize_ghost_results() -> dict:
+    """
+    Ajan-1 / dashboard için ghost learning özeti.
+    Hem ghost_signals/ghost_results (2.0) hem paper_results (v1) kapsanır.
+    Returns dict: {total, wins, losses, win_rate, avg_r, pending,
+                   top_patterns, ghost_pnl, correct_skips}
+    """
+    try:
+        from database import get_conn
+
+        with get_conn() as conn:
+            # ── Ghost 2.0 istatistikleri (ghost_results) ──────────────
+            g2 = conn.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN r.virtual_outcome='WIN'  THEN 1 ELSE 0 END) as wins,
+                    SUM(CASE WHEN r.virtual_outcome='LOSS' THEN 1 ELSE 0 END) as losses,
+                    AVG(r.virtual_pnl_r) as avg_r,
+                    SUM(r.virtual_pnl_r) as ghost_pnl
+                FROM ghost_signals g
+                JOIN ghost_results r ON g.id = r.ghost_id
+                WHERE r.virtual_outcome IN ('WIN','LOSS')
+            """).fetchone()
+
+            pending_g2 = conn.execute(
+                "SELECT COUNT(*) FROM ghost_signals WHERE simulated=0"
+            ).fetchone()[0]
+
+            # ── Top patterns (2.0) ────────────────────────────────────
+            top_rows = conn.execute("""
+                SELECT
+                    r.pattern_type,
+                    COUNT(*) as cnt,
+                    SUM(CASE WHEN r.virtual_outcome='WIN' THEN 1.0 ELSE 0 END)
+                        * 100.0 / COUNT(*) as wr,
+                    AVG(r.virtual_pnl_r) as avg_r
+                FROM ghost_results r
+                WHERE r.virtual_outcome IN ('WIN','LOSS')
+                  AND r.simulated_at > datetime('now','-30 days')
+                GROUP BY r.pattern_type
+                HAVING cnt >= 3
+                ORDER BY avg_r DESC
+                LIMIT 5
+            """).fetchall()
+
+            # ── v1 paper_results özeti ────────────────────────────────
+            p1 = conn.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN would_have_won=1 THEN 1 ELSE 0 END) as wins,
+                    SUM(CASE WHEN hit_stop_first=1 THEN 1 ELSE 0 END) as losses,
+                    SUM(CASE WHEN skip_decision_correct=1 THEN 1 ELSE 0 END) as correct_skips
+                FROM paper_results
+                WHERE status='finalized'
+            """).fetchone()
+
+        g2_total  = int(g2["total"] or 0)
+        g2_wins   = int(g2["wins"]  or 0)
+        g2_losses = int(g2["losses"] or 0)
+        g2_wr     = round(g2_wins / g2_total * 100, 1) if g2_total > 0 else 0.0
+        g2_avg_r  = round(float(g2["avg_r"] or 0), 3)
+        g2_pnl    = round(float(g2["ghost_pnl"] or 0), 3)
+
+        top_patterns = [
+            {
+                "pattern":  dict(r)["pattern_type"],
+                "count":    int(dict(r)["cnt"]),
+                "win_rate": round(float(dict(r)["wr"]), 1),
+                "avg_r":    round(float(dict(r)["avg_r"]), 2),
+            }
+            for r in top_rows
+        ]
+
+        p1_total = int(p1["total"] or 0) if p1 else 0
+
+        return {
+            "total":          g2_total,
+            "wins":           g2_wins,
+            "losses":         g2_losses,
+            "win_rate":       g2_wr,
+            "avg_r":          g2_avg_r,
+            "ghost_pnl":      g2_pnl,
+            "pending":        pending_g2,
+            "top_patterns":   top_patterns,
+            "paper_v1_total": p1_total,
+            "correct_skips":  int(p1["correct_skips"] or 0) if p1 else 0,
+        }
+    except Exception as e:
+        logger.error("[Ghost2] summarize_ghost_results hatası: %s", e)
+        return {
+            "total": 0, "wins": 0, "losses": 0, "win_rate": 0,
+            "avg_r": 0, "ghost_pnl": 0, "pending": 0,
+            "top_patterns": [], "paper_v1_total": 0, "correct_skips": 0,
+        }
+
+
+def send_weekly_ghost_report(bot_token: str = "", chat_id: str = "") -> bool:
+    """
+    Haftalık ghost learning özeti Telegram'a gönderir.
+    bot_token/chat_id boş ise config'den alır.
+    Returns True if sent successfully.
+    """
+    try:
+        if not bot_token or not chat_id:
+            from config import TELEGRAM_BOT_TOKEN as bot_token, TELEGRAM_CHAT_ID as chat_id
+
+        summary = summarize_ghost_results()
+        suggestions = generate_threshold_suggestions()
+
+        week_start = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+        week_end   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        lines = [
+            "👻 Ghost Learning Haftalık Rapor",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"📅 Hafta: {week_start} → {week_end}",
+            f"🔍 Simüle edilen: {summary['total']} ghost signal",
+            f"✅ WIN: {summary['wins']}  ❌ LOSS: {summary['losses']}  WR: {summary['win_rate']}%",
+            f"💰 Ghost PnL: {summary['ghost_pnl']:+.2f}R  Ort. R: {summary['avg_r']:+.2f}R",
+            f"⏳ Bekleyen: {summary['pending']}",
+            "",
+        ]
+
+        if summary["top_patterns"]:
+            lines.append("🏆 En İyi Missed Pattern'lar")
+            for p in summary["top_patterns"]:
+                lines.append(
+                    f"  {p['pattern']:12s}  WR:{p['win_rate']:.0f}%  R:{p['avg_r']:+.2f}  ({p['count']} ghost)"
+                )
+            lines.append("")
+
+        if suggestions:
+            lines.append("💡 Threshold Önerileri")
+            for s in suggestions[:5]:
+                arrow = "⬇️" if s["action"] == "LOWER_THRESHOLD" else "⬆️"
+                lines.append(
+                    f"  {s['coin']:12s} {s['trigger_type']:8s}: "
+                    f"{s['current_val']:.0f} → {s['suggested_val']:.0f} {arrow}"
+                )
+            lines.append("")
+
+        if summary["correct_skips"]:
+            lines.append(f"🎯 Doğru Atlama Kararı: {summary['correct_skips']} sinyal")
+
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        text = "\n".join(lines)
+
+        import requests
+        resp = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": ""},
+            timeout=10,
+        )
+        ok = resp.status_code == 200
+        if ok:
+            logger.info("[Ghost2] Haftalık rapor Telegram'a gönderildi")
+        else:
+            logger.warning("[Ghost2] Telegram gönderim hatası: %s", resp.text[:200])
+        return ok
+    except Exception as e:
+        logger.error("[Ghost2] send_weekly_ghost_report hatası: %s", e)
+        return False
+
+
+# ── v1 Uyumluluk — mevcut paper_results pipeline'ı korunur ───────────
+
 def track_skipped_signal(signal: dict, decision: str, client=None):
     """
     WATCH, VETO veya SKIPPED sinyal için paper_results'a takip kaydı açar.
-    Sadece entry, sl ve tp1 değerleri olan sinyaller için çalışır.
+    Ghost Learning 2.0 ile maybe_ghost_log() da çağrılır.
     """
     try:
         from database import save_paper_trade
@@ -58,45 +418,46 @@ def track_skipped_signal(signal: dict, decision: str, client=None):
             "tp1":       tp1,
         }, tracked_from=decision)
 
+        # Ghost 2.0: ayrı tabloya da kaydet
+        maybe_ghost_log(signal, reason=decision)
+
         logger.debug(
-            f"[Ghost] {signal.get('symbol')} {decision} takibe alındı "
-            f"entry={entry} sl={sl} tp1={tp1}"
+            "[Ghost] %s %s takibe alındı entry=%s sl=%s tp1=%s",
+            signal.get("symbol"), decision, entry, sl, tp1
         )
     except Exception as e:
-        logger.warning(f"[Ghost] track_skipped_signal hatası: {e}")
+        logger.warning("[Ghost] track_skipped_signal hatası: %s", e)
 
 
 def process_pending_results(client):
     """
-    Bekleyen paper_results kayıtlarını işle.
-    Her kayıt için mevcut fiyatı kontrol et ve sonucu güncelle.
-    client: Binance public client (futures_ticker kullanır).
+    Bekleyen paper_results kayıtlarını mevcut fiyatla işle (v1 pipeline).
+    Ghost 2.0 simülasyonu da çalıştırılır.
     """
     try:
         from database import get_pending_paper_results
 
         pending = get_pending_paper_results(limit=50)
         if not pending:
-            return
+            pass
+        else:
+            now = datetime.now(timezone.utc)
+            for record in pending:
+                try:
+                    _process_single(record, client, now)
+                except Exception as e:
+                    logger.warning("[Ghost] Kayıt #%s işlenemedi: %s", record.get("id"), e)
 
-        now = datetime.now(timezone.utc)
-
-        for record in pending:
-            try:
-                _process_single(record, client, now)
-            except Exception as e:
-                logger.warning(f"[Ghost] Kayıt #{record.get('id')} işlenemedi: {e}")
+        # Ghost 2.0 simülasyonunu da çalıştır
+        done = simulate_pending_ghosts(client, limit=100)
+        if done:
+            logger.debug("[Ghost2] %d ghost simüle edildi", done)
 
     except Exception as e:
-        logger.error(f"[Ghost] process_pending_results hatası: {e}")
+        logger.error("[Ghost] process_pending_results hatası: %s", e)
 
 
 def _calc_excursions(entry: float, sl: float, current_price: float, is_long: bool) -> tuple[float, float]:
-    """
-    R cinsinden MFE ve MAE hesapla.
-    MFE = max favorable excursion (kazanılan taraf)
-    MAE = max adverse excursion (kaybedilen taraf)
-    """
     risk = abs(entry - sl)
     if risk <= 0:
         return 0.0, 0.0
@@ -110,24 +471,18 @@ def _calc_excursions(entry: float, sl: float, current_price: float, is_long: boo
 
 
 def _calc_skip_correctness(hit_tp: int, hit_stop_first: int, tracked_from: str) -> int:
-    """
-    Atlama kararı doğru muydu?
-    VETO/SKIP kararı + SL vuruldu → doğru atladık (1)
-    VETO/SKIP kararı + TP vuruldu → yanlış atladık (0)
-    İzleme verisi → -1 (geçersiz, kaydedilmez)
-    """
     if tracked_from in ("VETO", "SKIPPED_BY_RISK", "SKIPPED_BY_REGIME",
                         "SKIPPED_BY_LOW_SCORE", "SKIPPED_BY_COOLDOWN",
                         "SKIPPED_BY_SPREAD", "SKIPPED_BY_MARGIN_RISK"):
         if hit_stop_first == 1 and hit_tp == 0:
-            return 1   # Doğru atladık
+            return 1
         elif hit_tp == 1 and hit_stop_first == 0:
-            return 0   # Yanlış atladık
-    return -1  # İzleme verisi veya belirsiz
+            return 0
+    return -1
 
 
 def _process_single(record: dict, client, now: datetime):
-    """Tek bir paper_result kaydını işle."""
+    """Tek bir paper_result kaydını işle (v1)."""
     from database import update_paper_result
 
     record_id = record["id"]
@@ -145,11 +500,8 @@ def _process_single(record: dict, client, now: datetime):
         })
         return
 
-    # Süre kontrolü — çok uzun bekleyen sinyalleri EXPIRED yap
     try:
-        created = datetime.fromisoformat(
-            str(record["created_at"]).replace("Z", "+00:00")
-        )
+        created = datetime.fromisoformat(str(record["created_at"]).replace("Z", "+00:00"))
         if created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
         elapsed_hours = (now - created).total_seconds() / 3600
@@ -164,10 +516,9 @@ def _process_single(record: dict, client, now: datetime):
             "hit_stop_first": 0,
             "setup_worked":   0,
         })
-        logger.debug(f"[Ghost] #{record_id} {symbol} EXPIRED ({elapsed_hours:.1f}sa)")
+        logger.debug("[Ghost] #%d %s EXPIRED (%.1fsa)", record_id, symbol, elapsed_hours)
         return
 
-    # Mevcut fiyatı al
     current_price = _get_price(client, symbol)
     if not current_price:
         return
@@ -176,7 +527,6 @@ def _process_single(record: dict, client, now: datetime):
     tp1_hit = (is_long and current_price >= tp1) or (not is_long and current_price <= tp1)
     sl_hit  = (is_long and current_price <= sl)  or (not is_long and current_price >= sl)
 
-    # MFE/MAE hesapla ve kayıtta kayıtlı değerlerle karşılaştır
     cur_mfe, cur_mae = _calc_excursions(entry, sl, current_price, is_long)
     prev_mfe = float(record.get("max_favorable_excursion") or 0)
     prev_mae = float(record.get("max_adverse_excursion") or 0)
@@ -188,41 +538,40 @@ def _process_single(record: dict, client, now: datetime):
     if tp1_hit:
         correctness = _calc_skip_correctness(1, 0, tracked_from)
         updates = {
-            "status":                "finalized",
-            "finalized_at":          now.isoformat(),
-            "hit_tp":                1,
-            "hit_stop_first":        0,
-            "setup_worked":          1,
-            "would_have_won":        1,
+            "status":                  "finalized",
+            "finalized_at":            now.isoformat(),
+            "hit_tp":                  1,
+            "hit_stop_first":          0,
+            "setup_worked":            1,
+            "would_have_won":          1,
             "max_favorable_excursion": new_mfe,
             "max_adverse_excursion":   new_mae,
-            "first_touch":           "tp1",
+            "first_touch":             "tp1",
         }
         if correctness >= 0:
             updates["skip_decision_correct"] = correctness
         update_paper_result(record_id, updates)
-        logger.info(f"[Ghost] #{record_id} {symbol} GHOST_WIN (TP1 ulaşıldı) MFE={new_mfe:.2f}R MAE={new_mae:.2f}R")
+        logger.info("[Ghost] #%d %s GHOST_WIN MFE=%.2fR MAE=%.2fR", record_id, symbol, new_mfe, new_mae)
 
     elif sl_hit:
         correctness = _calc_skip_correctness(0, 1, tracked_from)
         updates = {
-            "status":                "finalized",
-            "finalized_at":          now.isoformat(),
-            "hit_tp":                0,
-            "hit_stop_first":        1,
-            "setup_worked":          0,
-            "would_have_won":        0,
+            "status":                  "finalized",
+            "finalized_at":            now.isoformat(),
+            "hit_tp":                  0,
+            "hit_stop_first":          1,
+            "setup_worked":            0,
+            "would_have_won":          0,
             "max_favorable_excursion": new_mfe,
             "max_adverse_excursion":   new_mae,
-            "first_touch":           "stop",
+            "first_touch":             "stop",
         }
         if correctness >= 0:
             updates["skip_decision_correct"] = correctness
         update_paper_result(record_id, updates)
-        logger.info(f"[Ghost] #{record_id} {symbol} GHOST_LOSS (SL vuruldu) MFE={new_mfe:.2f}R MAE={new_mae:.2f}R")
+        logger.info("[Ghost] #%d %s GHOST_LOSS MFE=%.2fR MAE=%.2fR", record_id, symbol, new_mfe, new_mae)
 
     else:
-        # Henüz sonuçlanmadı — sadece MFE/MAE güncelle (değer artışı varsa)
         if new_mfe > prev_mfe or new_mae > prev_mae:
             update_paper_result(record_id, {
                 "max_favorable_excursion": new_mfe,
@@ -231,7 +580,6 @@ def _process_single(record: dict, client, now: datetime):
 
 
 def _get_price(client, symbol: str) -> float:
-    """Public futures ticker fiyatı — paper modda kullanılabilir."""
     try:
         if client:
             ticker = client.futures_ticker(symbol=symbol)
@@ -244,8 +592,7 @@ def _get_price(client, symbol: str) -> float:
 def calculate_dynamic_ghost_weight() -> float:
     """
     Gerçek trade sayısına göre ghost ağırlığını dinamik hesapla.
-    Az trade → yüksek ghost ağırlık (daha fazla öğren).
-    Çok trade → düşük ghost ağırlık (gerçek data baskın).
+    Az trade → yüksek ağırlık (daha fazla öğren).
     """
     try:
         from database import get_conn
@@ -271,8 +618,8 @@ def calculate_dynamic_ghost_weight() -> float:
 
 def get_ghost_learning_stats() -> dict:
     """
-    Ghost learning istatistiklerini döndür.
-    AI karar motorunun coin profil hesabında kullanılir.
+    Ghost learning istatistiklerini döndür (v1 uyumluluk).
+    AI karar motorunun coin profil hesabında kullanılır.
     """
     try:
         from database import get_conn
@@ -305,5 +652,5 @@ def get_ghost_learning_stats() -> dict:
             "dynamic_weight": calculate_dynamic_ghost_weight(),
         }
     except Exception as e:
-        logger.error(f"[Ghost] get_ghost_learning_stats hatası: {e}")
+        logger.error("[Ghost] get_ghost_learning_stats hatası: %s", e)
         return {}

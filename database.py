@@ -238,6 +238,54 @@ CREATE TABLE IF NOT EXISTS coin_configs (
 )
 """
 
+# ── Ghost Learning 2.0 tabloları ─────────────────────────────────────
+
+_GHOST_SIGNALS_DDL = """
+CREATE TABLE IF NOT EXISTS ghost_signals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    coin            TEXT NOT NULL,
+    side            TEXT NOT NULL,
+    entry_price     REAL NOT NULL,
+    stop_loss       REAL NOT NULL,
+    take_profit     REAL NOT NULL,
+    confidence      REAL DEFAULT 0,
+    reject_reason   TEXT DEFAULT '',
+    trigger_type    TEXT DEFAULT 'unknown',
+    simulated       INTEGER DEFAULT 0,
+    created_at      TEXT DEFAULT (datetime('now'))
+)
+"""
+
+_GHOST_RESULTS_DDL = """
+CREATE TABLE IF NOT EXISTS ghost_results (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ghost_id        INTEGER NOT NULL,
+    virtual_outcome TEXT NOT NULL,
+    virtual_pnl_r   REAL DEFAULT 0,
+    virtual_mfe     REAL DEFAULT 0,
+    virtual_mae     REAL DEFAULT 0,
+    bars_held       INTEGER DEFAULT 0,
+    pattern_type    TEXT DEFAULT '',
+    simulated_at    TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (ghost_id) REFERENCES ghost_signals(id)
+)
+"""
+
+_GHOST_THRESHOLD_SUGGESTIONS_DDL = """
+CREATE TABLE IF NOT EXISTS ghost_threshold_suggestions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    coin            TEXT NOT NULL,
+    trigger_type    TEXT NOT NULL,
+    action          TEXT NOT NULL,
+    current_val     REAL NOT NULL,
+    suggested_val   REAL NOT NULL,
+    expected_trades REAL DEFAULT 0,
+    confidence      TEXT DEFAULT 'MEDIUM',
+    applied         INTEGER DEFAULT 0,
+    created_at      TEXT DEFAULT (datetime('now'))
+)
+"""
+
 # ── Migration kolonları ──────────────────────────────────────────────
 
 _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
@@ -325,6 +373,9 @@ def init_db() -> None:
         conn.execute(_SIGNAL_EVENTS_DDL)
         conn.execute(_PAPER_ACCOUNT_DDL)
         conn.execute(_COIN_CONFIGS_DDL)
+        conn.execute(_GHOST_SIGNALS_DDL)
+        conn.execute(_GHOST_RESULTS_DDL)
+        conn.execute(_GHOST_THRESHOLD_SUGGESTIONS_DDL)
         from config import INITIAL_PAPER_BALANCE
         conn.execute(
             "INSERT OR IGNORE INTO paper_account (id, balance) VALUES (1, ?)",
@@ -1281,6 +1332,112 @@ def update_paper_result(result_id: int, updates: dict):
         conn.execute(
             f"UPDATE paper_results SET {set_clause} WHERE id = ?",
             list(filtered.values()) + [result_id]
+        )
+
+
+# ── Ghost Learning 2.0 CRUD ──────────────────────────────────────────
+
+def save_ghost_signal(data: dict) -> int:
+    """ghost_signals tablosuna yeni kayıt ekler, id döner."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO ghost_signals
+               (coin, side, entry_price, stop_loss, take_profit,
+                confidence, reject_reason, trigger_type, simulated)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+            (
+                data.get("coin") or data.get("symbol", ""),
+                data.get("side") or data.get("direction", ""),
+                float(data.get("entry_price") or data.get("entry", 0)),
+                float(data.get("stop_loss") or data.get("sl", 0)),
+                float(data.get("take_profit") or data.get("tp1", 0)),
+                float(data.get("confidence", 0)),
+                data.get("reject_reason", ""),
+                data.get("trigger_type", "unknown"),
+            )
+        )
+        return cur.lastrowid or 0
+
+
+def get_unsimulated_ghosts(limit: int = 100) -> list:
+    """Henüz simüle edilmemiş ghost_signals kayıtlarını döner."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM ghost_signals
+               WHERE simulated = 0
+               ORDER BY created_at ASC
+               LIMIT ?""",
+            (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def save_ghost_result(ghost_id: int, data: dict) -> None:
+    """ghost_results tablosuna simülasyon sonucu kaydeder."""
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO ghost_results
+               (ghost_id, virtual_outcome, virtual_pnl_r, virtual_mfe,
+                virtual_mae, bars_held, pattern_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                ghost_id,
+                data.get("virtual_outcome", "OPEN"),
+                float(data.get("virtual_pnl_r", 0)),
+                float(data.get("virtual_mfe", 0)),
+                float(data.get("virtual_mae", 0)),
+                int(data.get("bars_held", 0)),
+                data.get("pattern_type", ""),
+            )
+        )
+        conn.execute(
+            "UPDATE ghost_signals SET simulated = 1 WHERE id = ?",
+            (ghost_id,)
+        )
+
+
+def get_ghost_pattern_stats(min_count: int = 5, days: int = 30) -> list:
+    """
+    Pattern analizi: trigger_type × coin bazında ghost WR ve avg R döner.
+    min_count: Minimum ghost sayısı (anlamlı analiz için).
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT
+                   g.trigger_type,
+                   g.coin,
+                   COUNT(*) as ghost_count,
+                   SUM(CASE WHEN r.virtual_outcome='WIN' THEN 1.0 ELSE 0 END)
+                       * 100.0 / COUNT(*) AS virtual_wr,
+                   AVG(r.virtual_pnl_r) AS avg_virtual_r
+               FROM ghost_signals g
+               JOIN ghost_results r ON g.id = r.ghost_id
+               WHERE g.created_at > datetime('now', ?)
+               GROUP BY g.trigger_type, g.coin
+               HAVING ghost_count >= ?
+               ORDER BY avg_virtual_r DESC""",
+            (f"-{days} days", min_count)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def save_ghost_suggestion(data: dict) -> None:
+    """ghost_threshold_suggestions tablosuna öneri kaydeder."""
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO ghost_threshold_suggestions
+               (coin, trigger_type, action, current_val, suggested_val,
+                expected_trades, confidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data.get("coin", ""),
+                data.get("trigger_type", ""),
+                data.get("action", "LOWER_THRESHOLD"),
+                float(data.get("current_val", 0)),
+                float(data.get("suggested_val", 0)),
+                float(data.get("expected_trades", 0)),
+                data.get("confidence", "MEDIUM"),
+            )
         )
 
 
