@@ -229,6 +229,15 @@ CREATE TABLE IF NOT EXISTS paper_account (
 )
 """
 
+_COIN_CONFIGS_DDL = """
+CREATE TABLE IF NOT EXISTS coin_configs (
+    coin            TEXT PRIMARY KEY,
+    config_json     TEXT DEFAULT '{}',
+    updated_at      TEXT,
+    version         INTEGER DEFAULT 1
+)
+"""
+
 # ── Migration kolonları ──────────────────────────────────────────────
 
 _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
@@ -315,6 +324,7 @@ def init_db() -> None:
         conn.execute(_PAPER_RESULTS_DDL)
         conn.execute(_SIGNAL_EVENTS_DDL)
         conn.execute(_PAPER_ACCOUNT_DDL)
+        conn.execute(_COIN_CONFIGS_DDL)
         from config import INITIAL_PAPER_BALANCE
         conn.execute(
             "INSERT OR IGNORE INTO paper_account (id, balance) VALUES (1, ?)",
@@ -1744,3 +1754,59 @@ def get_daily_signal_count() -> dict:
     except Exception as e:
         logger.warning(f"get_daily_signal_count: {e}")
         return {"total": 0}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COIN CONFIGS — per-coin nightly optimizer parametreleri
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_coin_config(coin: str) -> dict:
+    """Coin'in optimize edilmiş parametrelerini döndürür. Yoksa boş dict."""
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT config_json FROM coin_configs WHERE coin = ?", (coin,)
+            ).fetchone()
+            if row:
+                return json.loads(row[0]) if row[0] else {}
+    except Exception as e:
+        logger.warning(f"get_coin_config({coin}): {e}")
+    return {}
+
+
+def save_coin_config(coin: str, config: dict) -> None:
+    """Per-coin config'i upsert eder, version'ı artırır."""
+    try:
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        config_json = json.dumps(config, ensure_ascii=False)
+        with get_conn() as conn:
+            existing = conn.execute(
+                "SELECT version FROM coin_configs WHERE coin = ?", (coin,)
+            ).fetchone()
+            if existing:
+                new_version = (existing[0] or 1) + 1
+                conn.execute(
+                    "UPDATE coin_configs SET config_json=?, updated_at=?, version=? WHERE coin=?",
+                    (config_json, now_str, new_version, coin)
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO coin_configs (coin, config_json, updated_at, version) VALUES (?,?,?,1)",
+                    (coin, config_json, now_str)
+                )
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"save_coin_config({coin}): {e}")
+
+
+def get_all_coin_configs() -> dict:
+    """Tüm coin config'lerini {coin: config_dict} olarak döndürür."""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT coin, config_json FROM coin_configs"
+            ).fetchall()
+            return {r[0]: json.loads(r[1]) if r[1] else {} for r in rows}
+    except Exception as e:
+        logger.warning(f"get_all_coin_configs: {e}")
+        return {}

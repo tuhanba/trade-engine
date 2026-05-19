@@ -32,6 +32,7 @@ from config import (
 from database import (
     get_conn, save_postmortem, save_ai_log,
     is_coin_in_cooldown, get_stats,
+    get_coin_config, save_coin_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -1254,6 +1255,281 @@ def post_trade_analysis(trade_id, client_ref=None, tg_fn=None):
 
 # ═══════════════════════════════════════════════════════════
 # ANA GİRİŞ NOKTASI
+# ═══════════════════════════════════════════════════════════
+# NIGHTLY PER-COIN OPTİMİZER
+# Her gece 03:00 UTC — coin başına RSI/ATR/confidence parametreleri
+# ═══════════════════════════════════════════════════════════
+
+_COIN_PARAM_BOUNDS = {
+    "confidence_cutoff": (0.45, 0.90),
+    "sl_atr_mult":       (0.8,  2.5),
+    "tp_atr_mult":       (1.2,  4.5),
+    "leverage":          (3,    10),
+}
+
+
+def _clamp_coin(v, key):
+    lo, hi = _COIN_PARAM_BOUNDS[key]
+    return max(lo, min(hi, v))
+
+
+def _get_coin_trade_stats(conn, days=30, min_trades=20):
+    """
+    Son N gün içindeki CLOSED trade'lerden coin başına istatistik çıkarır.
+    min_trades karşılanmayan coinler döndürülmez.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute("""
+        SELECT
+            symbol,
+            COUNT(*)                                            AS total,
+            SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END)      AS wins,
+            AVG(r_multiple)                                     AS avg_r,
+            AVG(CASE WHEN mfe IS NOT NULL THEN mfe ELSE 0 END) AS avg_mfe,
+            AVG(CASE WHEN mae IS NOT NULL THEN mae ELSE 0 END) AS avg_mae,
+            AVG(sl)                                             AS avg_sl,
+            AVG(entry)                                          AS avg_entry
+        FROM trades
+        WHERE status = 'CLOSED'
+          AND close_time >= ?
+        GROUP BY symbol
+        HAVING COUNT(*) >= ?
+    """, (cutoff, min_trades)).fetchall()
+
+    result = {}
+    for r in rows:
+        sym = r[0]
+        total = r[1] or 1
+        result[sym] = {
+            "total":       r[1],
+            "wins":        r[2] or 0,
+            "win_rate":    (r[2] or 0) / total,
+            "avg_r":       r[3] or 0.0,
+            "avg_mfe":     r[4] or 0.0,
+            "avg_mae":     r[5] or 0.0,
+            "avg_sl":      r[6] or 0.0,
+            "avg_entry":   r[7] or 0.0,
+        }
+    return result
+
+
+def _counterfactual_sl(conn, symbol, sl_mults=(1.5, 2.0, 2.5), days=30, min_trades=5):
+    """
+    'SL daha geniş olsaydı bu trade WIN olur muydu?' counterfactual analizi.
+    mae < virtual_sl_dist ise o çarpanla POTENTIAL_WIN sayılır.
+    MAE bilgisi trade tablosundan gelir.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute("""
+        SELECT entry, sl, mae, net_pnl
+        FROM trades
+        WHERE symbol = ?
+          AND status = 'CLOSED'
+          AND close_time >= ?
+          AND entry > 0 AND sl > 0 AND mae IS NOT NULL
+    """, (symbol, cutoff)).fetchall()
+
+    if len(rows) < min_trades:
+        return {}
+
+    results = {}
+    for mult in sl_mults:
+        rescued = 0
+        applicable = 0
+        for entry, sl, mae, pnl in rows:
+            if pnl >= 0:
+                continue  # sadece kayıpları analiz et
+            sl_dist = abs(entry - sl)
+            virtual_sl_dist = sl_dist * mult
+            applicable += 1
+            if mae < virtual_sl_dist:
+                rescued += 1
+        rescue_rate = rescued / applicable if applicable > 0 else 0
+        results[mult] = {
+            "rescue_rate":  round(rescue_rate, 3),
+            "rescued":      rescued,
+            "applicable":   applicable,
+        }
+    return results
+
+
+def _optimize_coin_params(coin, stats, current_config, cf_results=None):
+    """
+    Tek bir coin için yeni parametreleri hesaplar.
+    Döndürür: (new_config_dict, changes_list)
+    """
+    p = dict(current_config)
+    if "confidence_cutoff" not in p:
+        p["confidence_cutoff"] = 0.65
+    if "sl_atr_mult" not in p:
+        p["sl_atr_mult"] = 1.2
+    if "tp_atr_mult" not in p:
+        p["tp_atr_mult"] = 2.0
+    if "leverage" not in p:
+        p["leverage"] = 10
+
+    changes = []
+    wr   = stats["win_rate"]
+    avgr = stats["avg_r"]
+
+    # ── Confidence cutoff ────────────────────────────────────────────────
+    if wr > 0.60 and avgr > 0.8:
+        new_conf = _clamp_coin(p["confidence_cutoff"] - 0.02, "confidence_cutoff")
+        if new_conf != p["confidence_cutoff"]:
+            changes.append(f"conf ↓ {p['confidence_cutoff']:.2f}→{new_conf:.2f} (WR:{wr:.0%} R:{avgr:.2f})")
+            p["confidence_cutoff"] = new_conf
+    elif wr < 0.40:
+        new_conf = _clamp_coin(p["confidence_cutoff"] + 0.05, "confidence_cutoff")
+        if new_conf != p["confidence_cutoff"]:
+            changes.append(f"conf ↑ {p['confidence_cutoff']:.2f}→{new_conf:.2f} (WR:{wr:.0%})")
+            p["confidence_cutoff"] = new_conf
+
+    # ── TP çarpanı — MFE/MAE oranına göre ───────────────────────────────
+    avg_mfe = stats["avg_mfe"]
+    avg_mae = stats["avg_mae"]
+    if avg_mae > 0:
+        ratio = avg_mfe / avg_mae
+        if ratio > 2.5:
+            new_tp = _clamp_coin(p["tp_atr_mult"] * 1.10, "tp_atr_mult")
+            if round(new_tp, 3) != round(p["tp_atr_mult"], 3):
+                changes.append(f"tp ↑ {p['tp_atr_mult']:.2f}→{new_tp:.2f} (MFE/MAE={ratio:.1f})")
+                p["tp_atr_mult"] = round(new_tp, 3)
+        elif ratio < 1.2:
+            new_tp = _clamp_coin(p["tp_atr_mult"] * 0.95, "tp_atr_mult")
+            if round(new_tp, 3) != round(p["tp_atr_mult"], 3):
+                changes.append(f"tp ↓ {p['tp_atr_mult']:.2f}→{new_tp:.2f} (MFE/MAE={ratio:.1f})")
+                p["tp_atr_mult"] = round(new_tp, 3)
+
+    # ── SL çarpanı — counterfactual ─────────────────────────────────────
+    if cf_results:
+        best_mult = None
+        best_rescue = 0
+        for mult, data in cf_results.items():
+            if data["rescue_rate"] > best_rescue and data["applicable"] >= 3:
+                best_rescue = data["rescue_rate"]
+                best_mult = mult
+        if best_mult and best_rescue > 0.40:
+            # Çok kayıp SL gürültüsünden — biraz genişlet
+            new_sl = _clamp_coin(p["sl_atr_mult"] + 0.10, "sl_atr_mult")
+            if round(new_sl, 3) != round(p["sl_atr_mult"], 3):
+                changes.append(
+                    f"sl ↑ {p['sl_atr_mult']:.2f}→{new_sl:.2f} "
+                    f"(cf rescue {best_rescue:.0%} @{best_mult}x)"
+                )
+                p["sl_atr_mult"] = round(new_sl, 3)
+
+    # ── Leverage — yalnızca performans güçlüyse, ASLA 10x üstüne ────────
+    if wr > 0.65 and avgr > 1.2:
+        new_lev = _clamp_coin(p["leverage"] + 1, "leverage")
+        if new_lev != p["leverage"]:
+            changes.append(f"lev ↑ {p['leverage']}→{new_lev} (WR:{wr:.0%} R:{avgr:.2f})")
+            p["leverage"] = new_lev
+    elif wr < 0.35 or avgr < -0.5:
+        new_lev = _clamp_coin(p["leverage"] - 1, "leverage")
+        if new_lev != p["leverage"]:
+            changes.append(f"lev ↓ {p['leverage']}→{new_lev} (WR:{wr:.0%})")
+            p["leverage"] = new_lev
+
+    p["win_rate"]  = round(wr, 4)
+    p["avg_r"]     = round(avgr, 4)
+    p["sample_n"]  = stats["total"]
+    p["optimized_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return p, changes
+
+
+def nightly_optimize_coins(tg_fn=None):
+    """
+    Per-coin nightly optimizer — 03:00 UTC'de çalışır.
+    coin_configs tablosunu günceller, Telegram raporu gönderir.
+    """
+    try:
+        conn = db()
+        coin_stats = _get_coin_trade_stats(conn, days=30, min_trades=20)
+        if not coin_stats:
+            conn.close()
+            logger.info("[NightlyOpt] Yeterli trade verisi yok (min 20/coin/30gün).")
+            return "Yeterli veri yok."
+
+        updated = []
+        conf_raised = 0
+        conf_lowered = 0
+        paused = []
+        top_performers = []
+        underperformers = []
+
+        for coin, stats in sorted(coin_stats.items()):
+            current_cfg = get_coin_config(coin)
+            cf = _counterfactual_sl(conn, coin)
+            new_cfg, changes = _optimize_coin_params(coin, stats, current_cfg, cf)
+            save_coin_config(coin, new_cfg)
+            updated.append(coin)
+
+            wr   = stats["win_rate"]
+            avgr = stats["avg_r"]
+
+            if wr >= 0.58 and avgr > 0.5:
+                top_performers.append((coin, wr, avgr))
+            elif wr < 0.35 or (wr < 0.45 and avgr < -0.3):
+                underperformers.append((coin, wr, avgr))
+                paused.append(coin)
+
+            for c in changes:
+                if "conf ↑" in c:
+                    conf_raised += 1
+                elif "conf ↓" in c:
+                    conf_lowered += 1
+
+        conn.close()
+
+        top_performers.sort(key=lambda x: x[1], reverse=True)
+        underperformers.sort(key=lambda x: x[1])
+
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        lines = [
+            "🧠 <b>AI Brain Nightly Report</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+            f"📅 {now_str}",
+            f"📊 Analyzed: {sum(s['total'] for s in coin_stats.values())} trades / {len(coin_stats)} coins",
+            "",
+        ]
+
+        if top_performers:
+            lines.append("🏆 <b>Top Performers</b>")
+            for sym, wr, avgr in top_performers[:5]:
+                lines.append(f"  {sym:<12} WR:{wr:.0%} R:{avgr:.1f} ✅")
+            lines.append("")
+
+        if underperformers:
+            lines.append("⚠️  <b>Underperformers (conf artırıldı)</b>")
+            for sym, wr, avgr in underperformers[:5]:
+                lines.append(f"  {sym:<12} WR:{wr:.0%} R:{avgr:.1f} 🔴")
+            lines.append("")
+
+        lines += [
+            f"🔧 Config Updates: {len(updated)} coins",
+            f"⬆️  Confidence raised: {conf_raised}",
+            f"⬇️  Confidence lowered: {conf_lowered}",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+        ]
+
+        report = "\n".join(lines)
+        logger.info("[NightlyOpt] %s", report.replace("\n", " | "))
+
+        if tg_fn:
+            try:
+                tg_fn(report)
+            except Exception as e:
+                logger.warning(f"[NightlyOpt] Telegram gönderilemedi: {e}")
+
+        return report
+
+    except Exception as e:
+        import traceback
+        msg = f"[NightlyOpt] Hata: {e}\n{traceback.format_exc()[:400]}"
+        logger.error(msg)
+        return msg
+
+
 # ═══════════════════════════════════════════════════════════
 
 _EOD_CACHE = [None]
