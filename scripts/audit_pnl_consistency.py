@@ -59,7 +59,7 @@ def audit() -> dict:
 
         # 3. Open trades kontrolü
         open_trades = conn.execute(
-            "SELECT * FROM trades WHERE status='OPEN'"
+            "SELECT * FROM trades WHERE status IN ('OPEN','tp1_hit','runner')"
         ).fetchall()
         for t in open_trades:
             tid = t["id"]
@@ -68,25 +68,25 @@ def audit() -> dict:
                 warnings.append(
                     f"Trade #{tid}: current_price boş/sıfır"
                 )
-            # quantity kontrolü
-            if t["quantity"] is None or t["quantity"] <= 0:
-                warnings.append(f"Trade #{tid}: quantity boş/sıfır")
-            # entry_price kontrolü
-            if t["entry_price"] is None or t["entry_price"] <= 0:
-                errors.append(f"Trade #{tid}: entry_price boş/sıfır!")
+            # qty kontrolü (DB kolonu: qty)
+            if t["qty"] is None or t["qty"] <= 0:
+                warnings.append(f"Trade #{tid}: qty boş/sıfır")
+            # entry kontrolü (DB kolonu: entry)
+            if t["entry"] is None or t["entry"] <= 0:
+                errors.append(f"Trade #{tid}: entry boş/sıfır!")
 
         ok_items.append(f"Open trades kontrol: {len(open_trades)} adet")
 
         # 4. Closed trades kontrolü
         closed_trades = conn.execute(
-            "SELECT * FROM trades WHERE status='CLOSED'"
+            "SELECT * FROM trades WHERE status='closed'"
         ).fetchall()
         for t in closed_trades:
             tid = t["id"]
-            if t["realized_pnl"] is None:
-                warnings.append(f"Trade #{tid}: realized_pnl NULL")
-            if t["exit_price"] is None or t["exit_price"] <= 0:
-                warnings.append(f"Trade #{tid}: exit_price boş/sıfır")
+            if t["net_pnl"] is None:
+                warnings.append(f"Trade #{tid}: net_pnl NULL")
+            if t["close_price"] is None or t["close_price"] <= 0:
+                warnings.append(f"Trade #{tid}: close_price boş/sıfır")
 
         ok_items.append(f"Closed trades kontrol: {len(closed_trades)} adet")
 
@@ -94,8 +94,8 @@ def audit() -> dict:
         all_trades = conn.execute("SELECT * FROM trades").fetchall()
         for t in all_trades:
             tid = t["id"]
-            if t["stop_loss"] is None or t["stop_loss"] <= 0:
-                warnings.append(f"Trade #{tid}: stop_loss boş/sıfır")
+            if t["sl"] is None or t["sl"] <= 0:
+                warnings.append(f"Trade #{tid}: sl boş/sıfır")
 
         # 6. Balance ledger kontrolü
         if "balance_ledger" in table_names:
