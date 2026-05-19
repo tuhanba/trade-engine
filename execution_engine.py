@@ -648,7 +648,19 @@ def open_trade(client, signal_dict: dict, ax_result: dict):
         sig.score       = float(signal_dict.get("score", ax_result.get("score", 0)))
         sig.risk_pct    = 1.0
         sig.source      = "scalp_bot"
-        sig.metadata    = {"candidate_id": signal_dict.get("candidate_id")}
+        sig.metadata    = {
+            "candidate_id":      signal_dict.get("candidate_id"),
+            "adx":               signal_dict.get("adx", 0),
+            "rv":                signal_dict.get("rv", 0),
+            "rsi5":              signal_dict.get("rsi5", 50),
+            "rsi1":              signal_dict.get("rsi1", 50),
+            "btc_trend":         signal_dict.get("btc_trend", "NEUTRAL"),
+            "bb_width_pct":      signal_dict.get("bb_width_pct", 0),
+            "bb_width_chg":      signal_dict.get("bb_width_chg", 0),
+            "momentum_3c":       signal_dict.get("momentum_3c", 0),
+            "funding_favorable": signal_dict.get("funding_favorable", 1),
+            "ml_score":          signal_dict.get("ml_score", 50),
+        }
         balance  = database.get_paper_balance() or 250.0
         trade    = build_trade_from_signal(sig, balance, config.DEFAULT_FEE_RATE, config.MAX_LEVERAGE)
         if trade is None:
