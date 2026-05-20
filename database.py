@@ -1209,6 +1209,7 @@ def _migrate():
         ("coin_profiles", "regime_performance", "TEXT"),
         ("coin_profiles", "danger_score","REAL DEFAULT 0"),
         ("coin_profiles", "sample_size", "INTEGER DEFAULT 0"),
+        ("coin_profiles", "total_trades", "INTEGER DEFAULT 0"),
         ("trades", "total_fee",    "REAL DEFAULT 0"),
         ("trades", "setup_quality","TEXT"),
         ("trades", "final_score",  "REAL"),
