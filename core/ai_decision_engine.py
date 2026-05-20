@@ -364,7 +364,16 @@ class AIDecisionEngine:
                 _risk    * 3.0,    # 0-10 → 0-30
                 1
             )
-            result = classify_signal(sig)
+            try:
+                from database import get_market_regime as _get_regime
+                _regime = _get_regime()
+            except Exception:
+                _regime = "NEUTRAL"
+            _ctx = {
+                "confluence_score": float(getattr(sig, "confluence_score", 2) or 2),
+                "market_regime":    _regime,
+            }
+            result = classify_signal(sig, _ctx)
             return {
                 "decision":    result.decision,
                 "final_score": float(result.score_adjusted or sig.score or 50.0),
@@ -652,6 +661,20 @@ class AdaptiveScorer:
                 getattr(signal, "symbol", "?"), ml_score, adjusted,
             )
 
+        # 7. Confluence score factor (0-4 TF alignment)
+        confluence = float(
+            getattr(signal, "confluence_score", None)
+            or context.get("confluence_score", 2)
+        )
+        if confluence == 4:
+            adjusted *= 1.15
+            logger.debug("[Confluence] 4/4 aligned → +15%%")
+        elif confluence == 3:
+            adjusted *= 1.08
+        elif confluence <= 1:
+            adjusted *= 0.85
+            logger.debug("[Confluence] %d/4 aligned → -15%%", int(confluence))
+
         return round(min(adjusted, 200.0), 1)
 
 
@@ -710,6 +733,32 @@ def classify_signal(
 
     # ── Adaptif score hesapla ────────────────────────────────────
     adjusted_score = scorer.compute_adjusted_score(signal, ctx)
+
+    # ── Piyasa Rejimi Filtresi ────────────────────────────────────────
+    try:
+        from database import get_market_regime as _get_regime
+        regime = _get_regime()
+    except Exception:
+        regime = ctx.get("market_regime", "NEUTRAL")
+
+    side_upper = str(getattr(signal, "side", "") or getattr(signal, "direction", "")).upper()
+
+    if regime == "CHOPPY":
+        setup_quality = str(getattr(signal, "setup_quality", "") or "").upper()
+        if setup_quality not in ("S", "A+"):
+            return AIDecisionResult(
+                decision=SignalDecision.VETO.value,
+                reason=f"CHOPPY piyasa — {setup_quality} kalite yetersiz (min A+)",
+                confidence=0.85,
+                score_adjusted=adjusted_score,
+            )
+    elif regime == "BULLISH" and side_upper == "SHORT":
+        adjusted_score = round(adjusted_score * 0.88, 1)
+        logger.debug("[Regime] BULLISH + SHORT → score *0.88 → %.1f", adjusted_score)
+    elif regime == "BEARISH" and side_upper == "LONG":
+        adjusted_score = round(adjusted_score * 0.88, 1)
+        logger.debug("[Regime] BEARISH + LONG → score *0.88 → %.1f", adjusted_score)
+    # ─────────────────────────────────────────────────────────────────
 
     # ── Ghost insight ────────────────────────────────────────────
     ghost_stats = ghost.get_symbol_ghost_stats(signal.symbol)

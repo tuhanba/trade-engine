@@ -970,6 +970,14 @@ def build_report(stats, sym_stats, changes, drought, loss_streak, win_streak,
     regime_emoji = {"BULLISH":"📈","BEARISH":"📉","CHOPPY":"🌀","NEUTRAL":"➡️","UNKNOWN":"❓"}
     _re_icon = regime_emoji.get(regime, '❓')
     lines.append(f"\n{_re_icon} <b>Piyasa Rejimi:</b> {regime}")
+    regime_effects = {
+        "BULLISH": "⬆️ LONG sinyaller favori — SHORT eşiği yükseltildi",
+        "BEARISH": "⬇️ SHORT sinyaller favori — LONG eşiği yükseltildi",
+        "CHOPPY":  "🚫 Sadece A+ / S kalite sinyaller geçiyor",
+        "NEUTRAL": "↔️ Standart filtreler aktif",
+        "UNKNOWN": "❓ Yeterli veri yok",
+    }
+    lines.append(f"   {regime_effects.get(regime, '')}")
 
     # Markov geçiş matrisi raporu
     if markov_matrix and markov_matrix["sample"] >= 8:
@@ -1622,6 +1630,12 @@ def analyze_and_adapt():
         last20_stats  = calc_stats(last20)
         sym_stats     = calc_symbol_stats(all_t)
         regime        = get_market_regime(recent)
+        # Regime'i DB'ye yaz — ai_decision_engine okuyacak
+        try:
+            from database import set_market_regime as _set_regime
+            _set_regime(regime)
+        except Exception as _re:
+            logger.debug(f"Regime yazılamadı: {_re}")
         heatmap       = calc_hourly_heatmap(all_t)
         bad_hours     = get_bad_hours(heatmap, threshold=0.30)
         drought       = is_drought(conn, hours=3)

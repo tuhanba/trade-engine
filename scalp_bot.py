@@ -479,6 +479,7 @@ def main():
                     sig.risk_score = risk_result["score"]
                     sig.setup_quality = trigger_result["quality"]
                     sig.ml_score = trigger_result.get("ml_score", 50)
+                    sig.confluence_score = trigger_result.get("confluence_total", 2)
                     sig.entry_zone = trigger_result["entry"]
                     sig.stop_loss = risk_result["sl"]
                     sig.tp1 = risk_result["tp1"]
