@@ -417,6 +417,141 @@ def init_db() -> None:
         conn.execute(_GHOST_RESULTS_DDL)
         conn.execute(_GHOST_THRESHOLD_SUGGESTIONS_DDL)
         conn.execute(_GHOST_SUGGESTIONS_DDL)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ai_learning (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol        TEXT,
+                trade_result  TEXT,
+                pnl           REAL DEFAULT 0,
+                setup_quality TEXT,
+                created_at    TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS adaptive_stats (
+                id          TEXT PRIMARY KEY,
+                scope       TEXT,
+                key         TEXT,
+                sample_size INTEGER DEFAULT 0,
+                win_rate    REAL DEFAULT 0,
+                expectancy  REAL DEFAULT 0,
+                avg_r       REAL DEFAULT 0,
+                threshold_data      INTEGER DEFAULT 0,
+                threshold_watchlist INTEGER DEFAULT 0,
+                threshold_telegram  INTEGER DEFAULT 0,
+                threshold_trade     INTEGER DEFAULT 0,
+                action_taken TEXT DEFAULT '',
+                notes        TEXT DEFAULT '',
+                created_at   TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS coin_profiles (
+                symbol       TEXT PRIMARY KEY,
+                win_rate     REAL DEFAULT 0.5,
+                avg_r        REAL DEFAULT 0,
+                profit_factor REAL DEFAULT 0,
+                tp1_hit_rate REAL DEFAULT 0,
+                tp2_hit_rate REAL DEFAULT 0,
+                runner_contribution REAL DEFAULT 0,
+                avg_duration REAL DEFAULT 0,
+                fakeout_rate REAL DEFAULT 0,
+                fee_drag     REAL DEFAULT 0,
+                best_hour    INTEGER,
+                best_session TEXT,
+                long_bias    REAL DEFAULT 0.5,
+                short_bias   REAL DEFAULT 0.5,
+                regime_performance TEXT,
+                danger_score REAL DEFAULT 0,
+                sample_size  INTEGER DEFAULT 0,
+                total_trades INTEGER DEFAULT 0,
+                updated_at   TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS params (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                version         INTEGER DEFAULT 1,
+                sl_atr_mult     REAL DEFAULT 1.2,
+                tp_atr_mult     REAL DEFAULT 2.0,
+                rsi5_min        REAL DEFAULT 35,
+                rsi5_max        REAL DEFAULT 75,
+                rsi1_min        REAL DEFAULT 35,
+                rsi1_max        REAL DEFAULT 72,
+                vol_ratio_min   REAL DEFAULT 1.2,
+                min_volume_m    REAL DEFAULT 10.0,
+                min_change_pct  REAL DEFAULT 2.0,
+                risk_pct        REAL DEFAULT 1.5,
+                updated_at      TEXT DEFAULT (datetime('now')),
+                ai_reason       TEXT DEFAULT ''
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ai_logs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at      TEXT,
+                trades_analyzed INTEGER DEFAULT 0,
+                win_rate        REAL DEFAULT 0,
+                avg_rr          REAL DEFAULT 0,
+                insight         TEXT DEFAULT '',
+                changes         TEXT DEFAULT '[]',
+                event           TEXT,
+                symbol          TEXT,
+                decision        TEXT,
+                score           REAL DEFAULT 0,
+                confidence      REAL DEFAULT 0,
+                reason          TEXT DEFAULT '',
+                data            TEXT DEFAULT ''
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS trade_events (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id    INTEGER,
+                event_type  TEXT,
+                data        TEXT DEFAULT '',
+                created_at  TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_state (
+                key        TEXT PRIMARY KEY,
+                value      TEXT DEFAULT '',
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS weekly_summary (
+                week_start  TEXT PRIMARY KEY,
+                trade_count INTEGER DEFAULT 0,
+                win_count   INTEGER DEFAULT 0,
+                loss_count  INTEGER DEFAULT 0,
+                win_rate    REAL DEFAULT 0,
+                net_pnl     REAL DEFAULT 0,
+                avg_r       REAL DEFAULT 0,
+                best_day    TEXT,
+                worst_day   TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS coin_library (
+                symbol       TEXT PRIMARY KEY,
+                min_qty      REAL DEFAULT 0,
+                step_size    REAL DEFAULT 0,
+                tick_size    REAL DEFAULT 0,
+                min_notional REAL DEFAULT 5.0,
+                status       TEXT DEFAULT 'TRADING',
+                last_updated TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS coin_cooldown (
+                symbol        TEXT PRIMARY KEY,
+                until         TEXT,
+                reason        TEXT DEFAULT '',
+                consec_losses INTEGER DEFAULT 0
+            )
+        """)
         from config import INITIAL_PAPER_BALANCE
         conn.execute(
             "INSERT OR IGNORE INTO paper_account (id, balance) VALUES (1, ?)",

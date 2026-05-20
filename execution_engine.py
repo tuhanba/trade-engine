@@ -575,8 +575,11 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
 
     # Live Tracker Postmortem Analizi
     try:
-        from live_tracker import record_close
-        record_close(trade_id, close_price, reason)
+        from live_tracker import record_close as _record_close
+    except ImportError:
+        def _record_close(*args, **kwargs): pass
+    try:
+        _record_close(trade_id, close_price, reason)
     except Exception as e:
         logger.warning(f"Live tracker record_close hatası: {e}")
 
@@ -602,12 +605,15 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
 
     # ── CoinLibrary Öğrenme Döngüsü ──────────────────────────────────────────
     try:
-        from coin_library import update_coin_stats
+        from coin_library import update_coin_stats as _update_coin_stats
+    except ImportError:
+        def _update_coin_stats(*args, **kwargs): pass
+    try:
         entry_p = t.get("entry", 0)
         sl_p    = t.get("sl", 0)
         sl_dist = abs(entry_p - sl_p) if sl_p else 1e-10
         r_mult  = round(net_pnl / (sl_dist * t.get("qty", 1) + 1e-10), 3)
-        update_coin_stats(
+        _update_coin_stats(
             symbol    = t["symbol"],
             result    = result,
             net_pnl   = net_pnl,
