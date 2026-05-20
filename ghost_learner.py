@@ -300,70 +300,28 @@ class GhostLearner:
 
     def collect_ghosts(self, hours_back: int = 48) -> int:
         """
-        signal_candidates'tan reddedilen sinyalleri ghost_signals'a kopyalar.
-        Zaten kopyalanmış olanları tekrar almaz (candidate_id unique).
-
-        Returns: kaç yeni ghost kaydedildi
+        VETO sinyalleri classify_signal() → maybe_ghost_log() → save_ghost_signal()
+        zinciriyle direkt ghost_signals tablosuna yazılıyor.
+        Bu fonksiyon birikmiş ghost sayısını raporlar ve bekleyen simülasyon
+        sayısını döner. Gerçek veri toplama classify_signal() hook'u üzerinden
+        otomatik oluyor.
         """
-        count = 0
-        with _get_conn() as conn:
-            # Zaten kaydedilmiş candidate_id'leri al
-            existing_ids = {
-                r[0] for r in conn.execute(
-                    "SELECT candidate_id FROM ghost_signals WHERE candidate_id IS NOT NULL"
-                ).fetchall()
-            }
-
-            cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours_back)
-                      ).strftime("%Y-%m-%d %H:%M:%S")
-
-            candidates = conn.execute("""
-                SELECT id, symbol, direction, entry, sl, tp1, tp2, tp3,
-                       final_score, decision, market_regime, created_at
-                FROM signal_candidates
-                WHERE decision IN ('REJECT', 'SKIP', 'FILTERED', 'VETO')
-                  AND created_at >= ?
-                  AND final_score >= ?
-                ORDER BY id DESC
-            """, (cutoff, self.min_score)).fetchall()
-
-            for row in candidates:
-                cid = row[0]
-                if cid in existing_ids:
-                    continue
-
-                # entry/sl/tp kontrolü — eksik olanlara girme
-                entry = row[3] or 0
-                sl    = row[4] or 0
-                tp1   = row[5] or 0
-                if entry <= 0 or sl <= 0 or tp1 <= 0:
-                    continue
-
-                conn.execute("""
-                    INSERT INTO ghost_signals
-                        (candidate_id, symbol, direction, entry_price,
-                         stop_loss, tp1, tp2, tp3,
-                         final_score, reject_reason, market_regime,
-                         simulated, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?)
-                """, (
-                    cid,
-                    row[1],   # symbol
-                    row[2],   # direction
-                    entry,
-                    sl,
-                    tp1,
-                    row[6] or 0,  # tp2
-                    row[7] or 0,  # tp3
-                    row[8] or 0,  # final_score
-                    row[9] or "", # decision (reject_reason olarak)
-                    row[10] or "NEUTRAL",  # market_regime
-                    row[11],  # created_at
-                ))
-                count += 1
-
-        logger.info("[Ghost] %d yeni ghost signal kaydedildi.", count)
-        return count
+        try:
+            with _get_conn() as conn:
+                total = conn.execute(
+                    "SELECT COUNT(*) FROM ghost_signals"
+                ).fetchone()[0]
+                pending = conn.execute(
+                    "SELECT COUNT(*) FROM ghost_signals WHERE simulated=0"
+                ).fetchone()[0]
+            logger.info(
+                "[Ghost] ghost_signals: %d toplam, %d simüle bekliyor.",
+                total, pending
+            )
+            return pending
+        except Exception as exc:
+            logger.warning("[Ghost] collect_ghosts kontrol hatası: %s", exc)
+            return 0
 
     # ── Adım 2: Simülasyon ───────────────────────────────────────────────────
 
