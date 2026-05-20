@@ -56,13 +56,17 @@ class TelegramDelivery:
         Yapılandırılmamışsa veya hata varsa False döner, crash olmaz.
         """
         if not self.is_configured():
-            logger.warning("Telegram yapılandırılmamış – mesaj atlandı")
+            logger.warning(
+                "[Telegram] Yapılandırılmamış — BOT_TOKEN veya CHAT_ID boş. "
+                "Mesaj gönderilemedi: %s",
+                text[:50],
+            )
             return False
 
         url = _TELEGRAM_API.format(token=self.token)
         payload = {
             "chat_id": self.chat_id,
-            "text": text,
+            "text": text[:4096],
             "parse_mode": "HTML",
         }
 
@@ -71,13 +75,16 @@ class TelegramDelivery:
             if resp.status_code == 200:
                 return True
             logger.warning(
-                "Telegram yanıt hatası: %s – %s",
+                "[Telegram] Gönderim başarısız: HTTP %d — %s",
                 resp.status_code,
-                resp.text[:200],
+                resp.text[:100],
             )
             return False
-        except requests.RequestException as exc:
-            logger.error("Telegram gönderim hatası: %s", exc)
+        except requests.exceptions.Timeout:
+            logger.warning("[Telegram] Timeout — mesaj gönderilemedi")
+            return False
+        except Exception as exc:
+            logger.warning("[Telegram] Hata: %s", exc)
             return False
 
     # ── Trade bildirimleri ───────────────────────────────────────

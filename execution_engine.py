@@ -90,7 +90,7 @@ class ExecutionEngine:
         )
 
         # Telegram bildirimi
-        self.telegram.send_trade_open({
+        tg_result = self.telegram.send_trade_open({
             "symbol": trade.symbol,
             "side": trade.side,
             "entry_price": trade.entry_price,
@@ -104,6 +104,10 @@ class ExecutionEngine:
             "margin_used": trade.margin_used,
             "notional": trade.notional,
         })
+        if not tg_result:
+            logger.warning("[Telegram] Trade açılış mesajı gönderilemedi: %s", trade.symbol)
+        else:
+            logger.info("[Telegram] Trade açılış mesajı gönderildi: %s", trade.symbol)
 
         return trade_id
 
@@ -276,13 +280,17 @@ class ExecutionEngine:
             total_pnl, accumulated, remaining_pnl,
         )
 
-        self.telegram.send_trade_close({
+        tg_result = self.telegram.send_trade_close({
             "symbol": trade["symbol"],
             "side": trade.get("direction") or trade.get("side", ""),
             "exit_price": exit_price,
             "realized_pnl": total_pnl,
             "close_reason": reason,
         })
+        if not tg_result:
+            logger.warning("[Telegram] Trade kapanış mesajı gönderilemedi: %s", trade["symbol"])
+        else:
+            logger.info("[Telegram] Trade kapanış mesajı gönderildi: %s", trade["symbol"])
 
     # ── Sinyal işleme ────────────────────────────────────────────
 
