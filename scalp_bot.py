@@ -255,7 +255,7 @@ def main():
                 time.sleep(10)
                 continue
 
-            # Günlük kayıp limiti kontrolü (DAILY_MAX_LOSS_PCT)
+            # Paper modda kayıp limiti yok — live trading'e geçince aktif edilecek
             try:
                 from database import get_conn
                 today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -268,17 +268,10 @@ def main():
                 balance = get_paper_balance()
                 max_loss_abs = balance * (DAILY_MAX_LOSS_PCT / 100.0)
                 if today_loss < -max_loss_abs:
-                    logger.warning(
-                        f"⛔ Günlük kayıp limiti aşıldı: {today_loss:.2f}$ "
-                        f"(limit: -{max_loss_abs:.2f}$) — yeni trade alınmıyor."
+                    logger.info(
+                        f"📊 Kayıp bilgisi: {today_loss:.2f}$ "
+                        f"(limit: -{max_loss_abs:.2f}$) — paper modda devam."
                     )
-                    send_message(
-                        f"⛔ Günlük kayıp limiti aşıldı!\n"
-                        f"Bugün: {today_loss:.2f}$ | Limit: -{max_loss_abs:.2f}$\n"
-                        f"Yeni sinyal alımı durduruldu."
-                    )
-                    time.sleep(300)  # 5 dakika bekle, tekrar kontrol et
-                    continue
             except Exception as _e:
                 logger.warning(f"Günlük kayıp kontrolü hatası: {_e}")
 
