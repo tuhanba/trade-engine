@@ -23,7 +23,7 @@ from config import (
     CIRCUIT_BREAKER_LOSSES, CIRCUIT_BREAKER_MINUTES,
     PAPER_MODE, AX_MODE, EXECUTION_MODE, COIN_UNIVERSE,
     LOG_DIR, LOG_MAX_DAYS, LOG_MAX_MB,
-    MAX_DAILY_SIGNALS, DB_PATH,
+    DB_PATH,
     DAILY_MAX_LOSS_PCT,
     DATA_THRESHOLD, WATCHLIST_THRESHOLD, TELEGRAM_THRESHOLD, TRADE_THRESHOLD,
     LIVE_CONFIRM, MAX_LEVERAGE, MIN_RR,
@@ -282,12 +282,10 @@ def main():
             except Exception as _e:
                 logger.warning(f"Günlük kayıp kontrolü hatası: {_e}")
 
-            # Günlük sinyal limiti kontrolü
+            # Günlük sinyal sayısı (bilgi amaçlı — hard limit yok)
             daily_counts = get_daily_signal_count()
-            if daily_counts["total"] >= MAX_DAILY_SIGNALS:
-                logger.info(f"Günlük sinyal limiti doldu ({MAX_DAILY_SIGNALS})")
-                time.sleep(60)
-                continue
+            if daily_counts["total"] % 10 == 0 and daily_counts["total"] > 0:
+                logger.debug(f"Günlük sinyal sayısı: {daily_counts['total']}")
 
             # Açık trade takibi
             if EXECUTION_AVAILABLE:
@@ -346,11 +344,6 @@ def main():
 
                 if symbol in open_symbols:
                     continue
-
-                # Günlük limit tekrar kontrol
-                daily_counts = get_daily_signal_count()
-                if daily_counts["total"] >= MAX_DAILY_SIGNALS:
-                    break
 
                 try:
                     # ── ADIM 2: TREND ENGINE ───────────────────────────────

@@ -90,7 +90,7 @@ MIN_MOVE_PCT             = _env_float("MIN_MOVE_PCT", 0.5)
 SCAN_INCLUDE_WATCH       = _env_bool("SCAN_INCLUDE_WATCH", True)
 WATCHLIST_MIN_SCAN_SCORE = _env_float("WATCHLIST_MIN_SCAN_SCORE", 50.0)
 MAX_COINS_PER_SCAN_LOOP  = _env_int("MAX_COINS_PER_SCAN_LOOP", 30)
-MAX_DAILY_SIGNALS        = _env_int("MAX_DAILY_SIGNALS", 60)
+MAX_DAILY_SIGNALS        = 9999  # Ruflo: kalite gate yeterli, hard limit yok
 
 # Sinyal Esikleri (v9.0 — gevşetilmiş, score max ~75 üretiyor)
 DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 20.0)
