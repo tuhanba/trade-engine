@@ -1734,6 +1734,19 @@ def get_system_state(key: str, default="-") -> str:
     return default
 
 
+def get_market_regime() -> str:
+    """Son kaydedilen piyasa rejimini döner. Default: NEUTRAL"""
+    return get_system_state("market_regime", default="NEUTRAL")
+
+
+def set_market_regime(regime: str) -> None:
+    """Piyasa rejimini system_state tablosuna yazar."""
+    try:
+        update_system_state("market_regime", regime)
+    except Exception as exc:
+        logger.warning("[DB] set_market_regime: %s", exc)
+
+
 def save_daily_summary(data: dict):
     with get_conn() as conn:
         conn.execute("""

@@ -256,3 +256,50 @@ class TrendEngine:
             "trend_1h":        trend_1h,
             "confluence_raw":  confluence_raw,   # 1-3 (15m/1h/4h); trigger_engine 5m ekler → 1-4
         }
+
+    def _get_trend_direction(self, symbol: str, interval: str) -> str:
+        """EMA21/55 + ADX ile tek TF yön: LONG / SHORT / NEUTRAL"""
+        try:
+            limit = 80 if interval in ("1m", "5m") else 60
+            df = self.get_candles(symbol, interval, limit)
+            if df.empty or len(df) < 30:
+                return "NEUTRAL"
+            e21 = self._ema(df["close"], 21)
+            e55 = self._ema(df["close"], 55)
+            adx_v, pdi, mdi = self._adx(df)
+            c = df["close"].iloc[-1]
+            if e21.iloc[-1] > e55.iloc[-1] and c > e21.iloc[-1] and adx_v > 15 and pdi > mdi:
+                return "LONG"
+            if e21.iloc[-1] < e55.iloc[-1] and c < e21.iloc[-1] and adx_v > 15 and mdi > pdi:
+                return "SHORT"
+            return "NEUTRAL"
+        except Exception:
+            return "NEUTRAL"
+
+    def get_confluence_score(self, symbol: str, side: str) -> dict:
+        """
+        1m + 5m + 1h + 4h kaçı verilen yönü destekliyor? (0-4)
+        side: 'LONG' veya 'SHORT'
+        Returns: {score: int(0-4), details: dict, label: str}
+        """
+        target = side.upper()
+        h1_raw = self.get_1h_trend(symbol)
+        h4_raw = self.get_4h_trend(symbol)
+
+        def _norm(t: str) -> str:
+            t = t.upper()
+            if t in ("BULLISH", "LONG", "UP", "BULL"):
+                return "LONG"
+            if t in ("BEARISH", "SHORT", "DOWN", "BEAR"):
+                return "SHORT"
+            return "NEUTRAL"
+
+        timeframes = {
+            "1m":  self._get_trend_direction(symbol, "1m"),
+            "5m":  self._get_trend_direction(symbol, "5m"),
+            "1h":  _norm(h1_raw),
+            "4h":  _norm(h4_raw),
+        }
+        aligned = sum(1 for d in timeframes.values() if d == target)
+        label = {4: "STRONG", 3: "GOOD", 2: "WEAK"}.get(aligned, "AGAINST")
+        return {"score": aligned, "details": timeframes, "label": label}
