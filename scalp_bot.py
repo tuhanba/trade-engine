@@ -181,8 +181,20 @@ def main():
     init_db()
     init_paper_account()
 
-    # Binance client
-    client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
+    # Binance client — paper modda API key opsiyonel
+    try:
+        client = Client(
+            BINANCE_API_KEY or "",
+            BINANCE_API_SECRET or "",
+        )
+        client.ping()
+        logger.info("✅ Binance bağlantısı OK")
+    except Exception as _be:
+        logger.warning(
+            f"⚠️ Binance bağlantısı başarısız: {_be} — "
+            f"Public endpoint'ler kullanılacak (paper mode)"
+        )
+        client = Client("", "")
     if AI_BRAIN_AVAILABLE:
         ai_set_client(client, send_message)
 

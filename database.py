@@ -881,8 +881,13 @@ def close_trade(
         try:
             conn.execute("UPDATE paper_account SET balance = balance + ? WHERE id=1", (realized_pnl,))
             conn.commit()
+            new_bal = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+            logger.info(
+                "[DB] Trade #%s kapandı: pnl=%+.3f$ → bakiye=%.2f$",
+                trade_id, realized_pnl, new_bal[0] if new_bal else 0,
+            )
         except Exception as _be:
-            logger.warning("close_trade balance update: %s", _be)
+            logger.error("[DB] Bakiye güncellenemedi #%s: %s", trade_id, _be)
     except Exception as exc:
         logger.error("Trade kapatılamadı [%s]: %s", trade_id, exc)
     finally:
@@ -1973,8 +1978,8 @@ def is_coin_in_cooldown(symbol: str) -> bool:
 # SCALP BOT COMPAT FONKSİYONLARI
 # ─────────────────────────────────────────────────────────────────────────────
 
-def init_paper_account():
-    """Paper account yoksa başlangıç bakiyesiyle oluşturur."""
+def init_paper_account(reset: bool = False):
+    """Paper account yoksa başlangıç bakiyesiyle oluşturur. reset=True ise bakiyeyi sıfırlar."""
     try:
         with get_conn() as conn:
             conn.execute(_PAPER_ACCOUNT_DDL)
@@ -1988,6 +1993,13 @@ def init_paper_account():
                     (init_bal, init_bal)
                 )
                 logger.info(f"[DB] paper_account oluşturuldu: ${init_bal}")
+            elif reset:
+                init_bal = getattr(config, 'INITIAL_PAPER_BALANCE', 500.0)
+                conn.execute(
+                    "UPDATE paper_account SET balance=?, initial_balance=? WHERE id=1",
+                    (init_bal, init_bal)
+                )
+                logger.info(f"[DB] paper_account sıfırlandı: ${init_bal}")
             else:
                 logger.info("[DB] paper_account hazır.")
     except Exception as e:
