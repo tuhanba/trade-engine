@@ -762,6 +762,29 @@ def classify_signal(
         signal.score, adjusted_score,
         ghost_insight or "",
     )
+
+    # ── Ghost Learning hook ───────────────────────────────────────────
+    # VETO veya WATCH kararında ghost_signals'a kaydet (tüm çağırıcılar için)
+    if result.decision in (SignalDecision.VETO.value, SignalDecision.WATCH.value):
+        try:
+            from core.ghost_learning import maybe_ghost_log
+            maybe_ghost_log(
+                {
+                    "symbol":       signal.symbol,
+                    "direction":    signal.side,
+                    "entry":        signal.entry_price,
+                    "sl":           signal.stop_loss,
+                    "tp1":          getattr(signal, "tp1", None) or 0,
+                    "confidence":   result.confidence,
+                    "trigger_type": getattr(signal, "trigger_type", "UNKNOWN"),
+                    "final_score":  result.score_adjusted,
+                },
+                reason=result.decision,
+            )
+        except Exception as _ghost_err:
+            logger.debug("[classify_signal] ghost log atlandı: %s", _ghost_err)
+    # ─────────────────────────────────────────────────────────────────
+
     return result
 
 

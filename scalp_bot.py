@@ -605,13 +605,6 @@ def main():
                                 "preview_tp3": sig.tp3,
                                 "leverage_hint": int(sig.leverage_suggestion or 10),
                             })
-                        _ghost_log({
-                            "symbol": symbol, "direction": sig.direction,
-                            "entry": sig.entry_zone,
-                            "sl": sig.stop_loss, "tp1": sig.tp1,
-                            "confidence": decision.get("confidence", sig.final_score / 100),
-                            "quality": sig.setup_quality,
-                        }, reason="ai_veto")
                         continue
 
                     sig.status = "approved"
