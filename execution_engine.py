@@ -479,6 +479,14 @@ def _check_trade(client, t: dict) -> bool:
             })
             update_paper_balance(pnl_tp1)
             save_trade_event(trade_id, "TP1_HIT", f"price={tp1} pnl={pnl_tp1:.4f} new_sl={new_sl:.6f}")
+            try:
+                from telegram_delivery import send_tp_hit
+                _bal_tp1 = get_paper_balance()
+                _remaining_tp1 = qty - qty_tp1
+                send_tp_hit(symbol, 1, pnl_tp1, _remaining_tp1, _bal_tp1)
+                logger.info(f"[Telegram] TP1 bildirimi: {symbol} +{pnl_tp1:.4f}$")
+            except Exception as _tg_tp1:
+                logger.debug(f"[Telegram] TP1 bildirim hatası: {_tg_tp1}")
             if event_manager: event_manager.broadcast_live_update(get_open_trades())
             if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), t.get("realized_pnl", 0) + pnl_tp1)
 
@@ -504,6 +512,14 @@ def _check_trade(client, t: dict) -> bool:
             })
             update_paper_balance(pnl_tp2)
             save_trade_event(trade_id, "TP2_HIT", f"price={tp2} pnl={pnl_tp2:.4f} trail={new_trail:.6f}")
+            try:
+                from telegram_delivery import send_tp_hit
+                _bal_tp2 = get_paper_balance()
+                _runner_qty = qty - qty_tp1 - qty_tp2
+                send_tp_hit(symbol, 2, pnl_tp2, _runner_qty, _bal_tp2)
+                logger.info(f"[Telegram] TP2 bildirimi: {symbol} +{pnl_tp2:.4f}$ → RUNNER")
+            except Exception as _tg_tp2:
+                logger.debug(f"[Telegram] TP2 bildirim hatası: {_tg_tp2}")
             if event_manager: event_manager.broadcast_live_update(get_open_trades())
             if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), realized)
             logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ → RUNNER trail={new_trail:.6f}")
@@ -641,6 +657,28 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
         ).start()
     except Exception as e:
         logger.warning(f"AI Brain post_trade_analysis hatası: {e}")
+    try:
+        from telegram_delivery import send_trade_close as _tg_close
+        _dur_str = f"{int(hold_min // 60)}s {int(hold_min % 60)}dk" if hold_min >= 60 else f"{int(hold_min)}dk"
+        _bal_close = get_paper_balance()
+        _entry_p = float(t.get("entry") or t.get("entry_price") or 1)
+        _sl_p    = float(t.get("sl") or t.get("stop_loss") or 0)
+        _sl_dist = abs(_entry_p - _sl_p) if _sl_p else 1e-10
+        _qty_all = float(t.get("original_qty") or t.get("qty") or 1)
+        _r_mult  = round(net_pnl / (_sl_dist * _qty_all + 1e-10), 2) if _sl_p else 0
+        _tg_close(
+            symbol=t["symbol"],
+            net_pnl=net_pnl,
+            total_fee=float(t.get("total_fee") or t.get("fee") or 0),
+            reason=reason,
+            duration_str=_dur_str,
+            direction=t.get("direction") or t.get("side", ""),
+            r_multiple=_r_mult,
+            balance_after=_bal_close,
+        )
+        logger.info(f"[Telegram] Kapanış bildirimi: {t['symbol']} {'+' if net_pnl >= 0 else ''}{net_pnl:.3f}$")
+    except Exception as _tg_close_err:
+        logger.warning(f"[Telegram] Kapanış bildirim hatası: {_tg_close_err}")
     logger.info(
         f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
         f"{reason.upper()} pnl={net_pnl:+.3f}$ hold={hold_min:.0f}dk"

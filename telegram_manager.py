@@ -290,23 +290,29 @@ class TelegramManager:
     def _cmd_ghost(self):
         import database
         try:
-            conn  = database.get_connection()
-            total = conn.execute("SELECT COUNT(*) FROM signal_candidates").fetchone()[0]
-            tp    = conn.execute("SELECT COUNT(*) FROM signal_candidates WHERE status='TP_HIT'").fetchone()[0]
-            sl    = conn.execute("SELECT COUNT(*) FROM signal_candidates WHERE status='SL_HIT'").fetchone()[0]
-            pnl   = conn.execute(
-                "SELECT COALESCE(SUM(ghost_pnl),0) FROM signal_candidates WHERE status IN ('TP_HIT','SL_HIT')"
-            ).fetchone()[0]
-            conn.close()
-            resolved = tp + sl
-            wr = round(tp / resolved * 100, 1) if resolved > 0 else 0
+            with database.get_conn() as conn:
+                gs_total = conn.execute("SELECT COUNT(*) FROM ghost_signals").fetchone()[0]
+                gs_sim   = conn.execute("SELECT COUNT(*) FROM ghost_signals WHERE simulated=1").fetchone()[0]
+                gr_wins  = conn.execute("SELECT COUNT(*) FROM ghost_results WHERE virtual_outcome='WIN'").fetchone()[0]
+                gr_loss  = conn.execute("SELECT COUNT(*) FROM ghost_results WHERE virtual_outcome='LOSS'").fetchone()[0]
+                gr_avg_r = conn.execute(
+                    "SELECT AVG(virtual_pnl_r) FROM ghost_results WHERE virtual_outcome IN ('WIN','LOSS')"
+                ).fetchone()[0] or 0
+                pending_sugg = conn.execute(
+                    "SELECT COUNT(*) FROM ghost_suggestions WHERE applied=0"
+                ).fetchone()[0]
+            resolved = gr_wins + gr_loss
+            vwr = round(gr_wins / resolved * 100, 1) if resolved > 0 else 0
             self.send_fn(
-                f"Ghost Learning\n\n"
-                f"Toplam sinyal adayi: {total}\n"
-                f"TP vurdu: {tp} | SL vurdu: {sl}\n"
-                f"Ghost winrate: {wr:.1f}%\n"
-                f"Ghost PnL: ${float(pnl):+.2f}\n"
-                f"Bekleyen: {total - resolved}"
+                f"👻 Ghost Learning 2.0\n"
+                f"━━━━━━━━━━━━━━━━\n"
+                f"Toplam sinyal: {gs_total}\n"
+                f"Simüle: {gs_sim} | Bekleyen: {gs_total - gs_sim}\n"
+                f"━━━━━━━━━━━━━━━━\n"
+                f"WIN: {gr_wins} | LOSS: {gr_loss}\n"
+                f"Ghost WR: {vwr:.1f}%\n"
+                f"Avg R: {gr_avg_r:.2f}R\n"
+                f"Bekleyen öneri: {pending_sugg}"
             )
         except Exception as e:
             self.send_fn(f"Ghost bilgisi alinamadi: {e}")
