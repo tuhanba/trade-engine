@@ -63,10 +63,10 @@ MIN_RR                     = _env_float("MIN_RR", 1.5)
 MIN_EXPECTED_MFE_R         = _env_float("MIN_EXPECTED_MFE_R", 1.2)
 
 # TP / SL ATR multipliers
-SL_ATR_MULT  = _env_float("SL_ATR_MULT", 1.2)
-TP1_R        = _env_float("TP1_R", 1.0)
-TP2_R        = _env_float("TP2_R", 2.0)
-TP3_R        = _env_float("TP3_R", 3.0)
+SL_ATR_MULT  = _env_float("SL_ATR_MULT", 1.8)   # gürültüden uzak SL
+TP1_R        = _env_float("TP1_R", 1.5)   # kârlı başlangıç
+TP2_R        = _env_float("TP2_R", 2.5)   # güçlü hedef
+TP3_R        = _env_float("TP3_R", 4.0)   # runner hedef
 
 # TP Splits
 TP1_CLOSE_PCT    = _env_float("TP1_CLOSE_PCT", 40)
@@ -110,6 +110,7 @@ PAPER_TRACK_HORIZON_HOURS       = _env_float("PAPER_TRACK_HORIZON_HOURS", 6.0)
 
 # Trigger Engine
 ALLOWED_QUALITIES          = ["S", "A+", "A", "B"]
+EXECUTABLE_QUALITIES       = _env("EXECUTABLE_QUALITIES", "S,A+,A").split(",")  # B kalite execute edilmez
 BAD_HOURS_UTC              = [4, 5, 6, 11, 12, 13]
 GOOD_HOURS_UTC             = [0, 1, 2, 3, 7, 8, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
 SHORT_REQUIRES_BTC_BEARISH = True
