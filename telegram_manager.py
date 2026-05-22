@@ -85,6 +85,7 @@ class TelegramManager:
             "/trades":  self._cmd_trades,
             "/balance": self._cmd_balance,
             "/open":    self._cmd_open,
+            "/signal":  self._cmd_signal,
             "/ghost":   self._cmd_ghost,
             "/daily":   self._cmd_daily,
             "/mode":    self._cmd_mode,
@@ -113,6 +114,7 @@ class TelegramManager:
             "/daily   - Bugunun ozeti\n"
             "/balance - Bakiye detayi\n"
             "/trades  - Son 5 trade\n"
+            "/signal  - Son 5 sinyal ozeti\n"
             "/ghost   - Ghost learning\n\n"
             "Kontrol\n"
             "/pause   - Duraklatir\n"
@@ -122,26 +124,56 @@ class TelegramManager:
 
     def _cmd_status(self):
         import database
-        bal    = database.get_paper_balance() or 0
-        open_t = database.get_open_trades()
-        uptime = int(time.time() - self._start_time)
-        h, rem = divmod(uptime, 3600)
-        m = rem // 60
-        paused_txt = "DURAKLATILDI" if self.is_paused else "Aktif"
+        bal     = database.get_paper_balance() or 0
+        init    = getattr(config, "INITIAL_PAPER_BALANCE", 500.0)
+        roi     = ((bal - init) / init * 100) if init else 0
+        open_t  = database.get_open_trades()
+        stats   = database.get_dashboard_stats()
+        uptime  = int(time.time() - self._start_time)
+        h, rem  = divmod(uptime, 3600)
+        m       = rem // 60
+
+        try:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            with database.get_conn() as conn:
+                today_pnl = conn.execute("""
+                    SELECT COALESCE(SUM(net_pnl), 0) FROM trades
+                    WHERE status='closed' AND DATE(close_time)=?
+                """, (today,)).fetchone()[0] or 0
+                ghost_n = conn.execute(
+                    "SELECT COUNT(*) FROM ghost_signals"
+                ).fetchone()[0]
+        except Exception:
+            today_pnl = 0
+            ghost_n = 0
+
+        regime = database.get_system_state("market_regime") or "NEUTRAL"
+        paused = "⏸ DURAKLATILDI" if self.is_paused else "▶️ Aktif"
+
         open_lines = ""
-        for t in open_t[:3]:
-            sym  = t.get("symbol", "?")
-            side = t.get("side") or t.get("direction", "?")
-            ep   = float(t.get("entry_price") or t.get("entry") or 0)
-            upnl = float(t.get("unrealized_pnl") or 0)
-            open_lines += f"\n  {sym} {side} @{ep:.4f} ({upnl:+.2f}$)"
+        for t in open_t[:5]:
+            sym   = t.get("symbol", "?")
+            side  = (t.get("side") or t.get("direction", "?"))[:1]
+            entry = float(t.get("entry_price") or t.get("entry") or 0)
+            upnl  = float(t.get("unrealized_pnl") or 0)
+            status = t.get("status", "open")
+            tp_marker = " 🎯" if "tp1" in status else ""
+            open_lines += f"\n  {sym} {side} @{entry:.4f} {upnl:+.2f}${tp_marker}"
+
         self.send_fn(
-            f"AurvexAI Durum\n"
-            f"Durum: {paused_txt}\n"
+            f"🤖 AurvexAI Durum\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"Durum: {paused}\n"
             f"Mod: {config.EXECUTION_MODE.upper()} | {config.AX_MODE.upper()}\n"
-            f"Bakiye: ${bal:.2f}\n"
-            f"Acik trade: {len(open_t)}{open_lines}\n"
-            f"Uptime: {h}s {m}dk"
+            f"Rejim: {regime}\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"💰 Bakiye: ${bal:.2f} ({roi:+.1f}% ROI)\n"
+            f"📅 Bugün: ${today_pnl:+.2f}\n"
+            f"📊 Toplam PnL: ${stats.get('total_pnl', 0):+.2f}\n"
+            f"👻 Ghost: {ghost_n} sinyal\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"Açık trade: {len(open_t)}{open_lines}\n"
+            f"⏱ Uptime: {h}s {m}dk"
         )
 
     def _cmd_stats(self):
@@ -236,6 +268,24 @@ class TelegramManager:
                 f"  TP1: ${tp1:.4f} PnL: {upnl:+.2f}$"
             )
         self.send_fn(f"Acik Tradeler ({len(trades)})\n\n" + "\n\n".join(lines))
+
+    def _cmd_signal(self):
+        """Son 5 sinyal adayının özeti."""
+        import database
+        signals = database.get_recent_signals(5)
+        if not signals:
+            self.send_fn("Henüz sinyal yok.")
+            return
+        lines = ["📡 Son 5 Sinyal\n━━━━━━━━━━━━━━"]
+        for s in signals:
+            sym   = s.get("symbol", "?")
+            side  = (s.get("direction") or s.get("side", "?"))
+            score = s.get("final_score") or s.get("score", 0)
+            dec   = s.get("decision", "?")
+            t     = str(s.get("created_at", ""))[:16]
+            emoji = "✅" if dec == "ALLOW" else "❌" if dec == "VETO" else "👁"
+            lines.append(f"{emoji} {sym} {side} | {score:.0f} | {t}")
+        self.send_fn("\n".join(lines))
 
     def _cmd_ghost(self):
         import database

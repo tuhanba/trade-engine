@@ -158,8 +158,43 @@ def api_signals():
 def api_learning():
     """Ghost learning özeti."""
     try:
-        from core.ai_decision_engine import get_learning_summary
-        return _ok(get_learning_summary())
+        with get_conn() as conn:
+            gs_total = conn.execute("SELECT COUNT(*) FROM ghost_signals").fetchone()[0]
+            gs_sim   = conn.execute("SELECT COUNT(*) FROM ghost_signals WHERE simulated=1").fetchone()[0]
+            gr_wins  = conn.execute("SELECT COUNT(*) FROM ghost_results WHERE virtual_outcome='WIN'").fetchone()[0]
+            gr_loss  = conn.execute("SELECT COUNT(*) FROM ghost_results WHERE virtual_outcome='LOSS'").fetchone()[0]
+            gr_avg_r = conn.execute("SELECT AVG(virtual_pnl_r) FROM ghost_results WHERE virtual_outcome IN ('WIN','LOSS')").fetchone()[0] or 0
+            suggestions = conn.execute("SELECT COUNT(*) FROM ghost_suggestions WHERE applied=0").fetchone()[0]
+
+            top_patterns = conn.execute("""
+                SELECT g.trigger_type, g.coin,
+                       COUNT(*) as n,
+                       SUM(CASE WHEN r.virtual_outcome='WIN' THEN 1.0 ELSE 0 END)*100/COUNT(*) as wr,
+                       AVG(r.virtual_pnl_r) as avg_r
+                FROM ghost_signals g
+                JOIN ghost_results r ON g.id=r.ghost_id
+                WHERE r.virtual_outcome IN ('WIN','LOSS')
+                GROUP BY g.trigger_type, g.coin
+                HAVING COUNT(*) >= 3
+                ORDER BY avg_r DESC LIMIT 5
+            """).fetchall()
+
+        vwr = round(gr_wins / (gr_wins + gr_loss) * 100, 1) if (gr_wins + gr_loss) > 0 else 0
+        return _ok({
+            "ghost_total": gs_total,
+            "ghost_simulated": gs_sim,
+            "ghost_pending": gs_total - gs_sim,
+            "virtual_wins": gr_wins,
+            "virtual_losses": gr_loss,
+            "virtual_wr": vwr,
+            "avg_r": round(gr_avg_r, 3),
+            "pending_suggestions": suggestions,
+            "top_patterns": [
+                {"trigger": r[0], "coin": r[1], "count": r[2],
+                 "wr": round(r[3], 1), "avg_r": round(r[4], 2)}
+                for r in top_patterns
+            ],
+        })
     except Exception as exc:
         return _error(str(exc))
 
