@@ -17,17 +17,21 @@ try:
         ALLOWED_QUALITIES, BAD_HOURS_UTC, GOOD_HOURS_UTC,
         SHORT_REQUIRES_BTC_BEARISH, BTC_TREND_INTERVAL,
         ADX_MIN_THRESHOLD, MIN_ADX_5M, FUNDING_LONG_MAX, FUNDING_SHORT_MIN,
+        SESSION_FILTER_ENABLED, SESSION_SCORE_BONUS, SESSION_SCORE_PENALTY,
     )
 except ImportError:
-    ALLOWED_QUALITIES        = ["S", "A+", "A", "B"]
-    BAD_HOURS_UTC            = [4, 5, 6, 11, 12, 13]
-    GOOD_HOURS_UTC           = [0, 1, 2, 3, 7, 8, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
-    SHORT_REQUIRES_BTC_BEARISH = True
-    BTC_TREND_INTERVAL       = "4h"
-    ADX_MIN_THRESHOLD        = 18
-    MIN_ADX_5M               = 13
-    FUNDING_LONG_MAX         = 0.003
-    FUNDING_SHORT_MIN        = -0.003
+    ALLOWED_QUALITIES           = ["S", "A+", "A", "B"]
+    BAD_HOURS_UTC               = list(range(0, 6))
+    GOOD_HOURS_UTC              = list(range(8, 18))
+    SHORT_REQUIRES_BTC_BEARISH  = True
+    BTC_TREND_INTERVAL          = "4h"
+    ADX_MIN_THRESHOLD           = 18
+    MIN_ADX_5M                  = 13
+    FUNDING_LONG_MAX            = 0.003
+    FUNDING_SHORT_MIN           = -0.003
+    SESSION_FILTER_ENABLED      = True
+    SESSION_SCORE_BONUS         = 10.0
+    SESSION_SCORE_PENALTY       = -15.0
 
 
 def _btc_allows(direction: str, btc_trend: str) -> tuple:
@@ -215,6 +219,14 @@ class TriggerEngine:
 
         if quality not in ALLOWED_QUALITIES:
             return {"quality": "D", "score": 0, "entry": 0}
+
+        # ── Session skoru ayarlaması ─────────────────────────────────────────
+        if SESSION_FILTER_ENABLED:
+            if current_hour in GOOD_HOURS_UTC:
+                score = min(score + SESSION_SCORE_BONUS / 10, 10.0)
+            elif current_hour in BAD_HOURS_UTC:
+                score = max(score + SESSION_SCORE_PENALTY / 10, 0.0)
+        # ─────────────────────────────────────────────────────────────────────
 
         # ── Çoklu TF Confluence kalite ayarlaması ────────────────────────────
         # trend_confluence: 15m+1h+4h = 1-3  (trend_engine'den gelir)

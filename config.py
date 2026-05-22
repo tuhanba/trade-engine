@@ -17,7 +17,9 @@ logger = logging.getLogger("ax.config")
 def _env(key, default=""): return os.getenv(key, default).strip()
 def _env_bool(key, default=False):
     v = os.getenv(key, "").strip().lower()
-    return True if v in ("true","1","yes") else (False if v in ("false","0","no","") else default)
+    if not v:
+        return default
+    return v in ("true", "1", "yes")
 def _env_int(key, default=0):
     v = os.getenv(key, "").strip()
     try: return int(v) if v else default
@@ -50,9 +52,9 @@ ANTHROPIC_API_KEY  = _env("ANTHROPIC_API_KEY")
 
 # Risk
 RISK_PCT                   = _env_float("RISK_PCT", 1.0)
-MAX_OPEN_TRADES            = _env_int("MAX_OPEN_TRADES", 5)
+MAX_OPEN_TRADES            = _env_int("MAX_OPEN_TRADES", 3)
 DAILY_MAX_LOSS_PCT         = _env_float("DAILY_MAX_LOSS_PCT", 5.0)
-MAX_LEVERAGE               = _env_int("MAX_LEVERAGE", 20)
+MAX_LEVERAGE               = _env_int("MAX_LEVERAGE", 10)
 DEFAULT_FEE_RATE           = _env_float("DEFAULT_FEE_RATE", 0.0004)
 MAX_CONSECUTIVE_LOSSES     = _env_int("MAX_CONSECUTIVE_LOSSES", 5)
 COIN_COOLDOWN_MINUTES      = _env_int("COIN_COOLDOWN_MINUTES", 30)
@@ -64,19 +66,20 @@ MIN_EXPECTED_MFE_R         = _env_float("MIN_EXPECTED_MFE_R", 1.2)
 
 # TP / SL ATR multipliers
 SL_ATR_MULT  = _env_float("SL_ATR_MULT", 1.8)   # gürültüden uzak SL
-TP1_R        = _env_float("TP1_R", 1.5)   # kârlı başlangıç
-TP2_R        = _env_float("TP2_R", 2.5)   # güçlü hedef
+TP1_R        = _env_float("TP1_R", 1.5)   # kârlı başlangıç (1.5R)
+TP2_R        = _env_float("TP2_R", 2.5)   # güçlü hedef (2.5R)
 TP3_R        = _env_float("TP3_R", 4.0)   # runner hedef
+MIN_SL_PCT   = _env_float("MIN_SL_PCT", 0.015)  # SL min %1.5 (gürültü koruması)
 
 # TP Splits
 TP1_CLOSE_PCT    = _env_float("TP1_CLOSE_PCT", 40)
-TP2_CLOSE_PCT    = _env_float("TP2_CLOSE_PCT", 30)
-RUNNER_CLOSE_PCT = _env_float("RUNNER_CLOSE_PCT", 30)
+TP2_CLOSE_PCT    = _env_float("TP2_CLOSE_PCT", 35)
+RUNNER_CLOSE_PCT = _env_float("RUNNER_CLOSE_PCT", 25)
 
 # Trailing
 TRAIL_ATR_MULT       = _env_float("TRAIL_ATR_MULT", 1.5)
 BREAKEVEN_ENABLED    = _env_bool("BREAKEVEN_ENABLED", True)
-BREAKEVEN_OFFSET_PCT = _env_float("BREAKEVEN_OFFSET_PCT", 0.05)
+BREAKEVEN_OFFSET_PCT = _env_float("BREAKEVEN_OFFSET_PCT", 0.1)
 
 # Paper / Timing
 INITIAL_PAPER_BALANCE = _env_float("INITIAL_PAPER_BALANCE", 500.0)
@@ -92,11 +95,11 @@ WATCHLIST_MIN_SCAN_SCORE = _env_float("WATCHLIST_MIN_SCAN_SCORE", 50.0)
 MAX_COINS_PER_SCAN_LOOP  = _env_int("MAX_COINS_PER_SCAN_LOOP", 30)
 MAX_DAILY_SIGNALS        = 9999  # Ruflo: kalite gate yeterli, hard limit yok
 
-# Sinyal Esikleri (v9.0 — gevşetilmiş, score max ~75 üretiyor)
-DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 20.0)
-WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 25.0)
-TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 28.0)
-TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 35.0)
+# Sinyal Esikleri (v10.0 — düşürüldü, gerçekçi eşikler)
+DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 15.0)
+WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 20.0)
+TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 25.0)
+TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 30.0)
 
 # Circuit Breaker
 CIRCUIT_BREAKER_LOSSES  = _env_int("CIRCUIT_BREAKER_LOSSES", 3)
@@ -111,11 +114,16 @@ PAPER_TRACK_HORIZON_HOURS       = _env_float("PAPER_TRACK_HORIZON_HOURS", 6.0)
 # Trigger Engine
 ALLOWED_QUALITIES          = ["S", "A+", "A", "B"]
 EXECUTABLE_QUALITIES       = _env("EXECUTABLE_QUALITIES", "S,A+,A").split(",")  # B kalite execute edilmez
-BAD_HOURS_UTC              = [4, 5, 6, 11, 12, 13]
-GOOD_HOURS_UTC             = [0, 1, 2, 3, 7, 8, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+# London (08-12 UTC) + NY (13-17 UTC) = en aktif seanslar
+GOOD_HOURS_UTC             = list(range(8, 18))   # 08-17 UTC
+BAD_HOURS_UTC              = list(range(0, 6))    # 00-05 UTC (Asian close)
+SESSION_FILTER_ENABLED     = _env_bool("SESSION_FILTER_ENABLED", True)
+SESSION_SCORE_BONUS        = _env_float("SESSION_SCORE_BONUS", 10.0)
+SESSION_SCORE_PENALTY      = _env_float("SESSION_SCORE_PENALTY", -15.0)
 SHORT_REQUIRES_BTC_BEARISH = True
 BTC_TREND_INTERVAL         = "4h"
 ADX_MIN_THRESHOLD          = 18  # eskiden 20
+MIN_ADX_5M_FILTER          = _env_float("MIN_ADX_5M_FILTER", 20.0)
 
 # Scalp Filtreler (v9.0 — gevşetilmiş)
 MIN_BB_WIDTH    = _env_float("MIN_BB_WIDTH", 1.0)      # eskiden 1.3
@@ -157,7 +165,14 @@ COIN_UNIVERSE = [
 ]
 
 # Ghost Learning
-GHOST_WEIGHT = _env_float("GHOST_WEIGHT", 0.30)
+GHOST_WEIGHT         = _env_float("GHOST_WEIGHT", 0.30)
+GHOST_MIN_CONFIDENCE = _env_float("GHOST_MIN_CONFIDENCE", 0.40)
+
+# Coin Library v2
+COIN_MIN_VOLUME_USDT = _env_float("COIN_MIN_VOLUME_USDT", 10_000_000)
+COIN_MIN_MOVE_PCT    = _env_float("COIN_MIN_MOVE_PCT", 0.5)
+COIN_MIN_SCORE       = _env_float("COIN_MIN_SCORE", 40.0)
+COIN_UNIVERSE_LIMIT  = _env_int("COIN_UNIVERSE_LIMIT", 40)
 
 # Guvenlik
 def is_live_trading_allowed() -> bool:

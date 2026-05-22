@@ -1,310 +1,142 @@
-# AURVEX AI Trade Engine — Claude Code Rehberi
-> **Son güncelleme:** 2026-05-21
-> **Durum:** Ghost Learning 2.0 aktif — Paper pipeline çalışıyor
-> **Sunucu yolu:** `/root/trade_engine/trade-engine/`
-> **Venv:** `/root/trade_engine/trade-engine/.venv/bin/python`
+# AurvexAI — Master Claude Code Rehberi
+> **Güncelleme:** 2026-05-22 | **Versiyon:** v3.0 Production
+> **Sunucu:** `/root/trade_engine/trade-engine/` | **DB:** `trading.db`
 
 ---
 
-## 1. Proje Yapısı
+## 🚨 ACİL — ŞU AN YAPILACAK (sırayla)
 
 ```
-trade-engine/
-│
-├── config.py                    # Tüm sabitler — os.getenv YASAK, buradan oku
-├── database.py                  # SQLite katmanı v5.2 — tek DB giriş noktası
-├── scalp_bot.py                 # Ana bot döngüsü (çalıştırılan dosya)
-├── execution_engine.py          # Trade aç / kapat / yönet
-├── signal_engine.py             # Sinyal üretimi (EMA+RSI+MACD+Volume)
-├── ai_brain.py                  # Gece 03:00 UTC nightly optimizer
-├── ghost_learner.py             # Ghost Learning scheduler (manuel/cron)
-├── ml_signal_scorer.py          # Voting Ensemble RF+GB
-├── app.py                       # Flask dashboard (port 5000)
-├── dashboard_service.py         # /api/* veri katmanı
-├── telegram_delivery.py         # Bildirim formatlama + gönderim
-│
-├── core/
-│   ├── accounting.py            # PnL/fee formülleri — DOKUNMA
-│   ├── ai_decision_engine.py    # ALLOW/VETO + ghost hook + paper öğrenim
-│   ├── ghost_learning.py        # Ghost Learning 2.0 motoru
-│   ├── paper_tracker.py         # Paper simülasyonu (v5.2)
-│   ├── market_scanner.py        # PERPETUAL coin tarama
-│   ├── risk_engine.py           # 5 risk governor fonksiyonu
-│   ├── trigger_engine.py        # Kalite sınıfı: S/A+/A/B/C/D
-│   ├── trend_engine.py          # Multi-TF trend analizi
-│   ├── trailing_engine.py       # Trailing SL yönetimi
-│   ├── signal_intelligence.py   # Sinyal kalite analizi
-│   ├── watchdog.py              # Bot sağlık izleme
-│   └── data_layer.py            # SignalData / TradeData dataclass'ları
-│
-├── scripts/
-│   ├── migrate_accounting_schema.py
-│   ├── audit_pnl_consistency.py
-│   ├── backtest_engine.py
-│   └── monitor_paper_run.py
-│
-├── .claude/agents/              # Claude Code agent'ları
-│   ├── ai-brain.md              # Nightly optimizer agent
-│   ├── ghost-learner.md         # Ghost Learning 2.0 agent
-│   └── signal-analyst.md        # Signal quality agent
-│
-├── aurvex-bot.service           # Systemd — scalp_bot.py  ← KULLAN
-├── aurvex-dashboard.service     # Systemd — app.py        ← KULLAN
-└── requirements.txt
+1. debug-no-telegram     → Neden Telegram mesajı gelmiyor? Bul ve düzelt
+2. fix-tp-sl-ratios      → TP1=1.5R, TP2=2.5R, SL min %1.5
+3. coin-library-v2       → Coin scoring + kütüphane
+4. signal-quality-v2     → Swing H/L TP, giriş kalitesi
+5. fix-ghost-pipeline    → Ghost learning tam entegrasyon
+6. enhance-all           → Dashboard + Telegram komutları
 ```
 
 ---
 
-## 2. Kritik Tasarım Kuralları
+## Sistem Mimarisi
 
-### 2.1 PnL Formülü (core/accounting.py — KESİNLİKLE DOKUNMA)
+```
+Binance Futures API (public endpoints, no key needed for data)
+    ↓
+MarketScanner → 25 coin filtrele (hacim + hareket)
+    ↓
+TriggerEngine → Sinyal üret (ADX, RSI, MACD, VWAP, Volume)
+    ↓  Score: 5-10 (trigger_score)
+TrendEngine → 4TF trend konfirmasyonu (confluence_score)
+    ↓  Score: 0-10 (trend_score)
+RiskEngine → Pozisyon boyutu, kaldıraç, R:R
+    ↓  Score: 0-10 (risk_score)
+AIDecisionEngine → final_score = trigger×4 + trend×3 + risk×3 (max 100)
+    ↓
+Threshold Pipeline:
+  final_score >= DATA_THRESHOLD(20)     → signal_candidates'a kaydet
+  final_score >= WATCHLIST_THRESHOLD(25) → watchlist
+  final_score >= TELEGRAM_THRESHOLD(28)  → Telegram'a gönder ← BURASI SORUNLU
+  final_score >= TRADE_THRESHOLD(35)     → Trade aç
+    ↓
+ExecutionEngine → Trade yönet (TP1/TP2/Breakeven/Trailing/SL)
+    ↓
+Telegram bildirimi → Trade open/TP1/TP2/Close
+```
+
+## Kritik Eşikler (config.py)
+
 ```python
-# LONG:  pnl = (exit_price - entry_price) × qty - fee
-# SHORT: pnl = (entry_price - exit_price) × qty - fee
-from core.accounting import calculate_realized_pnl, calculate_partial_close_pnl
+DATA_THRESHOLD      = 20.0   # Bu altı hiç kaydedilmez
+WATCHLIST_THRESHOLD = 25.0   # Watchlist'e girer
+TELEGRAM_THRESHOLD  = 28.0   # ← Telegram'a gönderilir
+TRADE_THRESHOLD     = 35.0   # ← Trade açılır
+TP1_R               = 1.5    # TP1 = entry ± SL_dist × 1.5
+TP2_R               = 2.5    # TP2 = entry ± SL_dist × 2.5
+TP3_R               = 4.0    # Runner hedef
+SL_ATR_MULT         = 1.8    # SL = entry ± ATR × 1.8
+MIN_RR              = 1.5    # Bu altı R:R kabul edilmez
+MIN_SL_PCT          = 0.015  # SL min %1.5 (gürültü koruması)
+EXECUTABLE_QUALITIES = [S, A+, A]  # B kalite execute edilmez
 ```
 
-### 2.2 Config Kuralı — os.getenv Yasak
-```python
-# DOĞRU:
-from config import SL_ATR_MULT, PAPER_MODE, TRADE_THRESHOLD
-# YANLIŞ:
-import os; sl = float(os.getenv("SL_ATR_MULT", 1.2))
+## Dosya Haritası
+
+```
+scalp_bot.py          ← Ana döngü (tüm pipeline buradan geçer)
+execution_engine.py   ← Trade aç/kapat, TP1/TP2/Trailing/SL
+signal_engine.py      ← Sinyal üretimi (entry/SL/TP hesabı)
+core/
+  trigger_engine.py   ← Kalite skorlama (S/A+/A/B/C/D)
+  trend_engine.py     ← Multi-TF trend analizi
+  risk_engine.py      ← Pozisyon boyutu ve risk
+  ai_decision_engine.py ← ALLOW/VETO kararı
+  coin_library.py     ← Coin filtresi ve kütüphanesi
+  ghost_learning.py   ← Ghost Learning 2.0
+  market_scanner.py   ← Coin tarama
+telegram_delivery.py  ← Bildirim formatları
+telegram_manager.py   ← /komutlar
+database.py           ← SQLite katmanı
+ai_brain.py           ← Nightly optimizer
+ghost_learner.py      ← Ghost scheduler
+config.py             ← TÜM parametreler buradan
+app.py                ← Dashboard API
 ```
 
-### 2.3 database.py — Fonksiyon İmzaları
-```python
-close_trade(trade_id, net_pnl=x, total_fee=y, reason=z, close_price=p)
-save_paper_result(data_dict)
-update_paper_result(id, updates_dict)
-get_pending_paper_results(limit=35)
-# Migration sonrası cache sıfırla:
-import database; database._TRADE_COLUMNS = None
-```
+## Bilinen Sorunlar
 
-### 2.4 Ghost Learning — Decision Dışarıdan Gelir
-```python
-# DOĞRU:
-save_scalp_signal(data, decision=decision)
-# YANLIŞ — hardcode yasak:
-save_scalp_signal(data, decision="ALLOW")
-```
+| Sorun | Neden | Agent |
+|---|---|---|
+| Telegram mesajı gelmiyor | final_score < 28 veya deliver_signal fail | debug-no-telegram |
+| 10/10 kayıp | TP1_R=1.0 çok düşük, SL gürültüde | fix-tp-sl-ratios |
+| Ghost signals = 0 | save_ghost_signal fail | fix-ghost-pipeline |
+| Bakiye $406 | Kümülatif kayıplar | Kabul (paper mode) |
 
-### 2.5 aurvex-dashboard DOKUNMA
-`aurvex-dashboard` servisini değişiklik sırasında **asla** yeniden başlatma.
-Sadece `aurvex-bot` restart edilir.
+## Araştırma Bulguları (Best Practices)
 
----
+### Optimal Scalping Parametreleri
+- **SL**: ATR × 1.5-2.5 (5m TF için), minimum %1.5 mesafe
+- **TP1**: 1.5-2.0R (erken kâr al)
+- **TP2**: 2.5-3.5R (ana hedef)
+- **R:R minimum**: 1.5 (daha azı uzun vadede kârsız)
+- **ADX filtresi**: >20 (trend var/yok ayrımı) — zaten var ✅
+- **Funding rate filtresi**: zaten var ✅
+- **Session filtresi**: London (08-12 UTC) + NY (13-17 UTC) en iyi
+- **Coin başına cooldown**: 3 ardışık kayıp → 2 saat bekle — zaten var ✅
 
-## 3. Ghost Learning 2.0 Mimarisi
+### Coin Library Best Practices
+- Sadece hacim değil: **trend tutarlılığı** (ADX tarihsel ortalama)
+- **Spread kontrolü**: bid-ask spread < %0.1
+- **Funding rate tarihi**: sürekli negatif/pozitif funding = risk
+- **Coin volatilite skoru**: coin başına ATR/price oran ortalaması
+- **Likidite derinliği**: order book depth %2 içi
 
-### Veri Akışı
-```
-scalp_bot → classify_signal() → VETO
-                ↓
-          maybe_ghost_log()         [core/ghost_learning.py]
-                ↓
-          save_ghost_signal()        [database.py]
-                ↓
-          ghost_signals tablosu
-                ↓
-          _ghost_worker thread       [scalp_bot.py:199]
-          (her 5 dakikada bir)
-                ↓
-          simulate_pending_ghosts()  [core/ghost_learning.py]
-                ↓
-          ghost_results tablosu
-                ↓
-          generate_threshold_suggestions()
-                ↓
-          ghost_suggestions tablosu
-                ↓
-          nightly_optimize_coins()   [ai_brain.py]
-          apply_ghost_suggestions()
-                ↓
-          coin_configs tablosu       ← confidence_cutoff güncellendi
-```
+### Ghost Learning Best Practices
+- VETO sinyallerini sakla → sonucu simüle et
+- Hangi setup türleri "miss" oluyor? (ghost WIN rate)
+- Threshold'u periyodik düşür → daha fazla fırsat yakala
 
-### Tablolar
-```sql
-ghost_signals     -- Reddedilen sinyaller (ham)
-ghost_results     -- Simülasyon sonuçları (WIN/LOSS/OPEN)
-ghost_suggestions -- AI Brain'e threshold önerileri
-coin_configs      -- Coin başına parametre (confidence_cutoff, sl_atr, tp_atr)
-```
+## Test Komutları
 
-### Test
 ```bash
-# Ghost signals birikmiş mi?
+# Telegram test
+bash aurvex_maintain.sh --telegram-test
+
+# Son 10 sinyalin skoru
 python3 -c "
 from database import get_conn
 with get_conn() as c:
-    print('ghost_signals:', c.execute('SELECT COUNT(*) FROM ghost_signals').fetchone()[0])
-    print('simulated:', c.execute('SELECT COUNT(*) FROM ghost_signals WHERE simulated=1').fetchone()[0])
-    print('ghost_results:', c.execute('SELECT COUNT(*) FROM ghost_results').fetchone()[0])
+    rows = c.execute('''
+        SELECT symbol, direction, decision, final_score, setup_quality, created_at
+        FROM signal_candidates
+        ORDER BY id DESC LIMIT 10
+    ''').fetchall()
+    for r in rows:
+        print(f'{r[5][:16]} {r[0]:<12} {r[1]:<6} score={r[2]} qual={r[3]} dec={r[4]}')
 "
 
-# Manuel ghost cycle
-python3 ghost_learner.py cycle
+# Bot sağlığı
+bash aurvex_maintain.sh --fix
+
+# Canlı log
+tail -f logs/ax_bot.log | grep -v "Scanner\|Kayıp bilgisi"
 ```
-
----
-
-## 4. Paper Trade Pipeline
-
-### Sinyal Akış Şeması
-```
-market_scanner → trigger_engine → ai_decision_engine
-                                        │
-                    VETO ───────────────┤→ ghost_signals (maybe_ghost_log)
-                                        │→ paper_results (PAPER_TRACK_REJECTED)
-                    ALLOW ──────────────┤→ execution_engine.open_trade()
-```
-
-### Paper Results Yaşam Döngüsü
-```
-save_paper_result()  → status='pending'
-        ↓
-process_pending_paper_results()  (her bot iterasyonunda)
-        ↓
-finalize_paper_row() → Binance kline → _simulate_path()
-        ↓
-update_paper_result() → status='completed'
-        ↓
-AIDecisionEngine.learn_from_paper_outcome()
-```
-
----
-
-## 5. Import Sağlığı (2026-05-21)
-
-```bash
-python3 -c "
-mods = ['config','database','core.accounting','core.paper_tracker',
-        'core.ghost_learning','core.ai_decision_engine',
-        'execution_engine','signal_engine','ai_brain',
-        'dashboard_service','ml_signal_scorer','ghost_learner']
-for m in mods:
-    try: __import__(m); print(f'OK  {m}')
-    except Exception as e: print(f'ERR {m}: {e}')
-"
-```
-
----
-
-## 6. Deployment
-
-```bash
-# Kod güncelle
-cd /root/trade_engine/trade-engine
-git pull origin main
-
-# Migration
-source .venv/bin/activate
-python3 scripts/migrate_accounting_schema.py
-
-# Sadece bot restart (dashboard dokunma)
-systemctl restart aurvex-bot
-journalctl -u aurvex-bot -n 50 --no-pager
-```
-
----
-
-## 7. Risk Sistemi
-
-| Kalite | Risk Çarpanı |
-|---|---|
-| S | 2.0x |
-| A+ | 1.5x |
-| A | 1.0x |
-| B | 0.5x |
-| C / D | Trade açılmaz |
-
-```python
-# 5 risk governor (core/risk_engine.py):
-check_daily_loss_limit(balance)       # DAILY_MAX_LOSS_PCT=5.0
-check_consecutive_losses()            # CIRCUIT_BREAKER_LOSSES=3
-check_coin_cooldown(symbol)
-check_max_open_trades()               # MAX_OPEN_TRADES=5
-check_correlated_exposure(symbol, open_trades)
-```
-
----
-
-## 8. Config Referansı
-
-```python
-EXECUTION_MODE    = "paper"   # paper | live
-TRADE_THRESHOLD   = 72.0      # Bu altı trade açma
-TELEGRAM_THRESHOLD= 65.0
-WATCHLIST_THRESHOLD=60.0
-DATA_THRESHOLD    = 55.0
-SL_ATR_MULT       = 1.2
-TP1_R = 1.0  TP2_R = 2.0  TP3_R = 3.0
-GHOST_WEIGHT      = 0.30
-PAPER_TRACK_REJECTED_CANDIDATES = True
-PAPER_TRACK_HORIZON_HOURS       = 8.0
-```
-
----
-
-## 9. Sık Hatalar
-
-| Hata | Çözüm |
-|---|---|
-| `no such table: paper_results` | `python3 -c "import database; database.init_db()"` |
-| `no such column: total_fee` | `python3 scripts/migrate_accounting_schema.py` |
-| `_TRADE_COLUMNS cache eski` | `python3 -c "import database; database._TRADE_COLUMNS = None"` |
-| `invalid character '—'` | `sed -i 's/[""]/"/g' file.py` |
-| Bot yanlış dizin | `WorkingDirectory=/root/trade_engine/trade-engine` |
-| Duplicate process | `pkill -f scalp_bot.py && systemctl start aurvex-bot` |
-| ghost collect returns 0 | Normal — data classify_signal() hook'tan direkt geliyor |
-
----
-
-## 10. Agent Görev Bölümü
-
-Claude Code oturumu açıldığında:
-
-```bash
-# 1. Import sağlığı
-python3 -c "import config,database,core.paper_tracker,execution_engine,ai_brain; print('OK')"
-
-# 2. Ghost durumu
-python3 -c "
-from database import get_conn
-with get_conn() as c:
-    gs = c.execute('SELECT COUNT(*),SUM(simulated) FROM ghost_signals').fetchone()
-    gr = c.execute('SELECT COUNT(*),AVG(virtual_pnl_r) FROM ghost_results').fetchone()
-    print(f'Ghost signals: {gs[0]} ({gs[1]} simulated)')
-    print(f'Ghost results: {gr[0]} avg_r={gr[1]:.2f}' if gr[0] else 'Ghost results: 0')
-"
-
-# 3. Paper durumu
-python3 -c "
-from database import get_conn
-with get_conn() as c:
-    r = dict(c.execute('SELECT status,COUNT(*) FROM paper_results GROUP BY status').fetchall() or [])
-    print('Paper results:', r)
-"
-```
-
----
-
-## 11. Roadmap
-
-### ✅ Tamamlanan
-- [x] Ghost Learning 2.0 DB fonksiyonları
-- [x] classify_signal() → ghost hook
-- [x] ghost_worker thread (scalp_bot'ta)
-- [x] nightly_optimize_coins() ghost suggestion reader
-- [x] coin_configs tablosu (get_coin_config / save_coin_config)
-
-### 🔄 Devam Eden
-- [ ] ghost_learner.py collect_ghosts() — signal_candidates yerine ghost_signals'ı baz al
-- [ ] ml_signal_scorer pipeline entegrasyonu (standalone, bağlı değil)
-- [ ] Multi-TF confluence (trend_engine → trigger_engine)
-
-### 📋 Gelecek
-- [ ] Live trading geçiş (ön koşul: 500+ paper result, WR > %52)
-- [ ] Dashboard ghost stats widget

@@ -99,6 +99,23 @@ def check_max_open_trades() -> bool:
         return True
 
 
+def check_spread(ticker: dict, max_spread_pct: float = 0.08) -> bool:
+    """
+    Bid-ask spread kontrolü. %0.08 üstü spread → kâr eridi → skip.
+    Returns True if acceptable.
+    """
+    try:
+        bid = float(ticker.get("bidPrice", 0))
+        ask = float(ticker.get("askPrice", 0))
+        mid = (bid + ask) / 2
+        if mid <= 0:
+            return True
+        spread_pct = (ask - bid) / mid * 100
+        return spread_pct <= max_spread_pct
+    except Exception:
+        return True
+
+
 def check_correlated_exposure(symbol: str, open_trades: list) -> bool:
     """
     Aynı base asset veya yüksek korelasyonlu coin için max açık

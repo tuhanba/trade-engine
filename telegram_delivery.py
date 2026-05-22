@@ -210,6 +210,13 @@ def format_signal(sig):
     conf_pct  = int((sig.confidence or 0) * 100)
     conf_bar  = "█" * (conf_pct // 10) + "░" * (10 - conf_pct // 10)
     now_utc   = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    hour = datetime.now(timezone.utc).hour
+    if 8 <= hour < 18:
+        session = "🇬🇧🇺🇸 London/NY"
+    elif 0 <= hour < 6:
+        session = "🌏 Asian"
+    else:
+        session = "🌙 Late"
     msg = (
         f"{header}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -231,7 +238,7 @@ def format_signal(sig):
         f"🧠 Güven:   {conf_bar} {conf_pct}%\n"
         f"💡 Why this trade?:   <i>{sig.reason or '—'}</i>\n"
         f"🛡 Invalidasyon: <code>{_fmt(sig.stop_loss)}</code>\n"
-        f"⏰ {now_utc}\n"
+        f"⏰ Seans: {session} | {now_utc}\n"
     )
     if quality == "B":
         msg += "\n<i>⚠️ B kalite — yarım pozisyon önerilir</i>"

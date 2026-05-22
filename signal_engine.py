@@ -22,7 +22,7 @@ import pandas as pd
 
 from config import (
     SL_ATR_MULT, TP1_R, TP2_R, TP3_R, TRAIL_ATR_MULT,
-    MIN_RR, MIN_EXPECTED_MFE_R,
+    MIN_RR, MIN_EXPECTED_MFE_R, MIN_SL_PCT,
     MIN_BB_WIDTH, MIN_ADX_15M, FUNDING_LONG_MAX, FUNDING_SHORT_MIN,
 )
 from core.coin_library import get_coin_params
@@ -222,11 +222,11 @@ def _calc_levels(direction: str, entry: float, atr_val: float,
     sl_mult = coin_p.get("sl_atr_mult", SL_ATR_MULT)
     sl_dist = atr_val * sl_mult
 
-    # Minimum SL koruması — ATR micro-cap gürültüsünde sıfıra yaklaşırsa %1.0 floor uygula
-    min_sl_dist = entry * 0.010
+    # Minimum SL koruması — gürültüde tetiklenmeyi önle (min %1.5)
+    min_sl_dist = entry * MIN_SL_PCT
     if sl_dist < min_sl_dist:
         logger.debug(
-            f"SL çok sıkı ({sl_dist:.6f} < min {min_sl_dist:.6f}) → minimum %1.0 uygulandı"
+            f"SL çok sıkı ({sl_dist:.6f} < min {min_sl_dist:.6f}) → minimum %{MIN_SL_PCT*100:.1f} uygulandı"
         )
         sl_dist = min_sl_dist
 
@@ -248,6 +248,91 @@ def _calc_levels(direction: str, entry: float, atr_val: float,
         "tp2": round(tp2, 8), "runner_target": round(runner, 8),
         "rr": round(rr, 3), "sl_dist": sl_dist,
     }
+
+def _calc_levels_v2(direction: str, entry: float, atr_val: float,
+                    df5: pd.DataFrame, coin_p: dict) -> dict:
+    """
+    v2: Swing High/Low bazlı TP hesabı. Yakın/uzak swing'ler varsa kullan,
+    yoksa ATR çarpanına düş (fallback).
+    """
+    sl_mult = coin_p.get("sl_atr_mult", SL_ATR_MULT)
+    sl_dist = atr_val * sl_mult
+    min_sl_dist = entry * MIN_SL_PCT
+    sl_dist = max(sl_dist, min_sl_dist)
+
+    tp_method = "atr"
+
+    if direction == "LONG":
+        sl = entry - sl_dist
+        highs = df5["high"].tail(20)
+        swing_highs = []
+        for i in range(2, len(highs) - 2):
+            h = highs.iloc[i]
+            if (h > highs.iloc[i-1] and h > highs.iloc[i-2] and
+                    h > highs.iloc[i+1] and h > highs.iloc[i+2] and h > entry):
+                swing_highs.append(h)
+        if len(swing_highs) >= 2:
+            swing_highs.sort()
+            tp1 = swing_highs[0]
+            tp2 = swing_highs[1]
+            if (tp1 - entry) / sl_dist < 1.5:
+                tp1 = entry + sl_dist * 1.5
+            if (tp2 - entry) / sl_dist < 2.5:
+                tp2 = entry + sl_dist * 2.5
+            tp_method = "swing_hl"
+        else:
+            tp1 = entry + sl_dist * TP1_R
+            tp2 = entry + sl_dist * TP2_R
+        tp3 = entry + sl_dist * TP3_R
+
+    else:  # SHORT
+        sl = entry + sl_dist
+        lows = df5["low"].tail(20)
+        swing_lows = []
+        for i in range(2, len(lows) - 2):
+            lo = lows.iloc[i]
+            if (lo < lows.iloc[i-1] and lo < lows.iloc[i-2] and
+                    lo < lows.iloc[i+1] and lo < lows.iloc[i+2] and lo < entry):
+                swing_lows.append(lo)
+        if len(swing_lows) >= 2:
+            swing_lows.sort(reverse=True)
+            tp1 = swing_lows[0]
+            tp2 = swing_lows[1]
+            if (entry - tp1) / sl_dist < 1.5:
+                tp1 = entry - sl_dist * 1.5
+            if (entry - tp2) / sl_dist < 2.5:
+                tp2 = entry - sl_dist * 2.5
+            tp_method = "swing_hl"
+        else:
+            tp1 = entry - sl_dist * TP1_R
+            tp2 = entry - sl_dist * TP2_R
+        tp3 = entry - sl_dist * TP3_R
+
+    rr = abs(tp2 - entry) / (sl_dist + 1e-10)
+    return {
+        "sl": round(sl, 8), "tp1": round(tp1, 8),
+        "tp2": round(tp2, 8), "runner_target": round(tp3, 8),
+        "rr": round(rr, 3), "sl_dist": sl_dist, "tp_method": tp_method,
+    }
+
+
+def _vwap_check(df1: pd.DataFrame, entry: float, direction: str) -> bool:
+    """
+    VWAP distance kontrolü. Entry VWAP'dan %1.5'ten fazla ters yöndeyse skip.
+    Returns True if acceptable.
+    """
+    try:
+        typical = (df1["high"] + df1["low"] + df1["close"]) / 3
+        vwap_val = float((typical * df1["volume"]).cumsum().iloc[-1] /
+                         (df1["volume"].cumsum().iloc[-1] + 1e-10))
+        if direction == "LONG" and entry > vwap_val * 1.015:
+            return False
+        if direction == "SHORT" and entry < vwap_val * 0.985:
+            return False
+        return True
+    except Exception:
+        return True
+
 
 def _estimate_mfe_r(bb_w: float, adx_v: float, mom3c: float,
                     direction: str, coin_p: dict) -> float:
@@ -337,6 +422,20 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     """
     NULL = {"symbol": symbol, "direction": None}
     coin_p = get_coin_params(symbol)
+
+    # Coin kalite skoru kontrolü
+    try:
+        from core.coin_library import get_coin_score, get_coin_optimal_sl_mult
+        coin_score = get_coin_score(symbol)
+        if coin_score < 30:
+            logger.debug(f"[Signal] {symbol} coin_score={coin_score:.0f} < 30 → skip")
+            return {**NULL, "skip_reason": "coin_score_too_low"}
+        opt_sl = get_coin_optimal_sl_mult(symbol)
+        if opt_sl != 1.8:
+            coin_p = dict(coin_p)
+            coin_p["sl_atr_mult"] = opt_sl
+    except Exception:
+        coin_score = 50.0
 
     # ── 15m Ana Trend ────────────────────────────────────────────────────────
     df15 = get_candles(client, symbol, "15m", 100)
@@ -435,9 +534,14 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
     btc_trend = get_btc_trend(client)
     trend_4h  = get_4h_trend(client, symbol)
 
-    # ── Seviyeler Hesapla ────────────────────────────────────────────────────
+    # ── VWAP Filtresi ────────────────────────────────────────────────────────
+    if not _vwap_check(df1, c1, direction):
+        logger.info(f"[Signal] {symbol} SKIP — vwap_distance_too_far")
+        return {**NULL, "skip_reason": "vwap_distance"}
+
+    # ── Seviyeler Hesapla (v2: swing H/L bazlı) ──────────────────────────────
     entry  = c1
-    levels = _calc_levels(direction, entry, atr1, coin_p)
+    levels = _calc_levels_v2(direction, entry, atr1, df5, coin_p)
 
     if levels["rr"] < MIN_RR:
         logger.info(f"[Signal] {symbol} SKIP — rr_too_low rr={levels['rr']:.2f}")
@@ -465,6 +569,8 @@ def generate_signal(client, symbol: str, coin_info: dict = None) -> dict:
         "score":           score,
         "confidence":      confidence,
         # debug / loglama
+        "tp_method":       levels.get("tp_method", "atr"),
+        "coin_score":      coin_score,
         "atr":             round(atr1, 8),
         "atr5":            round(atr5, 8),
         "adx15":           round(adx15, 1),
