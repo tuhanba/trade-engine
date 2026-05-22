@@ -1,10 +1,35 @@
+# Python
 __pycache__/
-trading.db*
-*.log
-.env
 *.pyc
-.venv/
-venv/
+*.pyo
 *.egg-info/
 dist/
 build/
+.venv/
+venv/
+
+# Environment & secrets
+.env
+.env.*
+*.env
+
+# Database
+*.db
+*.db-wal
+*.db-shm
+
+# Logs
+logs/
+*.log
+
+# Backup files
+.backup_pre_restore/
+*_backup_*/
+backups/
+*.bak
+*.save
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
