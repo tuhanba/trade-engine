@@ -222,6 +222,14 @@ def _calc_levels(direction: str, entry: float, atr_val: float,
     sl_mult = coin_p.get("sl_atr_mult", SL_ATR_MULT)
     sl_dist = atr_val * sl_mult
 
+    # Minimum SL koruması — ATR micro-cap gürültüsünde sıfıra yaklaşırsa %1.0 floor uygula
+    min_sl_dist = entry * 0.010
+    if sl_dist < min_sl_dist:
+        logger.debug(
+            f"SL çok sıkı ({sl_dist:.6f} < min {min_sl_dist:.6f}) → minimum %1.0 uygulandı"
+        )
+        sl_dist = min_sl_dist
+
     if direction == "LONG":
         sl  = entry - sl_dist
         tp1 = entry + sl_dist * TP1_R

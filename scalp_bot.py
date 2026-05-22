@@ -26,7 +26,7 @@ from config import (
     DB_PATH,
     DAILY_MAX_LOSS_PCT,
     DATA_THRESHOLD, WATCHLIST_THRESHOLD, TELEGRAM_THRESHOLD, TRADE_THRESHOLD,
-    LIVE_CONFIRM, MAX_LEVERAGE, MIN_RR,
+    LIVE_CONFIRM, MAX_LEVERAGE, MIN_RR, EXECUTABLE_QUALITIES,
     MAX_CORRELATED_TRADES,
     SCAN_INCLUDE_WATCH, WATCHLIST_MIN_SCAN_SCORE, MAX_COINS_PER_SCAN_LOOP,
     MAX_PORTFOLIO_EXPOSURE_PCT,
@@ -649,7 +649,9 @@ def main():
                     save_scalp_signal(sig.to_dict())
 
                     # ── ADIM 9: TRADE AÇMA (execute modunda) ──────────────
-                    if AX_MODE == "execute" and EXECUTION_AVAILABLE and sig.final_score >= TRADE_THRESHOLD:
+                    if (AX_MODE == "execute" and EXECUTION_AVAILABLE
+                            and sig.final_score >= TRADE_THRESHOLD
+                            and sig.setup_quality in EXECUTABLE_QUALITIES):  # B kalite execute edilmez
                         if sig.rr < MIN_RR:
                             update_candidate_status(candidate_id, reject_reason="bad_rr", lifecycle_stage="REJECTED", execution_status="rejected")
                             save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="bad_rr", reason="trade_guard_min_rr")
