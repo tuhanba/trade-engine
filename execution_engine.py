@@ -90,24 +90,30 @@ class ExecutionEngine:
         )
 
         # Telegram bildirimi
-        tg_result = self.telegram.send_trade_open({
-            "symbol": trade.symbol,
-            "side": trade.side,
-            "entry_price": trade.entry_price,
-            "stop_loss": trade.stop_loss,
-            "tp1": trade.tp1 or 0,
-            "tp2": trade.tp2 or 0,
-            "tp3": trade.tp3 or 0,
-            "leverage": trade.leverage,
-            "risk_pct": trade.risk_pct,
-            "risk_usd": trade.risk_usd,
-            "margin_used": trade.margin_used,
-            "notional": trade.notional,
-        })
-        if not tg_result:
-            logger.warning("[Telegram] Trade açılış mesajı gönderilemedi: %s", trade.symbol)
-        else:
-            logger.info("[Telegram] Trade açılış mesajı gönderildi: %s", trade.symbol)
+        try:
+            from telegram_delivery import send_trade_open as _tg_open
+            _tg_open({
+                "symbol":             trade.symbol,
+                "direction":          trade.side,
+                "entry":              trade.entry_price,
+                "sl":                 trade.stop_loss,
+                "tp1":                trade.tp1 or 0,
+                "tp2":                trade.tp2 or 0,
+                "tp3":                trade.tp3 or 0,
+                "leverage":           trade.leverage,
+                "risk_pct":           trade.risk_pct,
+                "risk_usd":           trade.risk_usd,
+                "margin_used":        trade.margin_used,
+                "notional_size":      trade.notional,
+                "setup_quality":      getattr(trade, "setup_quality", "-"),
+                "final_score":        getattr(trade, "final_score", 0),
+                "reason":             getattr(trade, "reason", "-"),
+                "max_loss_after_fee": getattr(trade, "max_loss_after_fee", 0),
+                "open_fee":           getattr(trade, "open_fee", 0),
+            })
+            logger.info("[Telegram] Trade açılış bildirimi gönderildi: %s", trade.symbol)
+        except Exception as _tg_err:
+            logger.warning("[Telegram] Trade açılış bildirimi hatası: %s", _tg_err)
 
         return trade_id
 
@@ -280,17 +286,21 @@ class ExecutionEngine:
             total_pnl, accumulated, remaining_pnl,
         )
 
-        tg_result = self.telegram.send_trade_close({
-            "symbol": trade["symbol"],
-            "side": trade.get("direction") or trade.get("side", ""),
-            "exit_price": exit_price,
-            "realized_pnl": total_pnl,
-            "close_reason": reason,
-        })
-        if not tg_result:
-            logger.warning("[Telegram] Trade kapanış mesajı gönderilemedi: %s", trade["symbol"])
-        else:
-            logger.info("[Telegram] Trade kapanış mesajı gönderildi: %s", trade["symbol"])
+        try:
+            from telegram_delivery import send_trade_close as _tg_close2
+            _tg_close2(
+                symbol=trade["symbol"],
+                net_pnl=total_pnl,
+                total_fee=float(trade.get("total_fee") or 0),
+                reason=reason,
+                duration_str="",
+                direction=trade.get("direction") or trade.get("side", ""),
+                r_multiple=0,
+                balance_after=0,
+            )
+            logger.info("[Telegram] Trade kapanış bildirimi gönderildi: %s", trade["symbol"])
+        except Exception as _tg_err2:
+            logger.warning("[Telegram] Trade kapanış bildirimi hatası: %s", _tg_err2)
 
     # ── Sinyal işleme ────────────────────────────────────────────
 

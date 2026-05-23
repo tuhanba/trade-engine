@@ -294,8 +294,10 @@ def deliver_signal(sig):
             return False
         dedupe_key = f"{sig.symbol}:{sig.direction}:{round(sig.entry_zone, 6)}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
         msg = format_signal(sig)
-        if not save_telegram_message(sig.id, sig.symbol, dedupe_key, msg, status="queued"):
-            return False
+        try:
+            save_telegram_message(sig.id, sig.symbol, dedupe_key, msg, status="queued")
+        except Exception:
+            pass    # DB kaydı başarısız olsa bile mesajı gönder
         _queue.push(msg, "HTML", dedupe_key)
         if len(_sent_ids) >= 1000:
             _sent_ids_set.discard(_sent_ids[0])
