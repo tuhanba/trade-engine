@@ -300,20 +300,36 @@ class RiskEngine:
             fee_rate = float(getattr(config, "DEFAULT_FEE_RATE", 0.0004))
             risk_pct_base = float(getattr(config, "RISK_PCT", 1.0))
 
-            atr_val = self._get_atr(symbol) or entry * 0.015
+            atr_val = self._get_atr(symbol) or entry * 0.02
+            # ATR fallback — sıfır veya çok küçükse fiyatın %2'sini kullan
+            if atr_val <= 0 or atr_val < entry * 0.005:
+                atr_val = entry * 0.02
+                logger.warning(f"ATR fallback kullanıldı: {symbol} atr={atr_val:.6f}")
             is_long = direction == "LONG"
             sl_dist = atr_val * sl_atr_mult
             sl = (entry - sl_dist) if is_long else (entry + sl_dist)
             tp1 = (entry + sl_dist * tp1_r) if is_long else (entry - sl_dist * tp1_r)
             tp2 = (entry + sl_dist * tp2_r) if is_long else (entry - sl_dist * tp2_r)
             tp3 = (entry + sl_dist * tp3_r) if is_long else (entry - sl_dist * tp3_r)
+            # MIN_SL_PCT kontrolü — SL entry'ye çok yakınsa zorla aç
+            min_sl_dist = entry * float(getattr(config, "MIN_SL_PCT", 0.015))
+            if abs(sl - entry) < min_sl_dist:
+                sl  = (entry - min_sl_dist) if is_long else (entry + min_sl_dist)
+                tp1 = (entry + min_sl_dist * tp1_r) if is_long else (entry - min_sl_dist * tp1_r)
+                tp2 = (entry + min_sl_dist * tp2_r) if is_long else (entry - min_sl_dist * tp2_r)
+                tp3 = (entry + min_sl_dist * tp3_r) if is_long else (entry - min_sl_dist * tp3_r)
+                logger.warning(f"MIN_SL_PCT override: {symbol} sl_dist={min_sl_dist:.6f}")
             rr = _calc_rr(entry, sl, tp2)
 
             if rr < min_rr:
                 return {"valid": False, "score": 0, "rr": rr, "risk_reject_reason": f"low_rr_{rr:.2f}"}
 
-            atr_pct = atr_val / (entry + 1e-10)
-            leverage = min(max_lev, max(1, int(0.02 / (atr_pct + 1e-10))))
+            # Leverage — config'den oku, ATR volatilitesine göre ölçekle ama min 2
+            try:
+                from config import MAX_LEVERAGE as _ML
+                leverage = min(int(_ML), 20)
+            except Exception:
+                leverage = 10
             risk_pct = risk_pct_base * quality_mult
 
             pos = calculate_position_size(
@@ -346,16 +362,31 @@ class RiskEngine:
             max_lev = int(getattr(config, "MAX_LEVERAGE", 20))
             risk_pct = float(getattr(config, "RISK_PCT", 1.0))
             fee_rate = float(getattr(config, "DEFAULT_FEE_RATE", 0.0004))
-            atr_val = self._get_atr(symbol) or entry * 0.015
+            atr_val = self._get_atr(symbol) or entry * 0.02
+            # ATR fallback — sıfır veya çok küçükse fiyatın %2'sini kullan
+            if atr_val <= 0 or atr_val < entry * 0.005:
+                atr_val = entry * 0.02
+                logger.warning(f"ATR fallback (preview): {symbol} atr={atr_val:.6f}")
             is_long = direction == "LONG"
             sl_dist = atr_val * sl_atr_mult
             sl = (entry - sl_dist) if is_long else (entry + sl_dist)
             tp1 = (entry + sl_dist * tp1_r) if is_long else (entry - sl_dist * tp1_r)
             tp2 = (entry + sl_dist * tp2_r) if is_long else (entry - sl_dist * tp2_r)
             tp3 = (entry + sl_dist * tp3_r) if is_long else (entry - sl_dist * tp3_r)
+            # MIN_SL_PCT kontrolü — SL entry'ye çok yakınsa zorla aç
+            min_sl_dist = entry * float(getattr(config, "MIN_SL_PCT", 0.015))
+            if abs(sl - entry) < min_sl_dist:
+                sl  = (entry - min_sl_dist) if is_long else (entry + min_sl_dist)
+                tp1 = (entry + min_sl_dist * tp1_r) if is_long else (entry - min_sl_dist * tp1_r)
+                tp2 = (entry + min_sl_dist * tp2_r) if is_long else (entry - min_sl_dist * tp2_r)
+                tp3 = (entry + min_sl_dist * tp3_r) if is_long else (entry - min_sl_dist * tp3_r)
             rr = _calc_rr(entry, sl, tp2)
-            atr_pct = atr_val / (entry + 1e-10)
-            leverage = min(max_lev, max(1, int(0.02 / (atr_pct + 1e-10))))
+            # Leverage — config'den oku
+            try:
+                from config import MAX_LEVERAGE as _ML
+                leverage = min(int(_ML), 20)
+            except Exception:
+                leverage = 10
             pos = calculate_position_size(
                 balance=balance, risk_pct=risk_pct, entry_price=entry,
                 stop_loss=sl, leverage=leverage, fee_rate=fee_rate,
