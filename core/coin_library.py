@@ -318,12 +318,13 @@ def _save_coin_profile(symbol: str, profile: dict):
         from database import get_conn
         with get_conn() as conn:
             now = profile["updated_at"]
+            # DB primary key: "coin" (not "symbol")
             conn.execute("""
-                UPDATE coin_configs SET config_json=?, updated_at=? WHERE symbol=?
+                UPDATE coin_configs SET config_json=?, updated_at=? WHERE coin=?
             """, (json.dumps(profile), now, symbol))
             if conn.rowcount == 0:
                 conn.execute("""
-                    INSERT INTO coin_configs (symbol, config_json, updated_at)
+                    INSERT INTO coin_configs (coin, config_json, updated_at)
                     VALUES (?, ?, ?)
                 """, (symbol, json.dumps(profile), now))
     except Exception as e:
@@ -336,7 +337,7 @@ def get_coin_score(symbol: str) -> float:
         from database import get_conn
         with get_conn() as conn:
             row = conn.execute(
-                "SELECT config_json FROM coin_configs WHERE symbol=?", (symbol,)
+                "SELECT config_json FROM coin_configs WHERE coin=?", (symbol,)
             ).fetchone()
             if row and row[0]:
                 data = json.loads(row[0])
@@ -352,7 +353,7 @@ def get_coin_optimal_sl_mult(symbol: str) -> float:
         from database import get_conn
         with get_conn() as conn:
             row = conn.execute(
-                "SELECT config_json FROM coin_configs WHERE symbol=?", (symbol,)
+                "SELECT config_json FROM coin_configs WHERE coin=?", (symbol,)
             ).fetchone()
             if row and row[0]:
                 data = json.loads(row[0])
@@ -367,8 +368,9 @@ def get_active_universe_v2(min_score: float = 40.0) -> list:
     try:
         from database import get_conn
         with get_conn() as conn:
+            # Primary key sütunu "coin" (not "symbol")
             rows = conn.execute(
-                "SELECT symbol, config_json FROM coin_configs"
+                "SELECT coin, config_json FROM coin_configs"
             ).fetchall()
             result = []
             for sym, cfg in rows:
