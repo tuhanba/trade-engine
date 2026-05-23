@@ -310,7 +310,15 @@ def api_logs():
                     elif re.search(r"LOSS|STOP|CLOSE|KAPAND", raw):
                         level = "CLOSE"
                     lines_out.append({"text": raw, "level": level})
-                return jsonify({"ok": True, "data": lines_out, "path": path, "total": len(lines_out)})
+                return jsonify({
+                    "ok": True,
+                    "data": {
+                        "lines": [l["text"] for l in lines_out],
+                        "items": lines_out,
+                    },
+                    "path": path,
+                    "total": len(lines_out)
+                })
             except Exception:
                 continue
 
@@ -331,7 +339,15 @@ def api_logs():
                         f"PNL: {pnl:+.4f}$",
                 "level": level,
             })
-        return jsonify({"ok": True, "data": lines_out, "path": "db_fallback", "total": len(lines_out)})
+        return jsonify({
+            "ok": True,
+            "data": {
+                "lines": [l["text"] for l in lines_out],
+                "items": lines_out,
+            },
+            "path": "db_fallback",
+            "total": len(lines_out)
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e), "data": []}), 500
 
@@ -455,17 +471,25 @@ def api_signal_stats():
 def api_signal_funnel():
     try:
         with get_conn() as conn:
-            scanned = conn.execute("SELECT COUNT(*) FROM scanned_coins").fetchone()[0] or 0
-            candidate = conn.execute("SELECT COUNT(*) FROM candidate_signals").fetchone()[0] or 0
-            watchlist = conn.execute(
-                "SELECT COUNT(*) FROM candidate_signals WHERE lifecycle_stage IN ('APPROVED_FOR_WATCHLIST','APPROVED_FOR_TELEGRAM','APPROVED_FOR_TRADE','OPENED','MANAGED','CLOSED')"
-            ).fetchone()[0] or 0
-            telegram = conn.execute(
+            def safe_count(sql, params=()):
+                try: return conn.execute(sql, params).fetchone()[0] or 0
+                except: return 0
+
+            scanned   = safe_count("SELECT COUNT(*) FROM scanned_coins")
+            candidate = safe_count("SELECT COUNT(*) FROM signal_candidates")
+            watchlist = safe_count(
+                "SELECT COUNT(*) FROM signal_candidates WHERE status NOT IN ('NEW','rejected')"
+            )
+            telegram  = safe_count(
                 "SELECT COUNT(*) FROM telegram_messages WHERE status IN ('queued','sent')"
-            ).fetchone()[0] or 0
-            trade = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] or 0
-            wins = conn.execute("SELECT COUNT(*) FROM trades WHERE net_pnl > 0 AND close_time IS NOT NULL").fetchone()[0] or 0
-            losses = conn.execute("SELECT COUNT(*) FROM trades WHERE net_pnl <= 0 AND close_time IS NOT NULL").fetchone()[0] or 0
+            )
+            trade   = safe_count("SELECT COUNT(*) FROM trades")
+            wins    = safe_count(
+                "SELECT COUNT(*) FROM trades WHERE net_pnl > 0 AND close_time IS NOT NULL"
+            )
+            losses  = safe_count(
+                "SELECT COUNT(*) FROM trades WHERE net_pnl <= 0 AND close_time IS NOT NULL"
+            )
         try:
             from dashboard_service import get_learning_metrics
             learned = get_learning_metrics(days=int(request.args.get("days", "14")))
@@ -657,6 +681,7 @@ def stream():
                 payload = {
                     "health": dashboard_service.get_health(),
                     "live":   dashboard_service.get_live_trades(),
+                    "stats":  dashboard_service.get_stats(),
                     "ts":     int(time.time()),
                 }
                 yield f"data: {json.dumps(payload)}\n\n"
@@ -818,12 +843,22 @@ def api_equity_curve():
     """Son 30 gunluk kumulatif PnL serisi."""
     try:
         with get_conn() as conn:
-            initial_balance = 250.0
-            bal_row = conn.execute(
-                "SELECT balance FROM balance_ledger ORDER BY id ASC LIMIT 1"
-            ).fetchone()
-            if bal_row:
-                initial_balance = float(bal_row[0])
+            initial_balance = 500.0
+            try:
+                bal_row = conn.execute(
+                    "SELECT balance FROM balance_ledger ORDER BY id ASC LIMIT 1"
+                ).fetchone()
+                if bal_row:
+                    initial_balance = float(bal_row[0])
+            except Exception:
+                try:
+                    bal_row = conn.execute(
+                        "SELECT balance FROM paper_account ORDER BY id ASC LIMIT 1"
+                    ).fetchone()
+                    if bal_row:
+                        initial_balance = float(bal_row[0])
+                except Exception:
+                    initial_balance = 500.0
 
             daily = conn.execute("""
                 SELECT DATE(close_time) as day,

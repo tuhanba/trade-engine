@@ -105,7 +105,7 @@ def _get_live_trades_impl() -> list:
         result.append({
             "id": t.get("id"),
             "symbol": t.get("symbol"),
-            "side": t.get("side"),
+            "side": t.get("direction") or t.get("side", "?"),
             "entry_price": t.get("entry") or t.get("entry_price", 0),
             "current_price": t.get("current_price", 0),
             "stop_loss": t.get("sl") or t.get("stop_loss", 0),
