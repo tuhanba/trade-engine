@@ -174,6 +174,13 @@ COIN_MIN_MOVE_PCT    = _env_float("COIN_MIN_MOVE_PCT", 0.5)
 COIN_MIN_SCORE       = _env_float("COIN_MIN_SCORE", 40.0)
 COIN_UNIVERSE_LIMIT  = _env_int("COIN_UNIVERSE_LIMIT", 40)
 
+# CVD / OI / Liquidity Zone parametreleri
+CVD_ENABLED         = _env_bool("CVD_ENABLED", True)
+OI_TRACKER_ENABLED  = _env_bool("OI_TRACKER_ENABLED", True)
+OI_MIN_CHANGE_PCT   = _env_float("OI_MIN_CHANGE_PCT", 2.0)    # Anlamlı OI değişim eşiği
+CVD_DIVERGENCE_BONUS= _env_float("CVD_DIVERGENCE_BONUS", 1.5) # CVD divergence bonusu
+CVD_CONFIRM_BONUS   = _env_float("CVD_CONFIRM_BONUS", 1.0)    # CVD confirm bonusu
+
 # Guvenlik
 def is_live_trading_allowed() -> bool:
     return (EXECUTION_MODE == "live" and LIVE_TRADING_ENABLED and CONFIRM_LIVE_TRADING)

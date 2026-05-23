@@ -249,6 +249,40 @@ class TriggerEngine:
         if quality not in ALLOWED_QUALITIES:
             return {"quality": "D", "score": 0, "entry": 0}
 
+        # ── CVD Analizi (Cumulative Volume Delta) ─────────────────────────────
+        cvd_bonus = 0.0
+        cvd_data  = {}
+        try:
+            from core.cvd_engine import CVDEngine as _CVDEngine
+            _cvd = _CVDEngine(self.client)
+            cvd_data = _cvd.analyze(symbol, direction)
+            cvd_bonus = cvd_data.get("cvd_score_bonus", 0.0)
+            score = min(10.0, max(0.0, score + cvd_bonus))
+            logger.debug(
+                f"[CVD] {symbol}: {cvd_data.get('cvd_signal')} "
+                f"bonus={cvd_bonus:+.1f} buy_ratio={cvd_data.get('buy_ratio', 0.5):.2f}"
+            )
+        except Exception as _cvd_err:
+            logger.debug(f"[CVD] skip: {_cvd_err}")
+        # ──────────────────────────────────────────────────────────────────────
+
+        # ── OI Analizi (Open Interest Delta) ──────────────────────────────────
+        oi_bonus = 0.0
+        oi_data  = {}
+        try:
+            from core.oi_tracker import OITracker as _OITracker
+            _oi = _OITracker(self.client)
+            oi_data = _oi.analyze(symbol, c1, direction)
+            oi_bonus = oi_data.get("oi_score_bonus", 0.0)
+            score = min(10.0, max(0.0, score + oi_bonus))
+            logger.debug(
+                f"[OI] {symbol}: {oi_data.get('oi_signal')} "
+                f"bonus={oi_bonus:+.1f} oi_chg={oi_data.get('oi_change_pct', 0):+.1f}%"
+            )
+        except Exception as _oi_err:
+            logger.debug(f"[OI] skip: {_oi_err}")
+        # ──────────────────────────────────────────────────────────────────────
+
         # ML skoru hesapla (funding check geçtiyse favorable=1)
         try:
             import sys as _sys, os as _os
@@ -290,4 +324,11 @@ class TriggerEngine:
             "hour_utc": current_hour,
             "good_hour": current_hour in GOOD_HOURS_UTC,
             "adx": round(adx_val, 1),
+            "cvd_signal":    cvd_data.get("cvd_signal", "NEUTRAL"),
+            "cvd_bonus":     round(cvd_bonus, 2),
+            "cvd_buy_ratio": cvd_data.get("buy_ratio", 0.5),
+            "cvd_divergence": cvd_data.get("cvd_divergence", False),
+            "oi_signal":     oi_data.get("oi_signal", "NEUTRAL"),
+            "oi_bonus":      round(oi_bonus, 2),
+            "oi_change_pct": oi_data.get("oi_change_pct", 0.0),
         }

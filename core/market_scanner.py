@@ -9,6 +9,17 @@ import time
 
 logger = logging.getLogger(__name__)
 
+
+def _get_oi_change_safe(client, symbol: str) -> float:
+    """OI değişimini güvenli şekilde döner. Hata varsa 0.0 döner."""
+    try:
+        from core.oi_tracker import get_oi_for_scanner
+        data = get_oi_for_scanner(client, symbol)
+        return data.get("open_interest_change", 0.0)
+    except Exception:
+        return 0.0
+
+
 # Config'den coin evrenini al
 try:
     import sys as _sys, os as _os
@@ -136,7 +147,7 @@ class MarketScanner:
                         "spread_percent": 0.0,
                         "atr_percent": min(20.0, price_change / 2.0),
                         "funding_rate": 0.0,
-                        "open_interest_change": 0.0,
+                        "open_interest_change": _get_oi_change_safe(self.client, symbol),
                         "status": status,
                         "tradeability_score": round(score, 1),
                         **metrics,
@@ -187,7 +198,7 @@ class MarketScanner:
                 "atr_percent": min(20.0, abs(price_change) / 2.0),
                 "spread_percent": 0.0,
                 "funding_rate": 0.0,
-                "open_interest_change": 0.0,
+                "open_interest_change": _get_oi_change_safe(self.client, symbol),
                 "tradeability_score": score,
                 "scanner_status": status,
                 "scanner_reason": reason,
