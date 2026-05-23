@@ -422,6 +422,39 @@ def main():
                                 })
                         continue
 
+                    # ── ADIM 3.5: COIN PERSONALITY — Per-coin parametreler ──
+                    try:
+                        from core.coin_personality import CoinPersonalityEngine
+                        _cp = CoinPersonalityEngine(db_path=DB_PATH)
+                        _personality = _cp.analyze_personality(symbol)
+                        _adaptive = _cp.get_adaptive_params(symbol)
+                        # Coin personality'yi signal event'e kaydet
+                        _pname = _personality.get("personality", "unknown")
+                        _traits = _personality.get("traits", [])
+                        if _pname != "unknown":
+                            save_signal_event(
+                                signal_id, "COIN_PERSONALITY",
+                                symbol=symbol,
+                                reason=f"{_pname}|traits={','.join(_traits)}"
+                            )
+                            logger.debug(
+                                f"[CoinPersonality] {symbol}: {_pname} "
+                                f"sl_mult={_adaptive['sl_atr_mult']:.1f} "
+                                f"risk={_adaptive['risk_pct']:.1f}%"
+                            )
+                        # Trigger score'una personality boost ekle
+                        if _pname == "The Runner" and trigger_result["quality"] in ("A", "A+", "S"):
+                            # Runner coinlerde strong trend sinyali = bonus
+                            trigger_result = dict(trigger_result)
+                            trigger_result["score"] = min(10.0, trigger_result["score"] + 0.5)
+                        elif _pname == "The Faker" and trigger_result["quality"] == "S":
+                            # Faker coinlerde S sinyali olsa bile dikkatli ol
+                            trigger_result = dict(trigger_result)
+                            trigger_result["score"] = max(0.0, trigger_result["score"] - 0.3)
+                    except Exception as _cp_err:
+                        logger.debug(f"[CoinPersonality] skip: {_cp_err}")
+                    # ────────────────────────────────────────────────────────
+
                     # ── ADIM 4: RISK ENGINE ────────────────────────────────
                     balance = get_paper_balance()
                     risk_result = risk.calculate(
