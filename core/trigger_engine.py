@@ -51,6 +51,9 @@ def _btc_allows(direction: str, btc_trend: str) -> tuple:
 class TriggerEngine:
     def __init__(self, client):
         self.client = client
+        # Per-instance trackers — instance'ta tutulmazsa _prev_oi her çağrıda sıfırlanır
+        self._oi_tracker = None   # OITracker: _prev_oi state'i burada yaşar
+        self._cvd_engine = None   # CVDEngine: modül cache'i var ama yine de tek instance yeter
 
     def get_candles(self, symbol: str, interval: str, limit: int) -> pd.DataFrame:
         try:
@@ -254,8 +257,9 @@ class TriggerEngine:
         cvd_data  = {}
         try:
             from core.cvd_engine import CVDEngine as _CVDEngine
-            _cvd = _CVDEngine(self.client)
-            cvd_data = _cvd.analyze(symbol, direction)
+            if self._cvd_engine is None:
+                self._cvd_engine = _CVDEngine(self.client)
+            cvd_data = self._cvd_engine.analyze(symbol, direction)
             cvd_bonus = cvd_data.get("cvd_score_bonus", 0.0)
             score = min(10.0, max(0.0, score + cvd_bonus))
             logger.debug(
@@ -271,8 +275,9 @@ class TriggerEngine:
         oi_data  = {}
         try:
             from core.oi_tracker import OITracker as _OITracker
-            _oi = _OITracker(self.client)
-            oi_data = _oi.analyze(symbol, c1, direction)
+            if self._oi_tracker is None:
+                self._oi_tracker = _OITracker(self.client)
+            oi_data = self._oi_tracker.analyze(symbol, c1, direction)
             oi_bonus = oi_data.get("oi_score_bonus", 0.0)
             score = min(10.0, max(0.0, score + oi_bonus))
             logger.debug(

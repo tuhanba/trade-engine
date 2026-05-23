@@ -90,7 +90,10 @@ class CVDEngine:
             # Son mumlar
             last_cvd = df["cvd"].iloc[-1]
             cvd_5ago = df["cvd"].iloc[-6]
-            cvd_slope = (last_cvd - cvd_5ago) / (abs(cvd_5ago) + 1e-10)  # normalized slope
+            # std ile normalize et: abs(cvd_5ago) sıfıra yakınsa patlama yapar
+            # cvd_std ≈ 0 da olabilir (flat piyasa) → 1e-10 fallback yeterli
+            cvd_std = float(df["cvd"].std())
+            cvd_slope = (last_cvd - cvd_5ago) / (cvd_std + 1e-10)  # z-score benzeri slope
 
             # Fiyat hareketi (son 10 mum)
             price_change = (df["close"].iloc[-1] - df["close"].iloc[-11]) / df["close"].iloc[-11]

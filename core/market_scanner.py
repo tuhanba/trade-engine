@@ -188,6 +188,8 @@ class MarketScanner:
 
     def _persist_scan(self, symbol: str, ts: float, status: str, reason: str, volume: float = 0.0, price: float = 0.0, price_change: float = 0.0, score: float = 0.0, metrics: Dict | None = None):
         metrics = metrics or self._tradeability_components(volume, price_change)
+        # Sadece aday coinler için OI API'ı çağır; reddedilen coinler için 0.0 yeterli
+        _oi_chg = _get_oi_change_safe(self.client, symbol) if status in ("Eligible", "Watch") else 0.0
         if save_market_snapshot:
             save_market_snapshot({
                 "symbol": symbol,
@@ -198,7 +200,7 @@ class MarketScanner:
                 "atr_percent": min(20.0, abs(price_change) / 2.0),
                 "spread_percent": 0.0,
                 "funding_rate": 0.0,
-                "open_interest_change": _get_oi_change_safe(self.client, symbol),
+                "open_interest_change": _oi_chg,
                 "tradeability_score": score,
                 "scanner_status": status,
                 "scanner_reason": reason,
