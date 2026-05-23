@@ -138,7 +138,8 @@ check_service aurvex-bot
 check_service aurvex-dashboard
 
 # Duplicate process
-PROC_COUNT=$(pgrep -c -f scalp_bot.py 2>/dev/null || echo 0)
+PROC_COUNT=$(pgrep -f scalp_bot.py 2>/dev/null | wc -l)
+PROC_COUNT=${PROC_COUNT//[^0-9]/}; PROC_COUNT=${PROC_COUNT:-0}
 if [ "$PROC_COUNT" -gt 1 ]; then
     err "$PROC_COUNT scalp_bot süreci var!"
     if [ "$DO_FIX" = true ]; then
@@ -317,12 +318,45 @@ with database.get_conn() as conn:
     paper_wr = round(paper_wins/paper_done*100,1) if paper_done>0 else 0
     regime = q("SELECT value FROM system_state WHERE key='market_regime'") or "NEUTRAL"
 
+    # Kapanış nedeni dağılımı
+    try:
+        close_reasons = conn.execute(
+            "SELECT COALESCE(close_reason,'?') r, COUNT(*) n FROM trades "
+            "WHERE status='closed' GROUP BY 1 ORDER BY 2 DESC LIMIT 6"
+        ).fetchall()
+    except Exception:
+        close_reasons = []
+    # Leverage dağılımı
+    try:
+        lev_counts = conn.execute(
+            "SELECT COALESCE(leverage,1) lev, COUNT(*) n FROM trades "
+            "WHERE status='closed' GROUP BY 1 ORDER BY 1"
+        ).fetchall()
+    except Exception:
+        lev_counts = []
+    # SL mesafesi ortalaması
+    try:
+        sl_dist_row = conn.execute(
+            "SELECT ROUND(AVG(ABS(entry-sl)/entry*100),2) FROM trades "
+            "WHERE status='closed' AND entry>0 AND sl>0"
+        ).fetchone()
+        avg_sl_pct = sl_dist_row[0] or 0
+    except Exception:
+        avg_sl_pct = 0
+
 print()
 print("  \033[1m📊 TRADE İSTATİSTİKLERİ\033[0m")
 print(f"  {'Bakiye:':<28} ${balance:.2f}")
 print(f"  {'Toplam PnL:':<28} ${total_pnl:.2f}")
 print(f"  {'Trade (açık/kapandı):':<28} {trades_open}/{trades_closed}")
 print(f"  {'Win Rate:':<28} {wr}% ({trades_wins}W/{trades_closed-trades_wins}L)")
+print(f"  {'Ort SL mesafesi:':<28} %{avg_sl_pct}")
+if close_reasons:
+    reasons_str = "  ".join(f"{r[0]}={r[1]}" for r in close_reasons)
+    print(f"  {'Kapanış nedenleri:':<28} {reasons_str}")
+if lev_counts:
+    lev_str = "  ".join(f"{r[0]}x={r[1]}" for r in lev_counts)
+    print(f"  {'Leverage dağılımı:':<28} {lev_str}")
 print()
 print("  \033[1m👻 GHOST LEARNING\033[0m")
 print(f"  {'Ghost signals:':<28} {ghost_total} ({ghost_sim} simüle)")
@@ -361,8 +395,10 @@ if [ -f "$BOT_LOG" ]; then
                           err "Bot sessiz (${DIFF}dk) — restart ediliyor"
 
     # Son 5 dakika hata sayısı
-    RECENT_ERRORS=$(tail -200 "$BOT_LOG" | grep -c "ERROR\|CRITICAL" 2>/dev/null || echo 0)
-    RECENT_WARNS=$(tail -200 "$BOT_LOG" | grep -c "WARNING" 2>/dev/null || echo 0)
+    RECENT_ERRORS=$(tail -200 "$BOT_LOG" 2>/dev/null | grep -E "ERROR|CRITICAL" | wc -l)
+    RECENT_WARNS=$(tail -200 "$BOT_LOG" 2>/dev/null | grep -c "WARNING" | head -1)
+    RECENT_ERRORS=${RECENT_ERRORS//[^0-9]/}; RECENT_ERRORS=${RECENT_ERRORS:-0}
+    RECENT_WARNS=${RECENT_WARNS//[^0-9]/};   RECENT_WARNS=${RECENT_WARNS:-0}
     [ "$RECENT_ERRORS" -gt 0 ] && err "Son 200 satırda $RECENT_ERRORS hata" || ok "Son 200 satırda hata yok"
     [ "$RECENT_WARNS" -gt 10 ] && warn "Son 200 satırda $RECENT_WARNS uyarı" || ok "Uyarı seviyesi normal ($RECENT_WARNS)"
 
@@ -469,25 +505,33 @@ fi
 sep "10. CRON DURUMU"
 # ═══════════════════════════════════════════════════════
 
-CRON_MAINTAIN=$(crontab -l 2>/dev/null | grep -c "aurvex_maintain" || echo 0)
-CRON_GHOST=$(crontab -l 2>/dev/null | grep -c "ghost_learner" || echo 0)
-CRON_NIGHTLY=$(crontab -l 2>/dev/null | grep -c "ai_brain" || echo 0)
+CRON_MAINTAIN=$(crontab -l 2>/dev/null | grep "aurvex_maintain" | wc -l)
+CRON_GHOST=$(crontab -l 2>/dev/null | grep "ghost_learner" | wc -l)
+CRON_NIGHTLY=$(crontab -l 2>/dev/null | grep "ai_brain" | wc -l)
+CRON_MAINTAIN=${CRON_MAINTAIN//[^0-9]/}; CRON_MAINTAIN=${CRON_MAINTAIN:-0}
+CRON_GHOST=${CRON_GHOST//[^0-9]/};       CRON_GHOST=${CRON_GHOST:-0}
+CRON_NIGHTLY=${CRON_NIGHTLY//[^0-9]/};   CRON_NIGHTLY=${CRON_NIGHTLY:-0}
 
 [ "$CRON_MAINTAIN" -gt 0 ] && ok "Maintenance cron aktif" || warn "Maintenance cron YOK"
 [ "$CRON_GHOST" -gt 0 ]    && ok "Ghost learner cron aktif" || warn "Ghost learner cron YOK"
 [ "$CRON_NIGHTLY" -gt 0 ]  && ok "AI Brain nightly cron aktif" || warn "AI Brain nightly cron YOK"
 
-if [ "$CRON_GHOST" -eq 0 ] || [ "$CRON_NIGHTLY" -eq 0 ]; then
+if [ "$DO_FIX" = true ]; then
+    if [ "$CRON_GHOST" -eq 0 ]; then
+        (crontab -l 2>/dev/null; echo "0 3 * * * cd $BASE && $VENV ghost_learner.py cycle >> $BASE/logs/ghost.log 2>&1") | crontab -
+        fixed "Ghost learner cron eklendi (her gün 03:00)"
+    fi
+    if [ "$CRON_NIGHTLY" -eq 0 ]; then
+        (crontab -l 2>/dev/null; echo "0 2 * * * cd $BASE && $VENV -c 'from ai_brain import nightly_optimize_coins; nightly_optimize_coins()' >> $BASE/logs/nightly.log 2>&1") | crontab -
+        fixed "AI Brain nightly cron eklendi (her gün 02:00)"
+    fi
+    if [ "$CRON_MAINTAIN" -eq 0 ]; then
+        (crontab -l 2>/dev/null; echo "0 */6 * * * bash $BASE/aurvex_maintain.sh --fix >> $BASE/logs/maintain.log 2>&1") | crontab -
+        fixed "Maintenance cron eklendi (her 6 saatte bir)"
+    fi
+elif [ "$CRON_GHOST" -eq 0 ] || [ "$CRON_NIGHTLY" -eq 0 ] || [ "$CRON_MAINTAIN" -eq 0 ]; then
     echo ""
-    info "Eksik cron'ları eklemek için:"
-    echo ""
-    cat << 'CRONHELP'
-    crontab -e
-    # Şunları ekle:
-    0 3  * * * cd /root/trade_engine/trade-engine && /root/trade_engine/.venv/bin/python3 ghost_learner.py cycle >> logs/ghost.log 2>&1
-    0 3  * * * cd /root/trade_engine/trade-engine && /root/trade_engine/.venv/bin/python3 -c "from ai_brain import nightly_optimize_coins; nightly_optimize_coins()" >> logs/nightly.log 2>&1
-    0 */6 * * * bash /root/trade_engine/trade-engine/aurvex_maintain.sh --fix >> logs/maintain.log 2>&1
-CRONHELP
+    info "Eksik cron'lar için: bash aurvex_maintain.sh --fix"
 fi
 
 # ═══════════════════════════════════════════════════════
