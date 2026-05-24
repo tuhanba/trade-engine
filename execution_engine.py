@@ -670,8 +670,8 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
 
     # ── CoinLibrary Öğrenme Döngüsü ──────────────────────────────────────────
     try:
-        from coin_library import update_coin_stats as _update_coin_stats
-    except ImportError:
+        from core.coin_library import update_coin_stats as _update_coin_stats
+    except (ImportError, AttributeError):
         def _update_coin_stats(*args, **kwargs): pass
     try:
         entry_p = t.get("entry", 0)

@@ -147,7 +147,7 @@ class TelegramManager:
             with database.get_conn() as conn:
                 today_pnl = conn.execute("""
                     SELECT COALESCE(SUM(net_pnl), 0) FROM trades
-                    WHERE status='closed' AND DATE(close_time)=?
+                    WHERE LOWER(status)='closed' AND DATE(close_time)=?
                 """, (today,)).fetchone()[0] or 0
                 ghost_n = conn.execute(
                     "SELECT COUNT(*) FROM ghost_signals"
