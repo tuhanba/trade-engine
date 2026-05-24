@@ -97,11 +97,11 @@ MAX_DAILY_SIGNALS        = _env_int("MAX_DAILY_SIGNALS", 9999)   # bilgi amaçl�
 DAILY_SIGNAL_LIMIT       = _env_int("DAILY_SIGNAL_LIMIT", 60)   # günlük hard limit
 MAX_SIGNALS_PER_COIN     = _env_int("MAX_SIGNALS_PER_COIN", 3)  # coin başına günlük max
 
-# Sinyal Esikleri (v10.0 — düşürüldü, gerçekçi eşikler)
-DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 15.0)
-WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 20.0)
-TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 25.0)
-TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 30.0)
+# Sinyal Esikleri (v11.0 — audit fix, B kaliteyi filtrele)
+DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 20.0)     # 15→20
+WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 35.0) # 20→35
+TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 50.0)  # 25→50
+TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 65.0)     # 30→65 (B kalite ~50-60, A ~65-75)
 
 # Circuit Breaker
 CIRCUIT_BREAKER_LOSSES  = _env_int("CIRCUIT_BREAKER_LOSSES", 3)
