@@ -67,6 +67,8 @@ class TelegramManager:
             uid = update.get("update_id", 0)
             if uid > self._last_update_id:
                 self._last_update_id = uid
+            else:
+                continue  # eski update, atla
             self._handle_update(update)
 
     def _handle_update(self, update: dict):

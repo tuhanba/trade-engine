@@ -350,21 +350,23 @@ def send_trade_open(data: dict):
 
 def send_tp_hit(symbol: str, tp_level: int, net_pnl: float,
                 remaining_qty: float, balance_after: float = 0):
-    """TP1 veya TP2 vurdu bildirimi."""
     try:
         emoji = "🎯" if tp_level == 1 else "🏆"
-        sign = "+" if net_pnl >= 0 else ""
+        sign  = "+" if net_pnl >= 0 else ""
+        result = "KAR ✅" if net_pnl >= 0 else "ZARAR ❌"
         text = (
-            f"{emoji} TP{tp_level} — {symbol}\n"
+            f"{emoji} <b>TP{tp_level} — {symbol}</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"TP{tp_level} PnL:      {sign}${net_pnl:.4f}\n"
-            f"Kalan Qty:    {remaining_qty:.6f}\n"
-            f"Bakiye:       ${balance_after:.2f}\n"
+            f"Sonuç:        <b>{result}</b>\n"
+            f"TP{tp_level} PnL:      <b>{sign}${net_pnl:.2f}</b>\n"
+            f"Kalan Miktar: {remaining_qty:.6f}\n"
+            f"Bakiye:       <b>${balance_after:.2f}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
         )
         if tp_level == 1:
-            text += "SL → Breakeven taşındı\n"
+            text += "📌 SL breakeven'e taşındı — runner devam ediyor"
         elif tp_level == 2:
-            text += "Runner / Trailing başladı\n"
+            text += "🏃 Runner trailing başladı"
         _queue.push(text)
     except Exception as e:
         logger.error(f"TP{tp_level} bildirim hatası: {e}")
@@ -374,20 +376,29 @@ def send_trade_close(symbol: str, net_pnl: float, total_fee: float,
                      reason: str, duration_str: str,
                      direction: str = "", r_multiple: float = 0,
                      balance_after: float = 0):
-    """Trade kapanış bildirimi."""
     try:
-        sign = "+" if net_pnl >= 0 else ""
+        sign   = "+" if net_pnl >= 0 else ""
         result = "✅ KAR" if net_pnl > 0 else "❌ ZARAR"
+        reason_map = {
+            "sl": "🛑 Stop Loss",
+            "tp1": "🎯 TP1",
+            "tp2": "🏆 TP2",
+            "tp3": "🏁 TP3",
+            "manual": "👋 Manuel",
+            "finish": "🏁 Finish",
+        }
+        reason_str = reason_map.get(reason.lower(), reason.upper())
+        dir_emoji  = "🔺" if direction.upper() == "LONG" else "🔻"
         text = (
-            f"{result} — {symbol}\n"
+            f"{result} {dir_emoji} <b>{symbol}</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"Sebep:        {reason.upper()}\n"
-            f"Net PnL:      {sign}${net_pnl:.4f}\n"
-            f"Toplam Fee:   ${total_fee:.4f}\n"
+            f"Kapanış:      {reason_str}\n"
+            f"Net PnL:      <b>{sign}${net_pnl:.2f}</b>\n"
+            f"Fee:          ${total_fee:.3f}\n"
             f"R-Multiple:   {r_multiple:.2f}R\n"
             f"Süre:         {duration_str}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"Bakiye:       ${balance_after:.2f}\n"
+            f"💰 Bakiye:    <b>${balance_after:.2f}</b>\n"
         )
         _queue.push(text)
     except Exception as e:

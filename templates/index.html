@@ -643,8 +643,8 @@ setInterval(async()=>{
   await Promise.all([fHealthWithMode(),fStats(),fLearn()]);
   await Promise.all([fLive(),fTrades(),fSigs(),fChart()]);
   fetchLogs();
-},8000);
-setInterval(fPipeline,30000);
+},4000);
+setInterval(fPipeline,15000);
 
 // Başlat
 async function main(){

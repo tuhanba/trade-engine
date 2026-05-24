@@ -250,8 +250,12 @@ def main():
     _last_nightly_day = ""  # Nightly optimizer son çalışma günü (YYYY-MM-DD)
     send_message(
         f"🚀 <b>AX Scalp Engine v2.0 başlatıldı</b>\n"
-        f"Mod: {AX_MODE.upper()} | {EXECUTION_MODE.upper()}\n"
-        f"Bakiye: ${get_paper_balance():.2f}"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"Mod: {'🧠 HUMAN' if config.HUMAN_MODE else '⚡ SCALP'} | {AX_MODE.upper()}\n"
+        f"Execution: {EXECUTION_MODE.upper()}\n"
+        f"Bakiye: ${get_paper_balance():.2f}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"Komutlar: /status /human /scalp /help"
     )
 
     while True:
