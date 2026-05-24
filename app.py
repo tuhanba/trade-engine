@@ -49,6 +49,26 @@ app = Flask(__name__)
 app.secret_key = getattr(config, "SECRET_KEY", "ax_secret_2026")
 socketio = SocketIO(app)
 
+# ── IP Whitelist ──────────────────────────────────────────────────────
+import os as _os
+
+_ALLOWED_IPS = set(filter(None, _os.getenv("ALLOWED_IPS", "127.0.0.1").split(",")))
+
+def _check_ip():
+    """Basit IP whitelist — sadece lokal veya izinli IP'ler."""
+    if not _ALLOWED_IPS or "0.0.0.0" in _ALLOWED_IPS:
+        return  # Whitelist devre dışı
+    client_ip = request.remote_addr or "0.0.0.0"
+    if client_ip not in _ALLOWED_IPS:
+        from flask import abort
+        abort(403)
+
+@app.before_request
+def check_access():
+    # /api/* ve /stream için IP kontrolü
+    if request.path.startswith("/api/") or request.path == "/stream":
+        _check_ip()
+    # /  (dashboard) herkese açık
 
 # ── CORS ─────────────────────────────────────────────────────────────
 
