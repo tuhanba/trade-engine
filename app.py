@@ -50,22 +50,36 @@ app.secret_key = getattr(config, "SECRET_KEY", "ax_secret_2026")
 socketio = SocketIO(app)
 
 # ── IP Whitelist ──────────────────────────────────────────────────────
+# Varsayılan: devre dışı (boş string veya ALLOWED_IPS env var set edilmemiş)
+# Etkinleştirmek için: ALLOWED_IPS=192.168.1.100,10.0.0.1
 import os as _os
 
-_ALLOWED_IPS = set(filter(None, _os.getenv("ALLOWED_IPS", "127.0.0.1").split(",")))
+_ALLOWED_IPS = set(filter(None, _os.getenv("ALLOWED_IPS", "").split(",")))
+
+def _get_client_ip() -> str:
+    """Nginx proxy veya doğrudan bağlantı için gerçek IP'yi döner."""
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    real_ip = request.headers.get("X-Real-IP", "")
+    if real_ip:
+        return real_ip
+    return request.remote_addr or "0.0.0.0"
 
 def _check_ip():
-    """Basit IP whitelist — sadece lokal veya izinli IP'ler."""
-    if not _ALLOWED_IPS or "0.0.0.0" in _ALLOWED_IPS:
-        return  # Whitelist devre dışı
-    client_ip = request.remote_addr or "0.0.0.0"
+    """IP whitelist — sadece ALLOWED_IPS env var set edilmişse aktif."""
+    if not _ALLOWED_IPS:
+        return  # Whitelist devre dışı (varsayılan)
+    if "0.0.0.0" in _ALLOWED_IPS:
+        return  # Açık erişim
+    client_ip = _get_client_ip()
     if client_ip not in _ALLOWED_IPS:
         from flask import abort
         abort(403)
 
 @app.before_request
 def check_access():
-    # /api/* ve /stream için IP kontrolü
+    # /api/* ve /stream için IP kontrolü (ALLOWED_IPS set edilmişse)
     if request.path.startswith("/api/") or request.path == "/stream":
         _check_ip()
     # /  (dashboard) herkese açık
