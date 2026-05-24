@@ -318,6 +318,21 @@ class ExecutionEngine:
         except Exception as _tg_err2:
             logger.warning("[Telegram] Trade kapanış bildirimi hatası: %s", _tg_err2)
 
+        # ── AI Learning callback ─────────────────────────────────────
+        try:
+            from core.ai_decision_engine import AIDecisionEngine as _AIDE
+            _aide = _AIDE()
+            _net = total_pnl  # final PnL
+            _aide.learn_from_outcome(
+                symbol=trade["symbol"],
+                net_pnl=float(_net),
+                reason=reason,
+            )
+            logger.debug(f"[AI Learn] {trade['symbol']} PnL={_net:.4f} reason={reason}")
+        except Exception as _ale:
+            logger.debug(f"[AI Learn] skip: {_ale}")
+        # ─────────────────────────────────────────────────────────────
+
     # ── Sinyal işleme ────────────────────────────────────────────
 
     def process_signal(self, signal: SignalData) -> Optional[int]:

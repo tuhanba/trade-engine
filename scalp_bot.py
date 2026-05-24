@@ -205,6 +205,15 @@ def main():
     risk     = RiskEngine(client, db_path=DB_PATH)
     ai_engine = AIDecisionEngine(db_path=DB_PATH)
 
+    # CoinPersonality singleton — döngüde tekrar init edilmeyecek
+    _cp_engine = None
+    try:
+        from core.coin_personality import CoinPersonalityEngine
+        _cp_engine = CoinPersonalityEngine(db_path=DB_PATH)
+        logger.info("CoinPersonalityEngine başlatıldı")
+    except Exception as _cpe:
+        logger.warning(f"CoinPersonality yüklenemedi: {_cpe}")
+
     # Ghost learning — bağımsız thread (ana bot döngüsünden bağımsız)
     _ghost_stop = threading.Event()
 
@@ -332,6 +341,7 @@ def main():
                 pass
 
             # ── ADIM 1: MARKET SCANNER ─────────────────────────────────────
+            _scan_start = time.time()
             candidates = scanner.scan()
             if not candidates:
                 logger.debug("Market scanner: aday bulunamadı")
@@ -349,6 +359,19 @@ def main():
 
             for coin_info in eligible:
                 symbol = coin_info["symbol"]
+
+                # ── Günlük sinyal limiti kontrolü ──────────────────────
+                from config import DAILY_SIGNAL_LIMIT, MAX_SIGNALS_PER_COIN
+                _dc = get_daily_signal_count()
+                _total_today = _dc.get("total", 0) if isinstance(_dc, dict) else int(_dc or 0)
+                if _total_today >= DAILY_SIGNAL_LIMIT:
+                    logger.info(f"[LIMIT] Günlük sinyal limiti doldu ({_total_today}/{DAILY_SIGNAL_LIMIT})")
+                    break  # Bu scan döngüsünü bitir
+                _coin_today = _dc.get(symbol, 0) if isinstance(_dc, dict) else 0
+                if _coin_today >= MAX_SIGNALS_PER_COIN:
+                    logger.debug(f"[LIMIT] {symbol} günlük limit: {_coin_today}/{MAX_SIGNALS_PER_COIN}")
+                    continue
+                # ────────────────────────────────────────────────────────
 
                 if symbol in open_symbols:
                     continue
@@ -426,36 +449,35 @@ def main():
                         continue
 
                     # ── ADIM 3.5: COIN PERSONALITY — Per-coin parametreler ──
-                    try:
-                        from core.coin_personality import CoinPersonalityEngine
-                        _cp = CoinPersonalityEngine(db_path=DB_PATH)
-                        _personality = _cp.analyze_personality(symbol)
-                        _adaptive = _cp.get_adaptive_params(symbol)
-                        # Coin personality'yi signal event'e kaydet
-                        _pname = _personality.get("personality", "unknown")
-                        _traits = _personality.get("traits", [])
-                        if _pname != "unknown":
-                            save_signal_event(
-                                signal_id, "COIN_PERSONALITY",
-                                symbol=symbol,
-                                reason=f"{_pname}|traits={','.join(_traits)}"
-                            )
-                            logger.debug(
-                                f"[CoinPersonality] {symbol}: {_pname} "
-                                f"sl_mult={_adaptive['sl_atr_mult']:.1f} "
-                                f"risk={_adaptive['risk_pct']:.1f}%"
-                            )
-                        # Trigger score'una personality boost ekle
-                        if _pname == "The Runner" and trigger_result["quality"] in ("A", "A+", "S"):
-                            # Runner coinlerde strong trend sinyali = bonus
-                            trigger_result = dict(trigger_result)
-                            trigger_result["score"] = min(10.0, trigger_result["score"] + 0.5)
-                        elif _pname == "The Faker" and trigger_result["quality"] == "S":
-                            # Faker coinlerde S sinyali olsa bile dikkatli ol
-                            trigger_result = dict(trigger_result)
-                            trigger_result["score"] = max(0.0, trigger_result["score"] - 0.3)
-                    except Exception as _cp_err:
-                        logger.debug(f"[CoinPersonality] skip: {_cp_err}")
+                    if _cp_engine is not None:
+                        try:
+                            _personality = _cp_engine.analyze_personality(symbol)
+                            _adaptive = _cp_engine.get_adaptive_params(symbol)
+                            # Coin personality'yi signal event'e kaydet
+                            _pname = _personality.get("personality", "unknown")
+                            _traits = _personality.get("traits", [])
+                            if _pname != "unknown":
+                                save_signal_event(
+                                    signal_id, "COIN_PERSONALITY",
+                                    symbol=symbol,
+                                    reason=f"{_pname}|traits={','.join(_traits)}"
+                                )
+                                logger.debug(
+                                    f"[CoinPersonality] {symbol}: {_pname} "
+                                    f"sl_mult={_adaptive['sl_atr_mult']:.1f} "
+                                    f"risk={_adaptive['risk_pct']:.1f}%"
+                                )
+                            # Trigger score'una personality boost ekle
+                            if _pname == "The Runner" and trigger_result["quality"] in ("A", "A+", "S"):
+                                # Runner coinlerde strong trend sinyali = bonus
+                                trigger_result = dict(trigger_result)
+                                trigger_result["score"] = min(10.0, trigger_result["score"] + 0.5)
+                            elif _pname == "The Faker" and trigger_result["quality"] == "S":
+                                # Faker coinlerde S sinyali olsa bile dikkatli ol
+                                trigger_result = dict(trigger_result)
+                                trigger_result["score"] = max(0.0, trigger_result["score"] - 0.3)
+                        except Exception as _cp_err:
+                            logger.debug(f"[CoinPersonality] skip: {_cp_err}")
                     # ────────────────────────────────────────────────────────
 
                     # ── ADIM 4: RISK ENGINE ────────────────────────────────
@@ -795,7 +817,10 @@ def main():
                 set_state("status", "running")
             except Exception:
                 pass
-            time.sleep(SCAN_INTERVAL)
+            _scan_dur = time.time() - _scan_start
+            _sleep = max(5, SCAN_INTERVAL - _scan_dur)
+            logger.debug(f"Scan süresi: {_scan_dur:.1f}s → sleep {_sleep:.0f}s")
+            time.sleep(_sleep)
             # ── AI Brain Periyodik Adaptasyon (30 dakikada bir) ─────────────
             _now_ts = time.time()
             if AI_BRAIN_AVAILABLE and (_now_ts - _last_ai_adapt) >= 1800:

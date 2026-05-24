@@ -24,12 +24,13 @@ logger = logging.getLogger("ax.database")
 
 def get_connection() -> sqlite3.Connection:
     """WAL modunda SQLite bağlantısı döner."""
-    conn = sqlite3.connect(config.DB_PATH, timeout=10)
+    conn = sqlite3.connect(config.DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-8000")  # 8MB cache
+    conn.execute("PRAGMA cache_size=10000")   # 10MB cache
+    conn.execute("PRAGMA temp_store=MEMORY")
     return conn
 
 

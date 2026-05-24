@@ -605,6 +605,16 @@ class AdaptiveScorer:
 
         base_score = signal.score
 
+        # Min sample guard — yetersiz veriyle çarpan uygulama
+        try:
+            _ghost_stats = self.ghost.get_symbol_ghost_stats(signal.symbol)
+            total_trades = _ghost_stats.get("total", 0) or 0
+        except Exception:
+            total_trades = 0
+        if total_trades < 10:
+            logger.debug(f"[Adaptive] {signal.symbol}: yetersiz veri ({total_trades}<10), base score kullanılıyor")
+            return round(base_score, 1)  # Boost/penalti yok, ham score döndür
+
         # 1. Ghost multiplier
         ghost_mult = self.ghost.get_score_multiplier(signal.symbol, signal.side)
         adjusted = base_score * ghost_mult
@@ -790,7 +800,7 @@ def classify_signal(
         confidence = 0.7
 
     # Ghost başarı bonusu
-    if ghost_stats["ghost_winrate"] >= 65 and ghost_stats["total"] >= 5:
+    if ghost_stats["ghost_winrate"] >= 65 and ghost_stats["total"] >= 15:  # min 15 sample
         if decision == SignalDecision.WATCH.value:
             decision = SignalDecision.ALLOW.value
             reason += f" | Ghost boost ({ghost_stats['ghost_winrate']}% WR)"

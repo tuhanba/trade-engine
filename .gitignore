@@ -33,3 +33,10 @@ backups/
 # OS
 .DS_Store
 Thumbs.db
+# Runtime files
+20
+EMA21
+EMA50
+MDI
+*.bak_*
+/tmp/*.log
