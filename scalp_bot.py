@@ -249,13 +249,13 @@ def main():
     _last_ai_adapt    = 0   # AI Brain periyodik adaptasyon (30 dakikada bir)
     _last_nightly_day = ""  # Nightly optimizer son çalışma günü (YYYY-MM-DD)
     send_message(
-        f"🚀 <b>AX Scalp Engine v2.0 başlatıldı</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"Mod: {'🧠 HUMAN' if config.HUMAN_MODE else '⚡ SCALP'} | {AX_MODE.upper()}\n"
+        f"🚀 <b>AX Scalp Engine başlatıldı</b>\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"Trading: {'🧠 HUMAN' if config.HUMAN_MODE else '⚡ SCALP'} | {AX_MODE.upper()}\n"
         f"Execution: {EXECUTION_MODE.upper()}\n"
-        f"Bakiye: ${get_paper_balance():.2f}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"Komutlar: /status /human /scalp /help"
+        f"💰 Bakiye: ${get_paper_balance():.2f}\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"/help — Komutlar"
     )
 
     while True:
