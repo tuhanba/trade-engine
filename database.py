@@ -1015,30 +1015,30 @@ def get_dashboard_stats() -> dict:
     try:
         total = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
         open_count = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE status='OPEN'"
+            "SELECT COUNT(*) FROM trades WHERE LOWER(status) IN ('open', 'tp1_hit', 'runner')"
         ).fetchone()[0]
         closed_count = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE status='closed'"
+            "SELECT COUNT(*) FROM trades WHERE LOWER(status)='closed'"
         ).fetchone()[0]
 
         rpnl_row = conn.execute(
-            "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE status='closed'"
+            "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE LOWER(status)='closed'"
         ).fetchone()
         realized_pnl = float(rpnl_row[0]) if rpnl_row else 0.0
 
         upnl_row = conn.execute(
-            "SELECT COALESCE(SUM(unrealized_pnl), 0) FROM trades WHERE status='OPEN'"
+            "SELECT COALESCE(SUM(unrealized_pnl), 0) FROM trades WHERE LOWER(status) IN ('open', 'tp1_hit', 'runner')"
         ).fetchone()
         unrealized_pnl = float(upnl_row[0]) if upnl_row else 0.0
 
         # Accumulated partial PnL (açık trade'lerdeki)
         accum_row = conn.execute(
-            "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE status='OPEN'"
+            "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE LOWER(status) IN ('open', 'tp1_hit', 'runner')"
         ).fetchone()
         accumulated_pnl = float(accum_row[0]) if accum_row else 0.0
 
         win_count = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE status='closed' AND net_pnl > 0"
+            "SELECT COUNT(*) FROM trades WHERE LOWER(status)='closed' AND net_pnl > 0"
         ).fetchone()[0]
         winrate = round(
             (win_count / closed_count * 100), 1
@@ -1048,7 +1048,7 @@ def get_dashboard_stats() -> dict:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         today_row = conn.execute(
             "SELECT COALESCE(SUM(net_pnl), 0) FROM trades "
-            "WHERE status='closed' AND DATE(close_time) = ?",
+            "WHERE LOWER(status)='closed' AND DATE(close_time) = ?",
             (today,),
         ).fetchone()
         today_pnl = float(today_row[0]) if today_row else 0.0

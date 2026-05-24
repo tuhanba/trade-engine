@@ -208,7 +208,7 @@ class TelegramManager:
         for t in trades:
             sym    = t.get("symbol", "?")
             side   = t.get("side") or t.get("direction", "?")
-            pnl    = float(t.get("realized_pnl") or 0)
+            pnl    = float(t.get("net_pnl") or t.get("realized_pnl") or 0)
             reason = t.get("close_reason") or "?"
             icon   = "WIN" if pnl > 0 else "LOSS"
             lines.append(f"{icon} {sym} {side} | {pnl:+.3f}$ | {reason}")
@@ -223,7 +223,7 @@ class TelegramManager:
             conn  = database.get_connection()
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             row   = conn.execute(
-                "SELECT COALESCE(SUM(realized_pnl),0) FROM trades WHERE DATE(closed_at)=? AND status='CLOSED'",
+                "SELECT COALESCE(SUM(realized_pnl),0) FROM trades WHERE DATE(close_time)=? AND status='closed'",
                 (today,)
             ).fetchone()
             conn.close()
@@ -327,7 +327,7 @@ class TelegramManager:
                           SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END),
                           SUM(CASE WHEN realized_pnl <= 0 THEN 1 ELSE 0 END),
                           COALESCE(SUM(realized_pnl), 0)
-                   FROM trades WHERE DATE(closed_at)=? AND status='CLOSED'""",
+                   FROM trades WHERE DATE(close_time)=? AND status='closed'""",
                 (today,)
             ).fetchone()
             conn.close()

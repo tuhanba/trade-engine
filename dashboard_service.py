@@ -103,31 +103,37 @@ def _get_live_trades_impl() -> list:
             pass
 
         result.append({
-            "id": t.get("id"),
-            "symbol": t.get("symbol"),
-            "side": t.get("direction") or t.get("side", "?"),
-            "entry_price": t.get("entry") or t.get("entry_price", 0),
-            "current_price": t.get("current_price", 0),
-            "stop_loss": t.get("sl") or t.get("stop_loss", 0),
-            "tp1": t.get("tp1", 0),
-            "tp2": t.get("tp2", 0),
-            "tp3": t.get("tp3", 0),
-            "leverage": t.get("leverage", 1),
-            "margin_used": t.get("margin_used", 0),
-            "risk_usd": t.get("risk_usd", 0),
-            "unrealized_pnl": t.get("unrealized_pnl", 0),
-            "accumulated_pnl": t.get("realized_pnl") or t.get("accumulated_pnl", 0),
-            "remaining_qty_pct": t.get("remaining_qty_pct", 100),
-            "total_pnl": round(
-                (t.get("unrealized_pnl") or 0) + (t.get("realized_pnl") or t.get("accumulated_pnl") or 0), 4
+            "id":            t.get("id"),
+            "symbol":        t.get("symbol", "?"),
+            "side":          t.get("direction") or t.get("side", "?"),
+            "entry_price":   float(t.get("entry") or t.get("entry_price") or 0),
+            "current_price": float(t.get("current_price") or 0),
+            "stop_loss":     float(t.get("sl") or t.get("stop_loss") or 0),
+            "tp1":           float(t.get("tp1") or 0),
+            "tp2":           float(t.get("tp2") or 0),
+            "tp3":           float(t.get("tp3") or 0),
+            "leverage":      int(t.get("leverage") or 1),
+            "qty":           float(t.get("qty") or t.get("quantity") or 0),
+            "notional":      float(t.get("notional_size") or t.get("notional") or 0),
+            "margin_used":   float(t.get("margin_used") or 0),
+            "risk_usd":      float(t.get("risk_usd") or 0),
+            "unrealized_pnl": float(t.get("unrealized_pnl") or 0),
+            "realized_pnl":  float(t.get("realized_pnl") or 0),
+            "accumulated_pnl": float(t.get("realized_pnl") or t.get("accumulated_pnl") or 0),
+            "remaining_qty_pct": float(t.get("remaining_qty_pct") or 100.0),
+            "total_pnl":     round(
+                (t.get("unrealized_pnl") or 0) +
+                (t.get("realized_pnl") or t.get("accumulated_pnl") or 0), 4
             ),
-            "opened_at": t.get("open_time") or t.get("opened_at", ""),
+            "status":        t.get("status", "open"),
+            "opened_at":     t.get("open_time") or t.get("opened_at", ""),
+            "setup_quality": t.get("setup_quality", "-"),
             # Exit state
-            "tp1_hit": exit_state.get("tp1_hit", False),
-            "tp2_hit": exit_state.get("tp2_hit", False),
-            "trailing_active": exit_state.get("trailing_active", False),
-            "breakeven_set": exit_state.get("breakeven_set", False),
-            "trailing_sl": exit_state.get("current_sl", 0),
+            "tp1_hit":          exit_state.get("tp1_hit", False),
+            "tp2_hit":          exit_state.get("tp2_hit", False),
+            "trailing_active":  exit_state.get("trailing_active", False),
+            "breakeven_set":    exit_state.get("breakeven_set", False),
+            "trailing_sl":      exit_state.get("current_sl", 0),
         })
     return result
 
