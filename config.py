@@ -100,7 +100,7 @@ MAX_SIGNALS_PER_COIN     = _env_int("MAX_SIGNALS_PER_COIN", 3)  # coin başına 
 # Sinyal Esikleri (v11.0 — audit fix, B kaliteyi filtrele)
 DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 20.0)     # 15→20
 WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 35.0) # 20→35
-TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 50.0)  # 25→50
+TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 40.0)  # 25→50→40 (trade açılanlar mutlaka gitsin)
 TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 65.0)     # 30→65 (B kalite ~50-60, A ~65-75)
 
 # Circuit Breaker

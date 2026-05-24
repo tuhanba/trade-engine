@@ -854,6 +854,10 @@ def main():
         except Exception as e:
             logger.error(f"Ana döngü hatası: {e}", exc_info=True)
             try:
+                send_message(f"⚠️ AurvexAI Ana Döngü Hatası\n{str(e)[:200]}\nBot 10s sonra devam ediyor...")
+            except Exception:
+                pass
+            try:
                 set_state("status", "error")
                 set_state("last_error", str(e)[:500])
             except Exception:
