@@ -65,11 +65,11 @@ MIN_RR                     = _env_float("MIN_RR", 1.5)
 MIN_EXPECTED_MFE_R         = _env_float("MIN_EXPECTED_MFE_R", 1.2)
 
 # TP / SL ATR multipliers
-SL_ATR_MULT  = _env_float("SL_ATR_MULT", 1.8)   # gürültüden uzak SL
+SL_ATR_MULT  = _env_float("SL_ATR_MULT", 2.0)   # gürültüden uzak SL (1.8→2.0)
 TP1_R        = _env_float("TP1_R", 1.5)   # kârlı başlangıç (1.5R)
 TP2_R        = _env_float("TP2_R", 2.5)   # güçlü hedef (2.5R)
 TP3_R        = _env_float("TP3_R", 4.0)   # runner hedef
-MIN_SL_PCT   = _env_float("MIN_SL_PCT", 0.015)  # SL min %1.5 (gürültü koruması)
+MIN_SL_PCT   = _env_float("MIN_SL_PCT", 0.02)   # SL min %2 (gürültü koruması — artırıldı)
 
 # TP Splits
 TP1_CLOSE_PCT    = _env_float("TP1_CLOSE_PCT", 40)
@@ -93,7 +93,9 @@ MIN_MOVE_PCT             = _env_float("MIN_MOVE_PCT", 0.5)
 SCAN_INCLUDE_WATCH       = _env_bool("SCAN_INCLUDE_WATCH", True)
 WATCHLIST_MIN_SCAN_SCORE = _env_float("WATCHLIST_MIN_SCAN_SCORE", 50.0)
 MAX_COINS_PER_SCAN_LOOP  = _env_int("MAX_COINS_PER_SCAN_LOOP", 30)
-MAX_DAILY_SIGNALS        = 9999  # Ruflo: kalite gate yeterli, hard limit yok
+MAX_DAILY_SIGNALS        = _env_int("MAX_DAILY_SIGNALS", 9999)   # bilgi amaçlı eski compat
+DAILY_SIGNAL_LIMIT       = _env_int("DAILY_SIGNAL_LIMIT", 60)   # günlük hard limit
+MAX_SIGNALS_PER_COIN     = _env_int("MAX_SIGNALS_PER_COIN", 3)  # coin başına günlük max
 
 # Sinyal Esikleri (v10.0 — düşürüldü, gerçekçi eşikler)
 DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 15.0)
@@ -118,8 +120,8 @@ EXECUTABLE_QUALITIES       = _env("EXECUTABLE_QUALITIES", "S,A+,A").split(",")  
 GOOD_HOURS_UTC             = list(range(8, 18))   # 08-17 UTC
 BAD_HOURS_UTC              = list(range(0, 6))    # 00-05 UTC (Asian close)
 SESSION_FILTER_ENABLED     = _env_bool("SESSION_FILTER_ENABLED", True)
-SESSION_SCORE_BONUS        = _env_float("SESSION_SCORE_BONUS", 10.0)
-SESSION_SCORE_PENALTY      = _env_float("SESSION_SCORE_PENALTY", -15.0)
+SESSION_SCORE_BONUS        = _env_float("SESSION_SCORE_BONUS", 5.0)
+SESSION_SCORE_PENALTY      = _env_float("SESSION_SCORE_PENALTY", -5.0)
 SHORT_REQUIRES_BTC_BEARISH = True
 BTC_TREND_INTERVAL         = "4h"
 ADX_MIN_THRESHOLD          = 18  # eskiden 20

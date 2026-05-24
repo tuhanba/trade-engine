@@ -247,6 +247,11 @@ def api_params():
 def api_coin_stats():
     try:
         with get_conn() as conn:
+            has_table = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='coin_profiles'"
+            ).fetchone()
+            if not has_table:
+                return jsonify({"ok": True, "data": [], "note": "coin_profiles tablosu henüz oluşturulmadı"})
             rows = conn.execute("""
                 SELECT symbol, sample_size as trade_count,
                        ROUND(win_rate*100,1) as win_rate_pct,
@@ -258,7 +263,7 @@ def api_coin_stats():
             """).fetchall()
         return jsonify({"ok": True, "data": [dict(r) for r in rows]})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": True, "data": [], "error": str(e)})
 
 
 # ── /api/ml_status ────────────────────────────────────────────────────────────
@@ -429,6 +434,11 @@ def api_ax_status():
 def api_coin_profiles():
     try:
         with get_conn() as conn:
+            has_table = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='coin_profiles'"
+            ).fetchone()
+            if not has_table:
+                return jsonify({"ok": True, "data": [], "note": "coin_profiles tablosu henüz oluşturulmadı"})
             rows = conn.execute("""
                 SELECT symbol, sample_size as trade_count,
                        ROUND(win_rate*100,1) as win_rate_pct,
@@ -439,7 +449,7 @@ def api_coin_profiles():
             """).fetchall()
         return jsonify({"ok": True, "data": [dict(r) for r in rows]})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": True, "data": [], "error": str(e)})
 
 
 # ── /api/signal_stats ─────────────────────────────────────────────────────────

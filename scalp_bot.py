@@ -267,7 +267,7 @@ def main():
                 time.sleep(10)
                 continue
 
-            # Paper modda kayıp limiti yok — live trading'e geçince aktif edilecek
+            # Günlük kayıp limiti — circuit breaker hard stop
             try:
                 from database import get_conn
                 today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -280,17 +280,25 @@ def main():
                 balance = get_paper_balance()
                 max_loss_abs = balance * (DAILY_MAX_LOSS_PCT / 100.0)
                 if today_loss < -max_loss_abs:
-                    logger.info(
-                        f"📊 Kayıp bilgisi: {today_loss:.2f}$ "
-                        f"(limit: -{max_loss_abs:.2f}$) — paper modda devam."
+                    logger.warning(
+                        f"[CIRCUIT BREAKER] Günlük kayıp limiti aşıldı: {today_loss:.2f}$ "
+                        f"(limit: -{max_loss_abs:.2f}$). Scan durduruldu — 5dk bekleniyor."
                     )
+                    time.sleep(300)
+                    continue
             except Exception as _e:
                 logger.warning(f"Günlük kayıp kontrolü hatası: {_e}")
 
-            # Günlük sinyal sayısı (bilgi amaçlı — hard limit yok)
+            # Günlük sinyal sayısı — hard limit kontrolü
             daily_counts = get_daily_signal_count()
-            if daily_counts["total"] % 10 == 0 and daily_counts["total"] > 0:
-                logger.debug(f"Günlük sinyal sayısı: {daily_counts['total']}")
+            _daily_total = daily_counts.get("total", 0) if isinstance(daily_counts, dict) else int(daily_counts)
+            from config import DAILY_SIGNAL_LIMIT
+            if _daily_total >= DAILY_SIGNAL_LIMIT:
+                logger.info(f"[LIMIT] Günlük sinyal limiti doldu ({_daily_total}/{DAILY_SIGNAL_LIMIT}), scan atlandı")
+                time.sleep(60)
+                continue
+            if _daily_total % 10 == 0 and _daily_total > 0:
+                logger.debug(f"Günlük sinyal sayısı: {_daily_total}/{DAILY_SIGNAL_LIMIT}")
 
             # Açık trade takibi
             if EXECUTION_AVAILABLE:
@@ -746,6 +754,7 @@ def main():
                             "score": sig.final_score,
                             "confidence": sig.confidence,
                             "candidate_id": candidate_id,
+                            "leverage": int(sig.leverage_suggestion or 10),
                             # ML training features — live_tracker.record_close() okur
                             "adx":              trigger_result.get("adx", 0),
                             "rv":               trigger_result.get("rv", 0),
