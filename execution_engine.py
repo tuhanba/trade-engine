@@ -489,13 +489,14 @@ def _check_trade(client, t: dict) -> bool:
         update_trade(trade_id, {"unrealized_pnl": unreal, "current_price": price})
         if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), unreal, t.get("realized_pnl", 0))
 
-    # ── SL Kontrolü ─────────────────────────────────────────────────────────
-    sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
-    if sl_hit:
-        pnl = _calc_pnl(direction, entry, price, qty)
-        save_trade_event(trade_id, "SL_HIT", f"price={price} pnl={pnl}")
-        _finalize(trade_id, price, pnl, "sl", t)
-        return True
+    # ── SL Kontrolü (OPEN/TP1_HIT modları için — runner modda ayrı handle) ──
+    if status != "runner":
+        sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
+        if sl_hit:
+            pnl = _calc_pnl(direction, entry, price, qty)
+            save_trade_event(trade_id, "SL_HIT", f"price={price} pnl={pnl}")
+            _finalize(trade_id, price, pnl, "sl", t)
+            return True
 
     # ── TP1 Kontrolü ────────────────────────────────────────────────────────
     if status == "open":
@@ -565,6 +566,77 @@ def _check_trade(client, t: dict) -> bool:
             if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), realized)
             logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ → RUNNER trail={new_trail:.6f}")
             return False
+
+    # ── Runner Trailing Stop Kontrolü ───────────────────────────────────────
+    if status == "runner":
+        trail_f = float(trail or 0)
+        # trail_stop yoksa sl (breakeven) kullan
+        active_stop = trail_f if trail_f > 0 else sl
+
+        if trail_f > 0:
+            # Trailing stop güncelle: fiyat yeni zirve yaptıysa trail'i hareket ettir
+            atr_val = _get_atr(client, symbol)
+            if atr_val > 0:
+                if is_long:
+                    new_trail_sl = price - atr_val * TRAIL_ATR_MULT
+                    if new_trail_sl > trail_f:
+                        trail_f = new_trail_sl
+                        active_stop = trail_f
+                        update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
+                        save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
+                else:
+                    new_trail_sl = price + atr_val * TRAIL_ATR_MULT
+                    if new_trail_sl < trail_f:
+                        trail_f = new_trail_sl
+                        active_stop = trail_f
+                        update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
+                        save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
+
+        # Runner stop vuruldu mu? (trail_stop veya breakeven sl)
+        if active_stop > 0:
+            stop_hit = (is_long and price <= active_stop) or (not is_long and price >= active_stop)
+            if stop_hit:
+                runner_qty = float(t.get("qty_runner") or (qty - qty_tp1 - qty_tp2))
+                pnl_runner = _calc_pnl(direction, entry, price, runner_qty)
+                total_pnl = (t.get("realized_pnl") or 0) + pnl_runner
+                close_reason = "trail" if trail_f > 0 else "breakeven"
+                save_trade_event(trade_id, "TRAIL_HIT", f"price={price} stop={active_stop:.6f} runner_pnl={pnl_runner:.4f}")
+                logger.info(f"[Execution] RUNNER STOP HIT #{trade_id} {symbol} stop={active_stop:.4f} reason={close_reason} total_pnl={total_pnl:.4f}")
+                _finalize(trade_id, price, total_pnl, close_reason, t)
+                return True
+
+        # ── Max Hold Timeout (runner dahil tüm durumlar) ────────────────
+        try:
+            open_t = t.get("open_time", "") or t.get("opened_at", "")
+            if open_t:
+                opened_dt = datetime.fromisoformat(open_t.replace("Z", "+00:00"))
+                elapsed_min = (datetime.now(timezone.utc) - opened_dt).total_seconds() / 60.0
+                if elapsed_min > MAX_HOLD_MINUTES:
+                    runner_qty = float(t.get("qty_runner") or (qty - qty_tp1 - qty_tp2))
+                    pnl_runner = _calc_pnl(direction, entry, price, runner_qty)
+                    total_pnl = (t.get("realized_pnl") or 0) + pnl_runner
+                    save_trade_event(trade_id, "TIMEOUT", f"elapsed={elapsed_min:.0f}m max={MAX_HOLD_MINUTES}m")
+                    logger.info(f"[Execution] MAX HOLD TIMEOUT #{trade_id} {symbol} elapsed={elapsed_min:.0f}dk")
+                    _finalize(trade_id, price, total_pnl, "max_hold_timeout", t)
+                    return True
+        except Exception as _to_err:
+            logger.debug(f"[Execution] Timeout kontrolü hatası: {_to_err}")
+
+    # ── Max Hold Timeout — OPEN/TP1_HIT durumları için ──────────────────────
+    if status in ("open", "tp1_hit"):
+        try:
+            open_t = t.get("open_time", "") or t.get("opened_at", "")
+            if open_t:
+                opened_dt = datetime.fromisoformat(open_t.replace("Z", "+00:00"))
+                elapsed_min = (datetime.now(timezone.utc) - opened_dt).total_seconds() / 60.0
+                if elapsed_min > MAX_HOLD_MINUTES:
+                    pnl_close = _calc_pnl(direction, entry, price, qty)
+                    save_trade_event(trade_id, "TIMEOUT", f"elapsed={elapsed_min:.0f}m max={MAX_HOLD_MINUTES}m")
+                    logger.info(f"[Execution] MAX HOLD TIMEOUT #{trade_id} {symbol} status={status} elapsed={elapsed_min:.0f}dk")
+                    _finalize(trade_id, price, pnl_close, "max_hold_timeout", t)
+                    return True
+        except Exception as _to_err2:
+            logger.debug(f"[Execution] Timeout kontrolü hatası: {_to_err2}")
 
     return False
 
@@ -670,8 +742,8 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
 
     # ── CoinLibrary Öğrenme Döngüsü ──────────────────────────────────────────
     try:
-        from coin_library import update_coin_stats as _update_coin_stats
-    except ImportError:
+        from core.coin_library import update_coin_stats as _update_coin_stats
+    except (ImportError, AttributeError):
         def _update_coin_stats(*args, **kwargs): pass
     try:
         entry_p = t.get("entry", 0)

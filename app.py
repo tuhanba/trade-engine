@@ -665,7 +665,9 @@ def api_signal_archive():
                     pr.max_adverse_excursion as mae,
                     pr.would_have_won
                 FROM signal_candidates sc
-                LEFT JOIN paper_results pr ON sc.uuid = pr.signal_id
+                LEFT JOIN paper_results pr
+                    ON (sc.id = CAST(pr.candidate_id AS INTEGER)
+                        OR (sc.uuid IS NOT NULL AND sc.uuid = pr.signal_id))
                 ORDER BY sc.id DESC
                 LIMIT ? OFFSET ?
             """, (limit, offset)).fetchall()

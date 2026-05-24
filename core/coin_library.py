@@ -331,6 +331,57 @@ def _save_coin_profile(symbol: str, profile: dict):
         logger.debug(f"[CoinLib] Profile save {symbol}: {e}")
 
 
+def update_coin_stats(symbol: str, result: str, net_pnl: float,
+                      r_multiple: float = 0.0, direction: str = "") -> None:
+    """
+    Kapanan trade sonrası coin istatistiklerini günceller.
+    coin_configs tablosundaki config_json içine kazanç/kayıp sayaçları eklenir.
+    """
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT config_json FROM coin_configs WHERE coin=?", (symbol,)
+            ).fetchone()
+            data: dict = {}
+            if row and row[0]:
+                try:
+                    data = json.loads(row[0])
+                except Exception:
+                    data = {}
+
+            # İstatistik güncelle
+            data["last_result"]  = result
+            data["last_pnl"]     = round(float(net_pnl), 4)
+            data["last_updated"] = datetime.now(timezone.utc).isoformat()
+            data["total_trades"] = data.get("total_trades", 0) + 1
+            if result == "WIN":
+                data["wins"] = data.get("wins", 0) + 1
+            else:
+                data["losses"] = data.get("losses", 0) + 1
+            total = data["total_trades"]
+            wins  = data.get("wins", 0)
+            data["win_rate"] = round(wins / total, 4) if total > 0 else 0.5
+            # Coin score = 50 + (win_rate - 0.5) * 100 → 0-100
+            data["coin_score"] = round(50 + (data["win_rate"] - 0.5) * 100, 1)
+            data["avg_r"]      = round(
+                (data.get("avg_r", 0) * (total - 1) + r_multiple) / total, 3
+            )
+
+            now_str = datetime.now(timezone.utc).isoformat()
+            cur = conn.execute("""
+                UPDATE coin_configs SET config_json=?, updated_at=? WHERE coin=?
+            """, (json.dumps(data), now_str, symbol))
+            if cur.rowcount == 0:
+                conn.execute("""
+                    INSERT INTO coin_configs (coin, config_json, updated_at)
+                    VALUES (?, ?, ?)
+                """, (symbol, json.dumps(data), now_str))
+        logger.debug(f"[CoinLib] {symbol} stats updated: {result} wr={data.get('win_rate', 0):.2f}")
+    except Exception as e:
+        logger.warning(f"[CoinLib] update_coin_stats {symbol}: {e}")
+
+
 def get_coin_score(symbol: str) -> float:
     """Coin skorunu DB'den getir. Yoksa nötr 50 döndür."""
     try:

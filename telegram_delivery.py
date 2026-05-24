@@ -381,13 +381,17 @@ def send_trade_close(symbol: str, net_pnl: float, total_fee: float,
         sign   = "+" if net_pnl >= 0 else ""
         result = "✅ KAR" if net_pnl > 0 else "❌ ZARAR"
         reason_map = {
-            "sl":     "🛑 Stop Loss",
-            "tp1":    "🎯 TP1 Hit",
-            "tp2":    "🏆 TP2 Hit",
-            "tp3":    "🏁 TP3 Hit",
-            "manual": "👋 Manuel",
-            "finish": "🏁 Finish Modu",
-            "timeout":"⏰ Süre Doldu",
+            "sl":               "🛑 Stop Loss",
+            "tp1":              "🎯 TP1 Hit",
+            "tp2":              "🏆 TP2 Hit",
+            "tp3":              "🏁 TP3 Hit",
+            "manual":           "👋 Manuel",
+            "finish":           "🏁 Finish Modu",
+            "timeout":          "⏰ Süre Doldu",
+            "max_hold_timeout": "⏰ Max Hold Süresi",
+            "trail":            "📉 Trailing Stop",
+            "runner":           "🏃 Runner Stop",
+            "breakeven":        "⚖️ Breakeven",
         }
         reason_str = reason_map.get(reason.lower(), reason.upper())
         dir_emoji  = "🔺 LONG" if "LONG" in direction.upper() else "🔻 SHORT"

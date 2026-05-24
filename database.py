@@ -117,7 +117,8 @@ CREATE TABLE IF NOT EXISTS trades (
     ax_mode             TEXT,
     environment         TEXT,
     session             TEXT,
-    metadata            TEXT DEFAULT '{}'
+    metadata            TEXT DEFAULT '{}',
+    trail_stop          REAL DEFAULT 0
 )
 """
 
@@ -140,7 +141,36 @@ CREATE TABLE IF NOT EXISTS signal_candidates (
     created_at      TEXT,
     status          TEXT DEFAULT 'NEW',
     ghost_pnl       REAL DEFAULT 0,
-    metadata        TEXT DEFAULT '{}'
+    metadata        TEXT DEFAULT '{}',
+    uuid            TEXT,
+    direction       TEXT DEFAULT '',
+    entry           REAL DEFAULT 0,
+    sl              REAL DEFAULT 0,
+    setup_quality   TEXT DEFAULT '',
+    final_score     REAL DEFAULT 0,
+    market_regime   TEXT DEFAULT '',
+    risk_status     TEXT DEFAULT '',
+    margin_loss_pct REAL DEFAULT 0,
+    spread          REAL DEFAULT 0,
+    volume          REAL DEFAULT 0,
+    volatility      REAL DEFAULT 0,
+    veto_reason     TEXT DEFAULT '',
+    linked_trade_id INTEGER,
+    trend_score     REAL DEFAULT 0,
+    trigger_score   REAL DEFAULT 0,
+    risk_score      REAL DEFAULT 0,
+    ai_score        REAL DEFAULT 0,
+    rr              REAL DEFAULT 0,
+    position_size   REAL DEFAULT 0,
+    notional        REAL DEFAULT 0,
+    leverage_suggestion INTEGER DEFAULT 10,
+    risk_amount     REAL DEFAULT 0,
+    max_loss        REAL DEFAULT 0,
+    atr             REAL DEFAULT 0,
+    stop_distance_percent REAL DEFAULT 0,
+    net_rr          REAL DEFAULT 0,
+    estimated_fee   REAL DEFAULT 0,
+    estimated_slippage REAL DEFAULT 0
 )
 """
 
@@ -346,6 +376,7 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("close_reason", "TEXT DEFAULT ''"),
         ("ax_mode",      "TEXT"),
         ("metadata",     "TEXT DEFAULT '{}'"),
+        ("trail_stop",   "REAL DEFAULT 0"),
     ],
     "signal_candidates": [
         ("tp2", "REAL DEFAULT 0"),
@@ -358,6 +389,36 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("status", "TEXT DEFAULT 'NEW'"),
         ("ghost_pnl", "REAL DEFAULT 0"),
         ("metadata", "TEXT DEFAULT '{}'"),
+        # v6.0 — yeni sütunlar (migration için)
+        ("uuid",            "TEXT"),
+        ("direction",       "TEXT DEFAULT ''"),
+        ("entry",           "REAL DEFAULT 0"),
+        ("sl",              "REAL DEFAULT 0"),
+        ("setup_quality",   "TEXT DEFAULT ''"),
+        ("final_score",     "REAL DEFAULT 0"),
+        ("market_regime",   "TEXT DEFAULT ''"),
+        ("risk_status",     "TEXT DEFAULT ''"),
+        ("margin_loss_pct", "REAL DEFAULT 0"),
+        ("spread",          "REAL DEFAULT 0"),
+        ("volume",          "REAL DEFAULT 0"),
+        ("volatility",      "REAL DEFAULT 0"),
+        ("veto_reason",     "TEXT DEFAULT ''"),
+        ("linked_trade_id", "INTEGER"),
+        ("trend_score",     "REAL DEFAULT 0"),
+        ("trigger_score",   "REAL DEFAULT 0"),
+        ("risk_score",      "REAL DEFAULT 0"),
+        ("ai_score",        "REAL DEFAULT 0"),
+        ("rr",              "REAL DEFAULT 0"),
+        ("position_size",   "REAL DEFAULT 0"),
+        ("notional",        "REAL DEFAULT 0"),
+        ("leverage_suggestion", "INTEGER DEFAULT 10"),
+        ("risk_amount",     "REAL DEFAULT 0"),
+        ("max_loss",        "REAL DEFAULT 0"),
+        ("atr",             "REAL DEFAULT 0"),
+        ("stop_distance_percent", "REAL DEFAULT 0"),
+        ("net_rr",          "REAL DEFAULT 0"),
+        ("estimated_fee",   "REAL DEFAULT 0"),
+        ("estimated_slippage", "REAL DEFAULT 0"),
     ],
     "ghost_signals": [
         ("candidate_id",  "INTEGER"),
@@ -2063,18 +2124,40 @@ def save_candidate_signal(data: dict) -> int:
         with get_conn() as conn:
             cursor = conn.execute("""
                 INSERT INTO signal_candidates
-                  (symbol, direction, entry, sl, tp1, tp2, tp3,
-                   setup_quality, final_score,
-                   decision, market_regime, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                  (uuid, symbol, direction, entry, sl, tp1, tp2, tp3,
+                   setup_quality, final_score, trend_score, trigger_score,
+                   risk_score, ai_score, rr, position_size, notional,
+                   leverage_suggestion, risk_amount, max_loss, atr,
+                   stop_distance_percent, net_rr, estimated_fee, estimated_slippage,
+                   decision, market_regime, reason, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
-                data.get("symbol"), data.get("direction"),
-                data.get("entry"), data.get("sl"),
+                data.get("signal_id"),                              # uuid = signal UUID
+                data.get("symbol"),
+                data.get("direction"),
+                data.get("entry"),
+                data.get("sl", data.get("stop", 0)),               # FIX: "stop" key alias
                 data.get("tp1"), data.get("tp2"), data.get("tp3"),
                 data.get("quality", data.get("setup_quality")),
                 data.get("final_score", data.get("score", 0)),
+                data.get("trend_score", 0),
+                data.get("trigger_score", 0),
+                data.get("risk_score", 0),
+                data.get("ai_score", data.get("final_score", 0)),
+                data.get("rr", 0),
+                data.get("position_size", 0),
+                data.get("notional", 0),
+                data.get("leverage_suggestion", data.get("leverage", 10)),
+                data.get("risk_amount", data.get("max_loss", 0)),
+                data.get("max_loss", 0),
+                data.get("atr", 0),
+                data.get("stop_distance_percent", 0),
+                data.get("net_rr", data.get("rr", 0)),
+                data.get("estimated_fee", 0),
+                data.get("estimated_slippage", 0),
                 data.get("decision", "PENDING"),
                 data.get("market_regime"),
+                data.get("reason", ""),
                 now,
             ))
             return cursor.lastrowid
