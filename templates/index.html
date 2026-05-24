@@ -3,96 +3,39 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AURVEX AI</title>
+<title>AURVEX AI · v6.0</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:      #030508;
-  --s0:      #060910;
-  --s1:      #090d18;
-  --s2:      #0d1222;
-  --s3:      #10162a;
-  --b0:      rgba(255,255,255,.05);
-  --b1:      rgba(255,255,255,.09);
-  --b2:      rgba(255,255,255,.15);
-  --gold:    #C8942A;
-  --goldL:   #E8B84B;
-  --goldD:   #8A610E;
-  --goldA:   rgba(200,148,42,.07);
-  --em:      #00C896;
-  --emA:     rgba(0,200,150,.08);
-  --ru:      #FF2D55;
-  --ruA:     rgba(255,45,85,.08);
-  --sa:      #3D8EFF;
-  --saA:     rgba(61,142,255,.08);
-  --am:      #9B5DE5;
-  --amA:     rgba(155,93,229,.08);
-  --tx:      #C8D0E8;
-  --tx2:     #8898B8;
-  --tx3:     #4A5A7A;
-  --tx4:     #242E44;
-  --r:       8px;
-  --r2:      12px;
-  --r3:      16px;
+  --bg:#030508;--s0:#060910;--s1:#090d18;--s2:#0d1222;--s3:#10162a;
+  --b0:rgba(255,255,255,.05);--b1:rgba(255,255,255,.09);--b2:rgba(255,255,255,.15);
+  --gold:#C8942A;--goldL:#E8B84B;--goldD:#8A610E;--goldA:rgba(200,148,42,.07);
+  --em:#00C896;--emA:rgba(0,200,150,.08);
+  --ru:#FF2D55;--ruA:rgba(255,45,85,.08);
+  --sa:#3D8EFF;--saA:rgba(61,142,255,.08);
+  --am:#9B5DE5;--amA:rgba(155,93,229,.08);
+  --tx:#C8D0E8;--tx2:#8898B8;--tx3:#4A5A7A;--tx4:#242E44;
+  --r:8px;--r2:12px;--r3:16px;
 }
 html{height:100%}
-body{
-  font-family:'Outfit',sans-serif;
-  background:var(--bg);color:var(--tx);
-  min-height:100vh;overflow-x:hidden;
-  position:relative;
-}
-body::before{
-  content:'';position:fixed;inset:0;z-index:1;pointer-events:none;
-  opacity:.028;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size:200px 200px;
-}
-body::after{
-  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
-  background:
-    radial-gradient(ellipse 70% 45% at 85% 5%, rgba(200,148,42,.055) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 40% at 5% 90%,  rgba(0,200,150,.04)   0%, transparent 55%),
-    radial-gradient(ellipse 40% 30% at 50% 50%, rgba(155,93,229,.02)  0%, transparent 70%);
-}
-.hdr{
-  position:sticky;top:0;z-index:300;
-  height:60px;padding:0 32px;
-  display:flex;align-items:center;justify-content:space-between;
-  background:rgba(3,5,8,.88);
-  backdrop-filter:blur(28px) saturate(160%);
-  -webkit-backdrop-filter:blur(28px) saturate(160%);
-  border-bottom:1px solid var(--b0);
-  box-shadow:0 1px 0 rgba(200,148,42,.06), 0 8px 40px rgba(0,0,0,.6);
-}
-.hdr::after{
-  content:'';position:absolute;left:0;right:0;bottom:-1px;height:1px;
-  background:linear-gradient(90deg,transparent 0%,var(--goldD) 35%,var(--goldL) 50%,var(--goldD) 65%,transparent 100%);
-  opacity:.55;
-}
+body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;overflow-x:hidden;position:relative}
+body::before{content:'';position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.025;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:200px 200px}
+body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 70% 45% at 85% 5%,rgba(200,148,42,.05) 0%,transparent 60%),radial-gradient(ellipse 50% 40% at 5% 90%,rgba(0,200,150,.035) 0%,transparent 55%),radial-gradient(ellipse 40% 30% at 50% 50%,rgba(155,93,229,.02) 0%,transparent 70%)}
+
+/* ── Header ── */
+.hdr{position:sticky;top:0;z-index:300;height:60px;padding:0 32px;display:flex;align-items:center;justify-content:space-between;background:rgba(3,5,8,.92);backdrop-filter:blur(28px) saturate(160%);-webkit-backdrop-filter:blur(28px) saturate(160%);border-bottom:1px solid var(--b0);box-shadow:0 1px 0 rgba(200,148,42,.06),0 8px 40px rgba(0,0,0,.6)}
+.hdr::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent 0%,var(--goldD) 35%,var(--goldL) 50%,var(--goldD) 65%,transparent 100%);opacity:.5}
 .logo-wrap{display:flex;align-items:baseline;gap:10px}
-.logo{
-  font-family:'Cinzel',serif;font-size:1.35rem;font-weight:700;
-  letter-spacing:.28em;text-transform:uppercase;
-  background:linear-gradient(135deg,#E8C96A 0%,var(--goldL) 40%,var(--gold) 70%,#9A6E10 100%);
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-}
-.logo-eyebrow{
-  font-family:'Outfit',sans-serif;font-size:.58rem;font-weight:500;
-  letter-spacing:.35em;text-transform:uppercase;color:var(--tx3);
-  padding-bottom:2px;
-}
-.hdr-mid{display:flex;align-items:center;gap:8px}
-.hdr-right{display:flex;align-items:center;gap:10px}
-.livechip{
-  display:flex;align-items:center;gap:7px;
-  padding:5px 14px 5px 10px;border-radius:20px;
-  background:rgba(255,255,255,.04);border:1px solid var(--b0);
-  font-size:.72rem;font-weight:500;transition:all .3s;
-}
+.logo{font-family:'Cinzel',serif;font-size:1.35rem;font-weight:700;letter-spacing:.28em;text-transform:uppercase;background:linear-gradient(135deg,#E8C96A 0%,var(--goldL) 40%,var(--gold) 70%,#9A6E10 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.logo-sub{display:flex;flex-direction:column;gap:1px}
+.logo-eyebrow{font-family:'Outfit',sans-serif;font-size:.56rem;font-weight:500;letter-spacing:.35em;text-transform:uppercase;color:var(--tx3);padding-bottom:1px}
+.logo-ver{font-family:'JetBrains Mono',monospace;font-size:.54rem;color:var(--goldD);letter-spacing:.1em}
+.hdr-mid{display:flex;align-items:center;gap:7px}
+.hdr-right{display:flex;align-items:center;gap:8px}
+.livechip{display:flex;align-items:center;gap:7px;padding:5px 13px 5px 10px;border-radius:20px;background:rgba(255,255,255,.04);border:1px solid var(--b0);font-size:.7rem;font-weight:500;transition:all .3s}
 .livechip.on{border-color:rgba(0,200,150,.25);background:rgba(0,200,150,.06)}
 .livechip.off{border-color:rgba(255,45,85,.25);background:rgba(255,45,85,.06)}
 .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
@@ -101,74 +44,72 @@ body::after{
 .dot-wait{background:var(--gold);animation:blink 1.2s ease-in-out infinite}
 @keyframes beat{0%,100%{box-shadow:0 0 0 0 rgba(0,200,150,.55)}65%{box-shadow:0 0 0 6px rgba(0,200,150,0)}}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
-.mpill{
-  font-family:'JetBrains Mono',monospace;font-size:.65rem;font-weight:500;
-  padding:4px 12px;border-radius:20px;letter-spacing:.07em;
-  background:var(--goldA);border:1px solid rgba(200,148,42,.22);color:var(--goldL);
-}
-.hpill{
-  font-family:'JetBrains Mono',monospace;font-size:.65rem;
-  padding:4px 12px;border-radius:20px;letter-spacing:.04em;
-  background:rgba(255,255,255,.04);border:1px solid var(--b0);color:var(--tx3);
-}
+.mpill{font-family:'JetBrains Mono',monospace;font-size:.65rem;font-weight:500;padding:4px 11px;border-radius:20px;letter-spacing:.07em;background:var(--goldA);border:1px solid rgba(200,148,42,.22);color:var(--goldL)}
+.humanpill{font-family:'JetBrains Mono',monospace;font-size:.65rem;padding:4px 11px;border-radius:20px;letter-spacing:.04em;transition:all .4s;cursor:default}
+.humanpill.scalp{background:rgba(0,200,150,.07);border:1px solid rgba(0,200,150,.22);color:var(--em)}
+.humanpill.human{background:rgba(155,93,229,.1);border:1px solid rgba(155,93,229,.3);color:#C084FF}
+.hpill{font-family:'JetBrains Mono',monospace;font-size:.65rem;padding:4px 11px;border-radius:20px;letter-spacing:.04em;background:rgba(255,255,255,.04);border:1px solid var(--b0);color:var(--tx3)}
 #clk{font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--tx3);min-width:68px;text-align:right}
+
+/* ── Layout ── */
 .wrap{position:relative;z-index:10;max-width:1800px;margin:0 auto;padding:24px 32px 80px}
-.sysbar{
-  display:flex;flex-wrap:wrap;gap:0;margin-bottom:22px;
-  border:1px solid var(--b0);border-radius:var(--r);overflow:hidden;background:var(--s1);
-}
-.sb{display:flex;align-items:center;gap:8px;padding:8px 18px;border-right:1px solid var(--b0);font-size:.72rem;color:var(--tx3)}
+
+/* ── Sysbar ── */
+.sysbar{display:flex;flex-wrap:wrap;gap:0;margin-bottom:22px;border:1px solid var(--b0);border-radius:var(--r);overflow:hidden;background:var(--s1)}
+.sb{display:flex;align-items:center;gap:8px;padding:8px 16px;border-right:1px solid var(--b0);font-size:.71rem;color:var(--tx3);white-space:nowrap}
 .sb:last-child{border-right:none}
-.sb strong{font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--tx)}
+.sb strong{font-family:'JetBrains Mono',monospace;font-size:.69rem;color:var(--tx)}
 .sbdot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
-.sgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:24px}
-.sc{
-  background:var(--s1);border:1px solid var(--b0);border-radius:var(--r2);
-  padding:18px 20px;position:relative;overflow:hidden;
-  transition:border-color .3s,transform .25s,box-shadow .3s;cursor:default;
-  animation:up .55s cubic-bezier(.16,1,.3,1) both;
-}
-.sc:nth-child(1){animation-delay:.05s}.sc:nth-child(2){animation-delay:.1s}
-.sc:nth-child(3){animation-delay:.15s}.sc:nth-child(4){animation-delay:.2s}
-.sc:nth-child(5){animation-delay:.25s}.sc:nth-child(6){animation-delay:.3s}
+
+/* ── Stat cards ── */
+.sgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:20px}
+.sc{background:var(--s1);border:1px solid var(--b0);border-radius:var(--r2);padding:18px 20px;position:relative;overflow:hidden;transition:border-color .3s,transform .25s;cursor:default;animation:up .55s cubic-bezier(.16,1,.3,1) both}
+.sc:nth-child(1){animation-delay:.04s}.sc:nth-child(2){animation-delay:.08s}.sc:nth-child(3){animation-delay:.12s}.sc:nth-child(4){animation-delay:.16s}.sc:nth-child(5){animation-delay:.2s}.sc:nth-child(6){animation-delay:.24s}
 .sc:hover{border-color:var(--b1);transform:translateY(-2px)}
 .sc-ln{position:absolute;top:0;left:0;right:0;height:1px}
-.sc-gl{position:absolute;top:-20px;right:-20px;width:90px;height:90px;border-radius:50%;filter:blur(32px);opacity:.14;pointer-events:none}
-.sc-lb{font-size:.65rem;font-weight:600;text-transform:uppercase;letter-spacing:.14em;color:var(--tx3);margin-bottom:7px}
-.sc-vl{font-family:'JetBrains Mono',monospace;font-size:1.55rem;font-weight:500;line-height:1.1;letter-spacing:-.01em}
-.sc-vl.gold{color:var(--goldL)}.sc-vl.em{color:var(--em)}.sc-vl.ru{color:var(--ru)}
-.sc-vl.sa{color:var(--sa)}.sc-vl.am{color:var(--am)}.sc-vl.white{color:var(--tx)}
-.sc-sb{font-size:.67rem;color:var(--tx3);margin-top:5px;font-family:'JetBrains Mono',monospace}
+.sc-gl{position:absolute;top:-20px;right:-20px;width:90px;height:90px;border-radius:50%;filter:blur(32px);opacity:.13;pointer-events:none}
+.sc-lb{font-size:.63rem;font-weight:600;text-transform:uppercase;letter-spacing:.14em;color:var(--tx3);margin-bottom:7px}
+.sc-vl{font-family:'JetBrains Mono',monospace;font-size:1.52rem;font-weight:500;line-height:1.1;letter-spacing:-.01em}
+.sc-vl.gold{color:var(--goldL)}.sc-vl.em{color:var(--em)}.sc-vl.ru{color:var(--ru)}.sc-vl.sa{color:var(--sa)}.sc-vl.am{color:var(--am)}.sc-vl.white{color:var(--tx)}.sc-vl.hu{color:#C084FF}
+.sc-sb{font-size:.66rem;color:var(--tx3);margin-top:5px;font-family:'JetBrains Mono',monospace}
+
+/* ── Pipeline bar ── */
+.pipeline{display:flex;align-items:center;gap:0;margin-bottom:22px;background:var(--s1);border:1px solid var(--b0);border-radius:var(--r);overflow:hidden}
+.pp{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 8px;border-right:1px solid var(--b0);position:relative;cursor:default;transition:background .2s}
+.pp:last-child{border-right:none}
+.pp:hover{background:rgba(255,255,255,.025)}
+.pp-v{font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:500;line-height:1}
+.pp-l{font-size:.59rem;color:var(--tx3);letter-spacing:.08em;text-transform:uppercase;margin-top:3px}
+.pp-arr{color:var(--tx4);font-size:.75rem;pointer-events:none}
+.pp-win .pp-v{color:var(--em)}.pp-loss .pp-v{color:var(--ru)}.pp-scan .pp-v{color:var(--tx2)}.pp-cand .pp-v{color:var(--gold)}.pp-tg .pp-v{color:var(--sa)}.pp-trade .pp-v{color:var(--am)}
+
+/* ── Section ── */
 .sec{margin-bottom:24px;animation:up .55s cubic-bezier(.16,1,.3,1) both}
 .sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .st{display:flex;align-items:center;gap:10px}
 .st-rule{width:20px;height:1px;border-radius:1px;flex-shrink:0}
-.st-txt{font-family:'Outfit',sans-serif;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.16em;color:var(--tx3)}
+.st-txt{font-family:'Outfit',sans-serif;font-size:.67rem;font-weight:700;text-transform:uppercase;letter-spacing:.16em;color:var(--tx3)}
 .scnt{font-family:'JetBrains Mono',monospace;font-size:.6rem;padding:2px 9px;border-radius:4px;border:1px solid}
 .scnt-g{background:var(--goldA);color:var(--gold);border-color:rgba(200,148,42,.2)}
 .scnt-e{background:var(--emA);color:var(--em);border-color:rgba(0,200,150,.2)}
 .scnt-s{background:var(--saA);color:var(--sa);border-color:rgba(61,142,255,.2)}
 .panel{background:var(--s1);border:1px solid var(--b0);border-radius:var(--r2)}
 .panel-p{padding:18px 20px}
-.twin{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:24px}
+
+/* ── Twin section (2-col) ── */
+.twin{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;margin-bottom:24px}
 .chart-h{position:relative;height:172px}
+
+/* ── Ghost Learning grid ── */
 .grow{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px}
-.gc{
-  background:var(--s2);border:1px solid var(--b0);border-radius:var(--r);
-  padding:12px 14px;text-align:center;position:relative;overflow:hidden;
-}
-.gc::after{
-  content:'';position:absolute;bottom:0;left:20%;right:20%;height:1px;
-  background:linear-gradient(90deg,transparent,var(--am),transparent);opacity:.45;
-}
-.gc-v{font-family:'JetBrains Mono',monospace;font-size:1.18rem;font-weight:500;color:var(--am);margin-bottom:2px}
-.gc-l{font-size:.62rem;color:var(--tx3);letter-spacing:.05em}
+.gc{background:var(--s2);border:1px solid var(--b0);border-radius:var(--r);padding:12px 14px;text-align:center;position:relative;overflow:hidden}
+.gc::after{content:'';position:absolute;bottom:0;left:20%;right:20%;height:1px;background:linear-gradient(90deg,transparent,var(--am),transparent);opacity:.4}
+.gc-v{font-family:'JetBrains Mono',monospace;font-size:1.15rem;font-weight:500;color:var(--am);margin-bottom:2px}
+.gc-l{font-size:.61rem;color:var(--tx3);letter-spacing:.05em}
+
+/* ── Open trade cards ── */
 .lgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
-.tc{
-  background:var(--s2);border:1px solid var(--b0);border-radius:var(--r2);
-  padding:18px 20px;position:relative;overflow:hidden;
-  transition:border-color .3s,box-shadow .3s;
-}
+.tc{background:var(--s2);border:1px solid var(--b0);border-radius:var(--r2);padding:18px 20px;position:relative;overflow:hidden;transition:border-color .3s,box-shadow .3s}
 .tc.L{border-top:2px solid var(--em)}.tc.S{border-top:2px solid var(--ru)}
 .tc.L:hover{border-color:rgba(0,200,150,.3);box-shadow:0 6px 32px rgba(0,200,150,.08)}
 .tc.S:hover{border-color:rgba(255,45,85,.3);box-shadow:0 6px 32px rgba(255,45,85,.08)}
@@ -183,7 +124,7 @@ body::after{
 .tc-meta .k{color:var(--tx3)}.tc-meta .v{font-family:'JetBrains Mono',monospace;color:var(--tx)}
 .pb{margin-top:4px}
 .pb-l{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:.6rem;color:var(--tx3);margin-bottom:5px}
-.pb-t{height:2px;background:var(--tx4);border-radius:2px;overflow:hidden;position:relative}
+.pb-t{height:2px;background:var(--tx4);border-radius:2px;overflow:hidden}
 .pb-f{height:100%;border-radius:2px;transition:width .9s cubic-bezier(.22,1,.36,1)}
 .pb-L{background:linear-gradient(90deg,var(--em),rgba(0,200,150,.3))}
 .pb-S{background:linear-gradient(90deg,var(--ru),rgba(255,45,85,.3))}
@@ -193,6 +134,8 @@ body::after{
 .tptag.trail{background:var(--saA);color:var(--sa);border-color:rgba(61,142,255,.22)}
 .tptag.be{background:var(--goldA);color:var(--gold);border-color:rgba(200,148,42,.22)}
 .tc-age{font-family:'JetBrains Mono',monospace;font-size:.58rem;color:var(--tx4);margin-left:auto}
+
+/* ── Tables ── */
 .tscroll{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
 thead tr{background:rgba(255,255,255,.018)}
@@ -211,35 +154,39 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
 .b-Wt{background:var(--saA);color:var(--sa);border-color:rgba(61,142,255,.22)}
 .b-P{background:var(--goldA);color:var(--gold);border-color:rgba(200,148,42,.22)}
 .b-S{background:var(--amA);color:var(--am);border-color:rgba(155,93,229,.25)}
-.logbox{
-  background:#020408;border:1px solid var(--b0);border-radius:var(--r2);
-  max-height:190px;overflow-y:auto;padding:12px 16px;
-  font-family:'JetBrains Mono',monospace;font-size:.65rem;line-height:1.8;
-}
+
+/* ── Logbox ── */
+.logbox{background:#020408;border:1px solid var(--b0);border-radius:var(--r2);max-height:190px;overflow-y:auto;padding:12px 16px;font-family:'JetBrains Mono',monospace;font-size:.65rem;line-height:1.8}
 .logbox::-webkit-scrollbar{width:3px}
 .logbox::-webkit-scrollbar-thumb{background:var(--tx4);border-radius:2px}
 .ll{color:var(--tx3)}.ll.e{color:#FF5577}.ll.w{color:#D4A017}.ll.ok{color:#40C070}
-.empty{text-align:center;padding:36px;color:var(--tx4);font-size:.78rem;border:1px dashed rgba(255,255,255,.045);border-radius:var(--r)}
-@keyframes up{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+
+/* ── Utils ── */
+.empty{text-align:center;padding:36px;color:var(--tx4);font-size:.78rem;border:1px dashed rgba(255,255,255,.04);border-radius:var(--r)}
+@keyframes up{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 .rbtn{font-size:.63rem;background:var(--s2);border:1px solid var(--b0);color:var(--tx3);padding:3px 10px;border-radius:5px;cursor:pointer;font-family:'JetBrains Mono',monospace;transition:.2s}
 .rbtn:hover{border-color:var(--b1);color:var(--tx)}
-.sig{position:fixed;bottom:16px;right:18px;z-index:999;font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;color:rgba(200,148,42,.35);letter-spacing:.1em;user-select:none;pointer-events:none;transition:color .4s}
 .dv{height:1px;background:linear-gradient(90deg,transparent,var(--b1),transparent);margin:24px 0}
+.sig{position:fixed;bottom:16px;right:18px;z-index:999;font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;color:rgba(200,148,42,.3);letter-spacing:.1em;user-select:none;pointer-events:none}
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.07);border-radius:3px}
-@media(max-width:1280px){.sgrid{grid-template-columns:repeat(3,1fr)}.twin{grid-template-columns:1fr}}
-@media(max-width:900px){.sgrid{grid-template-columns:repeat(2,1fr)}.wrap{padding:16px 16px 60px}.hdr{padding:0 18px}}
+
+@media(max-width:1400px){.sgrid{grid-template-columns:repeat(3,1fr)}.twin{grid-template-columns:1fr}}
+@media(max-width:900px){.sgrid{grid-template-columns:repeat(2,1fr)}.wrap{padding:16px 16px 60px}.hdr{padding:0 18px}.pipeline{display:none}}
 @media(max-width:560px){.sgrid{grid-template-columns:1fr 1fr}.hdr-mid{display:none}.logo{font-size:1.1rem}}
 </style>
 </head>
 <body>
+
+<!-- ── Header ── -->
 <header class="hdr">
   <div class="logo-wrap">
-    <div>
-      <div class="logo-eyebrow">Intelligence</div>
+    <div class="logo-sub">
+      <div class="logo-eyebrow">Signal Intelligence</div>
       <div class="logo">AURVEX</div>
     </div>
+    <div class="logo-ver">v6.0</div>
   </div>
   <div class="hdr-mid">
     <div class="livechip" id="lchip">
@@ -247,34 +194,41 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
       <span id="ltxt" style="color:var(--tx3)">Bağlanıyor</span>
     </div>
     <div class="mpill" id="mpill">PAPER</div>
+    <div class="humanpill scalp" id="humanpill">⚡ SCALP</div>
   </div>
   <div class="hdr-right">
     <div class="hpill" id="axpill" style="display:none"></div>
     <div id="clk">00:00:00</div>
   </div>
 </header>
+
 <div class="wrap">
+
+  <!-- ── Sysbar ── -->
   <div class="sysbar" id="sysbar" style="display:none">
-    <div class="sb"><div class="sbdot" id="sd-db"></div>Veritabanı <strong id="sb-db">—</strong></div>
+    <div class="sb"><div class="sbdot" id="sd-db"></div>DB <strong id="sb-db">—</strong></div>
     <div class="sb">Heartbeat <strong id="sb-hb">—</strong></div>
-    <div class="sb">Circuit Breaker <strong id="sb-cb">—</strong></div>
+    <div class="sb">Circuit <strong id="sb-cb">—</strong></div>
     <div class="sb">Mod <strong id="sb-ax">—</strong></div>
+    <div class="sb">Trade Eşik <strong id="sb-thr" style="color:var(--goldL)">—</strong></div>
     <div class="sb">Bakiye <strong id="sb-bal" style="color:var(--goldL)">—</strong></div>
   </div>
+
+  <!-- ── 6 Stat Cards ── -->
   <div class="sgrid">
     <div class="sc">
       <div class="sc-ln" style="background:linear-gradient(90deg,transparent,var(--gold),transparent)"></div>
       <div class="sc-gl" style="background:var(--gold)"></div>
       <div class="sc-lb">Bakiye</div>
       <div class="sc-vl gold" id="v-bal">—</div>
-      <div class="sc-sb" id="v-bal-s">Başlangıç: $<span id="v-init-bal">500</span></div>
+      <div class="sc-sb">Başlangıç: $<span id="v-init-bal">500</span></div>
     </div>
     <div class="sc">
       <div class="sc-ln" id="pnl-ln" style="background:linear-gradient(90deg,transparent,var(--em),transparent)"></div>
       <div class="sc-gl" id="pnl-gl" style="background:var(--em)"></div>
       <div class="sc-lb">Toplam PnL</div>
       <div class="sc-vl" id="v-pnl">—</div>
-      <div class="sc-sb" id="v-pnl-s">Gerçekleşmemiş: $0</div>
+      <div class="sc-sb" id="v-pnl-s">Unrealized: $0</div>
     </div>
     <div class="sc">
       <div class="sc-ln" id="td-ln" style="background:linear-gradient(90deg,transparent,var(--em),transparent)"></div>
@@ -297,18 +251,55 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
       <div class="sc-vl gold" id="v-open">—</div>
       <div class="sc-sb" id="v-cl">Kapandı: 0</div>
     </div>
-    <div class="sc">
-      <div class="sc-ln" style="background:linear-gradient(90deg,transparent,var(--am),transparent)"></div>
-      <div class="sc-gl" style="background:var(--am)"></div>
-      <div class="sc-lb">Ghost WR</div>
-      <div class="sc-vl am" id="v-gwr">—</div>
-      <div class="sc-sb" id="v-gwr-s">TP: 0 / SL: 0</div>
+    <div class="sc" id="sc-mode">
+      <div class="sc-ln" id="mode-ln" style="background:linear-gradient(90deg,transparent,var(--em),transparent)"></div>
+      <div class="sc-gl" id="mode-gl" style="background:var(--em)"></div>
+      <div class="sc-lb">Aktif Mod</div>
+      <div class="sc-vl em" id="v-mode">SCALP</div>
+      <div class="sc-sb" id="v-mode-s">⚡ Hızlı trade modu</div>
     </div>
   </div>
+
+  <!-- ── Signal Pipeline ── -->
+  <div class="pipeline" id="pipeline">
+    <div class="pp pp-scan">
+      <div class="pp-v" id="pp-scanned">—</div>
+      <div class="pp-l">Taranan</div>
+    </div>
+    <div class="pp" style="flex:0;padding:0 8px"><div class="pp-arr">›</div></div>
+    <div class="pp pp-cand">
+      <div class="pp-v" id="pp-cand">—</div>
+      <div class="pp-l">Aday</div>
+    </div>
+    <div class="pp" style="flex:0;padding:0 8px"><div class="pp-arr">›</div></div>
+    <div class="pp pp-tg">
+      <div class="pp-v" id="pp-tg">—</div>
+      <div class="pp-l">Telegram</div>
+    </div>
+    <div class="pp" style="flex:0;padding:0 8px"><div class="pp-arr">›</div></div>
+    <div class="pp pp-trade">
+      <div class="pp-v" id="pp-trade">—</div>
+      <div class="pp-l">Trade</div>
+    </div>
+    <div class="pp" style="flex:0;padding:0 8px"><div class="pp-arr">›</div></div>
+    <div class="pp pp-win">
+      <div class="pp-v" id="pp-win">—</div>
+      <div class="pp-l">Win</div>
+    </div>
+    <div class="pp" style="flex:0;padding:0 2px"><div class="pp-arr" style="color:var(--tx4)">/</div></div>
+    <div class="pp pp-loss">
+      <div class="pp-v" id="pp-loss">—</div>
+      <div class="pp-l">Loss</div>
+    </div>
+  </div>
+
+  <!-- ── Twin: PnL Chart + Ghost Learning ── -->
   <div class="twin">
     <div class="sec" style="margin:0">
       <div class="sh"><div class="st"><div class="st-rule" style="background:var(--gold)"></div><div class="st-txt">Kümülatif PnL</div></div></div>
-      <div class="panel panel-p"><div class="chart-h"><canvas id="pnlChart" role="img" aria-label="PnL grafiği">PnL</canvas></div></div>
+      <div class="panel panel-p">
+        <div class="chart-h"><canvas id="pnlChart" role="img" aria-label="PnL grafiği"></canvas></div>
+      </div>
     </div>
     <div class="sec" style="margin:0">
       <div class="sh"><div class="st"><div class="st-rule" style="background:var(--am)"></div><div class="st-txt">Ghost Learning</div></div></div>
@@ -320,26 +311,14 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
         </div>
         <div class="grow">
           <div class="gc"><div class="gc-v" id="g-pnl">—</div><div class="gc-l">Ghost PnL</div></div>
-          <div class="gc"><div class="gc-v" id="g-done">—</div><div class="gc-l">Paper Done</div></div>
+          <div class="gc"><div class="gc-v" id="g-done">—</div><div class="gc-l">Simüle</div></div>
           <div class="gc"><div class="gc-v" id="g-pwr">—</div><div class="gc-l">Paper WR</div></div>
         </div>
       </div>
     </div>
-    <div class="sec" style="margin:0">
-      <div class="sh"><div class="st"><div class="st-rule" style="background:var(--am)"></div><div class="st-txt">Ghost Intelligence</div></div></div>
-      <div class="panel panel-p" id="ghost-intel-panel">
-        <div class="grow" style="flex-wrap:wrap;gap:6px">
-          <div class="gc"><div class="gc-v" id="gi-accuracy">—</div><div class="gc-l">Dogruluk</div></div>
-          <div class="gc"><div class="gc-v" id="gi-total">—</div><div class="gc-l">Toplam</div></div>
-          <div class="gc"><div class="gc-v" id="gi-weight">—</div><div class="gc-l">Din. Agirlik</div></div>
-          <div class="gc"><div class="gc-v" id="gi-mfe">—</div><div class="gc-l">Ort. MFE</div></div>
-          <div class="gc"><div class="gc-v" id="gi-mae">—</div><div class="gc-l">Ort. MAE</div></div>
-        </div>
-        <div style="margin-top:8px;font-size:10px;color:var(--dim)" id="gi-top-coins">—</div>
-        <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap" id="gi-weekly-bars"></div>
-      </div>
-    </div>
   </div>
+
+  <!-- ── Açık Tradeler ── -->
   <div class="sec">
     <div class="sh">
       <div class="st"><div class="st-rule" style="background:var(--em)"></div><div class="st-txt">Açık Tradeler</div></div>
@@ -347,7 +326,10 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
     </div>
     <div id="livewrap"><div class="empty">Açık trade yok — sinyal bekleniyor</div></div>
   </div>
+
   <div class="dv"></div>
+
+  <!-- ── Son Tradeler ── -->
   <div class="sec">
     <div class="sh">
       <div class="st"><div class="st-rule" style="background:var(--gold)"></div><div class="st-txt">Son Tradeler</div></div>
@@ -362,6 +344,8 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
       </div>
     </div>
   </div>
+
+  <!-- ── Son Sinyaller ── -->
   <div class="sec">
     <div class="sh">
       <div class="st"><div class="st-rule" style="background:var(--sa)"></div><div class="st-txt">Son Sinyaller</div></div>
@@ -376,6 +360,8 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
       </div>
     </div>
   </div>
+
+  <!-- ── Bot Logları ── -->
   <div class="sec">
     <div class="sh">
       <div class="st"><div class="st-rule" style="background:var(--tx3)"></div><div class="st-txt">Bot Logları</div></div>
@@ -383,14 +369,18 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
     </div>
     <div class="logbox" id="logbox"><div class="ll">Yükleniyor...</div></div>
   </div>
-</div>
+
+</div><!-- .wrap -->
+
 <div class="sig">S</div>
+
 <script>
 const $=id=>document.getElementById(id);
 const N=v=>parseFloat(v||0);
 const pS=v=>{const n=N(v);return`${n>=0?'+':''}$${Math.abs(n).toFixed(2)}`};
 const prS=v=>{const f=N(v);return f?`$${f.toFixed(4)}`:'—'};
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
 function ago(iso){
   if(!iso)return'—';
   try{const ms=Date.now()-new Date(iso.replace('Z','')+'Z').getTime();
@@ -401,55 +391,125 @@ function fT(iso){
   if(!iso)return'—';
   try{return new Date(iso.replace('Z','')+'Z').toLocaleTimeString('tr',{hour:'2-digit',minute:'2-digit'})}catch{return'—'}
 }
+
+// Saat
 setInterval(()=>{$('clk').textContent=new Date().toLocaleTimeString('tr',{hour:'2-digit',minute:'2-digit',second:'2-digit'})},1000);
+
+// PnL Chart
 let chart=null;
 function initChart(){
   const ctx=$('pnlChart').getContext('2d');
   chart=new Chart(ctx,{type:'line',data:{labels:[],datasets:[{label:'PnL',data:[],borderColor:'#C8942A',backgroundColor:'rgba(200,148,42,.06)',borderWidth:1.5,pointRadius:0,pointHoverRadius:4,fill:true,tension:.35,pointHoverBackgroundColor:'#E8B84B'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{backgroundColor:'rgba(3,5,8,.97)',borderColor:'rgba(200,148,42,.35)',borderWidth:1,titleColor:'#4A5A7A',bodyColor:'#E8B84B',titleFont:{family:'JetBrains Mono',size:10},bodyFont:{family:'JetBrains Mono',size:12},callbacks:{label:c=>`${c.parsed.y>=0?'+':''}$${c.parsed.y.toFixed(2)}`}}},scales:{x:{display:false},y:{display:true,grid:{color:'rgba(255,255,255,.04)',drawTicks:false},border:{display:false},ticks:{color:'#4A5A7A',font:{family:'JetBrains Mono',size:9},maxTicksLimit:5,callback:v=>`${v>=0?'+':''}$${Math.abs(v).toFixed(0)}`}}},animation:{duration:600},interaction:{mode:'index',intersect:false}}});
 }
+
+// Health
 async function fHealth(){
-  try{const d=(await(await fetch('/api/health')).json()).data||{};
-  const alive=d.bot_alive;
-  const chip=$('lchip'),dot=$('ldot'),txt=$('ltxt');
-  if(alive){chip.className='livechip on';dot.className='dot dot-on';txt.textContent='CANLI';txt.style.color='var(--em)'}
-  else{chip.className='livechip off';dot.className='dot dot-off';txt.textContent='KAPALI';txt.style.color='var(--ru)'}
-  $('mpill').textContent=(d.execution_mode||'PAPER').toUpperCase();
-  const ax=(d.ax_mode||'').toUpperCase();
-  if(ax){const p=$('axpill');p.style.display='';p.textContent='AX: '+ax;p.style.color=ax==='EXECUTE'?'var(--em)':'var(--gold)';p.style.borderColor=ax==='EXECUTE'?'rgba(0,200,150,.25)':'rgba(200,148,42,.25)';p.style.background=ax==='EXECUTE'?'var(--emA)':'var(--goldA)'}
-  $('sysbar').style.display='flex';
-  const dbOk=d.db_connected;
-  $('sd-db').style.background=dbOk?'var(--em)':'var(--ru)';
-  $('sb-db').textContent=dbOk?'OK':'HATA';$('sb-db').style.color=dbOk?'var(--em)':'var(--ru)';
-  if(d.last_heartbeat){const s=Math.floor((Date.now()-new Date(d.last_heartbeat.replace('Z','')+'Z').getTime())/1000);$('sb-hb').textContent=`${s}s`;$('sb-hb').style.color=s<120?'var(--em)':s<300?'var(--gold)':'var(--ru)'}
-  $('sb-cb').textContent=d.circuit_breaker_active?'AKTİF':'Kapalı';$('sb-cb').style.color=d.circuit_breaker_active?'var(--ru)':'var(--em)';
-  $('sb-ax').textContent=d.ax_mode||'—';}catch(e){console.warn(e)}
+  try{
+    const d=(await(await fetch('/api/health')).json()).data||{};
+    const alive=d.bot_alive;
+    const chip=$('lchip'),dot=$('ldot'),txt=$('ltxt');
+    if(alive){chip.className='livechip on';dot.className='dot dot-on';txt.textContent='CANLI';txt.style.color='var(--em)'}
+    else{chip.className='livechip off';dot.className='dot dot-off';txt.textContent='KAPALI';txt.style.color='var(--ru)'}
+    $('mpill').textContent=(d.execution_mode||'PAPER').toUpperCase();
+
+    // Human / Scalp mode pill
+    const hp=$('humanpill');
+    const isHuman=d.human_mode===true;
+    hp.textContent=isHuman?'🧠 HUMAN':'⚡ SCALP';
+    hp.className='humanpill '+(isHuman?'human':'scalp');
+
+    // AX mode pill
+    const ax=(d.ax_mode||'').toUpperCase();
+    if(ax){const p=$('axpill');p.style.display='';p.textContent='AX: '+ax;p.style.color=ax==='EXECUTE'?'var(--em)':'var(--gold)';p.style.borderColor=ax==='EXECUTE'?'rgba(0,200,150,.25)':'rgba(200,148,42,.25)';p.style.background=ax==='EXECUTE'?'var(--emA)':'var(--goldA)'}
+
+    $('sysbar').style.display='flex';
+    const dbOk=d.db_connected;
+    $('sd-db').style.background=dbOk?'var(--em)':'var(--ru)';
+    $('sb-db').textContent=dbOk?'OK':'HATA';$('sb-db').style.color=dbOk?'var(--em)':'var(--ru)';
+    if(d.last_heartbeat){const s=Math.floor((Date.now()-new Date(d.last_heartbeat.replace('Z','')+'Z').getTime())/1000);$('sb-hb').textContent=`${s}s`;$('sb-hb').style.color=s<120?'var(--em)':s<300?'var(--gold)':'var(--ru)'}
+    $('sb-cb').textContent=d.circuit_breaker_active?'AKTİF':'Kapalı';$('sb-cb').style.color=d.circuit_breaker_active?'var(--ru)':'var(--em)';
+    $('sb-ax').textContent=(d.ax_mode||'—').toUpperCase();
+    if(d.trade_threshold)$('sb-thr').textContent=`${d.trade_threshold}`;
+  }catch(e){console.warn(e)}
 }
+
+// Stats
 async function fStats(){
-  try{const d=(await(await fetch('/api/stats')).json()).data||{};
-  const bal=N(d.balance),rpnl=N(d.realized_pnl),upnl=N(d.unrealized_pnl),tpnl=N(d.total_pnl)||rpnl+upnl,today=N(d.today_pnl),wr=N(d.winrate),opens=~~(d.open_trades),closed=~~(d.closed_trades),wins=~~(d.win_trades),gtp=~~(d.ghost_tp_hits),gsl=~~(d.ghost_sl_hits),gwr=N(d.ghost_winrate);
-  $('v-bal').textContent=`$${bal.toFixed(2)}`;$('sb-bal').textContent=`$${bal.toFixed(2)}`;
-  const initBal=document.getElementById('v-init-bal');if(initBal&&d.initial_balance)initBal.textContent=N(d.initial_balance).toFixed(0);
-  const pEl=$('v-pnl');pEl.textContent=pS(tpnl);pEl.className='sc-vl '+(tpnl>=0?'em':'ru');
-  $('pnl-ln').style.background=`linear-gradient(90deg,transparent,var(--${tpnl>=0?'em':'ru'}),transparent)`;
-  $('pnl-gl').style.background=`var(--${tpnl>=0?'em':'ru'})`;
-  $('v-pnl-s').textContent=`Gerçekleşmemiş: ${pS(upnl)}`;
-  const tEl=$('v-today');tEl.textContent=pS(today);tEl.className='sc-vl '+(today>=0?'em':'ru');
-  $('td-ln').style.background=`linear-gradient(90deg,transparent,var(--${today>=0?'em':'ru'}),transparent)`;
-  $('td-gl').style.background=`var(--${today>=0?'em':'ru'})`;
-  $('v-wr').textContent=`${wr.toFixed(1)}%`;$('v-wr-s').textContent=`${wins}W / ${Math.max(0,closed-wins)}L`;
-  $('v-open').textContent=`${opens} / ${opens+closed}`;$('v-cl').textContent=`Kapandı: ${closed}`;
-  $('v-gwr').textContent=`${gwr.toFixed(1)}%`;$('v-gwr-s').textContent=`TP: ${gtp} / SL: ${gsl}`;}catch(e){console.warn(e)}
+  try{
+    const d=(await(await fetch('/api/stats')).json()).data||{};
+    const bal=N(d.balance),rpnl=N(d.realized_pnl),upnl=N(d.unrealized_pnl),tpnl=N(d.total_pnl)||rpnl+upnl;
+    const today=N(d.today_pnl),wr=N(d.winrate),opens=~~(d.open_trades),closed=~~(d.closed_trades),wins=~~(d.win_trades);
+    $('v-bal').textContent=`$${bal.toFixed(2)}`;$('sb-bal').textContent=`$${bal.toFixed(2)}`;
+    const initEl=$('v-init-bal');if(initEl&&d.initial_balance)initEl.textContent=N(d.initial_balance).toFixed(0);
+    const pEl=$('v-pnl');pEl.textContent=pS(tpnl);pEl.className='sc-vl '+(tpnl>=0?'em':'ru');
+    $('pnl-ln').style.background=`linear-gradient(90deg,transparent,var(--${tpnl>=0?'em':'ru'}),transparent)`;
+    $('pnl-gl').style.background=`var(--${tpnl>=0?'em':'ru'})`;
+    $('v-pnl-s').textContent=`Unrealized: ${pS(upnl)}`;
+    const tEl=$('v-today');tEl.textContent=pS(today);tEl.className='sc-vl '+(today>=0?'em':'ru');
+    $('td-ln').style.background=`linear-gradient(90deg,transparent,var(--${today>=0?'em':'ru'}),transparent)`;
+    $('td-gl').style.background=`var(--${today>=0?'em':'ru'})`;
+    $('v-wr').textContent=`${wr.toFixed(1)}%`;$('v-wr-s').textContent=`${wins}W / ${Math.max(0,closed-wins)}L`;
+    $('v-open').textContent=`${opens} / ${opens+closed}`;$('v-cl').textContent=`Kapandı: ${closed}`;
+  }catch(e){console.warn(e)}
 }
+
+// Mode card (reads from health)
+function updateModeCard(isHuman){
+  const vEl=$('v-mode'),sEl=$('v-mode-s'),lnEl=$('mode-ln'),glEl=$('mode-gl');
+  if(isHuman){
+    vEl.textContent='HUMAN';vEl.className='sc-vl hu';
+    sEl.textContent='🧠 Az ama kaliteli sinyal';
+    lnEl.style.background='linear-gradient(90deg,transparent,#C084FF,transparent)';
+    glEl.style.background='#C084FF';
+  }else{
+    vEl.textContent='SCALP';vEl.className='sc-vl em';
+    sEl.textContent='⚡ Hızlı trade modu';
+    lnEl.style.background='linear-gradient(90deg,transparent,var(--em),transparent)';
+    glEl.style.background='var(--em)';
+  }
+}
+
+// Ghost / Learning
 async function fLearn(){
-  try{const raw=(await(await fetch('/api/learning')).json());const d=raw.data||raw||{};
-  $('g-wr').textContent=`${N(d.ghost_winrate).toFixed(1)}%`;$('g-tp').textContent=d.ghost_tp_hits||0;$('g-sl').textContent=d.ghost_sl_hits||0;$('g-pnl').textContent=pS(d.ghost_pnl||0);$('g-done').textContent=d.paper_completed||0;$('g-pwr').textContent=`${N(d.paper_winrate).toFixed(1)}%`;}
-  catch{try{const d=(await(await fetch('/api/stats')).json()).data||{};$('g-wr').textContent=`${N(d.ghost_winrate).toFixed(1)}%`;$('g-tp').textContent=d.ghost_tp_hits||0;$('g-sl').textContent=d.ghost_sl_hits||0;}catch{}}
+  try{
+    const raw=(await(await fetch('/api/learning')).json());const d=raw.data||raw||{};
+    $('g-wr').textContent=`${N(d.ghost_winrate||d.virtual_wr).toFixed(1)}%`;
+    $('g-tp').textContent=d.ghost_tp_hits||d.virtual_wins||0;
+    $('g-sl').textContent=d.ghost_sl_hits||d.virtual_losses||0;
+    $('g-pnl').textContent=pS(d.ghost_pnl||0);
+    $('g-done').textContent=d.paper_completed||d.ghost_simulated||0;
+    $('g-pwr').textContent=`${N(d.paper_winrate).toFixed(1)}%`;
+  }catch{
+    try{const d=(await(await fetch('/api/stats')).json()).data||{};
+    $('g-wr').textContent=`${N(d.ghost_winrate).toFixed(1)}%`;
+    $('g-tp').textContent=d.ghost_tp_hits||0;$('g-sl').textContent=d.ghost_sl_hits||0;}catch{}
+  }
 }
+
+// Pipeline funnel
+async function fPipeline(){
+  try{
+    const d=(await(await fetch('/api/signal_funnel')).json());
+    if(!d.ok)return;
+    const fd=d.data||{};
+    $('pp-scanned').textContent=fd.scanned||0;
+    $('pp-cand').textContent=fd.candidate||0;
+    $('pp-tg').textContent=fd.telegram_sent||fd.telegram||0;
+    $('pp-trade').textContent=fd.trade||0;
+    $('pp-win').textContent=fd.wins||0;
+    $('pp-loss').textContent=fd.losses||0;
+  }catch(e){console.warn('pipeline:',e)}
+}
+
+// Live (open) trades
 async function fLive(){
-  try{const ts=(await(await fetch('/api/live')).json()).data||[];
-  $('cnt-live').textContent=ts.length;const w=$('livewrap');
-  if(!ts.length){w.innerHTML='<div class="empty">Açık trade yok — sinyal bekleniyor</div>';return}
-  w.innerHTML=`<div class="lgrid">${ts.map(tCard).join('')}</div>`;}catch(e){console.warn(e)}
+  try{
+    const ts=(await(await fetch('/api/live')).json()).data||[];
+    $('cnt-live').textContent=ts.length;
+    const w=$('livewrap');
+    if(!ts.length){w.innerHTML='<div class="empty">Açık trade yok — sinyal bekleniyor</div>';return}
+    w.innerHTML=`<div class="lgrid">${ts.map(tCard).join('')}</div>`;
+  }catch(e){console.warn(e)}
 }
 function tCard(t){
   const side=(t.side||'LONG').toUpperCase(),isL=side==='LONG';
@@ -458,62 +518,142 @@ function tCard(t){
   const pC=upnl>0?'p':upnl<0?'n':'z';const tp1h=t.tp1_hit,tp2h=t.tp2_hit,trail=t.trailing_active,be=t.breakeven_set;
   return`<div class="tc ${isL?'L':'S'}"><div class="tc-hd"><div class="tc-sym">${t.symbol||'?'}</div><span class="stag ${isL?'L':'S'}">${side}</span></div><div class="tc-pnl ${pC}">${pS(upnl)} <span style="font-size:.68rem;color:var(--tx3);font-weight:400">unrealized</span></div><div class="tc-meta"><span class="k">Giriş</span><span class="v">${prS(ep)}</span><span class="k">Anlık</span><span class="v">${prS(cp)}</span><span class="k">Stop</span><span class="v n">${prS(sl)}</span><span class="k">Lev</span><span class="v">${t.leverage||1}x</span><span class="k">Marj</span><span class="v">$${margin.toFixed(2)}</span><span class="k">Kalan</span><span class="v">${rem.toFixed(0)}%</span></div><div class="pb"><div class="pb-l"><span>SL ${prS(sl)}</span><span style="color:var(--tx3)">${Math.round(pct)}%</span><span>TP2 ${prS(tp2)}</span></div><div class="pb-t"><div class="pb-f ${isL?'pb-L':'pb-S'}" style="width:${Math.round(pct)}%"></div></div></div><div class="tptags"><span class="tptag ${tp1h?'hit':''}">TP1${tp1h?' ✓':''} ${prS(tp1)}</span><span class="tptag ${tp2h?'hit':''}">TP2${tp2h?' ✓':''} ${prS(tp2)}</span>${trail?'<span class="tptag trail">TRAILING</span>':''}${be?'<span class="tptag be">BREAKEVEN</span>':''}<span class="tc-age">${ago(t.opened_at)} önce</span></div></div>`;
 }
+
+// Trades table
 async function fTrades(){
-  try{const list=(await(await fetch('/api/trades')).json()).data||[];const ts=list.slice(0,30);
-  $('cnt-trades').textContent=ts.length;const tb=$('tb-trades');
-  if(!ts.length){tb.innerHTML='<tr><td colspan="9"><div class="empty" style="border:none">Kapanmış trade yok</div></td></tr>';return}
-  tb.innerHTML=ts.map(t=>{const pnl=N(t.realized_pnl),ep=N(t.entry_price),xp=N(t.exit_price);const side=(t.side||'LONG').toUpperCase(),isL=side==='LONG';const res=pnl>0?'WIN':'LOSS',r=esc(t.close_reason||t.stop_reason||'—');return`<tr><td class="dim mono" style="font-size:.67rem">#${t.id}</td><td><span class="sym">${t.symbol||'?'}</span></td><td><span class="stag ${isL?'L':'S'}" style="font-size:.6rem">${side}</span></td><td class="mono">${ep?'$'+ep.toFixed(4):'—'}</td><td class="mono">${xp?'$'+xp.toFixed(4):'—'}</td><td class="mono ${pnl>=0?'p':'n'}" style="font-weight:500">${pS(pnl)}</td><td><span class="bdg ${pnl>0?'b-W':'b-L'}">${res}</span> <span class="dim" style="font-size:.7rem">${r}</span></td><td class="dim mono">${ago(t.opened_at)}</td><td class="dim mono">${t.leverage||1}x</td></tr>`;}).join('');}catch(e){console.warn(e)}
-}
-async function fSigs(){
-  try{const list=(await(await fetch('/api/signals')).json()).data||[];const ss=list.slice(0,25);
-  $('cnt-sigs').textContent=ss.length;const tb=$('tb-sigs');
-  if(!ss.length){tb.innerHTML='<tr><td colspan="9"><div class="empty" style="border:none">Sinyal yok</div></td></tr>';return}
-  tb.innerHTML=ss.map(s=>{const dir=(s.direction||s.side||'LONG').toUpperCase(),isL=dir==='LONG';const q=s.setup_quality||'C',score=N(s.final_score||s.score);const dec=(s.decision||'PENDING').toUpperCase();const dC=dec==='ALLOW'?'b-A':dec==='VETO'?'b-V':dec.includes('WATCH')?'b-Wt':'b-P';const entry=N(s.entry||s.entry_zone||s.entry_price),sl=N(s.sl||s.stop_loss),tp1=N(s.tp1);return`<tr><td><span class="sym">${s.symbol||'?'}</span></td><td><span class="stag ${isL?'L':'S'}" style="font-size:.6rem">${dir}</span></td><td><span class="bdg ${q==='S'?'b-S':'b-P'}">${q}</span></td><td class="mono" style="color:var(--goldL);font-weight:500">${score.toFixed(1)}</td><td class="mono">${entry?'$'+entry.toFixed(4):'—'}</td><td class="mono n">${sl?'$'+sl.toFixed(4):'—'}</td><td class="mono p">${tp1?'$'+tp1.toFixed(4):'—'}</td><td><span class="bdg ${dC}">${dec}</span></td><td class="dim mono" style="font-size:.68rem">${fT(s.created_at)}</td></tr>`;}).join('');}catch(e){console.warn(e)}
-}
-async function fChart(){
-  try{const list=(await(await fetch('/api/trades')).json()).data||[];const ts=list.filter(t=>(t.net_pnl!==undefined||t.realized_pnl!==undefined)&&(t.close_time||t.closed_at)).slice(0,50).reverse();if(!chart)return;let cum=0;const lbls=[],data=[];if(!ts.length){lbls.push('—');data.push(0)}else ts.forEach(t=>{const pnl=parseFloat(t.net_pnl||t.realized_pnl||0);cum+=pnl;lbls.push(fT(t.close_time||t.closed_at));data.push(+cum.toFixed(4))});chart.data.labels=lbls;chart.data.datasets[0].data=data;const last=data[data.length-1]||0;const c=last>=0?'#C8942A':'#FF2D55',bg=last>=0?'rgba(200,148,42,.06)':'rgba(255,45,85,.06)';chart.data.datasets[0].borderColor=c;chart.data.datasets[0].backgroundColor=bg;chart.update('none');}catch(e){console.warn(e)}
-}
-async function fGhostStats(){
   try{
-    const d=(await(await fetch('/api/ghost-stats')).json());
-    if(!d.ok)return;
-    $('gi-accuracy').textContent=`${d.accuracy_pct}%`;
-    $('gi-total').textContent=d.total||0;
-    $('gi-weight').textContent=d.dynamic_weight||'—';
-    $('gi-mfe').textContent=d.avg_mfe_r?`${d.avg_mfe_r}R`:'—';
-    $('gi-mae').textContent=d.avg_mae_r?`${d.avg_mae_r}R`:'—';
-    const topCoins=(d.top_correct_skips||[]).map(c=>`${c.symbol}(${c.accuracy}%)`).join(', ');
-    $('gi-top-coins').textContent=topCoins?'Top correct skips: '+topCoins:'Henuz veri yok';
-    const bars=(d.weekly||[]).map(w=>{
-      const total=(w.wins||0)+(w.losses||0);
-      const wr=total>0?Math.round(w.wins/total*100):0;
-      const col=wr>=60?'#C8942A':wr>=40?'#E8B84B':'#FF2D55';
-      return`<div title="${w.day} W:${w.wins} L:${w.losses}" style="display:flex;flex-direction:column;align-items:center;gap:2px;cursor:default">
-        <div style="font-size:8px;color:var(--dim)">${(w.day||'').slice(5)}</div>
-        <div style="width:18px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden;height:32px;display:flex;flex-direction:column-reverse">
-          <div style="background:${col};width:100%;height:${wr}%;transition:height .4s"></div>
-        </div>
-        <div style="font-size:8px;color:${col}">${wr}%</div>
-      </div>`;
+    const list=(await(await fetch('/api/trades')).json()).data||[];const ts=list.slice(0,30);
+    $('cnt-trades').textContent=ts.length;const tb=$('tb-trades');
+    if(!ts.length){tb.innerHTML='<tr><td colspan="9"><div class="empty" style="border:none">Kapanmış trade yok</div></td></tr>';return}
+    tb.innerHTML=ts.map(t=>{
+      const pnl=N(t.realized_pnl),ep=N(t.entry_price),xp=N(t.exit_price);
+      const side=(t.side||'LONG').toUpperCase(),isL=side==='LONG';
+      const res=pnl>0?'WIN':'LOSS',r=esc(t.close_reason||t.stop_reason||'—');
+      return`<tr><td class="dim mono" style="font-size:.67rem">#${t.id}</td><td><span class="sym">${t.symbol||'?'}</span></td><td><span class="stag ${isL?'L':'S'}" style="font-size:.6rem">${side}</span></td><td class="mono">${ep?'$'+ep.toFixed(4):'—'}</td><td class="mono">${xp?'$'+xp.toFixed(4):'—'}</td><td class="mono ${pnl>=0?'p':'n'}" style="font-weight:500">${pS(pnl)}</td><td><span class="bdg ${pnl>0?'b-W':'b-L'}">${res}</span> <span class="dim" style="font-size:.7rem">${r}</span></td><td class="dim mono">${ago(t.opened_at)}</td><td class="dim mono">${t.leverage||1}x</td></tr>`;
     }).join('');
-    $('gi-weekly-bars').innerHTML=bars||'<span style="font-size:10px;color:var(--dim)">Bu hafta veri yok</span>';
-  }catch(e){console.warn('ghost-stats:',e)}
+  }catch(e){console.warn(e)}
 }
+
+// Signals table
+async function fSigs(){
+  try{
+    const list=(await(await fetch('/api/signals')).json()).data||[];const ss=list.slice(0,25);
+    $('cnt-sigs').textContent=ss.length;const tb=$('tb-sigs');
+    if(!ss.length){tb.innerHTML='<tr><td colspan="9"><div class="empty" style="border:none">Sinyal yok</div></td></tr>';return}
+    tb.innerHTML=ss.map(s=>{
+      const dir=(s.direction||s.side||'LONG').toUpperCase(),isL=dir==='LONG';
+      const q=s.setup_quality||'C',score=N(s.final_score||s.score);
+      const dec=(s.decision||'PENDING').toUpperCase();
+      const dC=dec==='ALLOW'?'b-A':dec==='VETO'?'b-V':dec.includes('WATCH')?'b-Wt':'b-P';
+      const entry=N(s.entry||s.entry_zone||s.entry_price),sl=N(s.sl||s.stop_loss),tp1=N(s.tp1);
+      return`<tr><td><span class="sym">${s.symbol||'?'}</span></td><td><span class="stag ${isL?'L':'S'}" style="font-size:.6rem">${dir}</span></td><td><span class="bdg ${q==='S'?'b-S':'b-P'}">${q}</span></td><td class="mono" style="color:var(--goldL);font-weight:500">${score.toFixed(1)}</td><td class="mono">${entry?'$'+entry.toFixed(4):'—'}</td><td class="mono n">${sl?'$'+sl.toFixed(4):'—'}</td><td class="mono p">${tp1?'$'+tp1.toFixed(4):'—'}</td><td><span class="bdg ${dC}">${dec}</span></td><td class="dim mono" style="font-size:.68rem">${fT(s.created_at)}</td></tr>`;
+    }).join('');
+  }catch(e){console.warn(e)}
+}
+
+// PnL Chart
+async function fChart(){
+  try{
+    const list=(await(await fetch('/api/trades')).json()).data||[];
+    const ts=list.filter(t=>(t.net_pnl!==undefined||t.realized_pnl!==undefined)&&(t.close_time||t.closed_at)).slice(0,50).reverse();
+    if(!chart)return;
+    let cum=0;const lbls=[],data=[];
+    if(!ts.length){lbls.push('—');data.push(0)}
+    else ts.forEach(t=>{const pnl=parseFloat(t.net_pnl||t.realized_pnl||0);cum+=pnl;lbls.push(fT(t.close_time||t.closed_at));data.push(+cum.toFixed(4))});
+    chart.data.labels=lbls;chart.data.datasets[0].data=data;
+    const last=data[data.length-1]||0;
+    const c=last>=0?'#C8942A':'#FF2D55',bg=last>=0?'rgba(200,148,42,.06)':'rgba(255,45,85,.06)';
+    chart.data.datasets[0].borderColor=c;chart.data.datasets[0].backgroundColor=bg;chart.update('none');
+  }catch(e){console.warn(e)}
+}
+
+// Bot Logs
 async function fetchLogs(){
-  try{const d=(await(await fetch('/api/logs?n=60')).json()).data||{};const lines=d.lines||[];const box=$('logbox');if(!lines.length){box.innerHTML='<div class="ll">Log bulunamadı.</div>';return}box.innerHTML=lines.map(l=>{let c='';if(/ERROR|CRITICAL|Exception|Traceback/i.test(l))c='e';else if(/WARNING|WARN/i.test(l))c='w';else if(/TRADE ACILDI|TP1|TP2|WIN|LOSS|KAPANDI|ALLOW/i.test(l))c='ok';return`<div class="ll ${c}">${esc(l)}</div>`;}).join('');box.scrollTop=box.scrollHeight;}catch{$('logbox').innerHTML='<div class="ll e">Log yüklenemedi.</div>'}
+  try{
+    const d=(await(await fetch('/api/logs?n=60')).json()).data||{};const lines=d.lines||[];
+    const box=$('logbox');
+    if(!lines.length){box.innerHTML='<div class="ll">Log bulunamadı.</div>';return}
+    box.innerHTML=lines.map(l=>{
+      let c='';
+      if(/ERROR|CRITICAL|Exception|Traceback/i.test(l))c='e';
+      else if(/WARNING|WARN/i.test(l))c='w';
+      else if(/TRADE ACILDI|TP1|TP2|WIN|LOSS|KAPANDI|ALLOW/i.test(l))c='ok';
+      return`<div class="ll ${c}">${esc(l)}</div>`;
+    }).join('');
+    box.scrollTop=box.scrollHeight;
+  }catch{$('logbox').innerHTML='<div class="ll e">Log yüklenemedi.</div>'}
 }
+
+// SSE
 function connectSSE(){
-  try{const es=new EventSource('/stream');es.onmessage=ev=>{try{const d=JSON.parse(ev.data);if(d.stats?.balance)$('v-bal').textContent=`$${N(d.stats.balance).toFixed(2)}`;if(Array.isArray(d.live))$('cnt-live').textContent=d.live.length;}catch{}};es.onerror=()=>setTimeout(connectSSE,6000);}catch{}
+  try{
+    const es=new EventSource('/stream');
+    es.onmessage=ev=>{
+      try{
+        const d=JSON.parse(ev.data);
+        if(d.stats?.balance)$('v-bal').textContent=`$${N(d.stats.balance).toFixed(2)}`;
+        if(Array.isArray(d.live))$('cnt-live').textContent=d.live.length;
+        if(d.health?.human_mode!==undefined){updateModeCard(d.health.human_mode);const hp=$('humanpill');hp.textContent=d.health.human_mode?'🧠 HUMAN':'⚡ SCALP';hp.className='humanpill '+(d.health.human_mode?'human':'scalp')}
+      }catch{}
+    };
+    es.onerror=()=>setTimeout(connectSSE,6000);
+  }catch{}
 }
+
+// İlk yükleme
 async function init(){
   initChart();
-  await Promise.all([fHealth(),fStats(),fLearn(),fGhostStats()]);
-  await Promise.all([fLive(),fTrades(),fSigs(),fChart()]);
+  await Promise.all([fHealth(),fStats(),fLearn()]);
+  updateModeCard(false); // default scalp
+  await Promise.all([fLive(),fTrades(),fSigs(),fChart(),fPipeline()]);
   fetchLogs();connectSSE();
 }
-setInterval(async()=>{await Promise.all([fHealth(),fStats(),fLearn()]);await Promise.all([fLive(),fTrades(),fSigs(),fChart()]);fetchLogs();},8000);
-setInterval(fGhostStats,60000);
-init().catch(console.error);
+
+// Health'den human_mode al ve mode card'ı güncelle
+const _origFHealth=fHealth;
+async function fHealthWithMode(){
+  try{
+    const resp=await fetch('/api/health');
+    const j=await resp.json();
+    const d=j.data||{};
+    updateModeCard(d.human_mode===true);
+    // call original işlemleri de yap
+    const alive=d.bot_alive;
+    const chip=$('lchip'),dot=$('ldot'),txt=$('ltxt');
+    if(alive){chip.className='livechip on';dot.className='dot dot-on';txt.textContent='CANLI';txt.style.color='var(--em)'}
+    else{chip.className='livechip off';dot.className='dot dot-off';txt.textContent='KAPALI';txt.style.color='var(--ru)'}
+    $('mpill').textContent=(d.execution_mode||'PAPER').toUpperCase();
+    const hp=$('humanpill');const isHuman=d.human_mode===true;
+    hp.textContent=isHuman?'🧠 HUMAN':'⚡ SCALP';hp.className='humanpill '+(isHuman?'human':'scalp');
+    const ax=(d.ax_mode||'').toUpperCase();
+    if(ax){const p=$('axpill');p.style.display='';p.textContent='AX: '+ax;p.style.color=ax==='EXECUTE'?'var(--em)':'var(--gold)';p.style.borderColor=ax==='EXECUTE'?'rgba(0,200,150,.25)':'rgba(200,148,42,.25)';p.style.background=ax==='EXECUTE'?'var(--emA)':'var(--goldA)'}
+    $('sysbar').style.display='flex';
+    const dbOk=d.db_connected;
+    $('sd-db').style.background=dbOk?'var(--em)':'var(--ru)';
+    $('sb-db').textContent=dbOk?'OK':'HATA';$('sb-db').style.color=dbOk?'var(--em)':'var(--ru)';
+    if(d.last_heartbeat){const s=Math.floor((Date.now()-new Date(d.last_heartbeat.replace('Z','')+'Z').getTime())/1000);$('sb-hb').textContent=`${s}s`;$('sb-hb').style.color=s<120?'var(--em)':s<300?'var(--gold)':'var(--ru)'}
+    $('sb-cb').textContent=d.circuit_breaker_active?'AKTİF':'Kapalı';$('sb-cb').style.color=d.circuit_breaker_active?'var(--ru)':'var(--em)';
+    $('sb-ax').textContent=(d.ax_mode||'—').toUpperCase();
+    if(d.trade_threshold)$('sb-thr').textContent=`${d.trade_threshold}`;
+  }catch(e){console.warn(e)}
+}
+
+// Ana yenileme döngüsü
+setInterval(async()=>{
+  await Promise.all([fHealthWithMode(),fStats(),fLearn()]);
+  await Promise.all([fLive(),fTrades(),fSigs(),fChart()]);
+  fetchLogs();
+},8000);
+setInterval(fPipeline,30000);
+
+// Başlat
+async function main(){
+  initChart();
+  await Promise.all([fHealthWithMode(),fStats(),fLearn()]);
+  await Promise.all([fLive(),fTrades(),fSigs(),fChart(),fPipeline()]);
+  fetchLogs();connectSSE();
+}
+main().catch(console.error);
 </script>
 </body>
 </html>

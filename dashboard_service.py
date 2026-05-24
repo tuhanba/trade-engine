@@ -68,10 +68,24 @@ def _get_health_impl() -> dict:
         except Exception:
             pass
 
+    # Circuit breaker kontrolü
+    cb_active = False
+    try:
+        cb_val = database.get_state("circuit_breaker_until")
+        if cb_val:
+            until = datetime.fromisoformat(cb_val)
+            if until.tzinfo is None:
+                until = until.replace(tzinfo=timezone.utc)
+            cb_active = datetime.now(timezone.utc) < until
+    except Exception:
+        pass
+
     return {
         "ok": db_ok,
         "db_connected": db_ok,
         "execution_mode": config.EXECUTION_MODE,
+        "ax_mode": getattr(config, "AX_MODE", "execute"),
+        "human_mode": bool(getattr(config, "HUMAN_MODE", False)),
         "live_trading_enabled": config.LIVE_TRADING_ENABLED,
         "dry_run": config.DRY_RUN,
         "telegram_configured": telegram.is_configured(),
@@ -79,6 +93,9 @@ def _get_health_impl() -> dict:
         "bot_alive": bot_alive,
         "last_heartbeat": heartbeat,
         "last_error": last_error,
+        "circuit_breaker_active": cb_active,
+        "trade_threshold": getattr(config, "TRADE_THRESHOLD", 55.0),
+        "telegram_threshold": getattr(config, "TELEGRAM_THRESHOLD", 35.0),
         "server_time": datetime.now(timezone.utc).isoformat(),
     }
 
