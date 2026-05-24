@@ -117,7 +117,8 @@ CREATE TABLE IF NOT EXISTS trades (
     ax_mode             TEXT,
     environment         TEXT,
     session             TEXT,
-    metadata            TEXT DEFAULT '{}'
+    metadata            TEXT DEFAULT '{}',
+    trail_stop          REAL DEFAULT 0
 )
 """
 
@@ -375,6 +376,7 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("close_reason", "TEXT DEFAULT ''"),
         ("ax_mode",      "TEXT"),
         ("metadata",     "TEXT DEFAULT '{}'"),
+        ("trail_stop",   "REAL DEFAULT 0"),
     ],
     "signal_candidates": [
         ("tp2", "REAL DEFAULT 0"),

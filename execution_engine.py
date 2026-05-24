@@ -489,13 +489,14 @@ def _check_trade(client, t: dict) -> bool:
         update_trade(trade_id, {"unrealized_pnl": unreal, "current_price": price})
         if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), unreal, t.get("realized_pnl", 0))
 
-    # ── SL Kontrolü ─────────────────────────────────────────────────────────
-    sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
-    if sl_hit:
-        pnl = _calc_pnl(direction, entry, price, qty)
-        save_trade_event(trade_id, "SL_HIT", f"price={price} pnl={pnl}")
-        _finalize(trade_id, price, pnl, "sl", t)
-        return True
+    # ── SL Kontrolü (OPEN/TP1_HIT modları için — runner modda ayrı handle) ──
+    if status != "runner":
+        sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
+        if sl_hit:
+            pnl = _calc_pnl(direction, entry, price, qty)
+            save_trade_event(trade_id, "SL_HIT", f"price={price} pnl={pnl}")
+            _finalize(trade_id, price, pnl, "sl", t)
+            return True
 
     # ── TP1 Kontrolü ────────────────────────────────────────────────────────
     if status == "open":
@@ -569,6 +570,9 @@ def _check_trade(client, t: dict) -> bool:
     # ── Runner Trailing Stop Kontrolü ───────────────────────────────────────
     if status == "runner":
         trail_f = float(trail or 0)
+        # trail_stop yoksa sl (breakeven) kullan
+        active_stop = trail_f if trail_f > 0 else sl
+
         if trail_f > 0:
             # Trailing stop güncelle: fiyat yeni zirve yaptıysa trail'i hareket ettir
             atr_val = _get_atr(client, symbol)
@@ -577,23 +581,28 @@ def _check_trade(client, t: dict) -> bool:
                     new_trail_sl = price - atr_val * TRAIL_ATR_MULT
                     if new_trail_sl > trail_f:
                         trail_f = new_trail_sl
+                        active_stop = trail_f
                         update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
                         save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
                 else:
                     new_trail_sl = price + atr_val * TRAIL_ATR_MULT
                     if new_trail_sl < trail_f:
                         trail_f = new_trail_sl
+                        active_stop = trail_f
                         update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
                         save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
-            # Trailing stop vuruldu mu?
-            trail_hit = (is_long and price <= trail_f) or (not is_long and price >= trail_f)
-            if trail_hit:
+
+        # Runner stop vuruldu mu? (trail_stop veya breakeven sl)
+        if active_stop > 0:
+            stop_hit = (is_long and price <= active_stop) or (not is_long and price >= active_stop)
+            if stop_hit:
                 runner_qty = float(t.get("qty_runner") or (qty - qty_tp1 - qty_tp2))
                 pnl_runner = _calc_pnl(direction, entry, price, runner_qty)
                 total_pnl = (t.get("realized_pnl") or 0) + pnl_runner
-                save_trade_event(trade_id, "TRAIL_HIT", f"price={price} trail={trail_f:.6f} runner_pnl={pnl_runner:.4f}")
-                logger.info(f"[Execution] RUNNER TRAIL HIT #{trade_id} {symbol} trail={trail_f:.4f} total_pnl={total_pnl:.4f}")
-                _finalize(trade_id, price, total_pnl, "trail", t)
+                close_reason = "trail" if trail_f > 0 else "breakeven"
+                save_trade_event(trade_id, "TRAIL_HIT", f"price={price} stop={active_stop:.6f} runner_pnl={pnl_runner:.4f}")
+                logger.info(f"[Execution] RUNNER STOP HIT #{trade_id} {symbol} stop={active_stop:.4f} reason={close_reason} total_pnl={total_pnl:.4f}")
+                _finalize(trade_id, price, total_pnl, close_reason, t)
                 return True
 
         # ── Max Hold Timeout (runner dahil tüm durumlar) ────────────────
