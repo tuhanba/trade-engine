@@ -350,6 +350,19 @@ def main():
             for coin_info in eligible:
                 symbol = coin_info["symbol"]
 
+                # ── Günlük sinyal limiti kontrolü ──────────────────────
+                from config import DAILY_SIGNAL_LIMIT, MAX_SIGNALS_PER_COIN
+                _dc = get_daily_signal_count()
+                _total_today = _dc.get("total", 0) if isinstance(_dc, dict) else int(_dc or 0)
+                if _total_today >= DAILY_SIGNAL_LIMIT:
+                    logger.info(f"[LIMIT] Günlük sinyal limiti doldu ({_total_today}/{DAILY_SIGNAL_LIMIT})")
+                    break  # Bu scan döngüsünü bitir
+                _coin_today = _dc.get(symbol, 0) if isinstance(_dc, dict) else 0
+                if _coin_today >= MAX_SIGNALS_PER_COIN:
+                    logger.debug(f"[LIMIT] {symbol} günlük limit: {_coin_today}/{MAX_SIGNALS_PER_COIN}")
+                    continue
+                # ────────────────────────────────────────────────────────
+
                 if symbol in open_symbols:
                     continue
 
