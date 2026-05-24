@@ -360,14 +360,15 @@ class TelegramManager:
         sl  = config.HUMAN_SL_ATR_MULT if is_human else config.SL_ATR_MULT
         mx  = config.HUMAN_MAX_OPEN_TRADES if is_human else config.MAX_OPEN_TRADES
         self.send_fn(
-            f"⚙️ Çalışma Modu\n"
+            f"⚙️ <b>Çalışma Modu</b>\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"Aktif: {'🧠 HUMAN MODE' if is_human else '⚡ SCALP MODE'}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"Trade eşiği: {thr}\n"
-            f"SL: {sl}x ATR\n"
+            f"SL çarpanı: {sl}x ATR\n"
             f"Maks açık trade: {mx}\n"
             f"Execution: {config.EXECUTION_MODE.upper()}\n"
+            f"AX Mode: {config.AX_MODE.upper()}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"/human — İnsan moduna geç\n"
             f"/scalp — Scalp moduna geç"
