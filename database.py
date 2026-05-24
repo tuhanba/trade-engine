@@ -964,17 +964,9 @@ def close_trade(
             (exit_price, realized_pnl, realized_pnl, close_reason, now, trade_id),
         )
         conn.commit()
-        # Bakiyeyi otomatik güncelle
-        try:
-            conn.execute("UPDATE paper_account SET balance = balance + ? WHERE id=1", (realized_pnl,))
-            conn.commit()
-            new_bal = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
-            logger.info(
-                "[DB] Trade #%s kapandı: pnl=%+.3f$ → bakiye=%.2f$",
-                trade_id, realized_pnl, new_bal[0] if new_bal else 0,
-            )
-        except Exception as _be:
-            logger.error("[DB] Bakiye güncellenemedi #%s: %s", trade_id, _be)
+        # NOT: Bakiye güncellemesi çağıran tarafından (execution_engine._finalize veya
+        # ExecutionEngine.close_trade) yapılır — double-counting'i önlemek için burada güncellenmez.
+        logger.info("[DB] Trade #%s kapandı: pnl=%+.3f$", trade_id, realized_pnl)
     except Exception as exc:
         logger.error("Trade kapatılamadı [%s]: %s", trade_id, exc)
     finally:

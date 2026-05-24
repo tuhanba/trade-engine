@@ -61,15 +61,15 @@ COIN_COOLDOWN_MINUTES      = _env_int("COIN_COOLDOWN_MINUTES", 30)
 MAX_CORRELATED_TRADES      = _env_int("MAX_CORRELATED_TRADES", 3)
 MAX_MARGIN_LOSS_PCT        = _env_float("MAX_MARGIN_LOSS_PCT", 0.40)
 MAX_PORTFOLIO_EXPOSURE_PCT = _env_float("MAX_PORTFOLIO_EXPOSURE_PCT", 95.0)
-MIN_RR                     = _env_float("MIN_RR", 1.2)
+MIN_RR                     = _env_float("MIN_RR", 1.5)   # v6.1 düzeltildi: 1.2→1.5
 MIN_EXPECTED_MFE_R         = _env_float("MIN_EXPECTED_MFE_R", 1.2)
 
-# TP / SL ATR multipliers
-SL_ATR_MULT  = _env_float("SL_ATR_MULT", 1.2)   # SCALP MODU dar SL
-TP1_R        = _env_float("TP1_R", 1.0)   # scalp hızlı kâr al
-TP2_R        = _env_float("TP2_R", 2.0)   # ikinci hedef
+# TP / SL ATR multipliers  (fix-tp-sl-ratios: TP1=1.5R TP2=2.5R SL min %1.5)
+SL_ATR_MULT  = _env_float("SL_ATR_MULT", 1.8)   # v6.1 düzeltildi: 1.2→1.8 (gürültü koruması)
+TP1_R        = _env_float("TP1_R", 1.5)   # v6.1 düzeltildi: 1.0→1.5
+TP2_R        = _env_float("TP2_R", 2.5)   # v6.1 düzeltildi: 2.0→2.5
 TP3_R        = _env_float("TP3_R", 4.0)   # runner hedef
-MIN_SL_PCT   = _env_float("MIN_SL_PCT", 0.008)  # SL min %0.8 (scalp)
+MIN_SL_PCT   = _env_float("MIN_SL_PCT", 0.015)  # v6.1 düzeltildi: 0.008→0.015 (SL min %1.5)
 # HUMAN MODE parametreleri (.env'den override edilir)
 HUMAN_MODE              = _env_bool("HUMAN_MODE", False)
 HUMAN_SL_ATR_MULT       = _env_float("HUMAN_SL_ATR_MULT", 2.0)

@@ -293,12 +293,12 @@ class RiskEngine:
 
             # Human mode veya scalp mode'a göre parametreler
             _human = bool(getattr(config, "HUMAN_MODE", False))
-            sl_atr_mult = float(getattr(config, "HUMAN_SL_ATR_MULT" if _human else "SL_ATR_MULT", 2.0 if _human else 1.2))
-            tp1_r = float(getattr(config, "HUMAN_TP1_R" if _human else "TP1_R", 1.5 if _human else 1.0))
-            tp2_r = float(getattr(config, "HUMAN_TP2_R" if _human else "TP2_R", 2.5 if _human else 2.0))
-            tp3_r = float(getattr(config, "TP3_R", 3.0))
+            sl_atr_mult = float(getattr(config, "HUMAN_SL_ATR_MULT" if _human else "SL_ATR_MULT", 2.0 if _human else 1.8))
+            tp1_r = float(getattr(config, "HUMAN_TP1_R" if _human else "TP1_R", 1.5 if _human else 1.5))
+            tp2_r = float(getattr(config, "HUMAN_TP2_R" if _human else "TP2_R", 2.5 if _human else 2.5))
+            tp3_r = float(getattr(config, "TP3_R", 4.0))
             max_lev = int(getattr(config, "MAX_LEVERAGE", 20))
-            min_rr = float(getattr(config, "MIN_RR", 1.2))
+            min_rr = float(getattr(config, "MIN_RR", 1.5))
             fee_rate = float(getattr(config, "DEFAULT_FEE_RATE", 0.0004))
             risk_pct_base = float(getattr(config, "RISK_PCT", 1.0))
 
@@ -359,10 +359,10 @@ class RiskEngine:
             from core.accounting import calculate_position_size, calculate_rr as _calc_rr
             # Human mode veya scalp mode'a göre parametreler
             _human = bool(getattr(config, "HUMAN_MODE", False))
-            sl_atr_mult = float(getattr(config, "HUMAN_SL_ATR_MULT" if _human else "SL_ATR_MULT", 2.0 if _human else 1.2))
-            tp1_r = float(getattr(config, "HUMAN_TP1_R" if _human else "TP1_R", 1.5 if _human else 1.0))
-            tp2_r = float(getattr(config, "HUMAN_TP2_R" if _human else "TP2_R", 2.5 if _human else 2.0))
-            tp3_r = float(getattr(config, "TP3_R", 3.0))
+            sl_atr_mult = float(getattr(config, "HUMAN_SL_ATR_MULT" if _human else "SL_ATR_MULT", 2.0 if _human else 1.8))
+            tp1_r = float(getattr(config, "HUMAN_TP1_R" if _human else "TP1_R", 1.5 if _human else 1.5))
+            tp2_r = float(getattr(config, "HUMAN_TP2_R" if _human else "TP2_R", 2.5 if _human else 2.5))
+            tp3_r = float(getattr(config, "TP3_R", 4.0))
             max_lev = int(getattr(config, "MAX_LEVERAGE", 20))
             risk_pct = float(getattr(config, "RISK_PCT", 1.0))
             fee_rate = float(getattr(config, "DEFAULT_FEE_RATE", 0.0004))
