@@ -288,15 +288,31 @@ class ExecutionEngine:
 
         try:
             from telegram_delivery import send_trade_close as _tg_close2
+            from database import get_paper_balance as _gpb2
+            _bal2 = _gpb2()
+            _entry2 = float(trade.get("entry") or trade.get("entry_price") or 1)
+            _sl2    = float(trade.get("sl") or trade.get("stop_loss") or 0)
+            _sl_dist2 = abs(_entry2 - _sl2) if _sl2 else 1e-10
+            _qty2     = float(trade.get("original_qty") or trade.get("qty") or 1)
+            _r2       = round(total_pnl / (_sl_dist2 * _qty2 + 1e-10), 2) if _sl2 else 0
+            _open2    = trade.get("open_time", "")
+            _dur2     = ""
+            try:
+                from datetime import datetime, timezone as _tz
+                _opened2 = datetime.fromisoformat(_open2.replace("Z", "+00:00"))
+                _hold2   = (datetime.now(_tz.utc) - _opened2).total_seconds() / 60
+                _dur2    = f"{int(_hold2 // 60)}s {int(_hold2 % 60)}dk" if _hold2 >= 60 else f"{int(_hold2)}dk"
+            except Exception:
+                pass
             _tg_close2(
                 symbol=trade["symbol"],
                 net_pnl=total_pnl,
                 total_fee=float(trade.get("total_fee") or 0),
                 reason=reason,
-                duration_str="",
+                duration_str=_dur2,
                 direction=trade.get("direction") or trade.get("side", ""),
-                r_multiple=0,
-                balance_after=0,
+                r_multiple=_r2,
+                balance_after=_bal2,
             )
             logger.info("[Telegram] Trade kapanış bildirimi gönderildi: %s", trade["symbol"])
         except Exception as _tg_err2:
@@ -708,6 +724,12 @@ def open_trade(client, signal_dict: dict, ax_result: dict):
         sig.tp2         = float(signal_dict.get("tp2", 0))
         sig.tp3         = float(signal_dict.get("runner_target", 0))
         sig.score       = float(signal_dict.get("score", ax_result.get("score", 0)))
+        sig.leverage    = int(
+            signal_dict.get("leverage")
+            or signal_dict.get("leverage_hint")
+            or signal_dict.get("leverage_suggestion")
+            or 10
+        )
         sig.risk_pct    = 1.0
         sig.source      = "scalp_bot"
         sig.metadata    = {

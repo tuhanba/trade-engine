@@ -552,6 +552,31 @@ def init_db() -> None:
                 consec_losses INTEGER DEFAULT 0
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS telegram_messages (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id  INTEGER,
+                symbol     TEXT,
+                dedupe_key TEXT UNIQUE,
+                message    TEXT,
+                status     TEXT DEFAULT 'queued',
+                created_at TEXT DEFAULT (datetime('now')),
+                sent_at    TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scanned_coins (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol     TEXT,
+                score      REAL DEFAULT 0,
+                status     TEXT DEFAULT 'scanned',
+                reason     TEXT DEFAULT '',
+                volume     REAL DEFAULT 0,
+                price      REAL DEFAULT 0,
+                price_change REAL DEFAULT 0,
+                scanned_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
         from config import INITIAL_PAPER_BALANCE
         conn.execute(
             "INSERT OR IGNORE INTO paper_account (id, balance) VALUES (1, ?)",
@@ -912,13 +937,24 @@ def get_open_trades() -> list[dict]:
 
 
 def get_recent_trades(limit: int = 100) -> list[dict]:
-    """Son trade'leri döner."""
+    """Son trade'leri döner — dashboard uyumlu alias'larla."""
     conn = get_connection()
     try:
         rows = conn.execute(
             "SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            t = dict(r)
+            # Dashboard uyumluluğu için alan aliasları
+            t["exit_price"]  = t.get("close_price") or t.get("exit_price") or t.get("current_price", 0)
+            t["opened_at"]   = t.get("open_time") or t.get("opened_at", "")
+            t["closed_at"]   = t.get("close_time") or t.get("closed_at", "")
+            t["entry_price"] = t.get("entry") or t.get("entry_price", 0)
+            t["stop_loss"]   = t.get("sl") or t.get("stop_loss", 0)
+            t["side"]        = t.get("direction") or t.get("side", "?")
+            result.append(t)
+        return result
     except Exception as exc:
         logger.error("Recent trades alınamadı: %s", exc)
         return []
