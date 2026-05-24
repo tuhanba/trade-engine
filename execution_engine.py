@@ -279,6 +279,9 @@ class ExecutionEngine:
             realized_pnl=total_pnl,
             close_reason=reason,
         )
+        # BUG FIX: database.close_trade artık bakiyeyi otomatik güncellemez.
+        # Sadece bu close için yeni realize edilen miktarı ekle (TP1/TP2 kısmı zaten eklendi).
+        database.update_paper_balance(remaining_pnl)
 
         logger.info(
             "Trade kapatıldı: #%s %s %s → %s  PnL=%.4f (accumulated=%.4f + remaining=%.4f)",
@@ -493,9 +496,13 @@ def _check_trade(client, t: dict) -> bool:
     if status != "runner":
         sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
         if sl_hit:
-            pnl = _calc_pnl(direction, entry, price, qty)
-            save_trade_event(trade_id, "SL_HIT", f"price={price} pnl={pnl}")
-            _finalize(trade_id, price, pnl, "sl", t)
+            # BUG FIX: tp1_hit modunda kalan miktar = qty - qty_tp1 (TP1 zaten kapatıldı)
+            remaining_sl_qty = qty - float(qty_tp1 or 0) if status == "tp1_hit" else qty
+            remaining_sl_pnl = _calc_pnl(direction, entry, price, remaining_sl_qty)
+            accumulated_sl   = float(t.get("realized_pnl") or 0)
+            total_sl_pnl     = accumulated_sl + remaining_sl_pnl
+            save_trade_event(trade_id, "SL_HIT", f"price={price} pnl={total_sl_pnl}")
+            _finalize(trade_id, price, total_sl_pnl, "sl", t)
             return True
 
     # ── TP1 Kontrolü ────────────────────────────────────────────────────────
@@ -630,7 +637,11 @@ def _check_trade(client, t: dict) -> bool:
                 opened_dt = datetime.fromisoformat(open_t.replace("Z", "+00:00"))
                 elapsed_min = (datetime.now(timezone.utc) - opened_dt).total_seconds() / 60.0
                 if elapsed_min > MAX_HOLD_MINUTES:
-                    pnl_close = _calc_pnl(direction, entry, price, qty)
+                    # BUG FIX: tp1_hit modunda kalan miktar = qty - qty_tp1
+                    remaining_to_qty = qty - float(qty_tp1 or 0) if status == "tp1_hit" else qty
+                    pnl_remaining    = _calc_pnl(direction, entry, price, remaining_to_qty)
+                    accumulated_to   = float(t.get("realized_pnl") or 0)
+                    pnl_close        = accumulated_to + pnl_remaining
                     save_trade_event(trade_id, "TIMEOUT", f"elapsed={elapsed_min:.0f}m max={MAX_HOLD_MINUTES}m")
                     logger.info(f"[Execution] MAX HOLD TIMEOUT #{trade_id} {symbol} status={status} elapsed={elapsed_min:.0f}dk")
                     _finalize(trade_id, price, pnl_close, "max_hold_timeout", t)
