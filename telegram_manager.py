@@ -424,8 +424,9 @@ class TelegramManager:
         self.send_fn(
             "⚡ SCALP MODE AKTİF\n"
             "━━━━━━━━━━━━━━━━\n"
-            "SL: Dar (1.2x ATR)\n"
-            "TP: Yakın (1.0R-2.0R)\n"
+            "SL: 1.8x ATR (min %1.5)\n"
+            "TP: 1.5R - 2.5R\n"
+            "Min R:R: 1.5\n"
             "Maks açık trade: 5\n"
             "Çok sinyal, hızlı çıkış\n\n"
             "/human ile insan moduna geç."
