@@ -341,6 +341,7 @@ def main():
                 pass
 
             # ── ADIM 1: MARKET SCANNER ─────────────────────────────────────
+            _scan_start = time.time()
             candidates = scanner.scan()
             if not candidates:
                 logger.debug("Market scanner: aday bulunamadı")
@@ -816,7 +817,10 @@ def main():
                 set_state("status", "running")
             except Exception:
                 pass
-            time.sleep(SCAN_INTERVAL)
+            _scan_dur = time.time() - _scan_start
+            _sleep = max(5, SCAN_INTERVAL - _scan_dur)
+            logger.debug(f"Scan süresi: {_scan_dur:.1f}s → sleep {_sleep:.0f}s")
+            time.sleep(_sleep)
             # ── AI Brain Periyodik Adaptasyon (30 dakikada bir) ─────────────
             _now_ts = time.time()
             if AI_BRAIN_AVAILABLE and (_now_ts - _last_ai_adapt) >= 1800:
