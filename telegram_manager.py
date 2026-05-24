@@ -23,6 +23,7 @@ class TelegramManager:
         self.chat_id        = str(config.TELEGRAM_CHAT_ID)
         self.is_paused      = False
         self.is_finish_mode = False
+        self.human_mode     = False
         self._running       = False
         self._thread: Optional[threading.Thread] = None
         self._last_update_id = 0
@@ -92,6 +93,9 @@ class TelegramManager:
             "/pause":   self._cmd_pause,
             "/resume":  self._cmd_resume,
             "/finish":  self._cmd_finish,
+            "/human":   self._cmd_human_on,
+            "/scalp":   self._cmd_human_off,
+            "/insan":   self._cmd_human_on,
         }
         handler = handlers.get(cmd)
         if handler:
@@ -104,22 +108,25 @@ class TelegramManager:
 
     def _cmd_help(self):
         self.send_fn(
-            "AurvexAI Komutlari\n\n"
+            "🤖 AurvexAI Komutları\n\n"
             "Durum\n"
-            "/status  - Bot durumu + bakiye\n"
-            "/mode    - Calisma modu\n"
-            "/open    - Acik tradeler\n\n"
-            "Istatistik\n"
-            "/stats   - Genel performans\n"
-            "/daily   - Bugunun ozeti\n"
-            "/balance - Bakiye detayi\n"
-            "/trades  - Son 5 trade\n"
-            "/signal  - Son 5 sinyal ozeti\n"
-            "/ghost   - Ghost learning\n\n"
+            "/status  — Bot durumu\n"
+            "/open    — Açık tradeler\n"
+            "/mode    — Mod bilgisi\n\n"
+            "İstatistik\n"
+            "/stats   — Performans\n"
+            "/daily   — Bugün\n"
+            "/balance — Bakiye\n"
+            "/trades  — Son 5 trade\n"
+            "/signal  — Son 5 sinyal\n"
+            "/ghost   — Ghost learning\n\n"
+            "Mod\n"
+            "/human   — İnsan modu (az, kaliteli)\n"
+            "/scalp   — Scalp modu (çok, hızlı)\n\n"
             "Kontrol\n"
-            "/pause   - Duraklatir\n"
-            "/resume  - Devam ettirir\n"
-            "/finish  - Yeni sinyal almaz, aciklarini kapatir"
+            "/pause   — Duraklat\n"
+            "/resume  — Devam\n"
+            "/finish  — Kapat ve dur"
         )
 
     def _cmd_status(self):
@@ -375,4 +382,40 @@ class TelegramManager:
             "Finish modu aktif.\n"
             "Yeni sinyal alinmayacak.\n"
             "Acik tradeler kapaninca bot duracak."
+        )
+
+    def _cmd_human_on(self):
+        """Human mode: Az ama güçlü setup, yüksek threshold."""
+        self.human_mode = True
+        try:
+            import config as _cfg
+            _cfg.HUMAN_MODE = True
+        except Exception:
+            pass
+        self.send_fn(
+            "🧠 HUMAN MODE AKTİF\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "SL: Geniş (2x ATR)\n"
+            "TP: Uzak (1.5R-2.5R)\n"
+            "Maks açık trade: 2\n"
+            "Sadece A+/S kalite\n\n"
+            "/scalp ile normal moda dön."
+        )
+
+    def _cmd_human_off(self):
+        """Scalp mode: Çok trade, dar SL, hızlı TP."""
+        self.human_mode = False
+        try:
+            import config as _cfg
+            _cfg.HUMAN_MODE = False
+        except Exception:
+            pass
+        self.send_fn(
+            "⚡ SCALP MODE AKTİF\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "SL: Dar (1.2x ATR)\n"
+            "TP: Yakın (1.0R-2.0R)\n"
+            "Maks açık trade: 5\n"
+            "Çok sinyal, hızlı çıkış\n\n"
+            "/human ile insan moduna geç."
         )
