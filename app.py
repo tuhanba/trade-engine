@@ -184,20 +184,28 @@ def api_learning():
             gr_wins  = conn.execute("SELECT COUNT(*) FROM ghost_results WHERE virtual_outcome='WIN'").fetchone()[0]
             gr_loss  = conn.execute("SELECT COUNT(*) FROM ghost_results WHERE virtual_outcome='LOSS'").fetchone()[0]
             gr_avg_r = conn.execute("SELECT AVG(virtual_pnl_r) FROM ghost_results WHERE virtual_outcome IN ('WIN','LOSS')").fetchone()[0] or 0
-            suggestions = conn.execute("SELECT COUNT(*) FROM ghost_suggestions WHERE applied=0").fetchone()[0]
+            try:
+                suggestions = conn.execute(
+                    "SELECT COUNT(*) FROM ghost_suggestions WHERE applied=0"
+                ).fetchone()[0]
+            except Exception:
+                suggestions = 0
 
-            top_patterns = conn.execute("""
-                SELECT g.trigger_type, g.coin,
-                       COUNT(*) as n,
-                       SUM(CASE WHEN r.virtual_outcome='WIN' THEN 1.0 ELSE 0 END)*100/COUNT(*) as wr,
-                       AVG(r.virtual_pnl_r) as avg_r
-                FROM ghost_signals g
-                JOIN ghost_results r ON g.id=r.ghost_id
-                WHERE r.virtual_outcome IN ('WIN','LOSS')
-                GROUP BY g.trigger_type, g.coin
-                HAVING COUNT(*) >= 3
-                ORDER BY avg_r DESC LIMIT 5
-            """).fetchall()
+            try:
+                top_patterns = conn.execute("""
+                    SELECT g.trigger_type, g.coin,
+                           COUNT(*) as n,
+                           SUM(CASE WHEN r.virtual_outcome='WIN' THEN 1.0 ELSE 0 END)*100/COUNT(*) as wr,
+                           AVG(r.virtual_pnl_r) as avg_r
+                    FROM ghost_signals g
+                    JOIN ghost_results r ON g.id=r.ghost_id
+                    WHERE r.virtual_outcome IN ('WIN','LOSS')
+                    GROUP BY g.trigger_type, g.coin
+                    HAVING COUNT(*) >= 3
+                    ORDER BY avg_r DESC LIMIT 5
+                """).fetchall()
+            except Exception:
+                top_patterns = []
 
         vwr = round(gr_wins / (gr_wins + gr_loss) * 100, 1) if (gr_wins + gr_loss) > 0 else 0
         return _ok({
@@ -874,32 +882,30 @@ def api_equity_curve():
     try:
         with get_conn() as conn:
             initial_balance = 500.0
-            try:
-                bal_row = conn.execute(
-                    "SELECT balance FROM balance_ledger ORDER BY id ASC LIMIT 1"
-                ).fetchone()
-                if bal_row:
-                    initial_balance = float(bal_row[0])
-            except Exception:
+            for q in [
+                "SELECT balance FROM balance_ledger ORDER BY id ASC LIMIT 1",
+                "SELECT balance FROM paper_account ORDER BY id ASC LIMIT 1",
+            ]:
                 try:
-                    bal_row = conn.execute(
-                        "SELECT balance FROM paper_account ORDER BY id ASC LIMIT 1"
-                    ).fetchone()
-                    if bal_row:
-                        initial_balance = float(bal_row[0])
+                    row = conn.execute(q).fetchone()
+                    if row:
+                        initial_balance = float(row[0])
+                        break
                 except Exception:
-                    initial_balance = 500.0
+                    continue
 
-            daily = conn.execute("""
-                SELECT DATE(close_time) as day,
-                       SUM(COALESCE(net_pnl, realized_pnl, 0)) as daily_pnl
-                FROM trades
-                WHERE status='closed'
-                  AND close_time >= DATE('now', '-30 days')
-                  AND close_time IS NOT NULL
-                GROUP BY day
-                ORDER BY day
-            """).fetchall()
+            try:
+                daily = conn.execute("""
+                    SELECT DATE(close_time) as day,
+                           SUM(COALESCE(net_pnl, realized_pnl, 0)) as daily_pnl
+                    FROM trades
+                    WHERE LOWER(status)='closed'
+                      AND close_time >= DATE('now', '-30 days')
+                      AND close_time IS NOT NULL
+                    GROUP BY day ORDER BY day
+                """).fetchall()
+            except Exception:
+                daily = []
 
         cum_pnl = 0.0
         points = []
@@ -912,20 +918,17 @@ def api_equity_curve():
                 "balance": round(initial_balance + cum_pnl, 4),
             })
 
-        current_balance = initial_balance + cum_pnl
-        pct_change = round((cum_pnl / initial_balance * 100), 2) if initial_balance > 0 else 0
-
         return jsonify({
             "ok": True,
             "initial_balance": initial_balance,
-            "current_balance": round(current_balance, 4),
+            "current_balance": round(initial_balance + cum_pnl, 4),
             "total_pnl": round(cum_pnl, 4),
-            "pct_change": pct_change,
+            "pct_change": round((cum_pnl / initial_balance * 100), 2) if initial_balance > 0 else 0,
             "points": points,
         })
     except Exception as e:
         logger.error(f"[API] /api/equity-curve hatasi: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": True, "points": [], "total_pnl": 0, "error": str(e)})
 
 
 # ── Server başlatma ─────────────────────────────────────────────────

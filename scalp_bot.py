@@ -16,6 +16,7 @@ import logging.handlers
 import threading
 from datetime import datetime, timezone, timedelta
 from binance.client import Client
+import config
 
 from config import (
     BINANCE_API_KEY, BINANCE_API_SECRET,
@@ -34,8 +35,6 @@ from config import (
     PAPER_TRACK_WATCHLIST,
     PAPER_TRACK_TELEGRAM_GAPS,
     PAPER_TRACK_HORIZON_HOURS,
-    HUMAN_MODE, HUMAN_SL_ATR_MULT, HUMAN_TP1_R, HUMAN_TP2_R,
-    HUMAN_TRADE_THRESHOLD, HUMAN_MAX_OPEN_TRADES,
 )
 from database import (
     init_db, init_paper_account, get_paper_balance,
@@ -314,7 +313,7 @@ def main():
 
             # Açık trade limiti (Human Mode desteği)
             open_trades_now = get_open_trades()
-            _max_open_check = HUMAN_MAX_OPEN_TRADES if HUMAN_MODE else MAX_OPEN_TRADES
+            _max_open_check = config.HUMAN_MAX_OPEN_TRADES if config.HUMAN_MODE else MAX_OPEN_TRADES
             if len(open_trades_now) >= _max_open_check:
                 time.sleep(5)
                 continue
@@ -699,7 +698,7 @@ def main():
 
                     # ── ADIM 9: TRADE AÇMA (execute modunda) ──────────────
                     # Human Mode override
-                    _trade_thr = HUMAN_TRADE_THRESHOLD if HUMAN_MODE else TRADE_THRESHOLD
+                    _trade_thr = config.HUMAN_TRADE_THRESHOLD if config.HUMAN_MODE else TRADE_THRESHOLD
                     if (AX_MODE == "execute" and EXECUTION_AVAILABLE
                             and sig.final_score >= _trade_thr
                             and sig.setup_quality in EXECUTABLE_QUALITIES):  # B kalite execute edilmez

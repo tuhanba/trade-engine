@@ -171,7 +171,7 @@ class TelegramManager:
             f"🤖 AurvexAI Durum\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"Durum: {paused}\n"
-            f"Mod: {config.EXECUTION_MODE.upper()} | {config.AX_MODE.upper()}\n"
+            f"Mod: {'🧠 HUMAN' if config.HUMAN_MODE else '⚡ SCALP'} | {config.EXECUTION_MODE.upper()}\n"
             f"Rejim: {regime}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"💰 Bakiye: ${bal:.2f} ({roi:+.1f}% ROI)\n"
@@ -353,14 +353,22 @@ class TelegramManager:
             self.send_fn(f"Gunluk ozet alinamadi: {e}")
 
     def _cmd_mode(self):
-        thr = getattr(config, "TRADE_THRESHOLD", 68)
-        bad = getattr(config, "BAD_HOURS_UTC", [])
+        is_human = config.HUMAN_MODE
+        thr = config.HUMAN_TRADE_THRESHOLD if is_human else config.TRADE_THRESHOLD
+        sl  = config.HUMAN_SL_ATR_MULT if is_human else config.SL_ATR_MULT
+        mx  = config.HUMAN_MAX_OPEN_TRADES if is_human else config.MAX_OPEN_TRADES
         self.send_fn(
-            f"Calisma Modu\n\n"
-            f"EXECUTION_MODE: {config.EXECUTION_MODE.upper()}\n"
-            f"AX_MODE: {config.AX_MODE.upper()}\n"
-            f"TRADE_THRESHOLD: {thr}\n"
-            f"Kapali saatler (UTC): {bad}"
+            f"⚙️ Çalışma Modu\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"Aktif: {'🧠 HUMAN MODE' if is_human else '⚡ SCALP MODE'}\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"Trade eşiği: {thr}\n"
+            f"SL: {sl}x ATR\n"
+            f"Maks açık trade: {mx}\n"
+            f"Execution: {config.EXECUTION_MODE.upper()}\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"/human — İnsan moduna geç\n"
+            f"/scalp — Scalp moduna geç"
         )
 
     def _cmd_pause(self):
