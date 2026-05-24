@@ -566,6 +566,69 @@ def _check_trade(client, t: dict) -> bool:
             logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ → RUNNER trail={new_trail:.6f}")
             return False
 
+    # ── Runner Trailing Stop Kontrolü ───────────────────────────────────────
+    if status == "runner":
+        trail_f = float(trail or 0)
+        if trail_f > 0:
+            # Trailing stop güncelle: fiyat yeni zirve yaptıysa trail'i hareket ettir
+            atr_val = _get_atr(client, symbol)
+            if atr_val > 0:
+                if is_long:
+                    new_trail_sl = price - atr_val * TRAIL_ATR_MULT
+                    if new_trail_sl > trail_f:
+                        trail_f = new_trail_sl
+                        update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
+                        save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
+                else:
+                    new_trail_sl = price + atr_val * TRAIL_ATR_MULT
+                    if new_trail_sl < trail_f:
+                        trail_f = new_trail_sl
+                        update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
+                        save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
+            # Trailing stop vuruldu mu?
+            trail_hit = (is_long and price <= trail_f) or (not is_long and price >= trail_f)
+            if trail_hit:
+                runner_qty = float(t.get("qty_runner") or (qty - qty_tp1 - qty_tp2))
+                pnl_runner = _calc_pnl(direction, entry, price, runner_qty)
+                total_pnl = (t.get("realized_pnl") or 0) + pnl_runner
+                save_trade_event(trade_id, "TRAIL_HIT", f"price={price} trail={trail_f:.6f} runner_pnl={pnl_runner:.4f}")
+                logger.info(f"[Execution] RUNNER TRAIL HIT #{trade_id} {symbol} trail={trail_f:.4f} total_pnl={total_pnl:.4f}")
+                _finalize(trade_id, price, total_pnl, "trail", t)
+                return True
+
+        # ── Max Hold Timeout (runner dahil tüm durumlar) ────────────────
+        try:
+            open_t = t.get("open_time", "") or t.get("opened_at", "")
+            if open_t:
+                opened_dt = datetime.fromisoformat(open_t.replace("Z", "+00:00"))
+                elapsed_min = (datetime.now(timezone.utc) - opened_dt).total_seconds() / 60.0
+                if elapsed_min > MAX_HOLD_MINUTES:
+                    runner_qty = float(t.get("qty_runner") or (qty - qty_tp1 - qty_tp2))
+                    pnl_runner = _calc_pnl(direction, entry, price, runner_qty)
+                    total_pnl = (t.get("realized_pnl") or 0) + pnl_runner
+                    save_trade_event(trade_id, "TIMEOUT", f"elapsed={elapsed_min:.0f}m max={MAX_HOLD_MINUTES}m")
+                    logger.info(f"[Execution] MAX HOLD TIMEOUT #{trade_id} {symbol} elapsed={elapsed_min:.0f}dk")
+                    _finalize(trade_id, price, total_pnl, "max_hold_timeout", t)
+                    return True
+        except Exception as _to_err:
+            logger.debug(f"[Execution] Timeout kontrolü hatası: {_to_err}")
+
+    # ── Max Hold Timeout — OPEN/TP1_HIT durumları için ──────────────────────
+    if status in ("open", "tp1_hit"):
+        try:
+            open_t = t.get("open_time", "") or t.get("opened_at", "")
+            if open_t:
+                opened_dt = datetime.fromisoformat(open_t.replace("Z", "+00:00"))
+                elapsed_min = (datetime.now(timezone.utc) - opened_dt).total_seconds() / 60.0
+                if elapsed_min > MAX_HOLD_MINUTES:
+                    pnl_close = _calc_pnl(direction, entry, price, qty)
+                    save_trade_event(trade_id, "TIMEOUT", f"elapsed={elapsed_min:.0f}m max={MAX_HOLD_MINUTES}m")
+                    logger.info(f"[Execution] MAX HOLD TIMEOUT #{trade_id} {symbol} status={status} elapsed={elapsed_min:.0f}dk")
+                    _finalize(trade_id, price, pnl_close, "max_hold_timeout", t)
+                    return True
+        except Exception as _to_err2:
+            logger.debug(f"[Execution] Timeout kontrolü hatası: {_to_err2}")
+
     return False
 
 
