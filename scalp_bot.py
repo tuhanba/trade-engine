@@ -289,16 +289,11 @@ def main():
             except Exception as _e:
                 logger.warning(f"Günlük kayıp kontrolü hatası: {_e}")
 
-            # Günlük sinyal sayısı — hard limit kontrolü
+            # Günlük sinyal sayısı — bilgi amaçlı log
             daily_counts = get_daily_signal_count()
             _daily_total = daily_counts.get("total", 0) if isinstance(daily_counts, dict) else int(daily_counts)
-            from config import DAILY_SIGNAL_LIMIT
-            if _daily_total >= DAILY_SIGNAL_LIMIT:
-                logger.info(f"[LIMIT] Günlük sinyal limiti doldu ({_daily_total}/{DAILY_SIGNAL_LIMIT}), scan atlandı")
-                time.sleep(60)
-                continue
             if _daily_total % 10 == 0 and _daily_total > 0:
-                logger.debug(f"Günlük sinyal sayısı: {_daily_total}/{DAILY_SIGNAL_LIMIT}")
+                logger.debug(f"Günlük sinyal sayısı: {_daily_total}")
 
             # Açık trade takibi
             if EXECUTION_AVAILABLE:
