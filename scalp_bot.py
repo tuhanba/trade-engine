@@ -34,6 +34,8 @@ from config import (
     PAPER_TRACK_WATCHLIST,
     PAPER_TRACK_TELEGRAM_GAPS,
     PAPER_TRACK_HORIZON_HOURS,
+    HUMAN_MODE, HUMAN_SL_ATR_MULT, HUMAN_TP1_R, HUMAN_TP2_R,
+    HUMAN_TRADE_THRESHOLD, HUMAN_MAX_OPEN_TRADES,
 )
 from database import (
     init_db, init_paper_account, get_paper_balance,
@@ -310,9 +312,10 @@ def main():
                 if open_trades_now:
                     exec_monitor(client)
 
-            # Açık trade limiti
+            # Açık trade limiti (Human Mode desteği)
             open_trades_now = get_open_trades()
-            if len(open_trades_now) >= MAX_OPEN_TRADES:
+            _max_open_check = HUMAN_MAX_OPEN_TRADES if HUMAN_MODE else MAX_OPEN_TRADES
+            if len(open_trades_now) >= _max_open_check:
                 time.sleep(5)
                 continue
 
@@ -359,19 +362,6 @@ def main():
 
             for coin_info in eligible:
                 symbol = coin_info["symbol"]
-
-                # ── Günlük sinyal limiti kontrolü ──────────────────────
-                from config import DAILY_SIGNAL_LIMIT, MAX_SIGNALS_PER_COIN
-                _dc = get_daily_signal_count()
-                _total_today = _dc.get("total", 0) if isinstance(_dc, dict) else int(_dc or 0)
-                if _total_today >= DAILY_SIGNAL_LIMIT:
-                    logger.info(f"[LIMIT] Günlük sinyal limiti doldu ({_total_today}/{DAILY_SIGNAL_LIMIT})")
-                    break  # Bu scan döngüsünü bitir
-                _coin_today = _dc.get(symbol, 0) if isinstance(_dc, dict) else 0
-                if _coin_today >= MAX_SIGNALS_PER_COIN:
-                    logger.debug(f"[LIMIT] {symbol} günlük limit: {_coin_today}/{MAX_SIGNALS_PER_COIN}")
-                    continue
-                # ────────────────────────────────────────────────────────
 
                 if symbol in open_symbols:
                     continue
@@ -708,8 +698,10 @@ def main():
                     save_scalp_signal(sig.to_dict())
 
                     # ── ADIM 9: TRADE AÇMA (execute modunda) ──────────────
+                    # Human Mode override
+                    _trade_thr = HUMAN_TRADE_THRESHOLD if HUMAN_MODE else TRADE_THRESHOLD
                     if (AX_MODE == "execute" and EXECUTION_AVAILABLE
-                            and sig.final_score >= TRADE_THRESHOLD
+                            and sig.final_score >= _trade_thr
                             and sig.setup_quality in EXECUTABLE_QUALITIES):  # B kalite execute edilmez
                         if sig.rr < MIN_RR:
                             update_candidate_status(candidate_id, reject_reason="bad_rr", lifecycle_stage="REJECTED", execution_status="rejected")

@@ -52,7 +52,7 @@ ANTHROPIC_API_KEY  = _env("ANTHROPIC_API_KEY")
 
 # Risk
 RISK_PCT                   = _env_float("RISK_PCT", 1.0)
-MAX_OPEN_TRADES            = _env_int("MAX_OPEN_TRADES", 3)
+MAX_OPEN_TRADES            = _env_int("MAX_OPEN_TRADES", 5)
 DAILY_MAX_LOSS_PCT         = _env_float("DAILY_MAX_LOSS_PCT", 5.0)
 MAX_LEVERAGE               = _env_int("MAX_LEVERAGE", 10)
 DEFAULT_FEE_RATE           = _env_float("DEFAULT_FEE_RATE", 0.0004)
@@ -61,18 +61,25 @@ COIN_COOLDOWN_MINUTES      = _env_int("COIN_COOLDOWN_MINUTES", 30)
 MAX_CORRELATED_TRADES      = _env_int("MAX_CORRELATED_TRADES", 3)
 MAX_MARGIN_LOSS_PCT        = _env_float("MAX_MARGIN_LOSS_PCT", 0.40)
 MAX_PORTFOLIO_EXPOSURE_PCT = _env_float("MAX_PORTFOLIO_EXPOSURE_PCT", 95.0)
-MIN_RR                     = _env_float("MIN_RR", 1.5)
+MIN_RR                     = _env_float("MIN_RR", 1.2)
 MIN_EXPECTED_MFE_R         = _env_float("MIN_EXPECTED_MFE_R", 1.2)
 
 # TP / SL ATR multipliers
-SL_ATR_MULT  = _env_float("SL_ATR_MULT", 2.0)   # gürültüden uzak SL (1.8→2.0)
-TP1_R        = _env_float("TP1_R", 1.5)   # kârlı başlangıç (1.5R)
-TP2_R        = _env_float("TP2_R", 2.5)   # güçlü hedef (2.5R)
+SL_ATR_MULT  = _env_float("SL_ATR_MULT", 1.2)   # SCALP MODU dar SL
+TP1_R        = _env_float("TP1_R", 1.0)   # scalp hızlı kâr al
+TP2_R        = _env_float("TP2_R", 2.0)   # ikinci hedef
 TP3_R        = _env_float("TP3_R", 4.0)   # runner hedef
-MIN_SL_PCT   = _env_float("MIN_SL_PCT", 0.02)   # SL min %2 (gürültü koruması — artırıldı)
+MIN_SL_PCT   = _env_float("MIN_SL_PCT", 0.008)  # SL min %0.8 (scalp)
+# HUMAN MODE parametreleri (.env'den override edilir)
+HUMAN_MODE              = _env_bool("HUMAN_MODE", False)
+HUMAN_SL_ATR_MULT       = _env_float("HUMAN_SL_ATR_MULT", 2.0)
+HUMAN_TP1_R             = _env_float("HUMAN_TP1_R", 1.5)
+HUMAN_TP2_R             = _env_float("HUMAN_TP2_R", 2.5)
+HUMAN_TRADE_THRESHOLD   = _env_float("HUMAN_TRADE_THRESHOLD", 72.0)
+HUMAN_MAX_OPEN_TRADES   = _env_int("HUMAN_MAX_OPEN_TRADES", 2)
 
 # TP Splits
-TP1_CLOSE_PCT    = _env_float("TP1_CLOSE_PCT", 40)
+TP1_CLOSE_PCT    = _env_float("TP1_CLOSE_PCT", 50)   # scalp: erken çık
 TP2_CLOSE_PCT    = _env_float("TP2_CLOSE_PCT", 35)
 RUNNER_CLOSE_PCT = _env_float("RUNNER_CLOSE_PCT", 25)
 
@@ -86,13 +93,13 @@ INITIAL_PAPER_BALANCE = _env_float("INITIAL_PAPER_BALANCE", 500.0)
 MAX_HOLD_MINUTES      = _env_int("MAX_HOLD_MINUTES", 240)
 
 # Scan
-SCAN_INTERVAL            = _env_int("SCAN_INTERVAL", 60)
-SCAN_INTERVAL_SECONDS    = _env_int("SCAN_INTERVAL_SECONDS", 60)
-MIN_VOLUME_USDT          = _env_float("MIN_VOLUME_USDT", 5_000_000.0)
-MIN_MOVE_PCT             = _env_float("MIN_MOVE_PCT", 0.5)
+SCAN_INTERVAL            = _env_int("SCAN_INTERVAL", 45)   # 60→45s
+SCAN_INTERVAL_SECONDS    = _env_int("SCAN_INTERVAL_SECONDS", 45)
+MIN_VOLUME_USDT          = _env_float("MIN_VOLUME_USDT", 3_000_000.0)
+MIN_MOVE_PCT             = _env_float("MIN_MOVE_PCT", 0.3)
 SCAN_INCLUDE_WATCH       = _env_bool("SCAN_INCLUDE_WATCH", True)
-WATCHLIST_MIN_SCAN_SCORE = _env_float("WATCHLIST_MIN_SCAN_SCORE", 50.0)
-MAX_COINS_PER_SCAN_LOOP  = _env_int("MAX_COINS_PER_SCAN_LOOP", 30)
+WATCHLIST_MIN_SCAN_SCORE = _env_float("WATCHLIST_MIN_SCAN_SCORE", 45.0)
+MAX_COINS_PER_SCAN_LOOP  = _env_int("MAX_COINS_PER_SCAN_LOOP", 40)
 MAX_DAILY_SIGNALS        = _env_int("MAX_DAILY_SIGNALS", 9999)   # bilgi amaçlı eski compat
 DAILY_SIGNAL_LIMIT       = _env_int("DAILY_SIGNAL_LIMIT", 60)   # günlük hard limit
 MAX_SIGNALS_PER_COIN     = _env_int("MAX_SIGNALS_PER_COIN", 3)  # coin başına günlük max
@@ -100,8 +107,8 @@ MAX_SIGNALS_PER_COIN     = _env_int("MAX_SIGNALS_PER_COIN", 3)  # coin başına 
 # Sinyal Esikleri (v11.0 — audit fix, B kaliteyi filtrele)
 DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 20.0)     # 15→20
 WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 35.0) # 20→35
-TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 40.0)  # 25→50→40 (trade açılanlar mutlaka gitsin)
-TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 65.0)     # 30→65 (B kalite ~50-60, A ~65-75)
+TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 35.0)  # v6.0 gevşetildi
+TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 55.0)     # v6.0 gevşetildi
 
 # Circuit Breaker
 CIRCUIT_BREAKER_LOSSES  = _env_int("CIRCUIT_BREAKER_LOSSES", 3)
@@ -128,11 +135,11 @@ ADX_MIN_THRESHOLD          = 18  # eskiden 20
 MIN_ADX_5M_FILTER          = _env_float("MIN_ADX_5M_FILTER", 20.0)
 
 # Scalp Filtreler (v9.0 — gevşetilmiş)
-MIN_BB_WIDTH    = _env_float("MIN_BB_WIDTH", 1.0)      # eskiden 1.3
-MIN_ADX_15M     = _env_float("MIN_ADX_15M", 18)        # eskiden 20
-MIN_ADX_5M      = _env_float("MIN_ADX_5M", 13)         # eskiden 15
-FUNDING_LONG_MAX  = _env_float("FUNDING_LONG_MAX", 0.003)   # eskiden 0.001
-FUNDING_SHORT_MIN = _env_float("FUNDING_SHORT_MIN", -0.003)  # eskiden -0.001
+MIN_BB_WIDTH    = _env_float("MIN_BB_WIDTH", 0.8)      # v6.0 gevşetildi
+MIN_ADX_15M     = _env_float("MIN_ADX_15M", 15)        # v6.0 gevşetildi
+MIN_ADX_5M      = _env_float("MIN_ADX_5M", 12)         # v6.0 gevşetildi
+FUNDING_LONG_MAX  = _env_float("FUNDING_LONG_MAX", 0.005)   # v6.0 gevşetildi
+FUNDING_SHORT_MIN = _env_float("FUNDING_SHORT_MIN", -0.005)  # v6.0 gevşetildi
 
 # Flask
 FLASK_HOST = _env("FLASK_HOST", "0.0.0.0")
