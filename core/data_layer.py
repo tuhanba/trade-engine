@@ -202,6 +202,7 @@ class _SignalRecord:
         self.risk_score: float = 0.0
         self.setup_quality: str = ""
         self.ml_score: float = 50.0
+        self.confluence_score: float = 0.0
         self.entry_zone: float = 0.0
         self.stop_loss: float = 0.0
         self.tp1: Optional[float] = None
@@ -262,6 +263,7 @@ class _SignalRecord:
             "trigger_score": self.trigger_score,
             "risk_score": self.risk_score,
             "ml_score": self.ml_score,
+            "confluence_score": self.confluence_score,
             "status": self.status,
             "telegram_status": self.telegram_status,
             "reject_reason": self.reject_reason,

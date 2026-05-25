@@ -169,7 +169,9 @@ def activate_circuit_breaker():
 def main():
     # ── Duplicate process koruması ─────────────────────────────────────
     import fcntl as _fcntl
-    _lock_file = open("/tmp/aurvex_bot.lock", "w")
+    import tempfile as _tempfile
+    _lock_path = os.path.join(_tempfile.gettempdir(), "aurvex_bot.lock")
+    _lock_file = open(_lock_path, "w")
     try:
         _fcntl.flock(_lock_file, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
     except BlockingIOError:
@@ -363,6 +365,8 @@ def main():
             # Eski sinyalleri arşivle
             archive_old_scalp_signals(hours=24)
 
+            # Bakiye scan döngüsü başında bir kez alınır — her coin için DB çağrısı önlenir
+            balance = get_paper_balance()
             for coin_info in eligible:
                 symbol = coin_info["symbol"]
 
@@ -474,7 +478,6 @@ def main():
                     # ────────────────────────────────────────────────────────
 
                     # ── ADIM 4: RISK ENGINE ────────────────────────────────
-                    balance = get_paper_balance()
                     risk_result = risk.calculate(
                         symbol, trend_result["direction"],
                         trigger_result["entry"],

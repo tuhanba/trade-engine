@@ -47,9 +47,8 @@ def _get_health_impl() -> dict:
 
     db_ok = False
     try:
-        conn = database.get_connection()
-        conn.execute("SELECT 1")
-        conn.close()
+        with database.get_conn() as conn:
+            conn.execute("SELECT 1")
         db_ok = True
     except Exception:
         pass
@@ -64,7 +63,7 @@ def _get_health_impl() -> dict:
         try:
             hb_dt = datetime.fromisoformat(heartbeat.replace("Z", "+00:00"))
             elapsed_sec = (datetime.now(timezone.utc) - hb_dt).total_seconds()
-            bot_alive = elapsed_sec < 300  # 5 dakika içinde heartbeat varsa alive
+            bot_alive = elapsed_sec < 120  # 2 dakika içinde heartbeat varsa alive
         except Exception:
             pass
 
@@ -210,7 +209,7 @@ def get_ax_status() -> dict:
             "paper_mode": config.PAPER_MODE,
             "circuit_breaker_active": cb_active, "circuit_breaker_until": cb_until,
             "paper_balance": round(balance, 2),
-            "initial_balance": database.get_paper_balance(),
+            "initial_balance": getattr(config, "INITIAL_PAPER_BALANCE", 500.0),
         }
     except Exception as e:
         logger.error("get_ax_status hata: %s", e)
@@ -220,17 +219,16 @@ def get_ax_status() -> dict:
 def get_calendar_data(days: int = 30) -> list:
     """Günlük PnL takvimi."""
     try:
-        conn = database.get_connection()
-        rows = conn.execute("""
-            SELECT date(close_time) AS day,
-                   COALESCE(SUM(net_pnl),0) AS pnl,
-                   COUNT(*) AS trades,
-                   SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) AS wins
-            FROM trades
-            WHERE close_time IS NOT NULL AND close_time >= date('now',?)
-            GROUP BY day ORDER BY day ASC
-        """, (f"-{days} days",)).fetchall()
-        conn.close()
+        with database.get_conn() as conn:
+            rows = conn.execute("""
+                SELECT date(close_time) AS day,
+                       COALESCE(SUM(net_pnl),0) AS pnl,
+                       COUNT(*) AS trades,
+                       SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) AS wins
+                FROM trades
+                WHERE close_time IS NOT NULL AND close_time >= date('now',?)
+                GROUP BY day ORDER BY day ASC
+            """, (f"-{days} days",)).fetchall()
         return [{"day": r["day"], "pnl": round(float(r["pnl"]), 4),
                  "trades": r["trades"], "wins": r["wins"]} for r in rows]
     except Exception as e:
@@ -241,17 +239,16 @@ def get_calendar_data(days: int = 30) -> list:
 def get_weekly_data(weeks: int = 8) -> list:
     """Haftalık PnL özeti."""
     try:
-        conn = database.get_connection()
-        rows = conn.execute("""
-            SELECT strftime('%Y-W%W', close_time) AS week,
-                   COALESCE(SUM(net_pnl),0) AS pnl,
-                   COUNT(*) AS trades,
-                   SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) AS wins
-            FROM trades
-            WHERE close_time IS NOT NULL AND close_time >= date('now',?)
-            GROUP BY week ORDER BY week ASC
-        """, (f"-{weeks*7} days",)).fetchall()
-        conn.close()
+        with database.get_conn() as conn:
+            rows = conn.execute("""
+                SELECT strftime('%Y-W%W', close_time) AS week,
+                       COALESCE(SUM(net_pnl),0) AS pnl,
+                       COUNT(*) AS trades,
+                       SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) AS wins
+                FROM trades
+                WHERE close_time IS NOT NULL AND close_time >= date('now',?)
+                GROUP BY week ORDER BY week ASC
+            """, (f"-{weeks*7} days",)).fetchall()
         return [{"week": r["week"], "pnl": round(float(r["pnl"]), 4),
                  "trades": r["trades"], "wins": r["wins"],
                  "winrate": round(r["wins"] / r["trades"] * 100, 1) if r["trades"] else 0.0}
@@ -264,18 +261,17 @@ def get_weekly_data(weeks: int = 8) -> list:
 def get_learning_metrics(days: int = 14) -> dict:
     """Ghost + paper learning metrikleri."""
     try:
-        conn   = database.get_connection()
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        with database.get_conn() as conn:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
-        def q(sql, *args):
-            return conn.execute(sql, args).fetchone()[0] or 0
+            def q(sql, *args):
+                return conn.execute(sql, args).fetchone()[0] or 0
 
-        ghost_tp  = q("SELECT COUNT(*) FROM signal_candidates WHERE status='TP_HIT' AND created_at>=?", cutoff)
-        ghost_sl  = q("SELECT COUNT(*) FROM signal_candidates WHERE status='SL_HIT' AND created_at>=?", cutoff)
-        ghost_pnl = q("SELECT COALESCE(SUM(ghost_pnl),0) FROM signal_candidates WHERE status IN ('TP_HIT','SL_HIT') AND created_at>=?", cutoff)
-        p_done    = q("SELECT COUNT(*) FROM paper_results WHERE status='completed' AND created_at>=?", cutoff)
-        p_wins    = q("SELECT COUNT(*) FROM paper_results WHERE would_have_won=1 AND created_at>=?", cutoff)
-        conn.close()
+            ghost_tp  = q("SELECT COUNT(*) FROM signal_candidates WHERE status='TP_HIT' AND created_at>=?", cutoff)
+            ghost_sl  = q("SELECT COUNT(*) FROM signal_candidates WHERE status='SL_HIT' AND created_at>=?", cutoff)
+            ghost_pnl = q("SELECT COALESCE(SUM(ghost_pnl),0) FROM signal_candidates WHERE status IN ('TP_HIT','SL_HIT') AND created_at>=?", cutoff)
+            p_done    = q("SELECT COUNT(*) FROM paper_results WHERE status='completed' AND created_at>=?", cutoff)
+            p_wins    = q("SELECT COUNT(*) FROM paper_results WHERE would_have_won=1 AND created_at>=?", cutoff)
 
         res = ghost_tp + ghost_sl
         return {

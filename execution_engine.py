@@ -525,11 +525,11 @@ def _check_trade(client, t: dict) -> bool:
             pnl_tp2 = _calc_pnl(direction, entry, tp2, qty_tp2)
             realized = (t.get("realized_pnl") or 0) + pnl_tp2
             # Runner'ı başlat — trail stop koy
-            atr_val = _get_atr(client, symbol)
+            _cached_atr_val = _get_atr(client, symbol)
             if is_long:
-                new_trail = tp2 - atr_val * TRAIL_ATR_MULT
+                new_trail = tp2 - _cached_atr_val * TRAIL_ATR_MULT
             else:
-                new_trail = tp2 + atr_val * TRAIL_ATR_MULT
+                new_trail = tp2 + _cached_atr_val * TRAIL_ATR_MULT
             update_trade(trade_id, {
                 "status":       "runner",
                 "tp2_hit":      1,
@@ -561,7 +561,7 @@ def _check_trade(client, t: dict) -> bool:
 
         if trail_f > 0:
             # Trailing stop güncelle: fiyat yeni zirve yaptıysa trail'i hareket ettir
-            atr_val = _get_atr(client, symbol)
+            atr_val = _cached_atr_val if '_cached_atr_val' in dir() else _get_atr(client, symbol)
             if atr_val > 0:
                 if is_long:
                     new_trail_sl = price - atr_val * TRAIL_ATR_MULT
