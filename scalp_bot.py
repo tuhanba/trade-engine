@@ -176,7 +176,7 @@ def main():
         _fcntl.flock(_lock_file, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
     except BlockingIOError:
         logger.error("HATA: scalp_bot zaten çalışıyor! Çift process engellendi.")
-        import sys; sys.exit(1)
+        import sys; sys.exit(0)  # 0 = normal çıkış → systemd Restart=on-failure tetiklenmez
     # ─────────────────────────────────────────────────────────────────
     logger.info("=== AX Scalp Engine v2.0 başlatılıyor ===")
 
