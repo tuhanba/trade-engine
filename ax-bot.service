@@ -9,8 +9,10 @@ User=root
 WorkingDirectory=/root/trade_engine/trade-engine
 EnvironmentFile=-/root/trade_engine/trade-engine/.env
 ExecStart=/root/trade_engine/.venv/bin/python /root/trade_engine/trade-engine/scalp_bot.py
-Restart=always
+Restart=on-failure
 RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
 StandardOutput=append:/root/trade_engine/trade-engine/logs/ax_bot.log
 StandardError=append:/root/trade_engine/trade-engine/logs/ax_bot.log
 Environment=PYTHONUNBUFFERED=1
