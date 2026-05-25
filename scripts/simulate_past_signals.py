@@ -12,7 +12,7 @@ Kullanım:
 """
 from __future__ import annotations
 
-import os, sys, argparse, json, csv
+import os, sys, argparse, json, csv, random
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -233,21 +233,22 @@ def load_signals(db_path: str, days: int, min_score: float, include_all: bool) -
 
 # ── Ana simülasyon ────────────────────────────────────────────────────────────
 
-def run_simulation(signals: list[dict], initial_balance: float) -> dict:
+def run_simulation(signals: list[dict], initial_balance: float, seed: int = 42) -> dict:
     """
     Sinyalleri simüle et.
     paper_results varsa gerçek outcome kullan,
-    yoksa istatistiksel dağılım (TP1 %45, TP2 %25, SL %30) uygula.
+    yoksa rastgele (seed=42 ile tekrarlanabilir) dağılım uygular:
+      %30 SL | %45 TP1 | %25 TP2
     """
+    rng = random.Random(seed)   # Tekrarlanabilir rastgele (seed ile)
     results = []
     balance = initial_balance
     skipped = 0
+    skipped_reasons: dict[str, int] = {}
 
-    STAT_DIST = [
-        ("tp2",     0.25),   # %25 TP2 vurulur
-        ("tp1",     0.45),   # %45 TP1 vurulur
-        ("sl",      0.30),   # %30 SL vurulur
-    ]
+    # Gerçekçi dağılım: %45 TP1, %25 TP2, %30 SL
+    # TP1 ortalama ~+0.5R (fee+slippage düşünce), SL ~-1.0R
+    STAT_OUTCOMES  = ["tp1"] * 45 + ["tp2"] * 25 + ["sl"] * 30  # 100 elemanlı pool
 
     for i, sig in enumerate(signals):
         entry     = float(sig.get("entry") or 0)
@@ -260,12 +261,16 @@ def run_simulation(signals: list[dict], initial_balance: float) -> dict:
 
         if not entry or not sl_orig:
             skipped += 1
+            # Nedenini kaydet (lifecycle_stage varsa)
+            lc = sig.get("lifecycle_stage") or sig.get("decision") or "no_entry_sl"
+            skipped_reasons[lc] = skipped_reasons.get(lc, 0) + 1
             continue
 
         # Yeni TP/SL hesapla
         calc = recalc_tpsl(entry, sl_orig, direction)
         if not calc["valid"]:
             skipped += 1
+            skipped_reasons["invalid_calc"] = skipped_reasons.get("invalid_calc", 0) + 1
             continue
 
         tp1, tp2, tp3 = calc["tp1"], calc["tp2"], calc["tp3"]
@@ -273,7 +278,6 @@ def run_simulation(signals: list[dict], initial_balance: float) -> dict:
 
         # Outcome belirle
         paper_won = sig.get("paper_won")
-        paper_status = sig.get("paper_status") or ""
 
         if paper_won is not None:
             # paper_results varsa gerçek sonuç
@@ -284,17 +288,8 @@ def run_simulation(signals: list[dict], initial_balance: float) -> dict:
                 outcome = "sl"
             outcome_src = "paper"
         else:
-            # İstatistiksel dağılım (sıralı)
-            idx = i % len(STAT_DIST)
-            # Kümülatif olasılık
-            roll = (i % 100) / 100.0
-            cum = 0.0
-            outcome = "sl"
-            for o, prob in STAT_DIST:
-                cum += prob
-                if roll < cum:
-                    outcome = o
-                    break
+            # Rastgele seçim (seed=42 → tekrarlanabilir, ama sıralı değil)
+            outcome = rng.choice(STAT_OUTCOMES)
             outcome_src = "statistical"
 
         # PnL simülasyonu
@@ -358,9 +353,11 @@ def run_simulation(signals: list[dict], initial_balance: float) -> dict:
         "net_return_pct": round((balance - initial_balance) / initial_balance * 100, 2),
         "sl_expanded":    sl_expanded,
         "paper_sourced":  paper_sourced,
+        "skipped_reasons": skipped_reasons,
     }
 
-    return {"results": results, "stats": stats, "skipped": skipped}
+    return {"results": results, "stats": stats, "skipped": skipped,
+            "skipped_reasons": skipped_reasons}
 
 
 # ── Yazdırma ─────────────────────────────────────────────────────────────────
@@ -394,18 +391,32 @@ def print_report(sim: dict, show_all: bool = False):
           f"MIN_SL={MIN_SL_PCT*100:.1f}%  MIN_RR={MIN_RR}")
     print(f"  Risk/trade={RISK_PCT}%  Fee={FEE_RATE*100:.2f}%  Slippage=0.03%\n")
 
+    paper_sourced = stats.get("paper_sourced", 0)
+    skipped_r = sim.get("skipped_reasons", {})
+
     print(f"  {BOLD}Sonuçlar:{NC}")
     print(f"  {'Simüle:':<24} {stats.get('total',0)} sinyal")
-    print(f"  {'Atlandı:':<24} {skipped} (entry/sl eksik)")
-    print(f"  {'Paper verisi:':<24} {stats.get('paper_sourced',0)} (gerçek outcome)")
+    # Atlandı nedenleri
+    if skipped_r:
+        reasons_str = ", ".join(f"{k}={v}" for k, v in sorted(skipped_r.items(), key=lambda x: -x[1])[:4])
+        print(f"  {'Atlandı:':<24} {skipped} → {DIM}{reasons_str}{NC}")
+    else:
+        print(f"  {'Atlandı:':<24} {skipped} (entry/sl eksik — risk aşamasına gelemedi)")
+    print(f"  {'Paper verisi:':<24} {paper_sourced} (gerçek outcome{'✅' if paper_sourced > 0 else ' — istatistiksel'})")
     print(f"  {'SL genişletildi:':<24} {stats.get('sl_expanded',0)} (MIN_SL<%{MIN_SL_PCT*100:.1f})")
+    # İstatistiksel simülasyon uyarısı
+    if paper_sourced == 0:
+        print(f"\n  {YLW}⚠ Tüm sonuçlar istatistiksel (seed=42, dağılım: %45 TP1, %25 TP2, %30 SL){NC}")
+        print(f"  {YLW}  Gerçek performans farklı olabilir. Paper tracking açıkken daha doğru olur.{NC}")
     print()
     print(f"  {'WIN/LOSS:':<24} {stats.get('wins',0)}W / {stats.get('losses',0)}L")
     print(f"  {'Win Rate:':<24} {wr_clr}{wr:.1f}%{NC}")
     print(f"  {'Profit Factor:':<24} {GRN if pf>=1.5 else (YLW if pf>=1 else RED)}{pf:.3f}{NC}")
     print(f"  {'Avg R:':<24} {GRN if avgr>0 else RED}{avgr:+.3f}R{NC}")
     print(f"  {'Net PnL:':<24} {net_clr}{net:+.2f}${NC}")
-    print(f"  {'ROI:':<24} {net_clr}{roi:+.2f}%{NC}")
+    # ROI uyarısı: compounding + istatistiksel → çok şişiyor
+    roi_note = f"  {DIM}(istatistiksel+compounding — gerçekçi değil){NC}" if paper_sourced == 0 else ""
+    print(f"  {'ROI:':<24} {net_clr}{roi:+.2f}%{NC}{roi_note}")
     print(f"  {'Toplam Fee:':<24} -{stats.get('total_fee',0):.2f}$")
     print(f"  {'Başlangıç bakiye:':<24} ${stats.get('initial_balance',0):.2f}")
     print(f"  {'Final bakiye:':<24} ${stats.get('final_balance',0):.2f}")
