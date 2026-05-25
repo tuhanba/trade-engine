@@ -12,7 +12,8 @@ import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, Generator, ContextManager
+from contextlib import contextmanager
 
 import config
 from core.data_layer import SignalData, TradeData
@@ -34,14 +35,19 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
-def get_conn() -> sqlite3.Connection:
-    """get_connection alias — v5.1 compat (check_same_thread=False)."""
+@contextmanager
+def get_conn() -> Generator[sqlite3.Connection, None, None]:
+    """get_connection alias — v5.1 compat (closes connection after exiting block)."""
     conn = sqlite3.connect(config.DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA cache_size=-10000")  # 10MB cache
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def open_db(db_path: str | None = None, timeout: int = 15) -> sqlite3.Connection:
@@ -448,19 +454,17 @@ def _verify_schema() -> None:
         'trades': ['direction', 'open_time', 'close_time', 'entry', 'sl',
                    'qty', 'net_pnl', 'close_price', 'tp1', 'tp2', 'tp3'],
     }
-    conn = get_conn()
     try:
-        for table, cols in required.items():
-            existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
-            missing = set(cols) - existing
-            if missing:
-                logger.error("SCHEMA EKSIK — %s tablosunda: %s", table, missing)
-            else:
-                logger.info("Schema OK: %s", table)
+        with get_conn() as conn:
+            for table, cols in required.items():
+                existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+                missing = set(cols) - existing
+                if missing:
+                    logger.error("SCHEMA EKSIK — %s tablosunda: %s", table, missing)
+                else:
+                    logger.info("Schema OK: %s", table)
     except Exception as exc:
         logger.warning("Schema doğrulaması başarısız: %s", exc)
-    finally:
-        conn.close()
 
 
 def init_db() -> None:

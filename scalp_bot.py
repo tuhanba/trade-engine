@@ -169,13 +169,29 @@ def activate_circuit_breaker():
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
     # ── Duplicate process koruması ─────────────────────────────────────
-    import fcntl as _fcntl
     import tempfile as _tempfile
     _lock_path = os.path.join(_tempfile.gettempdir(), "aurvex_bot.lock")
     _lock_file = open(_lock_path, "w")
+    is_locked = False
     try:
-        _fcntl.flock(_lock_file, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
-    except BlockingIOError:
+        import fcntl as _fcntl
+        try:
+            _fcntl.flock(_lock_file, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            is_locked = True
+        except BlockingIOError:
+            pass
+    except ImportError:
+        try:
+            import msvcrt as _msvcrt
+            try:
+                _msvcrt.locking(_lock_file.fileno(), _msvcrt.LK_NBLCK, 1)
+                is_locked = True
+            except OSError:
+                pass
+        except ImportError:
+            is_locked = True  # Safe fallback if neither works
+            
+    if not is_locked:
         logger.error("HATA: scalp_bot zaten çalışıyor! Çift process engellendi.")
         import sys; sys.exit(0)  # 0 = normal çıkış → systemd Restart=on-failure tetiklenmez
     # ─────────────────────────────────────────────────────────────────
@@ -239,6 +255,34 @@ def main():
         name="ghost-worker",
     )
     _ghost_thread.start()
+
+    # Paper tracking — bağımsız thread (ana bot döngüsünden bağımsız)
+    _paper_stop = threading.Event()
+
+    def _paper_worker(binance_client, stop_event):
+        logger.info("[Paper] Worker thread başladı")
+        while not stop_event.is_set():
+            try:
+                from core.paper_tracker import process_pending_paper_results
+                done_p = process_pending_paper_results(binance_client, limit=30)
+                if done_p:
+                    logger.info(f"[paper_tracker] finalize {done_p} satır tamamlandı")
+                    try:
+                        ai_engine._update_threshold_from_ghost()
+                    except Exception as _tge:
+                        logger.debug(f"[AI] threshold update atlandı: {_tge}")
+            except Exception as _pe:
+                logger.warning(f"[Paper] Worker hata: {_pe}")
+            stop_event.wait(timeout=90)   # 1.5 dakikada bir çalış
+        logger.info("[Paper] Worker thread durdu")
+
+    _paper_thread = threading.Thread(
+        target=_paper_worker,
+        args=(client, _paper_stop),
+        daemon=True,
+        name="paper-worker",
+    )
+    _paper_thread.start()
 
     # Telegram Manager (komut dinleyici)
     tg_manager = None
@@ -327,19 +371,7 @@ def main():
 
             open_symbols = {t["symbol"] for t in open_trades_now}
 
-            try:
-                from core.paper_tracker import process_pending_paper_results
-
-                done_p = process_pending_paper_results(client, limit=30)
-                if done_p:
-                    logger.info(f"[paper_tracker] finalize {done_p} satır tamamlandı")
-                    # Ghost sonuçlarına göre TRADE_THRESHOLD'u adaptif güncelle
-                    try:
-                        ai_engine._update_threshold_from_ghost()
-                    except Exception as _tge:
-                        logger.debug(f"[AI] threshold update atlandı: {_tge}")
-            except Exception as _pte:
-                logger.debug(f"[paper_tracker] atlandı: {_pte}")
+            # Paper results are updated asynchronously in the background thread.
 
             # Diagnostics sayacı
             try:

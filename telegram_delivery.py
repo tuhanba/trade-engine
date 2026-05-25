@@ -163,21 +163,24 @@ class _Queue:
             self._event.wait()
             self._event.clear()
             while True:
-                with self._lock:
-                    if not self._q:
-                        break
-                    item = self._q.popleft()
-                if len(item) >= 3:
-                    text, pm, dk = item[0], item[1], item[2]
-                else:
-                    text, pm, dk = item[0], item[1] if len(item) > 1 else "HTML", None
-                ok = _send_raw(text, pm)
-                if ok and dk:
-                    try:
-                        from database import mark_telegram_message_sent
-                        mark_telegram_message_sent(dk)
-                    except Exception:
-                        pass
+                try:
+                    with self._lock:
+                        if not self._q:
+                            break
+                        item = self._q.popleft()
+                    if len(item) >= 3:
+                        text, pm, dk = item[0], item[1], item[2]
+                    else:
+                        text, pm, dk = item[0], item[1] if len(item) > 1 else "HTML", None
+                    ok = _send_raw(text, pm)
+                    if ok and dk:
+                        try:
+                            from database import mark_telegram_message_sent
+                            mark_telegram_message_sent(dk)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.error(f"[Telegram Queue Worker] Hata: {e}")
                 time.sleep(0.5)
 
 
