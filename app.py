@@ -160,10 +160,15 @@ def api_stats():
         ax_status = dashboard_service.get_ax_status()
         return _ok({
             **stats,
-            "balance": stats.get("balance", ax_status.get("paper_balance", 0)),
+            "balance":         stats.get("balance", ax_status.get("paper_balance", 0)),
             "initial_balance": stats.get("initial_balance", ax_status.get("initial_balance", 500.0)),
-            "bot_running": ax_status.get("bot_running", False),
-            "execution_mode": ax_status.get("execution_mode", "paper"),
+            "bot_running":     ax_status.get("bot_running", False),
+            "execution_mode":  ax_status.get("execution_mode", "paper"),
+            # BUG FIX: Frontend için zorunlu alanlar — get_dashboard_stats'dan gelir
+            "win_trades":      stats.get("win_trades", 0),
+            "loss_trades":     stats.get("loss_trades", 0),
+            "win_rate":        stats.get("win_rate", stats.get("winrate", 0)),
+            "today_pnl":       stats.get("today_pnl", 0),
         })
     except Exception as exc:
         return _error(str(exc))

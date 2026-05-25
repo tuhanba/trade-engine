@@ -78,10 +78,10 @@ HUMAN_TP2_R             = _env_float("HUMAN_TP2_R", 2.5)
 HUMAN_TRADE_THRESHOLD   = _env_float("HUMAN_TRADE_THRESHOLD", 72.0)
 HUMAN_MAX_OPEN_TRADES   = _env_int("HUMAN_MAX_OPEN_TRADES", 2)
 
-# TP Splits
-TP1_CLOSE_PCT    = _env_float("TP1_CLOSE_PCT", 50)   # scalp: erken çık
-TP2_CLOSE_PCT    = _env_float("TP2_CLOSE_PCT", 35)
-RUNNER_CLOSE_PCT = _env_float("RUNNER_CLOSE_PCT", 25)
+# TP Splits — toplamı 100 olmalı (test_config_tp_logic)
+TP1_CLOSE_PCT    = _env_float("TP1_CLOSE_PCT", 40)   # 50→40: toplam=100
+TP2_CLOSE_PCT    = _env_float("TP2_CLOSE_PCT", 30)   # 35→30: toplam=100
+RUNNER_CLOSE_PCT = _env_float("RUNNER_CLOSE_PCT", 30) # 25→30: toplam=100
 
 # Trailing
 TRAIL_ATR_MULT       = _env_float("TRAIL_ATR_MULT", 1.5)
@@ -103,10 +103,10 @@ MAX_DAILY_SIGNALS        = _env_int("MAX_DAILY_SIGNALS", 9999)   # bilgi amaçl�
 DAILY_SIGNAL_LIMIT       = _env_int("DAILY_SIGNAL_LIMIT", 60)   # günlük hard limit
 MAX_SIGNALS_PER_COIN     = _env_int("MAX_SIGNALS_PER_COIN", 3)  # coin başına günlük max
 
-# Sinyal Esikleri (v11.0 — audit fix, B kaliteyi filtrele)
-DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 20.0)     # 15→20
-WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 35.0) # 20→35
-TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 35.0)  # v6.0 gevşetildi
+# Sinyal Eşikleri — DATA < WATCHLIST < TELEGRAM < TRADE sıralaması zorunlu
+DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 20.0)
+WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 28.0) # 35→28: TELEGRAM'dan düşük olmalı
+TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 35.0)  # v6.0 gevşetildi (28→35)
 TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 55.0)     # v6.0 gevşetildi
 
 # Circuit Breaker

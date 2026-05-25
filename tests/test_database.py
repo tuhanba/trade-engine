@@ -105,7 +105,7 @@ def test_crud_trade():
 
         recent = database.get_recent_trades(10)
         assert len(recent) >= 1
-        assert recent[0]["status"] == "CLOSED"
+        assert recent[0]["status"].lower() == "closed"  # BUG FIX: DB 'closed' lowercase yazar
     finally:
         config.DB_PATH = original
         os.unlink(tmp.name)

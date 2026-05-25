@@ -217,27 +217,30 @@ def format_signal(sig):
         session = "🌏 Asian"
     else:
         session = "🌙 Late"
+    # BUG FIX: entry_zone veya rr None/eksik olduğunda crash önle
+    _entry = getattr(sig, 'entry_zone', None) or getattr(sig, 'entry_price', None) or 0
+    _rr    = sig.rr if getattr(sig, 'rr', None) is not None else 0
     msg = (
         f"{header}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🧭 Mode: <b>{EXECUTION_MODE.upper()}</b>\n"
         f"🪙 <b>{sig.symbol}</b>  {dir_emoji}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📌 Entry:  <code>{_fmt(sig.entry_zone)}</code>\n"
-        f"🛑 Stop:   <code>{_fmt(sig.stop_loss)}</code>\n"
-        f"🎯 TP1:    <code>{_fmt(sig.tp1)}</code>\n"
-        f"🎯 TP2:    <code>{_fmt(sig.tp2)}</code>\n"
-        f"🚀 TP3:    <code>{_fmt(sig.tp3)}</code>\n"
+        f"📌 Entry:  <code>{_fmt(_entry)}</code>\n"
+        f"🛑 Stop:   <code>{_fmt(getattr(sig,'stop_loss',0) or 0)}</code>\n"
+        f"🎯 TP1:    <code>{_fmt(getattr(sig,'tp1',0) or 0)}</code>\n"
+        f"🎯 TP2:    <code>{_fmt(getattr(sig,'tp2',0) or 0)}</code>\n"
+        f"🚀 TP3:    <code>{_fmt(getattr(sig,'tp3',0) or 0)}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 Score:   <b>{_fmt(sig.final_score, 1)}</b> | Quality: <b>{sig.setup_quality}</b>\n"
-        f"⚖️ RR:      <b>{_fmt(sig.rr, 2)}R</b>  |  Risk: {_fmt(sig.risk_percent, 1)}%\n"
-        f"💸 Risk Amt:<b>{_fmt(sig.max_loss, 2)}</b> | Size: {_fmt(sig.position_size, 4)}\n"
-        f"🧮 Notional:<b>{_fmt(sig.notional_size, 2)}</b> | Lev: {sig.leverage_suggestion or '?'}x\n"
-        f"🔧 Kaldıraç: {sig.leverage_suggestion or '?'}x\n"
+        f"📊 Score:   <b>{_fmt(getattr(sig,'final_score',0) or 0, 1)}</b> | Quality: <b>{sig.setup_quality}</b>\n"
+        f"⚖️ RR:      <b>{_fmt(_rr, 2)}R</b>  |  Risk: {_fmt(getattr(sig,'risk_percent',0) or 0, 1)}%\n"
+        f"💸 Risk Amt:<b>{_fmt(getattr(sig,'max_loss',0) or 0, 2)}</b> | Size: {_fmt(getattr(sig,'position_size',0) or 0, 4)}\n"
+        f"🧮 Notional:<b>{_fmt(getattr(sig,'notional_size',0) or 0, 2)}</b> | Lev: {getattr(sig,'leverage_suggestion',None) or '?'}x\n"
+        f"🔧 Kaldıraç: {getattr(sig,'leverage_suggestion',None) or '?'}x\n"
         f"📊 Kalite:  {qbar}\n"
         f"🧠 Güven:   {conf_bar} {conf_pct}%\n"
-        f"💡 Why this trade?:   <i>{sig.reason or '—'}</i>\n"
-        f"🛡 Invalidasyon: <code>{_fmt(sig.stop_loss)}</code>\n"
+        f"💡 Why this trade?:   <i>{getattr(sig,'reason',None) or '—'}</i>\n"
+        f"🛡 Invalidasyon: <code>{_fmt(getattr(sig,'stop_loss',0) or 0)}</code>\n"
         f"⏰ Seans: {session} | {now_utc}\n"
     )
     if quality == "B":
@@ -290,9 +293,18 @@ def deliver_signal(sig):
             return False
         if sig.setup_quality not in ["S", "A+", "A", "B"]:
             return False
-        if not sig.is_valid():
-            return False
-        dedupe_key = f"{sig.symbol}:{sig.direction}:{round(sig.entry_zone, 6)}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+        # BUG FIX: is_valid() metodu olmayabilir — AttributeError yakala
+        try:
+            if not sig.is_valid():
+                return False
+        except AttributeError:
+            # is_valid() yoksa temel alan kontrolü yap
+            _entry = getattr(sig, 'entry_zone', None) or getattr(sig, 'entry_price', None)
+            if not sig.symbol or not _entry:
+                return False
+        # BUG FIX: entry_zone None olabilir — güvenli al
+        _entry_zone = getattr(sig, 'entry_zone', None) or getattr(sig, 'entry_price', None) or 0
+        dedupe_key = f"{sig.symbol}:{sig.direction}:{round(float(_entry_zone), 6)}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
         msg = format_signal(sig)
         try:
             save_telegram_message(sig.id, sig.symbol, dedupe_key, msg, status="queued")
