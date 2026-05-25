@@ -34,7 +34,9 @@ except ImportError:
     class SocketIO:
         def __init__(self, app, **kw): pass
         def emit(self, *a, **kw): pass
-        def run(self, app, **kw): app.run(**kw)
+        def run(self, app, **kw):
+            kw.pop("log_output", None)
+            app.run(**kw)
 
 import config
 import database
