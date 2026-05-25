@@ -34,7 +34,11 @@ except ImportError:
     class SocketIO:
         def __init__(self, app, **kw): pass
         def emit(self, *a, **kw): pass
-        def run(self, app, **kw): app.run(**kw)
+        def on(self, *a, **kw): return lambda f: f   # stub — event handler decorator
+        def run(self, app, **kw):
+            # flask_socketio'ya özel parametreleri temizle
+            kw.pop("log_output", None)
+            app.run(**kw)
 
 import config
 import database
