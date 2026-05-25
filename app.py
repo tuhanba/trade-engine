@@ -76,6 +76,7 @@ def _check_ip():
         return  # Açık erişim
     client_ip = _get_client_ip()
     if client_ip not in _ALLOWED_IPS:
+        logger.warning(f"IP engellendi: {client_ip} (İzin verilenler: {_ALLOWED_IPS})")
         from flask import abort
         abort(403)
 
