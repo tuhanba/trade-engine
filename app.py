@@ -138,7 +138,14 @@ def index():
 def api_health():
     """Sistem sağlık durumu."""
     try:
-        return _ok(dashboard_service.get_health())
+        health_data = dashboard_service.get_health()
+        resp = {
+            "ok": health_data.get("db_connected", False),
+            "db_connected": health_data.get("db_connected", False),
+            "data": health_data,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        return jsonify(resp)
     except Exception as exc:
         return _error(str(exc))
 

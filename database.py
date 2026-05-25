@@ -622,10 +622,10 @@ def init_db() -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS telegram_messages (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                signal_id  INTEGER,
+                sig_id     TEXT,
                 symbol     TEXT,
                 dedupe_key TEXT UNIQUE,
-                message    TEXT,
+                text       TEXT,
                 status     TEXT DEFAULT 'queued',
                 created_at TEXT DEFAULT (datetime('now')),
                 sent_at    TEXT
@@ -1340,6 +1340,7 @@ def _migrate():
         ("trades", "breakeven_set",   "INTEGER DEFAULT 0"),
         ("trades", "trailing_active", "INTEGER DEFAULT 0"),
         ("telegram_messages", "sig_id", "TEXT"),
+        ("telegram_messages", "text", "TEXT"),
     ]
     with get_conn() as conn:
         for table, col, col_type in migrations:
