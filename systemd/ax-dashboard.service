@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root/trade_engine
+WorkingDirectory=/root/trade_engine/trade-engine
 EnvironmentFile=/root/trade_engine/.env
-ExecStart=/root/trade_engine/.venv/bin/python /root/trade_engine/app.py
+ExecStart=/root/trade_engine/.venv/bin/python /root/trade_engine/trade-engine/app.py
 Restart=always
 RestartSec=5
 StandardOutput=journal
