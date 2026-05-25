@@ -154,46 +154,79 @@ def sim_pnl(entry, sl, tp1, tp2, direction, balance, outcome: str) -> dict:
 
 # ── DB Sorgulama ──────────────────────────────────────────────────────────────
 
+def _get_columns(conn, table: str) -> set:
+    """Tablodaki kolon adlarını döndürür."""
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        return {r[1] for r in rows}
+    except Exception:
+        return set()
+
+
 def load_signals(db_path: str, days: int, min_score: float, include_all: bool) -> list[dict]:
-    """signal_candidates + paper_results birleştirerek geçmiş sinyalleri çeker."""
+    """signal_candidates + paper_results birleştirerek geçmiş sinyalleri çeker.
+    Var olmayan kolonları otomatik atlar (DB şemasına uyumlu)."""
     import sqlite3
     conn = sqlite3.connect(db_path, timeout=10)
     conn.row_factory = sqlite3.Row
 
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
-    # Minimum score filtresi
-    score_clause = f"AND sc.final_score >= {min_score}" if not include_all else ""
+    # Mevcut kolonları kontrol et — eksik olanları NULL ile doldur
+    sc_cols  = _get_columns(conn, "signal_candidates")
+    pr_cols  = _get_columns(conn, "paper_results")
+    has_pr   = bool(pr_cols)  # paper_results tablosu var mı?
 
-    # ALLOW olmayan (işlem açılmamış) veya tümü
+    def sc(col, alias=None):
+        """signal_candidates kolonunu güvenli seç."""
+        a = alias or col
+        return f"sc.{col} AS {a}" if col in sc_cols else f"NULL AS {a}"
+
+    def pr(col, alias=None):
+        """paper_results kolonunu güvenli seç."""
+        a = alias or col
+        if not has_pr:
+            return f"NULL AS {a}"
+        return f"pr.{col} AS {a}" if col in pr_cols else f"NULL AS {a}"
+
+    # Filtreler
+    score_clause    = f"AND sc.final_score >= {min_score}" if not include_all else ""
     decision_clause = "" if include_all else "AND (sc.decision != 'ALLOW' OR sc.decision IS NULL)"
 
-    rows = conn.execute(f"""
+    # paper_results JOIN (tablo yoksa atla)
+    pr_join = (
+        "LEFT JOIN paper_results pr ON sc.id = pr.signal_id"
+        if has_pr else ""
+    )
+
+    query = f"""
         SELECT
             sc.id,
             sc.symbol,
             sc.direction,
             sc.final_score,
-            sc.setup_quality     AS quality,
+            {sc('setup_quality', 'quality')},
             sc.decision,
-            sc.entry,
-            sc.sl,
-            sc.tp1,
-            sc.tp2,
-            sc.tp3,
+            {sc('entry')},
+            {sc('sl')},
+            {sc('tp1')},
+            {sc('tp2')},
+            {sc('tp3')},
             sc.created_at,
-            sc.reject_reason,
-            pr.would_have_won    AS paper_won,
-            pr.status            AS paper_status,
-            pr.final_outcome_pct AS paper_outcome_pct
+            {sc('reject_reason')},
+            {pr('would_have_won',    'paper_won')},
+            {pr('status',            'paper_status')},
+            {pr('final_outcome_pct', 'paper_outcome_pct')}
         FROM signal_candidates sc
-        LEFT JOIN paper_results pr ON sc.id = pr.signal_id
+        {pr_join}
         WHERE sc.created_at >= ?
           {score_clause}
           {decision_clause}
         ORDER BY sc.id DESC
         LIMIT 1000
-    """, (since,)).fetchall()
+    """
+
+    rows = conn.execute(query, (since,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
