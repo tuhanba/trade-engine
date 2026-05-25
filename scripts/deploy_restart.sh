@@ -161,10 +161,11 @@ fi
 step "4. PAKET KONTROLÜ"
 
 if [ -f "$BASE/requirements.txt" ]; then
-    # Sadece eksik paketleri yükle (hızlı)
-    MISSING=$($PIP install -r "$BASE/requirements.txt" --dry-run 2>&1 | grep "Would install" | wc -l || echo 0)
-    if [ "$MISSING" -gt 0 ]; then
-        info "$MISSING yeni paket kurulacak..."
+    # Eksik paket var mı kontrol et
+    MISSING_OUT=$($PIP install -r "$BASE/requirements.txt" --dry-run 2>&1 || true)
+    if echo "$MISSING_OUT" | grep -q "Would install"; then
+        MISSING_COUNT=$(echo "$MISSING_OUT" | grep -c "Would install" || true)
+        info "${MISSING_COUNT} yeni paket kurulacak..."
         $PIP install -r "$BASE/requirements.txt" -q && ok "Paketler güncellendi" || warn "Paket kurulumu hatalı (devam ediliyor)"
     else
         ok "Tüm paketler güncel"
