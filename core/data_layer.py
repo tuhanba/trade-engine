@@ -53,7 +53,7 @@ class SignalDecision(enum.Enum):
 
 @dataclass
 class SignalData:
-    """Ham sinyal verisi."""
+    """Ham sinyal verisi — tüm sinyal sistemi alanları dahil."""
     symbol: str = ""
     side: str = "LONG"
     entry_price: float = 0.0
@@ -70,6 +70,43 @@ class SignalData:
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     metadata: Optional[dict[str, Any]] = None
+    # ── Genişletilmiş alanlar (signal_engine / format_signal tarafından kullanılır)
+    direction: str = ""               # 'LONG' / 'SHORT' — side alias
+    entry_zone: Optional[float] = None  # entry_price alias (eski compat)
+    setup_quality: str = ""           # 'S' / 'A+' / 'A' / 'B' / 'C'
+    final_score: float = 0.0
+    rr: Optional[float] = None        # Risk/Reward oranı
+    confidence: float = 0.0
+    risk_percent: float = 0.0
+    notional_size: float = 0.0
+    leverage_suggestion: Optional[int] = None
+    max_loss: float = 0.0
+    position_size: float = 0.0
+    market_regime: str = ""
+    atr: float = 0.0
+    telegram_status: str = ""
+    # ── ID alanı (deliver_signal dedupe için)
+    id: Optional[str] = None
+
+    def __post_init__(self):
+        """direction ↔ side senkronizasyonu, entry_zone ↔ entry_price senkronizasyonu."""
+        if self.direction and not self.side:
+            self.side = self.direction
+        elif self.side and not self.direction:
+            self.direction = self.side
+        if self.entry_zone is None and self.entry_price:
+            self.entry_zone = self.entry_price
+        elif self.entry_zone and not self.entry_price:
+            self.entry_price = self.entry_zone
+        if self.leverage_suggestion is None:
+            self.leverage_suggestion = self.leverage
+        if self.id is None:
+            self.id = str(uuid.uuid4())
+
+    def is_valid(self) -> bool:
+        """Temel alan geçerlilik kontrolü."""
+        _entry = self.entry_zone or self.entry_price
+        return bool(self.symbol) and bool(_entry)
 
 
 # ── TradeData ───────────────────────────────────────────────────────

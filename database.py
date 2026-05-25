@@ -376,7 +376,9 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("close_reason", "TEXT DEFAULT ''"),
         ("ax_mode",      "TEXT"),
         ("metadata",     "TEXT DEFAULT '{}'"),
-        ("trail_stop",   "REAL DEFAULT 0"),
+        ("trail_stop",        "REAL DEFAULT 0"),
+        ("breakeven_set",     "INTEGER DEFAULT 0"),  # BUG FIX: eksik kolon
+        ("trailing_active",   "INTEGER DEFAULT 0"),  # BUG FIX: eksik kolon
     ],
     "signal_candidates": [
         ("tp2", "REAL DEFAULT 0"),
@@ -433,6 +435,9 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
     ],
     "ghost_results": [
         ("exit_price", "REAL DEFAULT 0"),
+    ],
+    "telegram_messages": [
+        ("sig_id", "TEXT"),  # BUG FIX: save_telegram_message sig_id kullanıyor
     ],
 }
 
@@ -837,14 +842,15 @@ def update_trade_price(
     current_price: float,
     unrealized_pnl: float,
 ) -> None:
-    """Açık trade'in güncel fiyatını ve unrealized PnL'ini günceller."""
+    """Açık trade'in güncel fiyatını ve unrealized PnL'ini günceller.
+    BUG FIX: LOWER(status) kullan — tp1_hit ve runner da güncellenir."""
     conn = get_connection()
     try:
         conn.execute(
             """
             UPDATE trades
             SET current_price = ?, unrealized_pnl = ?
-            WHERE id = ? AND status = 'OPEN'
+            WHERE id = ? AND LOWER(status) IN ('open','tp1_hit','runner')
             """,
             (current_price, unrealized_pnl, trade_id),
         )
@@ -909,6 +915,7 @@ def record_partial_close(
         )
 
         # trades tablosu güncelle
+        # BUG FIX: LOWER(status) — tp1_hit modundaki trade'ler de güncellenir
         update_sql = """
             UPDATE trades
             SET realized_pnl = COALESCE(realized_pnl, 0) + ?,
@@ -923,7 +930,7 @@ def record_partial_close(
             update_sql += ", sl = ?"
             params.append(new_sl)
 
-        update_sql += " WHERE id = ? AND status = 'OPEN'"
+        update_sql += " WHERE id = ? AND LOWER(status) IN ('open','tp1_hit','runner')"
         params.append(trade_id)
 
         conn.execute(update_sql, params)
@@ -976,11 +983,12 @@ def close_trade(
 # ── Trade sorgular ─────────────────────────────────────────────────
 
 def get_open_trades() -> list[dict]:
-    """Açık trade'leri dict listesi olarak döner."""
+    """Açık trade'leri dict listesi olarak döner.
+    BUG FIX: LOWER(status) — case-insensitive karşılaştırma."""
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status IN ('OPEN','tp1_hit','runner') ORDER BY open_time DESC"
+            "SELECT * FROM trades WHERE LOWER(status) IN ('open','tp1_hit','runner') ORDER BY open_time DESC"
         ).fetchall()
         return [dict(r) for r in rows]
     except Exception as exc:
@@ -1074,8 +1082,9 @@ def get_dashboard_stats() -> dict:
             "SELECT COUNT(*) FROM trades WHERE LOWER(status)='closed'"
         ).fetchone()[0]
 
+        # BUG FIX: net_pnl kullan (realized_pnl TP1/TP2 partial toplamlarını da içerir)
         rpnl_row = conn.execute(
-            "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE LOWER(status)='closed'"
+            "SELECT COALESCE(SUM(net_pnl), 0) FROM trades WHERE LOWER(status)='closed'"
         ).fetchone()
         realized_pnl = float(rpnl_row[0]) if rpnl_row else 0.0
 
@@ -1093,6 +1102,7 @@ def get_dashboard_stats() -> dict:
         win_count = conn.execute(
             "SELECT COUNT(*) FROM trades WHERE LOWER(status)='closed' AND net_pnl > 0"
         ).fetchone()[0]
+        loss_count = closed_count - win_count
         winrate = round(
             (win_count / closed_count * 100), 1
         ) if closed_count > 0 else 0.0
@@ -1131,6 +1141,9 @@ def get_dashboard_stats() -> dict:
             "total_pnl": round(realized_pnl + unrealized_pnl + accumulated_pnl, 4),
             "today_pnl": round(today_pnl, 4),
             "winrate": winrate,
+            "win_rate": winrate,          # BUG FIX: alias — frontend win_rate bekliyor
+            "win_trades": win_count,      # BUG FIX: frontend için eksikti
+            "loss_trades": loss_count,    # BUG FIX: frontend için eksikti
             "balance": round(balance, 4),
             "initial_balance": getattr(config, 'INITIAL_PAPER_BALANCE', 500.0),
             "ghost_tp_hits": ghost_tp,
@@ -1321,6 +1334,12 @@ def _migrate():
         ("signal_candidates", "spread",          "REAL DEFAULT 0"),
         ("signal_candidates", "volume",          "REAL DEFAULT 0"),
         ("signal_candidates", "volatility",      "REAL DEFAULT 0"),
+        # BUG FIX: Eksik kolonlar — migration ile mevcut DB'ye eklenir
+        ("trades", "net_pnl",         "REAL DEFAULT 0"),
+        ("trades", "trail_stop",      "REAL DEFAULT 0"),
+        ("trades", "breakeven_set",   "INTEGER DEFAULT 0"),
+        ("trades", "trailing_active", "INTEGER DEFAULT 0"),
+        ("telegram_messages", "sig_id", "TEXT"),
     ]
     with get_conn() as conn:
         for table, col, col_type in migrations:

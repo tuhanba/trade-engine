@@ -341,14 +341,22 @@ class RiskEngine:
             if pos.get("qty", 0) <= 0:
                 return {"valid": False, "score": 0, "risk_reject_reason": "position_size_invalid"}
 
+            # Fee hesabı: open + close (notional × fee_rate × 2)
+            notional_val   = pos.get("notional", 0)
+            estimated_fee  = round(notional_val * fee_rate * 2, 6)
+            # net_rr: fee düşüldükten sonra gerçek R/R
+            risk_usd = pos.get("risk_usd", 0) or 1e-10
+            net_rr = round((rr * risk_usd - estimated_fee) / risk_usd, 3)
             return {
                 "valid": True, "sl": round(sl, 6), "tp1": round(tp1, 6),
                 "tp2": round(tp2, 6), "tp3": round(tp3, 6), "rr": round(rr, 3),
                 "risk_pct": round(risk_pct, 3), "position_size": round(pos.get("qty", 0), 6),
-                "notional": round(pos.get("notional", 0), 4), "leverage": leverage,
-                "max_loss": round(pos.get("risk_usd", 0), 4),
-                "risk_usd": round(pos.get("risk_usd", 0), 4),
+                "notional": round(notional_val, 4), "leverage": leverage,
+                "max_loss": round(risk_usd, 4),
+                "risk_usd": round(risk_usd, 4),
                 "score": round(min(10.0, 5.0 + rr * 1.5), 2), "atr": round(atr_val, 6),
+                "estimated_fee": estimated_fee,   # BUG FIX: test_risk_engine için eksikti
+                "net_rr": net_rr,                 # BUG FIX: fee sonrası gerçek R/R
             }
         except Exception as e:
             logger.error("RiskEngine.calculate: %s", e, exc_info=True)

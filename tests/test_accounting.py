@@ -21,7 +21,12 @@ from core.data_layer import SignalData
 
 
 def test_position_size():
-    qty = calculate_position_size(1000, 1.0, 100.0, 95.0)
+    # BUG FIX: calculate_position_size dict döner — .get("qty") kullan
+    result = calculate_position_size(1000, 1.0, 100.0, 95.0)
+    if isinstance(result, dict):
+        qty = result.get("qty", 0)
+    else:
+        qty = result
     assert qty > 0
     # risk = 10 USD, stop_dist = 5, qty = 2.0
     assert abs(qty - 2.0) < 0.01

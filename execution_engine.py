@@ -692,7 +692,11 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
         realized_pnl=net_pnl,
         close_reason=reason,
     )
-    update_paper_balance(net_pnl - (t.get("realized_pnl") or 0))
+    # BUG FIX: TP1/TP2'de zaten eklendi — sadece delta (kalan) ekle
+    # Örnek: net_pnl=10$, realized_pnl(TP1+TP2)=6$ → incremental=4$ (runner kârı)
+    already_added   = float(t.get("realized_pnl") or 0)
+    incremental_pnl = net_pnl - already_added
+    update_paper_balance(incremental_pnl)
     _dir = t.get("direction") or t.get("side", "LONG")
     if event_manager: event_manager.broadcast_trade_closed(t["symbol"], _dir, net_pnl, reason)
     if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), 0, net_pnl)

@@ -358,10 +358,17 @@ class AIDecisionEngine:
             _trigger = float(getattr(sig, 'trigger_score', 0) or 0)
             _trend   = float(getattr(sig, 'trend_score',   0) or 0)
             _risk    = float(getattr(sig, 'risk_score',    0) or 0)
+            # BUG FIX: 0-100 ölçeğinden gelenler varsa normalize et
+            _max_score = max(_trigger, _trend, _risk)
+            if _max_score > 10:
+                _trigger = _trigger / 10.0
+                _trend   = _trend   / 10.0
+                _risk    = _risk    / 10.0
             sig.score = round(
-                _trigger * 4.0 +   # 0-10 → 0-40
-                _trend   * 3.0 +   # 0-10 → 0-30
-                _risk    * 3.0,    # 0-10 → 0-30
+                min(100.0,
+                    _trigger * 4.0 +   # 0-10 → 0-40
+                    _trend   * 3.0 +   # 0-10 → 0-30
+                    _risk    * 3.0),   # 0-10 → 0-30
                 1
             )
             try:

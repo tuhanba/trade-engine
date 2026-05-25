@@ -496,7 +496,8 @@ async function fTrades(){
     $('cnt-trades').textContent=ts.length;const tb=$('tb-trades');
     if(!ts.length){tb.innerHTML='<tr><td colspan="9"><div class="empty" style="border:none">Kapanmış trade yok</div></td></tr>';return}
     tb.innerHTML=ts.map(t=>{
-      const pnl=N(t.realized_pnl),ep=N(t.entry_price),xp=N(t.exit_price);
+      // BUG FIX: net_pnl kullan (realized_pnl TP1/TP2 kısmi toplamları içerebilir)
+      const pnl=N(t.net_pnl!=null?t.net_pnl:t.realized_pnl),ep=N(t.entry_price),xp=N(t.exit_price);
       const side=(t.side||'LONG').toUpperCase(),isL=side==='LONG';
       const res=pnl>0?'WIN':'LOSS',r=esc(t.close_reason||t.stop_reason||'—');
       return`<tr><td class="dim mono" style="font-size:.67rem">#${t.id}</td><td><span class="sym">${t.symbol||'?'}</span></td><td><span class="stag ${isL?'L':'S'}" style="font-size:.6rem">${side}</span></td><td class="mono">${ep?'$'+ep.toFixed(4):'—'}</td><td class="mono">${xp?'$'+xp.toFixed(4):'—'}</td><td class="mono ${pnl>=0?'p':'n'}" style="font-weight:500">${pS(pnl)}</td><td><span class="bdg ${pnl>0?'b-W':'b-L'}">${res}</span> <span class="dim" style="font-size:.7rem">${r}</span></td><td class="dim mono">${ago(t.opened_at)}</td><td class="dim mono">${t.leverage||1}x</td></tr>`;
@@ -555,15 +556,24 @@ async function fetchLogs(){
 }
 
 // SSE
+let _lastLiveCount=-1;
 function connectSSE(){
   try{
     const es=new EventSource('/stream');
     es.onmessage=ev=>{
       try{
         const d=JSON.parse(ev.data);
-        if(d.stats?.balance)$('v-bal').textContent=`$${N(d.stats.balance).toFixed(2)}`;
-        if(Array.isArray(d.live))$('cnt-live').textContent=d.live.length;
-        if(d.health?.human_mode!==undefined){updateModeCard(d.health.human_mode);const hp=$('humanpill');hp.textContent=d.health.human_mode?'🧠 HUMAN':'⚡ SCALP';hp.className='humanpill '+(d.health.human_mode?'human':'scalp')}
+        // BUG FIX: null guard — balance null ise güncelleme
+        if(d.stats&&d.stats.balance!=null){
+          const bal=N(d.stats.balance);
+          if($('v-bal'))$('v-bal').textContent=`$${bal.toFixed(2)}`;
+          if($('sb-bal'))$('sb-bal').textContent=`$${bal.toFixed(2)}`;
+        }
+        const cnt=Array.isArray(d.live)?d.live.length:0;
+        if($('cnt-live'))$('cnt-live').textContent=cnt;
+        // BUG FIX: live trade sayısı değişirse otomatik yenile
+        if(cnt!==_lastLiveCount){_lastLiveCount=cnt;fLive();}
+        if(d.health&&d.health.human_mode!==undefined){updateModeCard(d.health.human_mode);const hp=$('humanpill');if(hp){hp.textContent=d.health.human_mode?'🧠 HUMAN':'⚡ SCALP';hp.className='humanpill '+(d.health.human_mode?'human':'scalp');}}
       }catch{}
     };
     es.onerror=()=>setTimeout(connectSSE,6000);
