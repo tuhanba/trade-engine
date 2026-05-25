@@ -136,7 +136,11 @@ def _get_live_trades_impl() -> list:
             "unrealized_pnl": float(t.get("unrealized_pnl") or 0),
             "realized_pnl":  float(t.get("realized_pnl") or 0),
             "accumulated_pnl": float(t.get("realized_pnl") or t.get("accumulated_pnl") or 0),
-            "remaining_qty_pct": float(t.get("remaining_qty_pct") or 100.0),
+            "remaining_qty_pct": float(
+                round((float(t.get("remaining_qty") or 0) / float(t.get("qty") or 1)) * 100, 1)
+                if t.get("remaining_qty") is not None and float(t.get("qty") or 0) > 0
+                else 100.0
+            ),
             "total_pnl":     round(
                 (t.get("unrealized_pnl") or 0) +
                 (t.get("realized_pnl") or t.get("accumulated_pnl") or 0), 4

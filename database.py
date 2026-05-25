@@ -870,7 +870,7 @@ def update_trade_sl(trade_id: int, new_sl: float) -> None:
     conn = get_connection()
     try:
         conn.execute(
-            "UPDATE trades SET sl = ? WHERE id = ? AND status = 'OPEN'",
+            "UPDATE trades SET sl = ? WHERE id = ? AND LOWER(status) IN ('open','tp1_hit','runner')",
             (new_sl, trade_id),
         )
         conn.commit()
