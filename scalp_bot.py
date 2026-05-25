@@ -42,6 +42,7 @@ from database import (
     save_scalp_signal, archive_old_scalp_signals,
     get_daily_signal_count,
     save_candidate_signal, save_signal_event, update_candidate_status, save_paper_result,
+    update_bot_status,
 )
 from core.data_layer import data_layer, SignalData
 from core.market_scanner import MarketScanner
@@ -819,8 +820,10 @@ def main():
                     continue
 
             try:
-                set_state("heartbeat", datetime.now(timezone.utc).isoformat())
-                set_state("status", "running")
+                _hb_ts = datetime.now(timezone.utc).isoformat()
+                set_state("heartbeat", _hb_ts)        # system_state (eski uyumluluk)
+                update_bot_status("heartbeat", _hb_ts)  # bot_status (dashboard okur)
+                update_bot_status("status", "running")
             except Exception:
                 pass
             _scan_dur = time.time() - _scan_start
@@ -866,6 +869,8 @@ def main():
             try:
                 set_state("status", "error")
                 set_state("last_error", str(e)[:500])
+                update_bot_status("status", "error")        # dashboard okur
+                update_bot_status("last_error", str(e)[:500])
             except Exception:
                 pass
             time.sleep(10)
