@@ -367,11 +367,19 @@ def main():
 
             # Bakiye scan döngüsü başında bir kez alınır — her coin için DB çağrısı önlenir
             balance = get_paper_balance()
+            # Duplicate koruması: aynı coin aynı scan döngüsünde birden fazla işlenmesin
+            scanned_this_cycle: set = set()
             for coin_info in eligible:
                 symbol = coin_info["symbol"]
 
                 if symbol in open_symbols:
                     continue
+
+                # ── Duplicate filtresi ──────────────────────────────────────
+                if symbol in scanned_this_cycle:
+                    logger.debug(f"[Scanner] {symbol} bu döngüde zaten tarandı, atlandı")
+                    continue
+                scanned_this_cycle.add(symbol)
 
                 try:
                     # ── ADIM 2: TREND ENGINE ───────────────────────────────
