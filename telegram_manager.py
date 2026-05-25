@@ -36,6 +36,15 @@ class TelegramManager:
         if not self._is_configured():
             logger.warning("TelegramManager: token/chat_id eksik")
             return
+        # Önceki offset'i veritabanından yükle — restart sonrası eski komutları önle
+        try:
+            import database as _db
+            saved = _db.get_state("tg_last_update_id")
+            if saved:
+                self._last_update_id = int(saved)
+                logger.info(f"Telegram offset yüklendi: {self._last_update_id}")
+        except Exception:
+            pass
         self._running = True
         self._thread = threading.Thread(
             target=self._poll_loop, daemon=True, name="tg-manager"
@@ -67,6 +76,12 @@ class TelegramManager:
             uid = update.get("update_id", 0)
             if uid > self._last_update_id:
                 self._last_update_id = uid
+                # Offset'i DB'ye kaydet — restart güvenliği
+                try:
+                    import database as _db
+                    _db.set_state("tg_last_update_id", str(uid))
+                except Exception:
+                    pass
             else:
                 continue  # eski update, atla
             self._handle_update(update)
@@ -229,13 +244,12 @@ class TelegramManager:
         init = getattr(config, "INITIAL_PAPER_BALANCE", 250.0)
         diff = bal - init
         try:
-            conn  = database.get_connection()
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            row   = conn.execute(
-                "SELECT COALESCE(SUM(realized_pnl),0) FROM trades WHERE DATE(close_time)=? AND status='closed'",
-                (today,)
-            ).fetchone()
-            conn.close()
+            with database.get_conn() as conn:
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                row   = conn.execute(
+                    "SELECT COALESCE(SUM(realized_pnl),0) FROM trades WHERE DATE(close_time)=? AND status='closed'",
+                    (today,)
+                ).fetchone()
             today_pnl = float(row[0]) if row else 0.0
         except Exception:
             today_pnl = 0.0
@@ -329,17 +343,16 @@ class TelegramManager:
     def _cmd_daily(self):
         import database
         try:
-            conn  = database.get_connection()
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            row   = conn.execute(
-                """SELECT COUNT(*),
-                          SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END),
-                          SUM(CASE WHEN realized_pnl <= 0 THEN 1 ELSE 0 END),
-                          COALESCE(SUM(realized_pnl), 0)
-                   FROM trades WHERE DATE(close_time)=? AND status='closed'""",
-                (today,)
-            ).fetchone()
-            conn.close()
+            with database.get_conn() as conn:
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                row   = conn.execute(
+                    """SELECT COUNT(*),
+                              SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END),
+                              SUM(CASE WHEN realized_pnl <= 0 THEN 1 ELSE 0 END),
+                              COALESCE(SUM(realized_pnl), 0)
+                       FROM trades WHERE DATE(close_time)=? AND status='closed'""",
+                    (today,)
+                ).fetchone()
             total  = row[0] or 0
             wins   = row[1] or 0
             losses = row[2] or 0

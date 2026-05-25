@@ -94,7 +94,6 @@ MAX_HOLD_MINUTES      = _env_int("MAX_HOLD_MINUTES", 240)
 
 # Scan
 SCAN_INTERVAL            = _env_int("SCAN_INTERVAL", 45)   # 60→45s
-SCAN_INTERVAL_SECONDS    = _env_int("SCAN_INTERVAL_SECONDS", 45)
 MIN_VOLUME_USDT          = _env_float("MIN_VOLUME_USDT", 3_000_000.0)
 MIN_MOVE_PCT             = _env_float("MIN_MOVE_PCT", 0.3)
 SCAN_INCLUDE_WATCH       = _env_bool("SCAN_INCLUDE_WATCH", True)

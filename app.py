@@ -269,17 +269,25 @@ def api_balance():
 @app.route("/api/params")
 def api_params():
     try:
-        p = None
-        if not p:
-            p = {
-                "sl_atr_mult": 1.5, "tp_atr_mult": 2.5,
-                "rsi5_min": 40, "rsi5_max": 70,
-                "rsi1_min": 40, "rsi1_max": 68,
-                "vol_ratio_min": 1.8, "min_volume_m": 5.0,
-                "min_change_pct": 1.5, "risk_pct": 1.0, "version": 1,
-                "ai_reason": "Parametre bulunamadı.",
-            }
-        return jsonify({"ok": True, "data": p})
+        return jsonify({"ok": True, "data": {
+            "sl_atr_mult":        getattr(config, "SL_ATR_MULT", 1.8),
+            "tp1_r":              getattr(config, "TP1_R", 1.5),
+            "tp2_r":              getattr(config, "TP2_R", 2.5),
+            "tp3_r":              getattr(config, "TP3_R", 4.0),
+            "min_rr":             getattr(config, "MIN_RR", 1.5),
+            "min_sl_pct":         getattr(config, "MIN_SL_PCT", 0.015),
+            "risk_pct":           getattr(config, "RISK_PCT", 1.0),
+            "max_open_trades":    getattr(config, "MAX_OPEN_TRADES", 5),
+            "trade_threshold":    getattr(config, "TRADE_THRESHOLD", 55.0),
+            "telegram_threshold": getattr(config, "TELEGRAM_THRESHOLD", 35.0),
+            "data_threshold":     getattr(config, "DATA_THRESHOLD", 20.0),
+            "scan_interval":      getattr(config, "SCAN_INTERVAL", 45),
+            "max_leverage":       getattr(config, "MAX_LEVERAGE", 10),
+            "execution_mode":     getattr(config, "EXECUTION_MODE", "paper"),
+            "human_mode":         getattr(config, "HUMAN_MODE", False),
+            "adx_min":            getattr(config, "ADX_MIN_THRESHOLD", 18),
+            "version":            "v6.0",
+        }})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -324,6 +332,7 @@ def api_ml_status():
 def api_logs():
     import re
     LOG_PATHS = [
+        os.path.join(getattr(config, "LOG_DIR", "logs"), "ax_bot.log"),
         "/root/trade_engine/logs/ax_bot.log",
         "/root/trade_engine/logs/bot.log",
         "/root/trade_engine/bot.log",
@@ -977,6 +986,13 @@ def main():
         "Dashboard API başlatılıyor %s:%s",
         config.FLASK_HOST, config.FLASK_PORT,
     )
+    # WebSocket event manager'ı başlat — dashboard real-time için şart
+    try:
+        from websocket_events import initialize_websocket_events
+        initialize_websocket_events(socketio)
+        logger.info("WebSocket event manager başlatıldı")
+    except Exception as _wse:
+        logger.warning(f"WebSocket event manager başlatılamadı: {_wse}")
     socketio.run(
         app,
         host=config.FLASK_HOST,

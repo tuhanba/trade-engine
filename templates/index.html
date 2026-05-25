@@ -6,6 +6,7 @@
 <title>AURVEX AI · v6.0</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -402,37 +403,6 @@ function initChart(){
   chart=new Chart(ctx,{type:'line',data:{labels:[],datasets:[{label:'PnL',data:[],borderColor:'#C8942A',backgroundColor:'rgba(200,148,42,.06)',borderWidth:1.5,pointRadius:0,pointHoverRadius:4,fill:true,tension:.35,pointHoverBackgroundColor:'#E8B84B'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{backgroundColor:'rgba(3,5,8,.97)',borderColor:'rgba(200,148,42,.35)',borderWidth:1,titleColor:'#4A5A7A',bodyColor:'#E8B84B',titleFont:{family:'JetBrains Mono',size:10},bodyFont:{family:'JetBrains Mono',size:12},callbacks:{label:c=>`${c.parsed.y>=0?'+':''}$${c.parsed.y.toFixed(2)}`}}},scales:{x:{display:false},y:{display:true,grid:{color:'rgba(255,255,255,.04)',drawTicks:false},border:{display:false},ticks:{color:'#4A5A7A',font:{family:'JetBrains Mono',size:9},maxTicksLimit:5,callback:v=>`${v>=0?'+':''}$${Math.abs(v).toFixed(0)}`}}},animation:{duration:600},interaction:{mode:'index',intersect:false}}});
 }
 
-// Health
-async function fHealth(){
-  try{
-    const d=(await(await fetch('/api/health')).json()).data||{};
-    const alive=d.bot_alive;
-    const chip=$('lchip'),dot=$('ldot'),txt=$('ltxt');
-    if(alive){chip.className='livechip on';dot.className='dot dot-on';txt.textContent='CANLI';txt.style.color='var(--em)'}
-    else{chip.className='livechip off';dot.className='dot dot-off';txt.textContent='KAPALI';txt.style.color='var(--ru)'}
-    $('mpill').textContent=(d.execution_mode||'PAPER').toUpperCase();
-
-    // Human / Scalp mode pill
-    const hp=$('humanpill');
-    const isHuman=d.human_mode===true;
-    hp.textContent=isHuman?'🧠 HUMAN':'⚡ SCALP';
-    hp.className='humanpill '+(isHuman?'human':'scalp');
-
-    // AX mode pill
-    const ax=(d.ax_mode||'').toUpperCase();
-    if(ax){const p=$('axpill');p.style.display='';p.textContent='AX: '+ax;p.style.color=ax==='EXECUTE'?'var(--em)':'var(--gold)';p.style.borderColor=ax==='EXECUTE'?'rgba(0,200,150,.25)':'rgba(200,148,42,.25)';p.style.background=ax==='EXECUTE'?'var(--emA)':'var(--goldA)'}
-
-    $('sysbar').style.display='flex';
-    const dbOk=d.db_connected;
-    $('sd-db').style.background=dbOk?'var(--em)':'var(--ru)';
-    $('sb-db').textContent=dbOk?'OK':'HATA';$('sb-db').style.color=dbOk?'var(--em)':'var(--ru)';
-    if(d.last_heartbeat){const s=Math.floor((Date.now()-new Date(d.last_heartbeat.replace('Z','')+'Z').getTime())/1000);$('sb-hb').textContent=`${s}s`;$('sb-hb').style.color=s<120?'var(--em)':s<300?'var(--gold)':'var(--ru)'}
-    $('sb-cb').textContent=d.circuit_breaker_active?'AKTİF':'Kapalı';$('sb-cb').style.color=d.circuit_breaker_active?'var(--ru)':'var(--em)';
-    $('sb-ax').textContent=(d.ax_mode||'—').toUpperCase();
-    if(d.trade_threshold)$('sb-thr').textContent=`${d.trade_threshold}`;
-  }catch(e){console.warn(e)}
-}
-
 // Stats
 async function fStats(){
   try{
@@ -603,14 +573,13 @@ function connectSSE(){
 // İlk yükleme
 async function init(){
   initChart();
-  await Promise.all([fHealth(),fStats(),fLearn()]);
+  await Promise.all([fHealthWithMode(),fStats(),fLearn()]);
   updateModeCard(false); // default scalp
   await Promise.all([fLive(),fTrades(),fSigs(),fChart(),fPipeline()]);
   fetchLogs();connectSSE();
 }
 
 // Health'den human_mode al ve mode card'ı güncelle
-const _origFHealth=fHealth;
 async function fHealthWithMode(){
   try{
     const resp=await fetch('/api/health');

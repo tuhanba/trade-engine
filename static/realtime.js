@@ -144,18 +144,18 @@ function handleLiveUpdate(data) {
 function handlePnLUpdate(data) {
   // PnL kartları güncellenir
   if (data.balance !== undefined) {
-    const balEl = document.getElementById('stBalance');
+    const balEl = document.getElementById('v-bal');
     if (balEl) {
       balEl.textContent = '$' + (data.balance || 0).toFixed(2);
     }
   }
-  
+
   if (data.unrealized_pnl !== undefined) {
-    const urEl = document.getElementById('unreal');
+    const urEl = document.getElementById('v-pnl-s');
     if (urEl) {
       const isPos = data.unrealized_pnl >= 0;
-      urEl.textContent = (isPos ? '+' : '') + data.unrealized_pnl.toFixed(3) + ' USDT';
-      urEl.style.color = isPos ? 'var(--green-br)' : 'var(--red-br)';
+      urEl.textContent = 'Unrealized: ' + (isPos ? '+' : '') + '$' + data.unrealized_pnl.toFixed(2);
+      urEl.style.color = isPos ? 'var(--em)' : 'var(--ru)';
     }
   }
 }
@@ -167,9 +167,10 @@ function handleTradeClosed(data) {
   }
   
   // Notification göster
-  if (data.symbol && data.pnl !== undefined) {
-    const win = data.pnl > 0;
-    const msg = `${data.symbol} ${data.direction} kapandı: ${win ? '+' : ''}${data.pnl.toFixed(2)}$`;
+  const pnl = data.pnl != null ? data.pnl : (data.net_pnl != null ? data.net_pnl : null);
+  if (data.symbol && pnl !== null) {
+    const win = pnl > 0;
+    const msg = `${data.symbol} ${data.direction || ''} kapandı: ${win ? '+' : ''}${pnl.toFixed(2)}$`;
     showNotification(msg, win ? 'success' : 'error');
   }
 }
@@ -231,7 +232,7 @@ function emitDashboardEvent(eventName, data = {}) {
  */
 document.addEventListener('DOMContentLoaded', () => {
   initializeWebSocket();
-  
+
   // Heartbeat gönder
   setInterval(() => {
     if (socket && socket.connected) {
@@ -239,3 +240,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }, REALTIME_CONFIG.HEARTBEAT_INTERVAL);
 });
+
+// ── Bridge functions — index.html handler'larını WebSocket callback'leriyle bağlar ──
+function loadPositions()  { if (typeof fLive === 'function') fLive(); }
+function loadStats()      { if (typeof fStats === 'function') fStats(); }
+function loadHistory()    { if (typeof fTrades === 'function') fTrades(); }
+function loadAxStatus()   { if (typeof fHealthWithMode === 'function') fHealthWithMode(); }
+function refreshAll() {
+  if (typeof fHealthWithMode === 'function') fHealthWithMode();
+  if (typeof fStats === 'function') fStats();
+  if (typeof fLive === 'function') fLive();
+  if (typeof fTrades === 'function') fTrades();
+  if (typeof fSigs === 'function') fSigs();
+}

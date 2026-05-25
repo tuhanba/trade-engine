@@ -46,6 +46,20 @@ except Exception:
     TP2_CLOSE_PCT = 30
     RUNNER_CLOSE_PCT = 30
 
+# ── AIDecisionEngine modül önbelleği (her trade kapanışında yeniden init önlenir) ─
+_cached_ai_engine = None
+
+def _get_ai_engine():
+    global _cached_ai_engine
+    if _cached_ai_engine is None:
+        try:
+            from core.ai_decision_engine import AIDecisionEngine
+            from config import DB_PATH
+            _cached_ai_engine = AIDecisionEngine(db_path=DB_PATH)
+        except Exception:
+            pass
+    return _cached_ai_engine
+
 
 class ExecutionEngine:
     """Paper trade yaşam döngüsü yöneticisi."""
@@ -279,47 +293,12 @@ class ExecutionEngine:
             realized_pnl=total_pnl,
             close_reason=reason,
         )
-        # BUG FIX: database.close_trade artık bakiyeyi otomatik güncellemez.
-        # Sadece bu close için yeni realize edilen miktarı ekle (TP1/TP2 kısmı zaten eklendi).
-        database.update_paper_balance(remaining_pnl)
-
+        # NOT: Bakiye güncellemesi ve Telegram bildirimi _finalize() üzerinden yapılır.
         logger.info(
             "Trade kapatıldı: #%s %s %s → %s  PnL=%.4f (accumulated=%.4f + remaining=%.4f)",
             trade["id"], trade["symbol"], trade.get("direction") or trade.get("side", "?"), reason,
             total_pnl, accumulated, remaining_pnl,
         )
-
-        try:
-            from telegram_delivery import send_trade_close as _tg_close2
-            from database import get_paper_balance as _gpb2
-            _bal2 = _gpb2()
-            _entry2 = float(trade.get("entry") or trade.get("entry_price") or 1)
-            _sl2    = float(trade.get("sl") or trade.get("stop_loss") or 0)
-            _sl_dist2 = abs(_entry2 - _sl2) if _sl2 else 1e-10
-            _qty2     = float(trade.get("original_qty") or trade.get("qty") or 1)
-            _r2       = round(total_pnl / (_sl_dist2 * _qty2 + 1e-10), 2) if _sl2 else 0
-            _open2    = trade.get("open_time", "")
-            _dur2     = ""
-            try:
-                from datetime import datetime, timezone as _tz
-                _opened2 = datetime.fromisoformat(_open2.replace("Z", "+00:00"))
-                _hold2   = (datetime.now(_tz.utc) - _opened2).total_seconds() / 60
-                _dur2    = f"{int(_hold2 // 60)}s {int(_hold2 % 60)}dk" if _hold2 >= 60 else f"{int(_hold2)}dk"
-            except Exception:
-                pass
-            _tg_close2(
-                symbol=trade["symbol"],
-                net_pnl=total_pnl,
-                total_fee=float(trade.get("total_fee") or 0),
-                reason=reason,
-                duration_str=_dur2,
-                direction=trade.get("direction") or trade.get("side", ""),
-                r_multiple=_r2,
-                balance_after=_bal2,
-            )
-            logger.info("[Telegram] Trade kapanış bildirimi gönderildi: %s", trade["symbol"])
-        except Exception as _tg_err2:
-            logger.warning("[Telegram] Trade kapanış bildirimi hatası: %s", _tg_err2)
 
         # ── AI Learning callback ─────────────────────────────────────
         try:
@@ -546,11 +525,11 @@ def _check_trade(client, t: dict) -> bool:
             pnl_tp2 = _calc_pnl(direction, entry, tp2, qty_tp2)
             realized = (t.get("realized_pnl") or 0) + pnl_tp2
             # Runner'ı başlat — trail stop koy
-            atr_val = _get_atr(client, symbol)
+            _cached_atr_val = _get_atr(client, symbol)
             if is_long:
-                new_trail = tp2 - atr_val * TRAIL_ATR_MULT
+                new_trail = tp2 - _cached_atr_val * TRAIL_ATR_MULT
             else:
-                new_trail = tp2 + atr_val * TRAIL_ATR_MULT
+                new_trail = tp2 + _cached_atr_val * TRAIL_ATR_MULT
             update_trade(trade_id, {
                 "status":       "runner",
                 "tp2_hit":      1,
@@ -582,7 +561,7 @@ def _check_trade(client, t: dict) -> bool:
 
         if trail_f > 0:
             # Trailing stop güncelle: fiyat yeni zirve yaptıysa trail'i hareket ettir
-            atr_val = _get_atr(client, symbol)
+            atr_val = _cached_atr_val if '_cached_atr_val' in dir() else _get_atr(client, symbol)
             if atr_val > 0:
                 if is_long:
                     new_trail_sl = price - atr_val * TRAIL_ATR_MULT
@@ -734,20 +713,19 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     # ── AI Öğrenme Döngüsü — Eksik 2 Düzeltmesi ──────────────────────────────
     # Her kapanan trade AI'ın Markov, heatmap ve parametre optimizasyonunu besler
     try:
-        from core.ai_decision_engine import AIDecisionEngine
-        from config import DB_PATH
-        ai_engine = AIDecisionEngine(db_path=DB_PATH)
+        ai_engine = _get_ai_engine()
         setup_quality = t.get("setup_quality") or t.get("quality") or "B"
-        ai_engine.learn_from_trade(
-            symbol        = t["symbol"],
-            result        = result,          # "WIN" | "LOSS"
-            pnl           = net_pnl,
-            setup_quality = setup_quality,
-        )
-        logger.info(
-            f"[AI Learn] #{trade_id} {t['symbol']} {result} "
-            f"pnl={net_pnl:+.3f}$ quality={setup_quality}"
-        )
+        if ai_engine:
+            ai_engine.learn_from_trade(
+                symbol        = t["symbol"],
+                result        = result,          # "WIN" | "LOSS"
+                pnl           = net_pnl,
+                setup_quality = setup_quality,
+            )
+            logger.info(
+                f"[AI Learn] #{trade_id} {t['symbol']} {result} "
+                f"pnl={net_pnl:+.3f}$ quality={setup_quality}"
+            )
     except Exception as e:
         logger.warning(f"AI learn_from_trade hatası: {e}")
 
