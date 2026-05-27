@@ -21,6 +21,13 @@ class NotificationService:
             if event_manager:
                 from database import get_open_trades
                 event_manager.broadcast_live_update(get_open_trades())
+            
+            # Send Telegram notification
+            try:
+                from telegram_delivery import send_trade_open
+                send_trade_open(event.payload)
+            except Exception as tg_err:
+                logger.error(f"[NotificationService] Telegram Error (open): {tg_err}")
         except Exception as e:
             logger.error(f"[NotificationService] Error in trade_opened: {e}")
 
@@ -36,13 +43,43 @@ class NotificationService:
                     payload.get("net_pnl"),
                     payload.get("reason")
                 )
+            
+            # Send Telegram notification
+            try:
+                from telegram_delivery import send_trade_close
+                send_trade_close(
+                    symbol=payload.get("symbol", "?"),
+                    net_pnl=float(payload.get("net_pnl", 0)),
+                    total_fee=0,  # Or pass it if payload has it
+                    reason=payload.get("reason", "unknown"),
+                    duration_str=payload.get("duration", "?"),
+                    direction=payload.get("direction", ""),
+                    r_multiple=float(payload.get("r_multiple", 0)),
+                    balance_after=float(payload.get("balance_after", 0))
+                )
+            except Exception as tg_err:
+                logger.error(f"[NotificationService] Telegram Error (close): {tg_err}")
         except Exception as e:
             logger.error(f"[NotificationService] Error in trade_closed: {e}")
 
     async def handle_tp_sl(self, event: Event):
+        payload = event.payload
         try:
             if event_manager:
                 from database import get_open_trades
                 event_manager.broadcast_live_update(get_open_trades())
+            
+            # Send Telegram notification
+            try:
+                from telegram_delivery import send_tp_hit
+                send_tp_hit(
+                    symbol=payload.get("symbol", "?"),
+                    tp_level=int(payload.get("level", 1)),
+                    net_pnl=float(payload.get("net_pnl", 0)),
+                    remaining_qty=float(payload.get("remaining_qty", 0)),
+                    balance_after=float(payload.get("balance_after", 0))
+                )
+            except Exception as tg_err:
+                logger.error(f"[NotificationService] Telegram Error (tp/sl): {tg_err}")
         except Exception as e:
             logger.error(f"[NotificationService] Error in tp_sl: {e}")
