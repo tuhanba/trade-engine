@@ -129,6 +129,15 @@ class AsyncMarketScanner:
                 candidates.sort(key=lambda x: x["tradeability_score"], reverse=True)
                 logger.info(f"Async Scan completed in {time.time() - start_time:.2f}s. "
                             f"Found {len(candidates)} candidates from {len(valid_symbols)} USDT perps.")
+                
+                # Update pipeline stats in DB for dashboard
+                try:
+                    from database import update_bot_status
+                    update_bot_status("pipeline_scanned", str(len(valid_symbols)))
+                    update_bot_status("pipeline_candidate", str(len(candidates)))
+                except Exception:
+                    pass
+
                 return candidates
             except Exception as e:
                 logger.error(f"Async Market scan error: {e}")

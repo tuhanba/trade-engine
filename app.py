@@ -169,6 +169,17 @@ def api_live():
 @app.route("/api/stats")
 def api_stats():
     """İstatistikler."""
+    def _get_safe_count(sql, params=()):
+        try:
+            with get_conn() as conn:
+                return conn.execute(sql, params).fetchone()[0] or 0
+        except: return 0
+    def _get_safe_status(key):
+        try:
+            with get_conn() as conn:
+                return int(conn.execute("SELECT value FROM bot_status WHERE key=?", (key,)).fetchone()[0])
+        except: return 0
+
     try:
         stats = dashboard_service.get_stats()
         ax_status = dashboard_service.get_ax_status()
@@ -183,6 +194,15 @@ def api_stats():
             "loss_trades":     stats.get("loss_trades", 0),
             "win_rate":        stats.get("win_rate", stats.get("winrate", 0)),
             "today_pnl":       stats.get("today_pnl", 0),
+            "funnel": {
+                "scanned": _get_safe_status("pipeline_scanned"),
+                "candidate": _get_safe_status("pipeline_candidate"),
+                "watchlist": _get_safe_count("SELECT COUNT(*) FROM signal_candidates WHERE status NOT IN ('NEW','rejected')"),
+                "telegram": _get_safe_count("SELECT COUNT(*) FROM telegram_messages WHERE status IN ('queued','sent')"),
+                "trade": stats.get("total_trades", 0),
+                "wins": stats.get("win_trades", 0),
+                "losses": stats.get("loss_trades", 0)
+            }
         })
     except Exception as exc:
         return _error(str(exc))
@@ -591,8 +611,12 @@ def api_signal_funnel():
                 try: return conn.execute(sql, params).fetchone()[0] or 0
                 except: return 0
 
-            scanned   = safe_count("SELECT COUNT(*) FROM scanned_coins")
-            candidate = safe_count("SELECT COUNT(*) FROM signal_candidates")
+            def safe_status(key):
+                try: return int(conn.execute("SELECT value FROM bot_status WHERE key=?", (key,)).fetchone()[0])
+                except: return 0
+
+            scanned   = safe_status("pipeline_scanned")
+            candidate = safe_status("pipeline_candidate")
             watchlist = safe_count(
                 "SELECT COUNT(*) FROM signal_candidates WHERE status NOT IN ('NEW','rejected')"
             )
