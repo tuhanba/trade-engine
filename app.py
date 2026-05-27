@@ -768,6 +768,35 @@ def api_circuit_breaker():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# ── /api/heatmap ──────────────────────────────────────────────────────────────
+@app.route("/api/heatmap")
+def api_heatmap():
+    try:
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT 
+                    symbol,
+                    strftime('%H', close_time) as hour_str,
+                    SUM(net_pnl) as total_pnl
+                FROM trades
+                WHERE status = 'closed' AND close_time IS NOT NULL
+                GROUP BY symbol, strftime('%H', close_time)
+            """).fetchall()
+            
+            data = []
+            for r in rows:
+                hour = r["hour_str"]
+                if hour is not None:
+                    data.append({
+                        "symbol": r["symbol"],
+                        "hour": int(hour),
+                        "pnl": float(r["total_pnl"] or 0)
+                    })
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ── SSE Real-time Stream ─────────────────────────────────────────────
 
 @app.route("/stream")

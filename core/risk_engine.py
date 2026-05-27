@@ -375,7 +375,24 @@ class RiskEngine:
             except Exception:
                 max_lev = 10
             stop_dist_pct = abs(entry - sl) / entry if entry > 0 else 0.02
-            leverage = min(max_lev, max(2, int(0.50 / stop_dist_pct))) if stop_dist_pct > 0 else max_lev
+            base_leverage = min(max_lev, max(2, int(0.50 / stop_dist_pct))) if stop_dist_pct > 0 else max_lev
+
+            # Dinamik Kaldıraç Çarpanı (AI Coin Profiles'dan)
+            lev_multiplier = 1.0
+            try:
+                from database import get_conn
+                with get_conn() as conn:
+                    row = conn.execute("SELECT win_rate, total_trades FROM coin_profiles WHERE symbol = ?", (symbol,)).fetchone()
+                    if row and row[1] >= 3:
+                        wr = float(row[0] or 0)
+                        if wr > 0.60:
+                            lev_multiplier = 1.25
+                        elif wr < 0.35:
+                            lev_multiplier = 0.50
+            except Exception as e:
+                logger.debug(f"[Risk] Dinamik kaldıraç hatası: {e}")
+
+            leverage = max(2, min(max_lev, int(base_leverage * lev_multiplier)))
             risk_pct = risk_pct_base * quality_mult
 
             pos = calculate_position_size(
