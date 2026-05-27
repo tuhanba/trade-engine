@@ -110,14 +110,14 @@ class AsyncScalpEngine:
 
     async def _heartbeat_loop(self):
         """Update heartbeat in database every 10 seconds."""
-        from database import set_bot_status
+        from database import update_bot_status
         from datetime import datetime, timezone
         while True:
             try:
-                await asyncio.to_thread(set_bot_status, "heartbeat", datetime.now(timezone.utc).isoformat())
-                await asyncio.to_thread(set_bot_status, "status", "running")
-            except Exception:
-                pass
+                await asyncio.to_thread(update_bot_status, "heartbeat", datetime.now(timezone.utc).isoformat())
+                await asyncio.to_thread(update_bot_status, "status", "running")
+            except Exception as e:
+                logger.error(f"Heartbeat failed: {e}")
             await asyncio.sleep(10)
 
     async def stop(self):
