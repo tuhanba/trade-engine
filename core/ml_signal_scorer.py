@@ -105,8 +105,14 @@ class MLSignalScorer:
 
             conn.close()
             return rows
+        except sqlite3.OperationalError as e:
+            if "no such table: pattern_memory" in str(e):
+                pass # Tablo henüz yok, sessizce geç
+            else:
+                logger.debug(f"ML veri yükleme hatası: {e}")
+            return []
         except Exception as e:
-            logger.warning(f"ML veri yükleme hatası: {e}")
+            logger.debug(f"ML veri yükleme hatası: {e}")
             return []
 
     def _row_to_features(self, row):
@@ -189,12 +195,11 @@ class MLSignalScorer:
             from sklearn.calibration import CalibratedClassifierCV
             import numpy as np
         except ImportError:
-            logger.warning("scikit-learn kurulu değil. pip install scikit-learn")
+            logger.debug("scikit-learn kurulu değil.")
             return False
 
         rows = self._load_training_data()
         if len(rows) < MIN_TRAIN_SAMPLES:
-            logger.info(f"ML eğitim için yetersiz veri: {len(rows)}/{MIN_TRAIN_SAMPLES}")
             return False
 
         X, y = self._rows_to_xy(rows)
