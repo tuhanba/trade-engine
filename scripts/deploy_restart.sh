@@ -159,6 +159,13 @@ else
     info "Yeni commit: $NEW_COMMIT"
 fi
 
+# -- Systemd Senkronizasyonu --
+if [ -d "$BASE/systemd" ]; then
+    info "Systemd dosyaları güncelleniyor..."
+    cp -f "$BASE/systemd/"*.service /etc/systemd/system/ 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+fi
+
 # ── 4. Paket Kurulumu ───────────────────────────────────────────────────────
 step "4. PAKET KONTROLÜ"
 
