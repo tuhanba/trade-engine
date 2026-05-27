@@ -4,7 +4,7 @@
 # Kullanım: bash aurvex_maintain.sh [--fix] [--full] [--telegram-test]
 # ═══════════════════════════════════════════════════════════════════
 
-BASE="/root/trade_engine/trade-engine"
+BASE="/root/trade_engine"
 VENV="/root/trade_engine/.venv/bin/python3"
 BOT_LOG="$BASE/logs/ax_bot.log"
 DASH_LOG="$BASE/logs/dashboard.log"
