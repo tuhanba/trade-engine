@@ -142,25 +142,25 @@ class TelegramManager:
 
     def _cmd_help(self):
         self.send_fn(
-            "🤖 AurvexAI Komutları\n\n"
-            "Durum\n"
-            "/status  — Bot durumu\n"
-            "/open    — Açık tradeler\n"
-            "/mode    — Mod bilgisi\n\n"
-            "İstatistik\n"
-            "/stats   — Performans\n"
-            "/daily   — Bugün\n"
-            "/balance — Bakiye\n"
-            "/trades  — Son 5 trade\n"
-            "/signal  — Son 5 sinyal\n"
-            "/ghost   — Ghost learning\n\n"
-            "Mod\n"
-            "/human   — İnsan modu (az, kaliteli)\n"
-            "/scalp   — Scalp modu (çok, hızlı)\n\n"
-            "Kontrol\n"
-            "/pause   — Duraklat\n"
-            "/resume  — Devam\n"
-            "/finish  — Kapat ve dur"
+            "🤖 **AurvexAI Yönetim Merkezi**\n\n"
+            "Merhaba! Ben senin yapay zeka destekli alım-satım asistanın. Sistemin kalbini buradan kontrol edebilirsin. İşte yapabileceklerim:\n\n"
+            "📊 **Gözlem ve Raporlama**\n"
+            "🔹 `/status` — Sistemin genel sağlığını, aktif modunu ve kârını özetler.\n"
+            "🔹 `/open` — Şu an Binance'te açık olan işlemlerini (giriş, stop, kâr) gösterir.\n"
+            "🔹 `/stats` — Tüm zamanların performans özetini (Win Rate vb.) çıkarır.\n"
+            "🔹 `/daily` — Bugüne özel kaç işlem açıldığını ve güncel kâr/zararı listeler.\n"
+            "🔹 `/balance` — Kasanın büyüme oranını detaylıca gösterir.\n"
+            "🔹 `/trades` — Kapanan son 5 işlemi (Neden kapandığıyla birlikte) listeler.\n"
+            "🔹 `/ghost` — Yapay zekanın (Ghost Learning) arka planda ne kadar öğrendiğini gösterir.\n\n"
+            "⚙️ **Strateji ve Mod Değişimi**\n"
+            "🔹 `/mode` — Şu an hangi stratejide çalıştığımızı söyler.\n"
+            "🔹 `/human` — İnsan Modu: Az ama öz, sadece en kaliteli sinyallere girer (A+/S).\n"
+            "🔹 `/scalp` — Scalp Modu: Piyasayı agresif tarar, çok işleme girer ve hızlı çıkar.\n\n"
+            "🛑 **Acil Durum Kontrolleri**\n"
+            "🔹 `/pause` — Piyasalar çok riskliyse botu duraklat. (Açık işlemler takip edilir, yeni işleme girilmez).\n"
+            "🔹 `/resume` — Her şey yolundaysa botu tekrar ava çıkar.\n"
+            "🔹 `/finish` — Mevcut işlemler kapandığı an botu tamamen uykuya al.\n\n"
+            "💡 *İpucu: Herhangi bir komuta tıklayarak anında çalıştırabilirsin!*"
         )
 
     def _cmd_status(self):
@@ -202,19 +202,20 @@ class TelegramManager:
             open_lines += f"\n  {sym} {side} @{entry:.4f} {upnl:+.2f}${tp_marker}"
 
         self.send_fn(
-            f"🤖 AurvexAI Durum\n"
+            f"📈 **Sistem Durum Raporu**\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"Durum: {paused}\n"
-            f"Mod: {'🧠 HUMAN' if config.HUMAN_MODE else '⚡ SCALP'} | {config.EXECUTION_MODE.upper()}\n"
-            f"Rejim: {regime}\n"
+            f"🔍 **Motor Durumu:** {paused}\n"
+            f"🎯 **Çalışma Modu:** {'🧠 İnsan (Özenli)' if config.HUMAN_MODE else '⚡ Scalp (Agresif)'} | {config.EXECUTION_MODE.upper()}\n"
+            f"🌊 **Piyasa Yönü (Rejim):** {regime}\n"
+            f"⏱ **Kesintisiz Çalışma:** {h} Saat, {m} Dakika\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"💰 Bakiye: ${bal:.2f} ({roi:+.1f}% ROI)\n"
-            f"📅 Bugün: ${today_pnl:+.2f}\n"
-            f"📊 Toplam PnL: ${stats.get('total_pnl', 0):+.2f}\n"
-            f"👻 Ghost: {ghost_n} sinyal\n"
+            f"💰 **Sanal Kasa:** ${bal:.2f} (Büyüme: {roi:+.1f}%)\n"
+            f"📅 **Bugünün Kârı:** ${today_pnl:+.2f}\n"
+            f"📊 **Toplam Kâr:** ${stats.get('total_pnl', 0):+.2f}\n"
+            f"👻 **YZ Öğrenme Havuzu:** {ghost_n} simülasyon\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"Açık trade: {len(open_t)}{open_lines}\n"
-            f"⏱ Uptime: {h}s {m}dk"
+            f"🟢 **Açık İşlemler ({len(open_t)} adet):**{open_lines}\n\n"
+            f"💡 *Detaylar için /stats veya /open yazabilirsin.*"
         )
 
     def _cmd_stats(self):
@@ -229,14 +230,17 @@ class TelegramManager:
         init  = getattr(config, "INITIAL_PAPER_BALANCE", 2000.0)
         roi   = ((bal - init) / init * 100) if init else 0
         self.send_fn(
-            f"Performans Istatistikleri\n\n"
-            f"Toplam trade: {total}\n"
-            f"Kazanc / Kayip: {wins}W / {loss}L\n"
-            f"Winrate: {wr:.1f}%\n"
-            f"Toplam PnL: ${pnl:+.2f}\n"
-            f"Bakiye: ${bal:.2f}\n"
-            f"ROI: {roi:+.1f}%\n"
-            f"Baslangic: ${init:.2f}"
+            f"📊 **Genel Performans İstatistikleri**\n\n"
+            f"Bu veriler botun şu ana kadar gösterdiği tüm başarı oranını özetler:\n\n"
+            f"🔸 **Toplam Kapanan İşlem:** {total} adet\n"
+            f"🔸 **Başarı Oranı (Kazanılan/Kaybedilen):** {wins} Başarılı / {loss} Zararlı\n"
+            f"🔸 **Win Rate (Kazanma Yüzdesi):** %{wr:.1f}\n"
+            f"🔸 **Kümülatif Net Kâr:** ${pnl:+.2f}\n\n"
+            f"💼 **Kasa Durumu:**\n"
+            f"🔸 Başlangıç: ${init:.2f}\n"
+            f"🔸 Güncel Bakiye: ${bal:.2f}\n"
+            f"🔸 Toplam Büyüme (ROI): %{roi:+.1f}\n\n"
+            f"💡 *Not: Yüksek kâr faktörü, düşük win rate'den daha önemlidir. Bot kârı uzatıp zararı erken keser.*"
         )
 
     def _cmd_trades(self):
@@ -251,9 +255,9 @@ class TelegramManager:
             side   = t.get("side") or t.get("direction", "?")
             pnl    = float(t.get("net_pnl") or t.get("realized_pnl") or 0)
             reason = t.get("close_reason") or "?"
-            icon   = "WIN" if pnl > 0 else "LOSS"
-            lines.append(f"{icon} {sym} {side} | {pnl:+.3f}$ | {reason}")
-        self.send_fn("Son 5 Trade\n\n" + "\n".join(lines))
+            icon   = "✅ KÂR" if pnl > 0 else "❌ ZARAR"
+            lines.append(f"{icon} | {sym} ({side})\n   └ Kâr: {pnl:+.3f}$ | Sebep: {reason}")
+        self.send_fn("📜 **Kapanan Son 5 İşlemin Analizi**\n\n" + "\n\n".join(lines) + "\n\n💡 *Not: Neden kapandığına (reason) bakarak botun hangi stratejiyi uyguladığını (SL, TP, Trail) görebilirsin.*")
 
     def _cmd_balance(self):
         import database
@@ -271,11 +275,13 @@ class TelegramManager:
         except Exception:
             today_pnl = 0.0
         self.send_fn(
-            f"Bakiye Detayi\n\n"
-            f"Anlik: ${bal:.2f}\n"
-            f"Baslangic: ${init:.2f}\n"
-            f"Toplam kar/zarar: ${diff:+.2f}\n"
-            f"Bugun: ${today_pnl:+.2f}"
+            f"💳 **Bakiye ve Kazanç Özeti**\n\n"
+            f"Sisteme tanımlı başlangıç kasan ve şu anki büyüme:\n\n"
+            f"🔹 Başlangıç Kası: ${init:.2f}\n"
+            f"🔹 **Şu Anki Kasa:** ${bal:.2f}\n"
+            f"🔹 Toplam Kâr/Zarar: ${diff:+.2f}\n"
+            f"🔹 Sadece Bugün Kazanılan: ${today_pnl:+.2f}\n\n"
+            f"💡 *Canlı ticarete (Live Trading) geçtiğinde burada gerçek Binance cüzdanını göreceksin.*"
         )
 
     def _cmd_open(self):
@@ -303,11 +309,13 @@ class TelegramManager:
                 except Exception:
                     pass
             lines.append(
-                f"{sym} {side}{hold}\n"
-                f"  Giris: ${ep:.4f} SL: ${sl:.4f}\n"
-                f"  TP1: ${tp1:.4f} PnL: {upnl:+.2f}$"
+                f"🪙 **{sym}** ({side}) {hold}\n"
+                f"   ├ Giriş Fiyatı: ${ep:.4f}\n"
+                f"   ├ Stop Loss: ${sl:.4f} (Korunuyor)\n"
+                f"   ├ Hedef TP1: ${tp1:.4f}\n"
+                f"   └ **Anlık Durum (PnL):** {upnl:+.2f}$"
             )
-        self.send_fn(f"Acik Tradeler ({len(trades)})\n\n" + "\n\n".join(lines))
+        self.send_fn(f"🟢 **Aktif Açık İşlemler ({len(trades)} adet)**\n\n" + "\n\n".join(lines) + "\n\n💡 *Bot bunları canlı takip ediyor. Kârda olanları Trailing Stop ile koruyacaktır.*")
 
     def _cmd_signal(self):
         """Son 5 sinyal adayının özeti."""
@@ -344,15 +352,18 @@ class TelegramManager:
             resolved = gr_wins + gr_loss
             vwr = round(gr_wins / resolved * 100, 1) if resolved > 0 else 0
             self.send_fn(
-                f"👻 Ghost Learning 2.0\n"
+                f"👻 **Yapay Zeka & Ghost Learning 2.0 Durumu**\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"Toplam sinyal: {gs_total}\n"
-                f"Simüle: {gs_sim} | Bekleyen: {gs_total - gs_sim}\n"
+                f"Bu modül botun beynidir. İşleme girmese bile sanal sinyaller üretip sonuçlarından ders çıkarır.\n\n"
+                f"🧠 **Toplanan Veri Seti:** {gs_total} sinyal incelendi.\n"
+                f"⚙️ **İşlenen (Simüle):** {gs_sim} | Bekleyen: {gs_total - gs_sim}\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"WIN: {gr_wins} | LOSS: {gr_loss}\n"
-                f"Ghost WR: {vwr:.1f}%\n"
-                f"Avg R: {gr_avg_r:.2f}R\n"
-                f"Bekleyen öneri: {pending_sugg}"
+                f"📊 **Öğrenme Başarısı:**\n"
+                f"🔹 Doğru Tahmin (WIN): {gr_wins} adet\n"
+                f"🔹 Yanlış Tahmin (LOSS): {gr_loss} adet\n"
+                f"🔹 Sanal Win Rate: %{vwr:.1f}\n"
+                f"🔹 Ortalama Kazanç Çarpanı: {gr_avg_r:.2f}R\n\n"
+                f"🛠 Bekleyen Strateji Önerisi: {pending_sugg} adet"
             )
         except Exception as e:
             self.send_fn(f"Ghost bilgisi alinamadi: {e}")
@@ -412,10 +423,10 @@ class TelegramManager:
         except Exception:
             pass
         self.send_fn(
-            "Bot duraklatildi.\n"
-            "Acik tradeler izlenmeye devam eder.\n"
-            "Yeni sinyal uretilmeyecek.\n"
-            "/resume ile devam et."
+            "⏸ **SİSTEM DURAKLATILDI (PAUSE)**\n\n"
+            "Bot şu an yeni piyasa fırsatlarını aramayı ve yeni işlem açmayı tamamen **durdurdu**.\n\n"
+            "💡 Ancak endişelenme! Hali hazırda açık olan işlemlerinin SL, TP ve Kâr alma seviyeleri takip edilmeye devam ediyor.\n\n"
+            "Piyasa tehlikesiz göründüğünde botu tekrar işe göndermek için `/resume` komutunu kullan."
         )
 
     def _cmd_resume(self):
@@ -425,7 +436,10 @@ class TelegramManager:
             _db.set_state("tg_is_paused", "False")
         except Exception:
             pass
-        self.send_fn("Bot devam ediyor. Sinyal uretimi aktif.")
+        self.send_fn(
+            "▶️ **SİSTEM YENİDEN AKTİF (RESUME)**\n\n"
+            "Bot uykudan uyandı! Yeniden piyasayı taramaya ve uygun sinyallerde işlem açmaya başlıyor."
+        )
 
     def _cmd_finish(self):
         self.is_finish_mode = True

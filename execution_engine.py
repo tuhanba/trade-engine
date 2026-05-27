@@ -709,12 +709,19 @@ def _check_trade(client, t: dict) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _calc_pnl(direction: str, entry: float, exit_price: float, qty: float) -> float:
-    """Paper trade PnL hesabı (USD, kaldıraçsız)."""
+    """Paper trade PnL hesabı (Komisyonlar dahil)."""
     if direction == "LONG":
-        pnl = (exit_price - entry) * qty
+        gross_pnl = (exit_price - entry) * qty
     else:
-        pnl = (entry - exit_price) * qty
-    return round(pnl, 4)
+        gross_pnl = (entry - exit_price) * qty
+        
+    # Binance Vadeli İşlem Komisyonu (Varsayılan: %0.04 Taker)
+    open_fee = entry * qty * config.DEFAULT_FEE_RATE
+    close_fee = exit_price * qty * config.DEFAULT_FEE_RATE
+    total_fee = open_fee + close_fee
+    
+    net_pnl = gross_pnl - total_fee
+    return round(net_pnl, 4)
 
 
 def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> float:

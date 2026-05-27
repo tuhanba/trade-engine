@@ -18,6 +18,9 @@ from core.services.risk_service import RiskService
 from core.services.ai_decision_service import AIDecisionService
 from core.services.execution_service import ExecutionService
 from core.services.notification_service import NotificationService
+from core.services.scanner_service import ScannerService
+from telegram_manager import TelegramManager
+import telegram_delivery
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,6 +61,11 @@ class AsyncScalpEngine:
         AIDecisionService()
         ExecutionService()
         NotificationService()
+        ScannerService(self.client)
+
+        # Start Telegram Command Manager
+        self.telegram_manager = TelegramManager(telegram_delivery.send_message)
+        self.telegram_manager.start()
 
         # Start WebSocket Data Feed
         await self.market_data.initialize()
@@ -76,6 +84,8 @@ class AsyncScalpEngine:
 
     async def stop(self):
         logger.info("Stopping engine...")
+        if hasattr(self, 'telegram_manager'):
+            self.telegram_manager.stop()
         if self.market_data:
             await self.market_data.stop()
         await event_bus.stop()
