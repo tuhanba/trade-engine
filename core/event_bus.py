@@ -28,6 +28,15 @@ class EventBus:
         if self._queue:
             await self._queue.put(event)
 
+    def publish_sync(self, event: Event):
+        """Thread-safe way to publish events from synchronous code."""
+        if self._queue and self._running:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.call_soon_threadsafe(self._queue.put_nowait, event)
+            except Exception as e:
+                logger.error(f"Error in publish_sync: {e}")
+
     async def _process_events(self):
         while self._running:
             try:

@@ -414,33 +414,22 @@ def deliver_signal(sig):
 
 
 def send_trade_open(data: dict):
-    """
-    Trade açılış bildirimi. PAPER/DRY-RUN etiketi zorunludur.
-    data dict'i execution_engine.open_trade() tarafından sağlanır.
-    """
+    """Trade açılış bildirimi."""
     try:
         direction_emoji = "🟢 LONG" if str(data.get("direction", "")).upper() == "LONG" else "🔴 SHORT"
-        mode_label = "📄 PAPER/DRY-RUN" if EXECUTION_MODE != "live" else "🔴 LIVE"
+        mode_label = "📄 PAPER" if EXECUTION_MODE != "live" else "🔴 LIVE"
+        symbol = data.get('symbol', '-')
+        
         text = (
-            f"{mode_label}\n"
+            f"🚀 <b>YENİ İŞLEM AÇILDI</b> | {mode_label}\n\n"
+            f"{direction_emoji} <b>{symbol}</b> (x{data.get('leverage', '?')})\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"🆕 TRADE AÇILDI\n"
-            f"{direction_emoji} {data.get('symbol', '-')} x{data.get('leverage', '?')}\n"
+            f"🎯 <b>Giriş:</b> {_fmt(data.get('entry', 0))}\n"
+            f"🛑 <b>Stop:</b>  {_fmt(data.get('sl', 0))}\n"
+            f"🏆 <b>TP1:</b>   {_fmt(data.get('tp1', 0))}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"Entry:   {_fmt(data.get('entry', 0))}\n"
-            f"SL:      {_fmt(data.get('sl', 0))}\n"
-            f"TP1:     {_fmt(data.get('tp1', 0))}\n"
-            f"TP2:     {_fmt(data.get('tp2', 0))}\n"
-            f"TP3:     {_fmt(data.get('tp3', 0))}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"Notional:     ${_fmt(data.get('notional_size', 0), 2)}\n"
-            f"Margin:       ${_fmt(data.get('margin_used', 0), 2)}\n"
-            f"Risk USD:     ${_fmt(data.get('risk_usd', 0), 2)}\n"
-            f"Max Kayıp:    ${_fmt(data.get('max_loss_after_fee', 0), 2)}\n"
-            f"Giriş Fee:    ${_fmt(data.get('open_fee', 0), 4)}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"Kalite:  {data.get('setup_quality', '-')} | Skor: {_fmt(data.get('final_score', 0), 1)}\n"
-            f"Sebep:   {data.get('reason', '-')}\n"
+            f"💰 <b>Risk USD:</b> ${_fmt(data.get('risk_usd', 0), 2)}\n"
+            f"⚡ <b>Kalite:</b>   {data.get('setup_quality', '-')} (Skor: {_fmt(data.get('final_score', 0), 1)})\n"
         )
         _queue.push(text)
     except Exception as e:
@@ -453,19 +442,16 @@ def send_tp_hit(symbol: str, tp_level: int, net_pnl: float,
     try:
         emoji  = "🎯" if tp_level == 1 else "🏆"
         sign   = "+" if net_pnl >= 0 else ""
-        result = "KAR ✅" if net_pnl >= 0 else "ZARAR ❌"
         text = (
-            f"{emoji} <b>TP{tp_level} — {symbol}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"Sonuç:        <b>{result}</b>\n"
-            f"TP{tp_level} PnL:      <b>{sign}${net_pnl:.2f}</b>\n"
-            f"Bakiye:       <b>${balance_after:.2f}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{emoji} <b>TP{tp_level} VURDU!</b> | {symbol}\n\n"
+            f"💵 <b>Kâr:</b> {sign}${net_pnl:.2f}\n"
         )
         if tp_level == 1:
-            text += "📌 SL breakeven'e taşındı — runner devam ediyor"
+            text += "🛡️ <i>SL giriş noktasına çekildi (Breakeven). Kalan miktar için işlem devam ediyor.</i>\n"
         elif tp_level == 2:
-            text += "🏃 Runner trailing aktif"
+            text += "🏃 <i>Runner aktif. İşlem izleniyor.</i>\n"
+        
+        text += f"💳 Bakiye: <b>${balance_after:.2f}</b>\n"
         _queue.push(text)
     except Exception as e:
         logger.error(f"TP{tp_level} bildirim hatası: {e}")
@@ -475,35 +461,38 @@ def send_trade_close(symbol: str, net_pnl: float, total_fee: float,
                      reason: str, duration_str: str,
                      direction: str = "", r_multiple: float = 0,
                      balance_after: float = 0):
-    """Trade kapanış bildirimi — WIN/LOSS net göster."""
+    """Trade kapanış bildirimi."""
     try:
         sign   = "+" if net_pnl >= 0 else ""
-        result = "✅ KAR" if net_pnl > 0 else "❌ ZARAR"
+        if net_pnl > 0:
+            result_header = "✅ <b>BAŞARILI İŞLEM</b>"
+        elif net_pnl < 0:
+            result_header = "❌ <b>STOP/ZARAR</b>"
+        else:
+            result_header = "⚖️ <b>BAŞA BAŞ (Breakeven)</b>"
+            
         reason_map = {
-            "sl":               "🛑 Stop Loss",
-            "tp1":              "🎯 TP1 Hit",
-            "tp2":              "🏆 TP2 Hit",
-            "tp3":              "🏁 TP3 Hit",
-            "manual":           "👋 Manuel",
-            "finish":           "🏁 Finish Modu",
-            "timeout":          "⏰ Süre Doldu",
-            "max_hold_timeout": "⏰ Max Hold Süresi",
-            "trail":            "📉 Trailing Stop",
-            "runner":           "🏃 Runner Stop",
-            "breakeven":        "⚖️ Breakeven",
+            "sl":               "Stop Loss Vurdu",
+            "tp1":              "TP1'de Kapandı",
+            "tp2":              "TP2'de Kapandı",
+            "tp3":              "TP3 Tamamlandı",
+            "manual":           "Manuel Kapatıldı",
+            "finish":           "Finish Modu",
+            "timeout":          "Süre Doldu",
+            "max_hold_timeout": "Maksimum Süre Doldu",
+            "trail":            "Trailing Stop Vurdu",
+            "runner":           "Runner Kapandı",
+            "breakeven":        "Giriş Fiyatında Kapandı",
         }
         reason_str = reason_map.get(reason.lower(), reason.upper())
-        dir_emoji  = "🔺 LONG" if "LONG" in direction.upper() else "🔻 SHORT"
+        dir_emoji  = "LONG" if "LONG" in direction.upper() else "SHORT"
+        
         text = (
-            f"{result} {dir_emoji} <b>{symbol}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"Kapanış:  {reason_str}\n"
-            f"Net PnL:  <b>{sign}${net_pnl:.2f}</b>\n"
-            f"Fee:      ${total_fee:.3f}\n"
-            f"R:        {r_multiple:+.2f}R\n"
-            f"Süre:     {duration_str}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"💰 Bakiye: <b>${balance_after:.2f}</b>"
+            f"{result_header} | {symbol} ({dir_emoji})\n\n"
+            f"📌 <b>Sebep:</b> {reason_str}\n"
+            f"💵 <b>Net PnL:</b> {sign}${net_pnl:.2f}\n"
+            f"⏱️ <b>Süre:</b> {duration_str}\n\n"
+            f"💳 <b>Güncel Bakiye:</b> ${balance_after:.2f}"
         )
         _queue.push(text)
     except Exception as e:
