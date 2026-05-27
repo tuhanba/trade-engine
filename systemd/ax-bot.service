@@ -1,0 +1,17 @@
+[Unit]
+Description=AX Trade Engine - Scalp Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/trade_engine/trade-engine
+EnvironmentFile=/root/trade_engine/.env
+ExecStart=/root/trade_engine/.venv/bin/python /root/trade_engine/trade-engine/scalp_bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
