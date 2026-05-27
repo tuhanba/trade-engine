@@ -60,6 +60,11 @@ class TelegramManager:
                 self.human_mode = (human_mode_val == "True")
                 config.HUMAN_MODE = self.human_mode
                 logger.info(f"Telegram human_mode yüklendi: {self.human_mode}")
+                
+            exec_mode_val = _db.get_state("tg_execution_mode")
+            if exec_mode_val:
+                config.EXECUTION_MODE = exec_mode_val
+                logger.info(f"Telegram execution_mode yüklendi: {config.EXECUTION_MODE}")
         except Exception as e:
             logger.warning(f"Telegram states load hatası: {e}")
         self._running = True
@@ -131,6 +136,8 @@ class TelegramManager:
             "/human":   self._cmd_human_on,
             "/scalp":   self._cmd_human_off,
             "/insan":   self._cmd_human_on,
+            "/paper":   self._cmd_paper,
+            "/live":    self._cmd_live,
         }
         handler = handlers.get(cmd)
         if handler:
@@ -537,6 +544,25 @@ class TelegramManager:
             "TP: 1.5R - 2.5R\n"
             "Min R:R: 1.5\n"
             "Maks açık trade: 5\n"
-            "Çok sinyal, hızlı çıkış\n\n"
             "/human ile insan moduna geç."
         )
+
+    def _cmd_paper(self):
+        try:
+            import config as _cfg
+            _cfg.EXECUTION_MODE = "paper"
+            import database as _db
+            _db.set_state("tg_execution_mode", "paper")
+            self.send_fn("💵 **PAPER MODE AKTİF**\nSistem artık sanal parayla işlem yapacak. Gerçek paranız güvende.")
+        except Exception as e:
+            self.send_fn(f"Hata: {e}")
+
+    def _cmd_live(self):
+        try:
+            import config as _cfg
+            _cfg.EXECUTION_MODE = "live"
+            import database as _db
+            _db.set_state("tg_execution_mode", "live")
+            self.send_fn("🔥 **LIVE TRADING AKTİF**\n\n⚠️ **DİKKAT:** Sistem şu andan itibaren GERÇEK Binance bakiyenizle işlem açacaktır. Kemerlerinizi bağlayın!")
+        except Exception as e:
+            self.send_fn(f"Hata: {e}")

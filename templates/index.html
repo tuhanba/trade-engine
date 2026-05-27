@@ -722,7 +722,7 @@ async function fHealthWithMode(){
     const dbOk=d.db_connected;
     $('sd-db').style.background=dbOk?'var(--em)':'var(--ru)';
     $('sb-db').textContent=dbOk?'OK':'HATA';$('sb-db').style.color=dbOk?'var(--em)':'var(--ru)';
-    if(d.last_heartbeat){const s=Math.floor((Date.now()-new Date(d.last_heartbeat.replace('Z','')+'Z').getTime())/1000);$('sb-hb').textContent=`${s}s`;$('sb-hb').style.color=s<120?'var(--em)':s<300?'var(--gold)':'var(--ru)'}
+    if(d.last_heartbeat){const s=Math.floor((Date.now()-new Date(d.last_heartbeat).getTime())/1000);$('sb-hb').textContent=`${s}s`;$('sb-hb').style.color=s<120?'var(--em)':s<300?'var(--gold)':'var(--ru)'}
     $('sb-cb').textContent=d.circuit_breaker_active?'AKTİF':'Kapalı';$('sb-cb').style.color=d.circuit_breaker_active?'var(--ru)':'var(--em)';
     $('sb-ax').textContent=(d.ax_mode||'—').toUpperCase();
     if(d.trade_threshold)$('sb-thr').textContent=`${d.trade_threshold}`;
