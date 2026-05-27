@@ -19,7 +19,7 @@ class ExecutionService:
                 await asyncio.to_thread(self.execution_engine.update_open_trades)
             except Exception as e:
                 logger.error(f"[ExecutionService] Monitor loop error: {e}")
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
 
     async def handle_ai_validated(self, event: Event):
         payload = event.payload

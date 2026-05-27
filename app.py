@@ -800,7 +800,7 @@ def stream():
                 if err_count >= 10:
                     return
             try:
-                time.sleep(2)
+                time.sleep(1)
             except GeneratorExit:
                 return
 
