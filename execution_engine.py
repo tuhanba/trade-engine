@@ -455,15 +455,18 @@ def monitor_trades(client) -> list:
 
 
 def _get_price(client, symbol: str) -> float:
-    # 1. Binance client yardimiyla fiyati almayı dene
+    # 1. CCXT yardimiyla fiyati almayı dene
     try:
-        if client:
-            ticker = client.futures_ticker(symbol=symbol)
-            return float(ticker["lastPrice"])
+        import ccxt
+        exchange = ccxt.binance({'options': {'defaultType': 'future'}})
+        # CCXT symbol format: BTC/USDT:USDT (Futures)
+        ccxt_symbol = symbol.replace("USDT", "/USDT:USDT")
+        ticker = exchange.fetch_ticker(ccxt_symbol)
+        return float(ticker['last'])
     except Exception as e:
-        logger.warning(f"[Execution] futures_ticker failed for {symbol}: {e}. Trying public API fallback...")
+        logger.warning(f"[Execution] ccxt fetch_ticker failed for {symbol}: {e}. Trying public API fallback...")
 
-    # 2. Hata durumunda veya client yoksa public API fallback
+    # 2. Hata durumunda public API fallback
     try:
         import requests
         r = requests.get("https://fapi.binance.com/fapi/v1/ticker/price", params={"symbol": symbol}, timeout=5)
@@ -715,14 +718,17 @@ def _calc_pnl(direction: str, entry: float, exit_price: float, qty: float) -> fl
 
 
 def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> float:
-    """Trailing stop için anlık ATR."""
+    """Trailing stop için anlık ATR (CCXT ile)."""
     try:
         import pandas as pd
-        klines = client.futures_klines(symbol=symbol, interval=interval, limit=period + 5)
-        df = pd.DataFrame(klines, columns=[
-            "time","open","high","low","close","volume",
-            "ct","qav","nt","tbbav","tbqav","ignore"
-        ])
+        import ccxt
+        exchange = ccxt.binance({'options': {'defaultType': 'future'}})
+        ccxt_symbol = symbol.replace("USDT", "/USDT:USDT")
+        
+        # CCXT OHLCV format: [timestamp, open, high, low, close, volume]
+        klines = exchange.fetch_ohlcv(ccxt_symbol, timeframe=interval, limit=period + 5)
+        
+        df = pd.DataFrame(klines, columns=["time", "open", "high", "low", "close", "volume"])
         for col in ("high","low","close"):
             df[col] = df[col].astype(float)
         tr = pd.concat([
@@ -731,7 +737,8 @@ def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> flo
             (df["low"]  - df["close"].shift()).abs(),
         ], axis=1).max(axis=1)
         return float(tr.rolling(period).mean().iloc[-1])
-    except Exception:
+    except Exception as e:
+        logger.error(f"ATR hesaplama hatası (CCXT) {symbol}: {e}")
         return 0.01
 
 

@@ -4,12 +4,14 @@ import time
 import signal
 import asyncio
 import logging
-from binance.client import Client
 
 import config
 from database import init_db, init_paper_account
 from core.event_bus import event_bus
-from core.services.scanner_service import ScannerService
+from core.async_market_data import AsyncMarketDataService
+from core.recovery_service import RecoveryService
+from core.global_risk_manager import GlobalRiskManager
+from core.metrics import start_metrics_server
 from core.services.trend_service import TrendService
 from core.services.trigger_service import TriggerService
 from core.services.risk_service import RiskService
@@ -25,16 +27,8 @@ logger = logging.getLogger("ax.async_engine")
 
 class AsyncScalpEngine:
     def __init__(self):
-        self.scanner_service = None
-        
-        # Initialize Binance Client
-        try:
-            self.client = Client(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
-            self.client.ping()
-            logger.info("Binance connection OK")
-        except Exception as e:
-            logger.warning(f"Binance connection failed: {e}. Using public endpoints.")
-            self.client = Client("", "")
+        self.market_data = AsyncMarketDataService(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
+        self.client = None # CCXT handles this internally now
 
     async def start(self):
         logger.info("Starting Event-Driven Async Scalp Engine...")
@@ -42,6 +36,17 @@ class AsyncScalpEngine:
         # Init DB
         await asyncio.to_thread(init_db)
         await asyncio.to_thread(init_paper_account)
+
+        # Start Prometheus Metrics Server
+        start_metrics_server(port=8000)
+
+        # State Recovery (Çöken işlemleri kurtar)
+        recovery_svc = RecoveryService()
+        await recovery_svc.perform_state_recovery()
+
+        # Start Global Risk Manager (Kill Switch)
+        risk_manager = GlobalRiskManager(drawdown_limit_pct=5.0)
+        await risk_manager.start()
 
         # Start Event Bus
         await event_bus.start()
@@ -54,9 +59,17 @@ class AsyncScalpEngine:
         ExecutionService()
         NotificationService()
 
-        # Start Scanner Loop
-        self.scanner_service = ScannerService(interval_seconds=config.SCAN_INTERVAL)
-        asyncio.create_task(self.scanner_service.start())
+        # Start WebSocket Data Feed
+        await self.market_data.initialize()
+        
+        # Sinyal geldiğinde event bus'a bas (örnek)
+        async def on_ticker_update(data):
+            await event_bus.publish("market_data_update", data)
+            
+        self.market_data.on_ticker(on_ticker_update)
+        
+        # Tüm market için stream başlat
+        await self.market_data.start_all_tickers()
 
         # Keep engine running
         while True:
@@ -64,8 +77,8 @@ class AsyncScalpEngine:
 
     async def stop(self):
         logger.info("Stopping engine...")
-        if self.scanner_service:
-            self.scanner_service.stop()
+        if self.market_data:
+            await self.market_data.stop()
         await event_bus.stop()
 
 def handle_exception(loop, context):
