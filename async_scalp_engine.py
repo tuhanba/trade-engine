@@ -62,11 +62,10 @@ class AsyncScalpEngine:
         # Start WebSocket Data Feed
         await self.market_data.initialize()
         
-        # Sinyal geldiğinde event bus'a bas (örnek)
-        async def on_ticker_update(data):
-            await event_bus.publish("market_data_update", data)
-            
-        self.market_data.on_ticker(on_ticker_update)
+        # Sinyal geldiğinde event bus'a bas (örnek - devre dışı bırakıldı)
+        # async def on_ticker_update(data):
+        #     await event_bus.publish("market_data_update", data)
+        # self.market_data.on_ticker(on_ticker_update)
         
         # Tüm market için stream başlat
         await self.market_data.start_all_tickers()
