@@ -11,9 +11,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 try:
-    from config import BOT_TOKEN, CHAT_ID, FLASK_PORT
-except ImportError:
-    print("❌ ERROR: config.py bulunamadı.")
+    from config import TELEGRAM_BOT_TOKEN as BOT_TOKEN, TELEGRAM_CHAT_ID as CHAT_ID, FLASK_PORT
+except ImportError as e:
+    print(f"❌ ERROR: config.py import hatası: {e}")
     sys.exit(1)
 
 def print_step(msg):
