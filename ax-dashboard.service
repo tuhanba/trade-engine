@@ -6,15 +6,15 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/trade_engine/trade-engine
-EnvironmentFile=-/root/trade_engine/trade-engine/.env
-ExecStart=/root/trade_engine/.venv/bin/python /root/trade_engine/trade-engine/app.py
+WorkingDirectory=/root/trade_engine
+EnvironmentFile=-/root/trade_engine/.env
+ExecStart=/root/trade_engine/.venv/bin/python /root/trade_engine/app.py
 Restart=always
 RestartSec=5
-StandardOutput=append:/root/trade_engine/trade-engine/logs/dashboard.log
-StandardError=append:/root/trade_engine/trade-engine/logs/dashboard.log
+StandardOutput=append:/root/trade_engine/logs/dashboard.log
+StandardError=append:/root/trade_engine/logs/dashboard.log
 Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONPATH=/root/trade_engine/trade-engine
+Environment=PYTHONPATH=/root/trade_engine
 
 [Install]
 WantedBy=multi-user.target
