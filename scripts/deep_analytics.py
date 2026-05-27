@@ -31,7 +31,7 @@ def main():
         df_trades = pd.read_sql_query(trades_query, conn)
         
         if len(df_trades) > 0:
-            df_trades['open_time'] = pd.to_datetime(df_trades['open_time'])
+            df_trades['open_time'] = pd.to_datetime(df_trades['open_time'], format='mixed', errors='coerce', utc=True)
             df_trades['hour'] = df_trades['open_time'].dt.hour
             df_trades['day_of_week'] = df_trades['open_time'].dt.day_name()
             df_trades['is_win'] = df_trades['net_pnl'] > 0
@@ -122,7 +122,7 @@ def main():
             df_sig = pd.read_sql_query(sig_query, conn)
             if len(df_sig) > 0:
                 print(f"Total historical signals found: {len(df_sig)}")
-                df_sig['created_at'] = pd.to_datetime(df_sig['created_at'], format='mixed', errors='coerce')
+                df_sig['created_at'] = pd.to_datetime(df_sig['created_at'], format='mixed', errors='coerce', utc=True)
                 
                 df_resolved = df_sig[df_sig['ghost_pnl'].notna()].copy()
                 if len(df_resolved) > 0:
