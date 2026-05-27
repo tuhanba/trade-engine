@@ -239,6 +239,34 @@ class TriggerEngine:
         if quality not in ALLOWED_QUALITIES:
             return {"quality": "D", "score": 0, "entry": 0}
 
+        # ── Volatilite (ATR) Kalkanı ─────────────────────────────────────────
+        atr_pct = atr_val / c1
+        if atr_pct > 0.025:
+            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"extreme_volatility_{atr_pct*100:.1f}%"}
+        elif atr_pct > 0.015:
+            score = max(score - 1.5, 0.0)
+            if quality in ["S", "A+"]:
+                quality = "A"
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── L2 Orderbook (Balina Duvarı) Kalkanı ─────────────────────────────
+        try:
+            ob = self.client.futures_order_book(symbol=symbol, limit=20)
+            bids = ob.get("bids", [])
+            asks = ob.get("asks", [])
+            
+            bid_depth = sum(float(b[0]) * float(b[1]) for b in bids)
+            ask_depth = sum(float(a[0]) * float(a[1]) for a in asks)
+            
+            if direction == "LONG" and ask_depth > bid_depth * 4.0:
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_ask_wall_detected"}
+            if direction == "SHORT" and bid_depth > ask_depth * 4.0:
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_bid_wall_detected"}
+        except Exception as e:
+            logger.debug(f"[Orderbook] skip: {e}")
+            bid_depth, ask_depth = 1.0, 1.0
+        # ─────────────────────────────────────────────────────────────────────
+
         # ── Session skoru ayarlaması ─────────────────────────────────────────
         if SESSION_FILTER_ENABLED:
             if current_hour in GOOD_HOURS_UTC:
@@ -304,7 +332,29 @@ class TriggerEngine:
             logger.debug(f"[OI] skip: {_oi_err}")
         # ──────────────────────────────────────────────────────────────────────
 
-        ml_score = 50
+        # ── ML Puanlaması (Yapay Zeka Beyni) ──────────────────────────────────
+        try:
+            from core.ml_signal_scorer import score_signal
+            ml_signal = {
+                "symbol": symbol,
+                "adx15": adx_val,
+                "rv": rv,
+                "rsi5": rsi5,
+                "rsi1": rsi1,
+                "funding_favorable": 1 if (direction == "LONG" and funding < 0) or (direction == "SHORT" and funding > 0) else 0,
+                "btc_trend": btc_trend,
+                "direction": direction,
+                "momentum_3c": mom3c,
+                "ob_ratio": bid_depth / (ask_depth + 1e-10) if 'bid_depth' in locals() else 1.0,
+            }
+            ml_score = score_signal(ml_signal)
+            
+            if ml_score < 35:
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"ml_score_too_low_{ml_score}"}
+        except Exception as e:
+            logger.debug(f"[ML Scorer] skip: {e}")
+            ml_score = 50
+        # ──────────────────────────────────────────────────────────────────────
 
         return {
             "quality": quality,

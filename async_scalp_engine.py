@@ -64,6 +64,9 @@ class AsyncScalpEngine:
         self.scanner_service = ScannerService()
         asyncio.create_task(self.scanner_service.start())
 
+        # Start ML Background Training Loop
+        asyncio.create_task(self._ml_training_loop())
+
         # Start Telegram Command Manager
         self.telegram_manager = TelegramManager(telegram_delivery.send_message)
         self.telegram_manager.start()
@@ -82,6 +85,19 @@ class AsyncScalpEngine:
         # Keep engine running
         while True:
             await asyncio.sleep(1)
+
+    async def _ml_training_loop(self):
+        """Train the ML signal scorer every 24 hours."""
+        from core.ml_signal_scorer import train_model
+        while True:
+            try:
+                # Train immediately on start, then every 24h
+                success = await asyncio.to_thread(train_model)
+                if success:
+                    logger.info("[ML Engine] Model successfully trained/updated.")
+            except Exception as e:
+                logger.error(f"[ML Engine] Training failed: {e}")
+            await asyncio.sleep(86400) # 24 hours
 
     async def stop(self):
         logger.info("Stopping engine...")
