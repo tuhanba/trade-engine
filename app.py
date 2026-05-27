@@ -426,6 +426,41 @@ def api_logs():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e), "data": []}), 500
 
+# ── /api/telegram_logs ────────────────────────────────────────────────────────
+@app.route("/api/telegram_logs")
+def api_telegram_logs():
+    try:
+        n = min(int(request.args.get("n", 60)), 200)
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT symbol, text, status, created_at "
+                "FROM telegram_messages "
+                "ORDER BY id DESC LIMIT ?", (n,)
+            ).fetchall()
+        
+        lines_out = []
+        for r in reversed(rows):
+            r = dict(r)
+            sym = r.get("symbol", "")
+            status = r.get("status", "")
+            t = r.get("created_at", "")
+            txt = r.get("text", "").replace("\n", " - ")
+            lines_out.append({
+                "text": f"[{t}] {sym} ({status.upper()}): {txt}",
+                "level": "TRADE" if status == "sent" else "WARNING" if status == "queued" else "ERROR"
+            })
+            
+        return jsonify({
+            "ok": True,
+            "data": {
+                "lines": [l["text"] for l in lines_out],
+                "items": lines_out,
+            },
+            "total": len(lines_out)
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
 
 # ── /api/coin_library ─────────────────────────────────────────────────────────
 @app.route("/api/coin_library")

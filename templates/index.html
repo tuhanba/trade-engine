@@ -367,13 +367,25 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
     </div>
   </div>
 
-  <!-- ── Bot Logları ── -->
-  <div class="sec">
-    <div class="sh">
-      <div class="st"><div class="st-rule" style="background:var(--tx3)"></div><div class="st-txt">Bot Logları</div></div>
-      <button class="rbtn" onclick="fetchLogs()">↺ Yenile</button>
+  <!-- ── Loglar (Sistem & Telegram) ── -->
+  <div class="twin" style="margin-bottom:0; grid-template-columns: 1fr 1fr;">
+    <!-- Bot Logları -->
+    <div class="sec" style="margin:0">
+      <div class="sh">
+        <div class="st"><div class="st-rule" style="background:var(--tx3)"></div><div class="st-txt">Sistem Logları</div></div>
+        <button class="rbtn" onclick="fetchLogs()">↺ Yenile</button>
+      </div>
+      <div class="logbox" id="logbox"><div class="ll">Yükleniyor...</div></div>
     </div>
-    <div class="logbox" id="logbox"><div class="ll">Yükleniyor...</div></div>
+    
+    <!-- Telegram Logları -->
+    <div class="sec" style="margin:0">
+      <div class="sh">
+        <div class="st"><div class="st-rule" style="background:var(--sa)"></div><div class="st-txt">Telegram Aktarımları</div></div>
+        <button class="rbtn" onclick="fetchTgLogs()">↺ Yenile</button>
+      </div>
+      <div class="logbox" id="tgbox"><div class="ll">Yükleniyor...</div></div>
+    </div>
   </div>
 
 </div><!-- .wrap -->
@@ -582,6 +594,23 @@ async function fetchLogs(){
   }catch{$('logbox').innerHTML='<div class="ll e">Log yüklenemedi.</div>'}
 }
 
+// Telegram Logs
+async function fetchTgLogs(){
+  try{
+    const d=(await(await fetch('/api/telegram_logs?n=60')).json()).data||{};const lines=d.lines||[];
+    const box=$('tgbox');
+    if(!lines.length){box.innerHTML='<div class="ll">Aktarım bulunamadı.</div>';return}
+    box.innerHTML=lines.map(l=>{
+      let c='';
+      if(/ERROR/i.test(l))c='e';
+      else if(/WARNING/i.test(l))c='w';
+      else if(/TRADE/i.test(l))c='ok';
+      return`<div class="ll ${c}">${esc(l)}</div>`;
+    }).join('');
+    box.scrollTop=box.scrollHeight;
+  }catch{$('tgbox').innerHTML='<div class="ll e">Aktarımlar yüklenemedi.</div>'}
+}
+
 // SSE
 function connectSSE(){
   try{
@@ -679,7 +708,7 @@ async function fHeatmap() {
 setInterval(async()=>{
   await Promise.all([fLearn()]);
   await Promise.all([fTrades(),fSigs(),fChart()]);
-  fetchLogs();
+  fetchLogs();fetchTgLogs();
 },8000);
 setInterval(fPipeline,15000);
 
@@ -688,7 +717,7 @@ async function main(){
   initChart();
   await Promise.all([fHealthWithMode(),fStats(),fLearn(),fHeatmap()]);
   await Promise.all([fLive(),fTrades(),fSigs(),fChart(),fPipeline()]);
-  fetchLogs();connectSSE();
+  fetchLogs();fetchTgLogs();connectSSE();
 }
 main().catch(console.error);
 </script>
