@@ -22,9 +22,14 @@ from core.services.scanner_service import ScannerService
 from telegram_manager import TelegramManager
 import telegram_delivery
 
+os.makedirs("logs", exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("logs/ax_bot.log", encoding="utf-8")
+    ]
 )
 logger = logging.getLogger("ax.async_engine")
 
