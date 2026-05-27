@@ -29,7 +29,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("logs/ax_bot.log", encoding="utf-8")
+        logging.FileHandler("bot.log", encoding="utf-8")
     ]
 )
 logger = logging.getLogger("ax.async_engine")
@@ -73,6 +73,9 @@ class AsyncScalpEngine:
         # Start ML Background Training Loop
         asyncio.create_task(self._ml_training_loop())
 
+        # Start Heartbeat Loop
+        asyncio.create_task(self._heartbeat_loop())
+
         # Start Telegram Command Manager
         self.telegram_manager = TelegramManager(telegram_delivery.send_message)
         self.telegram_manager.start()
@@ -100,10 +103,22 @@ class AsyncScalpEngine:
                 # Train immediately on start, then every 24h
                 success = await asyncio.to_thread(train_model)
                 if success:
-                    logger.info("[ML Engine] Model successfully trained/updated.")
+                    logger.info("Background ML Training completed successfully.")
             except Exception as e:
-                logger.error(f"[ML Engine] Training failed: {e}")
-            await asyncio.sleep(86400) # 24 hours
+                logger.error(f"Background ML Training failed: {e}")
+            await asyncio.sleep(86400) # 24h
+
+    async def _heartbeat_loop(self):
+        """Update heartbeat in database every 10 seconds."""
+        from database import set_bot_status
+        from datetime import datetime, timezone
+        while True:
+            try:
+                await asyncio.to_thread(set_bot_status, "heartbeat", datetime.now(timezone.utc).isoformat())
+                await asyncio.to_thread(set_bot_status, "status", "running")
+            except Exception:
+                pass
+            await asyncio.sleep(10)
 
     async def stop(self):
         logger.info("Stopping engine...")
