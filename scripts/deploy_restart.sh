@@ -246,10 +246,10 @@ step "7. SERVİSLERİ BAŞLAT"
 start_service() {
     local svc="$1"
     local label="$2"
-    if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${svc}.service"; then
-        systemctl start "$svc" && ok "$label başlatıldı" || fail "$label başlatılamadı"
+    if systemctl start "$svc" 2>/dev/null; then
+        ok "$label başlatıldı"
     else
-        warn "$svc servisi bulunamadı — systemctl'ye kayıtlı değil"
+        warn "$svc servisi bulunamadı veya başlatılamadı"
         info "Manuel başlatmak için:"
         if [ "$svc" = "$BOT_SERVICE" ]; then
             echo -e "  ${DIM}nohup $VENV $BASE/async_scalp_engine.py >> $BASE/trade_engine.json.log 2>&1 &${NC}"
