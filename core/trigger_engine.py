@@ -54,6 +54,7 @@ class TriggerEngine:
         # Per-instance trackers — instance'ta tutulmazsa _prev_oi her çağrıda sıfırlanır
         self._oi_tracker = None   # OITracker: _prev_oi state'i burada yaşar
         self._cvd_engine = None   # CVDEngine: modül cache'i var ama yine de tek instance yeter
+        self._macro_filter = None
 
     def get_candles(self, symbol: str, interval: str, limit: int) -> pd.DataFrame:
         try:
@@ -109,12 +110,7 @@ class TriggerEngine:
             score += strength if c > o else -strength
         return round(score, 3)
 
-    def get_funding_rate(self, symbol: str) -> float:
-        try:
-            result = self.client.futures_funding_rate(symbol=symbol, limit=1)
-            return float(result[-1]["fundingRate"]) if result else 0.0
-        except Exception:
-            return 0.0
+
 
     def analyze(self, symbol: str, direction: str, btc_trend: str = "NEUTRAL",
                 trend_confluence: int = 1) -> dict:
@@ -185,11 +181,31 @@ class TriggerEngine:
         if bull5 and not (25 < rsi1 < 85): return {"quality": "D", "score": 0, "entry": 0}
         if bear5 and not (15 < rsi1 < 75): return {"quality": "D", "score": 0, "entry": 0}
 
-        funding = self.get_funding_rate(symbol)
-        if direction == "LONG" and funding > FUNDING_LONG_MAX:
-            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"funding_too_high_{funding:.4f}"}
-        if direction == "SHORT" and funding < FUNDING_SHORT_MIN:
-            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"funding_too_low_{funding:.4f}"}
+        # Makro Filtre (24h Funding Trend)
+        try:
+            from core.macro_filter import MacroFilter as _MacroFilter
+            if self._macro_filter is None:
+                self._macro_filter = _MacroFilter(self.client)
+            
+            macro_data = self._macro_filter.get_24h_funding_trend(symbol)
+            funding = macro_data.get("avg_rate", 0.0)
+            bias = macro_data.get("bias", "NEUTRAL")
+            
+            # Squeeze Kalkanı:
+            if direction == "LONG" and bias == "EXTREME_GREED":
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"macro_extreme_greed_squeeze_danger_{funding:.5f}"}
+            if direction == "SHORT" and bias == "EXTREME_FEAR":
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"macro_extreme_fear_squeeze_danger_{funding:.5f}"}
+            
+            # Eski anlık limitlere göre hard-block (config'den)
+            if direction == "LONG" and funding > FUNDING_LONG_MAX:
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"funding_too_high_{funding:.5f}"}
+            if direction == "SHORT" and funding < FUNDING_SHORT_MIN:
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"funding_too_low_{funding:.5f}"}
+                
+        except Exception as e:
+            logger.debug(f"[Macro] Error: {e}")
+            funding = 0.0
 
         score = 5.0
         quality = "C"
