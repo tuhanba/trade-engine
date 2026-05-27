@@ -121,6 +121,8 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;bac
 .tptag.hit{background:var(--emA);color:var(--em);border-color:rgba(0,229,153,0.3)}
 .tptag.trail{background:var(--saA);color:var(--sa);border-color:rgba(30,136,255,0.3)}
 .tptag.be{background:var(--goldA);color:var(--gold);border-color:rgba(245,194,66,0.3)}
+.tc-prog-wrap{width:100%;height:4px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:12px;overflow:hidden;position:relative}
+.tc-prog-fill{height:100%;border-radius:2px;transition:width 0.4s, background-color 0.4s}
 @media(max-width:1100px){
   .tc{flex-direction:column;align-items:flex-start;gap:20px}
   .tc-mid{width:100%;justify-content:space-between;padding:0;gap:16px}
@@ -258,7 +260,7 @@ tbody tr:hover{background:rgba(255,255,255,0.03)}
   <div class="pipeline" id="pipeline">
     <div class="pp pp-scan">
       <div class="pp-v" id="pp-scanned">—</div>
-      <div class="pp-l">Taranan</div>
+      <div class="pp-l">Taranan <span id="scan-cd" style="color:var(--gold);margin-left:4px">45s</span></div>
     </div>
     <div class="pp" style="flex:0;padding:0 8px"><div class="pp-arr">›</div></div>
     <div class="pp pp-cand">
@@ -424,8 +426,30 @@ function dur(opened, closed){
   }catch{return'—'}
 }
 
-// Saat
-setInterval(()=>{$('clk').textContent=new Date().toLocaleTimeString('tr',{hour:'2-digit',minute:'2-digit',second:'2-digit'})},1000);
+// Saat ve Geri Sayım
+let scanTimer = 45;
+setInterval(()=>{
+  $('clk').textContent=new Date().toLocaleTimeString('tr',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  if(scanTimer > 0) scanTimer--;
+  if($('scan-cd')) $('scan-cd').textContent = scanTimer + 's';
+},1000);
+
+function playDing() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.5);
+  } catch(e) {}
+}
 
 // PnL Chart
 let chart=null;
@@ -503,14 +527,29 @@ async function fPipeline(){
     $('pp-trade').textContent=fd.trade||0;
     $('pp-win').textContent=fd.wins||0;
     $('pp-loss').textContent=fd.losses||0;
+    scanTimer = 45; // Reset timer on successful fetch
   }catch(e){console.warn('pipeline:',e)}
 }
 
 // Live (open) trades
+let prevLiveIds = new Set();
 function updateLiveTradesDOM(ts) {
     if($('cnt-live')) $('cnt-live').textContent=ts.length;
     const w=$('livewrap');
     if(!w) return;
+    
+    // Check for new trades to play ding
+    let hasNew = false;
+    const currentIds = new Set();
+    ts.forEach(t => {
+      currentIds.add(t.id);
+      if(!prevLiveIds.has(t.id) && prevLiveIds.size > 0) {
+        hasNew = true;
+      }
+    });
+    if(hasNew) playDing();
+    prevLiveIds = currentIds;
+
     if(!ts.length){w.innerHTML='<div class="empty">Açık trade yok — sinyal bekleniyor</div>';return}
     w.innerHTML=`<div class="llist">${ts.map(tCard).join('')}</div>`;
 }
@@ -525,7 +564,29 @@ function tCard(t){
   const side=(t.side||'LONG').toUpperCase(),isL=side==='LONG';
   const ep=N(t.entry_price),cp=N(t.current_price),sl=N(t.stop_loss),tp1=N(t.tp1),tp2=N(t.tp2),upnl=N(t.total_pnl)||N(t.unrealized_pnl),margin=N(t.margin_used),rem=N(t.remaining_qty_pct)||100;
   const pC=upnl>0?'p':upnl<0?'n':'z';const tp1h=t.tp1_hit,tp2h=t.tp2_hit,trail=t.trailing_active,be=t.breakeven_set;
-  return`<div class="tc ${isL?'L':'S'}"><div class="tc-left"><div class="tc-sym">${t.symbol||'?'}</div><span class="stag ${isL?'L':'S'}">${side}</span></div><div class="tc-mid"><div class="tc-meta-item"><span class="k">Giriş</span><span class="v">${prS(ep)}</span></div><div class="tc-meta-item"><span class="k">Anlık</span><span class="v" style="color:var(--tx)">${prS(cp)}</span></div><div class="tc-meta-item"><span class="k">Stop</span><span class="v n">${prS(sl)}</span></div><div class="tc-meta-item"><span class="k">Boyut</span><span class="v">${t.leverage||1}x ($${margin.toFixed(0)})</span></div><div class="tptags">${tp1h?`<span class="tptag hit">TP1 ✓</span>`:''}${tp2h?`<span class="tptag hit">TP2 ✓</span>`:''}${trail?`<span class="tptag trail">TRAIL</span>`:''}${be?`<span class="tptag be">BE</span>`:''}</div></div><div class="tc-right"><div class="tc-pnl ${pC}">${pS(upnl)}</div><div class="tc-pnl-sub">unrealized</div></div></div>`;
+  
+  let prog = 0;
+  if(tp1 !== 0 && sl !== 0 && tp1 !== sl) {
+    const range = Math.abs(tp1 - sl);
+    const cur = isL ? (cp - sl) : (sl - cp);
+    prog = Math.max(0, Math.min(100, (cur / range) * 100));
+  }
+  const progColor = prog > 75 ? 'var(--em)' : prog > 30 ? 'var(--gold)' : 'var(--ru)';
+
+  return `<div class="tc ${isL?'L':'S'}">
+    <div style="width:100%; display:flex; justify-content:space-between; align-items:center;">
+      <div class="tc-left"><div class="tc-sym">${t.symbol||'?'}</div><span class="stag ${isL?'L':'S'}">${side}</span></div>
+      <div class="tc-mid">
+        <div class="tc-meta-item"><span class="k">Giriş</span><span class="v">${prS(ep)}</span></div>
+        <div class="tc-meta-item"><span class="k">Anlık</span><span class="v" style="color:var(--tx)">${prS(cp)}</span></div>
+        <div class="tc-meta-item"><span class="k">Stop</span><span class="v n">${prS(sl)}</span></div>
+        <div class="tc-meta-item"><span class="k">Boyut</span><span class="v">${t.leverage||1}x ($${margin.toFixed(0)})</span></div>
+        <div class="tptags">${tp1h?`<span class="tptag hit">TP1 ✓</span>`:''}${tp2h?`<span class="tptag hit">TP2 ✓</span>`:''}${trail?`<span class="tptag trail">TRAIL</span>`:''}${be?`<span class="tptag be">BE</span>`:''}</div>
+      </div>
+      <div class="tc-right"><div class="tc-pnl ${pC}">${pS(upnl)}</div><div class="tc-pnl-sub">unrealized</div></div>
+    </div>
+    <div class="tc-prog-wrap" title="TP1 Progress"><div class="tc-prog-fill" style="width:${prog}%; background:${progColor}"></div></div>
+  </div>`;
 }
 
 // Trades table
