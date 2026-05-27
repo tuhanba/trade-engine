@@ -61,7 +61,8 @@ class AsyncScalpEngine:
         AIDecisionService()
         ExecutionService()
         NotificationService()
-        ScannerService(self.client)
+        self.scanner_service = ScannerService()
+        asyncio.create_task(self.scanner_service.start())
 
         # Start Telegram Command Manager
         self.telegram_manager = TelegramManager(telegram_delivery.send_message)
@@ -84,6 +85,8 @@ class AsyncScalpEngine:
 
     async def stop(self):
         logger.info("Stopping engine...")
+        if hasattr(self, 'scanner_service'):
+            self.scanner_service.stop()
         if hasattr(self, 'telegram_manager'):
             self.telegram_manager.stop()
         if self.market_data:
