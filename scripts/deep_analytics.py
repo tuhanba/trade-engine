@@ -112,6 +112,39 @@ def main():
         except Exception as e:
             print("Could not analyze ghost signals:", e)
 
+        # 3. Analyze Signal Candidates (Historical Signals)
+        print("\n--- HISTORICAL SIGNALS ANALYSIS ---")
+        sig_query = """
+        SELECT symbol, side, decision, status, ghost_pnl, setup_quality, final_score, market_regime, created_at 
+        FROM signal_candidates
+        """
+        try:
+            df_sig = pd.read_sql_query(sig_query, conn)
+            if len(df_sig) > 0:
+                print(f"Total historical signals found: {len(df_sig)}")
+                df_sig['created_at'] = pd.to_datetime(df_sig['created_at'])
+                
+                df_resolved = df_sig[df_sig['ghost_pnl'].notna()].copy()
+                if len(df_resolved) > 0:
+                    df_resolved['is_win'] = df_resolved['ghost_pnl'] > 0
+                    print(f"Total resolved signals (with PnL): {len(df_resolved)}")
+                    print(f"Historical Win Rate: {df_resolved['is_win'].mean()*100:.2f}%")
+                    
+                    print("\n>> By Setup Quality:")
+                    q_stats = df_resolved.groupby('setup_quality').agg(
+                        count=('setup_quality', 'count'),
+                        win_rate=('is_win', 'mean')
+                    )
+                    for q, row in q_stats.iterrows():
+                        q_str = str(q) if q else "N/A"
+                        print(f"  {q_str:3s} | Signals: {row['count']:3.0f} | Win Rate: {row['win_rate']*100:5.1f}%")
+                else:
+                    print("No PnL resolved signals found in historical data.")
+            else:
+                print("No historical signals found.")
+        except Exception as e:
+            print("Could not analyze historical signals:", e)
+
     finally:
         conn.close()
 
