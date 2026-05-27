@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 import config
+from binance.client import Client
 from database import init_db, init_paper_account
 from core.event_bus import event_bus
 from core.async_market_data import AsyncMarketDataService
@@ -36,7 +37,7 @@ logger = logging.getLogger("ax.async_engine")
 class AsyncScalpEngine:
     def __init__(self):
         self.market_data = AsyncMarketDataService(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
-        self.client = None # CCXT handles this internally now
+        self.client = Client(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
 
     async def start(self):
         logger.info("Starting Event-Driven Async Scalp Engine...")
