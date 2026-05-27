@@ -11,6 +11,15 @@ class ExecutionService:
     def __init__(self):
         self.execution_engine = ExecutionEngine()
         event_bus.subscribe(EventType.AI_VALIDATED, self.handle_ai_validated)
+        asyncio.create_task(self._monitoring_loop())
+
+    async def _monitoring_loop(self):
+        while True:
+            try:
+                await asyncio.to_thread(self.execution_engine.update_open_trades)
+            except Exception as e:
+                logger.error(f"[ExecutionService] Monitor loop error: {e}")
+            await asyncio.sleep(2)
 
     async def handle_ai_validated(self, event: Event):
         payload = event.payload
@@ -28,8 +37,14 @@ class ExecutionService:
                 # Dispatch execution approval
                 await event_bus.publish(Event(type=EventType.EXECUTION_APPROVED, payload=payload))
                 
-                # Execute paper trade
-                trade_id = await asyncio.to_thread(self.execution_engine.process_signal, sig)
+                # Execute trade (Paper or Live)
+                if config.EXECUTION_MODE == "live":
+                    if not hasattr(self, "live_execution_engine"):
+                        from core.live_execution import LiveExecutionEngine
+                        self.live_execution_engine = LiveExecutionEngine()
+                    trade_id = await asyncio.to_thread(self.live_execution_engine.open_live_trade, sig)
+                else:
+                    trade_id = await asyncio.to_thread(self.execution_engine.process_signal, sig)
                 
                 if trade_id:
                     trade_payload = {

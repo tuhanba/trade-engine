@@ -231,6 +231,15 @@ class ExecutionEngine:
         symbol = trade["symbol"]
         close_pct = result.close_pct / 100.0
         qty_to_close = (trade.get("qty") or trade.get("quantity", 0)) * close_pct
+        
+        # Eger LIVE modundaysak once borsaya gonder
+        if config.EXECUTION_MODE == "live":
+            try:
+                from core.live_execution import LiveExecutionEngine
+                le = LiveExecutionEngine()
+                le.execute_live_close(symbol, trade.get("direction") or trade.get("side", "LONG"), qty_to_close)
+            except Exception as e:
+                logger.error(f"Live partial close error {symbol}: {e}")
 
         partial_pnl = calculate_realized_pnl(
             side=trade.get("direction") or trade.get("side", "LONG"),
@@ -278,6 +287,23 @@ class ExecutionEngine:
         _side = trade.get("direction") or trade.get("side", "LONG")
         _entry = trade.get("entry") or trade.get("entry_price", 0)
         _qty = trade.get("qty") or trade.get("quantity", 0)
+
+        # Kalan miktar (yeni: remaining_qty absolute, eski: remaining_qty_pct yüzde)
+        if trade.get("remaining_qty") is not None:
+            remaining_qty = float(trade.get("remaining_qty") or _qty)
+        else:
+            remaining_qty_pct = trade.get("remaining_qty_pct", 100.0) or 100.0
+            remaining_qty = _qty * (remaining_qty_pct / 100.0)
+
+        # Eger LIVE modundaysak once borsaya gonder
+        if config.EXECUTION_MODE == "live" and remaining_qty > 0:
+            try:
+                from core.live_execution import LiveExecutionEngine
+                le = LiveExecutionEngine()
+                le.execute_live_close(trade["symbol"], _side, remaining_qty)
+                le.cancel_all_orders(trade["symbol"]) # Cancel hard stop loss
+            except Exception as e:
+                logger.error(f"Live full close error {trade['symbol']}: {e}")
 
         rpnl = calculate_realized_pnl(
             side=_side,
