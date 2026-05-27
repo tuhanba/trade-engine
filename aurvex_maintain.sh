@@ -138,12 +138,12 @@ check_service ax-bot
 check_service ax-dashboard
 
 # Duplicate process
-PROC_COUNT=$(pgrep -f scalp_bot.py 2>/dev/null | wc -l)
+PROC_COUNT=$(pgrep -f async_scalp_engine.py 2>/dev/null | wc -l)
 PROC_COUNT=${PROC_COUNT//[^0-9]/}; PROC_COUNT=${PROC_COUNT:-0}
 if [ "$PROC_COUNT" -gt 1 ]; then
-    err "$PROC_COUNT scalp_bot süreci var!"
+    err "$PROC_COUNT async_scalp_engine süreci var!"
     if [ "$DO_FIX" = true ]; then
-        pkill -f scalp_bot.py 2>/dev/null; sleep 2
+        pkill -f async_scalp_engine.py 2>/dev/null; sleep 2
         systemctl start ax-bot
         fixed "Duplicate temizlendi, yeniden başlatıldı"
     fi
