@@ -86,6 +86,8 @@ async def main():
         loop.add_signal_handler(sig, shutdown_signal)
         
     try:
+        from telegram_delivery import send_message
+        send_message("🟢 <b>Sistem Başlatıldı!</b>\n🤖 Asenkron Scalp Motoru piyasayı taramaya başladı.")
         await engine.start()
     except asyncio.CancelledError:
         pass
