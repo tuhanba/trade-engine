@@ -351,6 +351,18 @@ class TriggerEngine:
             
             if ml_score < 35:
                 return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"ml_score_too_low_{ml_score}"}
+                
+            # ── Gerçek "S" Seviye Kuralı ─────────────────────────────────────
+            # Teknik analiz "S" veya "A+" dese bile, ML Skoru 70'in altındaysa notunu kır.
+            if quality in ["S", "A+"] and ml_score < 70:
+                quality = "A" 
+                score = max(score - 1.0, 0.0)
+                
+            # Eğer ML Skoru devasa bir güven veriyorsa (>75) ve teknik fena değilse, notu yükselt.
+            elif quality in ["A", "B"] and ml_score >= 75:
+                quality = "A+"
+                score = min(score + 1.5, 10.0)
+            # ──────────────────────────────────────────────────────────────────
         except Exception as e:
             logger.debug(f"[ML Scorer] skip: {e}")
             ml_score = 50

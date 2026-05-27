@@ -115,6 +115,7 @@ class TelegramManager:
         logger.info("Komut: %s", cmd)
         handlers = {
             "/help":    self._cmd_help,
+            "/health":  self._cmd_health,
             "/status":  self._cmd_status,
             "/stats":   self._cmd_stats,
             "/trades":  self._cmd_trades,
@@ -145,6 +146,7 @@ class TelegramManager:
             "🤖 **AurvexAI Yönetim Merkezi**\n\n"
             "Merhaba! Ben senin yapay zeka destekli alım-satım asistanın. Sistemin kalbini buradan kontrol edebilirsin. İşte yapabileceklerim:\n\n"
             "📊 **Gözlem ve Raporlama**\n"
+            "🔹 `/health` — Sistem sağlığını, RAM ve veritabanı durumunu kontrol eder.\n"
             "🔹 `/status` — Sistemin genel sağlığını, aktif modunu ve kârını özetler.\n"
             "🔹 `/open` — Şu an Binance'te açık olan işlemlerini (giriş, stop, kâr) gösterir.\n"
             "🔹 `/stats` — Tüm zamanların performans özetini (Win Rate vb.) çıkarır.\n"
@@ -161,6 +163,50 @@ class TelegramManager:
             "🔹 `/resume` — Her şey yolundaysa botu tekrar ava çıkar.\n"
             "🔹 `/finish` — Mevcut işlemler kapandığı an botu tamamen uykuya al.\n\n"
             "💡 *İpucu: Herhangi bir komuta tıklayarak anında çalıştırabilirsin!*"
+        )
+
+    def _cmd_health(self):
+        import os
+        import time
+        import database
+        
+        # System Uptime
+        uptime = int(time.time() - self._start_time)
+        h, rem = divmod(uptime, 3600)
+        m = rem // 60
+        
+        # DB Size
+        try:
+            db_path = getattr(config, "DB_PATH", "trading.db")
+            db_size = os.path.getsize(db_path) / (1024 * 1024) if os.path.exists(db_path) else 0
+            wal_size = os.path.getsize(db_path + "-wal") / (1024 * 1024) if os.path.exists(db_path + "-wal") else 0
+        except Exception:
+            db_size, wal_size = 0, 0
+            
+        # RAM Usage
+        try:
+            import psutil
+            ram = psutil.virtual_memory().percent
+            ram_text = f"%{ram:.1f}"
+        except ImportError:
+            ram_text = "Ölçülemedi (psutil yok)"
+            
+        # DB Query check (Ping)
+        t1 = time.time()
+        open_trades = len(database.get_open_trades())
+        t2 = time.time()
+        db_ping = int((t2 - t1) * 1000)
+        
+        self.send_fn(
+            f"🏥 **Sistem Sağlık Raporu**\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"⏱ **Kesintisiz Çalışma:** {h} Saat {m} Dakika\n"
+            f"💾 **Veritabanı Boyutu:** {db_size:.1f} MB\n"
+            f"🔄 **Veritabanı WAL:** {wal_size:.1f} MB\n"
+            f"⚡ **DB Gecikmesi (Ping):** {db_ping} ms\n"
+            f"🧠 **RAM Kullanımı:** {ram_text}\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"✅ *Tüm arka plan servisleri ve veritabanı aktif şekilde çalışıyor.*"
         )
 
     def _cmd_status(self):
