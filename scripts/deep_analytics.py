@@ -115,7 +115,7 @@ def main():
         # 3. Analyze Signal Candidates (Historical Signals)
         print("\n--- HISTORICAL SIGNALS ANALYSIS ---")
         sig_query = """
-        SELECT symbol, side, decision, status, ghost_pnl, setup_quality, final_score, market_regime, created_at 
+        SELECT symbol, direction, decision, status, ghost_pnl, setup_quality, final_score, market_regime, created_at 
         FROM signal_candidates
         """
         try:
