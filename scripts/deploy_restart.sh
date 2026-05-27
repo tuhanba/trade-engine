@@ -112,14 +112,16 @@ if [ "$BOT_ONLY" = false ]; then
 fi
 
 # Bot prosesini double-check — servis dışında çalışıyorsa da öldür
-BOT_PID=$(pgrep -f "scalp_bot.py" 2>/dev/null || true)
-if [ -n "$BOT_PID" ]; then
-    warn "Artık süreç bulundu (PID: $BOT_PID) — öldürülüyor..."
-    kill -TERM $BOT_PID 2>/dev/null || true
-    sleep 2
-    kill -9 $BOT_PID 2>/dev/null || true
-    ok "Artık süreç temizlendi"
-fi
+for script in "scalp_bot.py" "async_scalp_engine.py"; do
+    BOT_PID=$(pgrep -f "$script" 2>/dev/null || true)
+    if [ -n "$BOT_PID" ]; then
+        warn "Artık süreç bulundu ($script PID: $BOT_PID) — öldürülüyor..."
+        kill -TERM $BOT_PID 2>/dev/null || true
+        sleep 2
+        kill -9 $BOT_PID 2>/dev/null || true
+        ok "Artık süreç temizlendi: $script"
+    fi
+done
 
 # Lock dosyasını temizle
 LOCK_FILE=$(python3 -c "import tempfile,os; print(os.path.join(tempfile.gettempdir(),'aurvex_bot.lock'))" 2>/dev/null || echo "/tmp/aurvex_bot.lock")
@@ -219,7 +221,7 @@ check_syntax() {
     fi
 }
 
-[ -f "$BASE/scalp_bot.py" ]         && check_syntax "$BASE/scalp_bot.py"
+[ -f "$BASE/async_scalp_engine.py" ] && check_syntax "$BASE/async_scalp_engine.py"
 [ -f "$BASE/execution_engine.py" ]  && check_syntax "$BASE/execution_engine.py"
 [ -f "$BASE/app.py" ]               && check_syntax "$BASE/app.py"
 [ -f "$BASE/config.py" ]            && check_syntax "$BASE/config.py"
@@ -243,7 +245,7 @@ start_service() {
         warn "$svc servisi bulunamadı — systemctl'ye kayıtlı değil"
         info "Manuel başlatmak için:"
         if [ "$svc" = "$BOT_SERVICE" ]; then
-            echo -e "  ${DIM}nohup $VENV $BASE/scalp_bot.py >> $BASE/logs/ax_bot.log 2>&1 &${NC}"
+            echo -e "  ${DIM}nohup $VENV $BASE/async_scalp_engine.py >> $BASE/trade_engine.json.log 2>&1 &${NC}"
         else
             echo -e "  ${DIM}nohup $VENV $BASE/app.py >> $BASE/logs/dashboard.log 2>&1 &${NC}"
         fi
@@ -319,7 +321,7 @@ if [ "$ERRORS" -eq 0 ]; then
     echo -e "\n  ${GRN}${BOLD}✅ Deploy başarıyla tamamlandı!${NC}"
     echo -e "\n  📋 Faydalı komutlar:"
     echo -e "  ${DIM}journalctl -u $BOT_SERVICE -f          # Bot logları (canlı)${NC}"
-    echo -e "  ${DIM}tail -f $BASE/logs/ax_bot.log           # Dosya logları${NC}"
+    echo -e "  ${DIM}tail -f $BASE/trade_engine.json.log           # Dosya logları${NC}"
     echo -e "  ${DIM}bash $BASE/aurvex_maintain.sh --fix     # Sağlık kontrolü${NC}"
     echo -e "  ${DIM}python3 scripts/simulate_past_signals.py --days 3  # Simülasyon${NC}"
 else
