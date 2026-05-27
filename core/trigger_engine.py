@@ -159,13 +159,10 @@ class TriggerEngine:
         if adx_val < MIN_ADX_5M:
             return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1), "reject_reason": f"adx_too_low_{adx_val:.1f}"}
 
-        # AI beynine daha fazla veri sağlamak için RSI şartlarını esnettik (Sıkı filtreyi AI yapacak)
+        # AI beynine daha fazla veri sağlamak için RSI şartlarını esnettik
         rsi5_val = float(rsi5)
         bull5 = direction == "LONG" and e9_5.iloc[-1] > e21_5.iloc[-1] and 30 < rsi5_val < 80
         bear5 = direction == "SHORT" and e9_5.iloc[-1] < e21_5.iloc[-1] and 20 < rsi5_val < 70
-
-        if not bull5 and not bear5:
-            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1), "rsi5": round(float(rsi5_val), 1)}
 
         df1 = self.get_candles(symbol, "1m", 100)
         if df1.empty or len(df1) < 30:
@@ -178,8 +175,23 @@ class TriggerEngine:
         mom3c = self._momentum_3c(df1)
         vwap_val = self._vwap(df1)
 
-        if bull5 and not (25 < rsi1 < 85): return {"quality": "D", "score": 0, "entry": 0}
-        if bear5 and not (15 < rsi1 < 75): return {"quality": "D", "score": 0, "entry": 0}
+        import config
+        is_human = getattr(config, "HUMAN_MODE_ENABLED", True)
+
+        is_micro_scalp = False
+        if not is_human:
+            # SCALP MODU: 1 dakikalık aşırı hızlı kırılımları yakala
+            if direction == "LONG" and rv >= 2.5 and mom3c >= 2.0:
+                is_micro_scalp = True
+            elif direction == "SHORT" and rv >= 2.5 and mom3c <= -2.0:
+                is_micro_scalp = True
+
+        if not bull5 and not bear5 and not is_micro_scalp:
+            return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1), "rsi5": round(float(rsi5_val), 1)}
+
+        if not is_micro_scalp:
+            if bull5 and not (25 < rsi1 < 85): return {"quality": "D", "score": 0, "entry": 0}
+            if bear5 and not (15 < rsi1 < 75): return {"quality": "D", "score": 0, "entry": 0}
 
         # Makro Filtre (24h Funding Trend)
         try:
@@ -236,7 +248,12 @@ class TriggerEngine:
         if s_score >= 6: quality = "S"
         elif quality == "A" and score >= 7.5: quality = "A+"
 
-        if quality not in ALLOWED_QUALITIES:
+        # Mikro-Scalp Override
+        if is_micro_scalp:
+            quality = "M"
+            score = 8.0
+
+        if quality not in ALLOWED_QUALITIES + ["M"]:
             return {"quality": "D", "score": 0, "entry": 0}
 
         # ── Volatilite (ATR) Kalkanı ─────────────────────────────────────────
@@ -281,19 +298,19 @@ class TriggerEngine:
         confluence_total = trend_confluence + 1  # +1 for 5m
         confluence_score = round(confluence_total / 4.0, 2)
 
-        quality_order = ["B", "A", "A+", "S"]
-        if confluence_total >= 3 and quality in quality_order:
+        quality_order = ["B", "A", "A+", "S", "M"]
+        if confluence_total >= 3 and quality in quality_order and quality != "M":
             idx = quality_order.index(quality)
-            if idx < len(quality_order) - 1:
+            if idx < len(quality_order) - 2: # Don't upgrade to M through confluence
                 quality = quality_order[idx + 1]
                 score   = min(score + 1.0, 10.0)
-        elif confluence_total <= 1 and quality in quality_order:
+        elif confluence_total <= 1 and quality in quality_order and quality != "M":
             idx = quality_order.index(quality)
             if idx > 0:
                 quality = quality_order[idx - 1]
                 score   = max(score - 1.0, 0.0)
 
-        if quality not in ALLOWED_QUALITIES:
+        if quality not in ALLOWED_QUALITIES + ["M"]:
             return {"quality": "D", "score": 0, "entry": 0}
 
         # ── CVD Analizi (Cumulative Volume Delta) ─────────────────────────────
@@ -353,15 +370,17 @@ class TriggerEngine:
                 return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"ml_score_too_low_{ml_score}"}
                 
             # ── Gerçek "S" Seviye Kuralı ─────────────────────────────────────
-            # Teknik analiz "S" veya "A+" dese bile, ML Skoru 70'in altındaysa notunu kır.
             if quality in ["S", "A+"] and ml_score < 70:
                 quality = "A" 
                 score = max(score - 1.0, 0.0)
                 
-            # Eğer ML Skoru devasa bir güven veriyorsa (>75) ve teknik fena değilse, notu yükselt.
             elif quality in ["A", "B"] and ml_score >= 75:
                 quality = "A+"
                 score = min(score + 1.5, 10.0)
+                
+            # M Kalite (Micro-Scalp) için tolerans
+            if quality == "M" and ml_score < 45:
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"ml_score_too_low_for_micro_{ml_score}"}
             # ──────────────────────────────────────────────────────────────────
         except Exception as e:
             logger.debug(f"[ML Scorer] skip: {e}")

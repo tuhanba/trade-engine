@@ -296,7 +296,7 @@ class RiskEngine:
             from core.accounting import calculate_position_size, calculate_rr as _calc_rr
             import database
 
-            quality_mult = {"S": 2.0, "A+": 1.5, "A": 1.0, "B": 0.5}.get(quality, 0)
+            quality_mult = {"S": 2.0, "A+": 1.5, "A": 1.0, "B": 0.5, "M": 0.5}.get(quality, 0)
             if quality_mult == 0:
                 return {"valid": False, "score": 0, "risk_reject_reason": f"quality_{quality}_blocked"}
 
@@ -326,6 +326,15 @@ class RiskEngine:
             min_rr = float(getattr(config, "MIN_RR", 1.5))
             fee_rate = float(getattr(config, "DEFAULT_FEE_RATE", 0.0004))
             risk_pct_base = float(getattr(config, "RISK_PCT", 1.0))
+
+            # M (Micro-Scalp) Özel Kuralları (Aşırı Hızlı Çıkış)
+            if quality == "M":
+                sl_atr_mult = 0.5   # Dar SL
+                tp1_r = 0.8         # Dar TP1
+                tp2_r = 1.2
+                tp3_r = 2.0
+                min_rr = 1.0        # Tolerans
+                logger.info(f"[Micro-Scalp] {symbol} parametreler M moduna geçirildi.")
 
             # Dinamik TP Ölçekleme (Dynamic TP Scaling)
             try:
