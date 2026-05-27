@@ -122,7 +122,7 @@ def main():
             df_sig = pd.read_sql_query(sig_query, conn)
             if len(df_sig) > 0:
                 print(f"Total historical signals found: {len(df_sig)}")
-                df_sig['created_at'] = pd.to_datetime(df_sig['created_at'])
+                df_sig['created_at'] = pd.to_datetime(df_sig['created_at'], format='mixed', errors='coerce')
                 
                 df_resolved = df_sig[df_sig['ghost_pnl'].notna()].copy()
                 if len(df_resolved) > 0:
