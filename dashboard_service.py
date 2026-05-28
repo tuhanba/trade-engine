@@ -209,7 +209,7 @@ def get_ax_status() -> dict:
         return {
             "bot_running": bot_alive, "bot_status": status,
             "heartbeat": heartbeat, "last_seen_seconds": last_seen,
-            "execution_mode": config.EXECUTION_MODE, "ax_mode": config.AX_MODE,
+            "execution_mode": database.get_state("tg_execution_mode") or config.EXECUTION_MODE, "ax_mode": config.AX_MODE,
             "paper_mode": config.PAPER_MODE,
             "circuit_breaker_active": cb_active, "circuit_breaker_until": cb_until,
             "paper_balance": round(balance, 2),

@@ -641,7 +641,7 @@ async function fChart(){
 // Bot Logs
 async function fetchLogs(){
   try{
-    const d=(await(await fetch('/api/logs?n=60')).json()).data||{};const lines=d.lines||[];
+    const d=(await(await fetch('/api/logs?n=60&t='+Date.now())).json()).data||{};const lines=d.lines||[];
     const box=$('logbox');
     if(!lines.length){box.innerHTML='<div class="ll">Log bulunamadı.</div>';return}
     box.innerHTML=lines.map(l=>{
@@ -685,7 +685,17 @@ function connectSSE(){
         const ts=Array.isArray(d.live)?d.live:[];
         updateLiveTradesDOM(ts);
         
-        if(d.health&&d.health.human_mode!==undefined){updateModeCard(d.health.human_mode);const hp=$('humanpill');if(hp){hp.textContent=d.health.human_mode?'🧠 HUMAN':'⚡ SCALP';hp.className='humanpill '+(d.health.human_mode?'human':'scalp');}}
+        if(d.health){
+          if(d.health.human_mode!==undefined){updateModeCard(d.health.human_mode);const hp=$('humanpill');if(hp){hp.textContent=d.health.human_mode?'🧠 HUMAN':'⚡ SCALP';hp.className='humanpill '+(d.health.human_mode?'human':'scalp');}}
+          if(d.health.execution_mode){$('mpill').textContent=d.health.execution_mode.toUpperCase();}
+          const alive=d.health.bot_running;
+          const chip=$('lchip'),dot=$('ldot'),txt=$('ltxt');
+          const s=d.health.last_seen_seconds;
+          const s_txt = (s != null) ? `<span style="font-size:0.6rem;opacity:0.6;margin-left:4px">${s}s</span>` : '';
+          if(alive){chip.className='livechip on';dot.className='dot dot-on';txt.innerHTML=`CANLI${s_txt}`;txt.style.color='var(--em)'}
+          else{chip.className='livechip off';dot.className='dot dot-off';txt.innerHTML=`KAPALI${s_txt}`;txt.style.color='var(--ru)'}
+          if(s != null){$('sb-hb').textContent=`${s}s`;$('sb-hb').style.color=s<120?'var(--em)':s<300?'var(--gold)':'var(--ru)';}
+        }
       }catch(err){console.error("SSE parse error", err)}
     };
     es.onerror=()=>setTimeout(connectSSE,3000);
