@@ -107,7 +107,7 @@ def _ok(data):
     return jsonify({"ok": True, "data": data, "ts": datetime.now(timezone.utc).isoformat()})
 
 
-def _error(msg: str, code: int = 500):
+def _error(msg: str, code: int = 200):
     return jsonify({"ok": False, "error": str(msg)}), code
 
 

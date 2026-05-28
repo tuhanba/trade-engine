@@ -83,9 +83,9 @@ def _get_health_impl() -> dict:
     return {
         "ok": db_ok,
         "db_connected": db_ok,
-        "execution_mode": bot_status.get("tg_execution_mode", {}).get("value") or getattr(config, "EXECUTION_MODE", "paper"),
+        "execution_mode": database.get_state("tg_execution_mode") or bot_status.get("tg_execution_mode", {}).get("value") or getattr(config, "EXECUTION_MODE", "paper"),
         "ax_mode": getattr(config, "AX_MODE", "execute"),
-        "human_mode": str(bot_status.get("tg_human_mode", {}).get("value")) == "True" if bot_status.get("tg_human_mode", {}).get("value") is not None else bool(getattr(config, "HUMAN_MODE", False)),
+        "human_mode": str(database.get_state("tg_human_mode") or bot_status.get("tg_human_mode", {}).get("value")) == "True" if (database.get_state("tg_human_mode") or bot_status.get("tg_human_mode", {}).get("value")) is not None else bool(getattr(config, "HUMAN_MODE", False)),
         "live_trading_enabled": getattr(config, "LIVE_TRADING_ENABLED", False),
         "dry_run": getattr(config, "DRY_RUN", False),
         "telegram_configured": telegram.is_configured(),
@@ -211,9 +211,9 @@ def get_ax_status() -> dict:
         return {
             "bot_running": bot_alive, "bot_status": status,
             "heartbeat": heartbeat, "last_seen_seconds": last_seen,
-            "execution_mode": bot_status.get("tg_execution_mode", {}).get("value") or getattr(config, "EXECUTION_MODE", "paper"),
+            "execution_mode": database.get_state("tg_execution_mode") or bot_status.get("tg_execution_mode", {}).get("value") or getattr(config, "EXECUTION_MODE", "paper"),
             "ax_mode": getattr(config, "AX_MODE", "execute"),
-            "human_mode": str(bot_status.get("tg_human_mode", {}).get("value")) == "True" if bot_status.get("tg_human_mode", {}).get("value") is not None else bool(getattr(config, "HUMAN_MODE", False)),
+            "human_mode": str(database.get_state("tg_human_mode") or bot_status.get("tg_human_mode", {}).get("value")) == "True" if (database.get_state("tg_human_mode") or bot_status.get("tg_human_mode", {}).get("value")) is not None else bool(getattr(config, "HUMAN_MODE", False)),
             "paper_mode": getattr(config, "PAPER_MODE", True),
             "circuit_breaker_active": cb_active, "circuit_breaker_until": cb_until,
             "paper_balance": round(balance, 2),

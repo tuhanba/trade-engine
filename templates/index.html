@@ -479,7 +479,10 @@ async function fStats(){
   try{
     const d=(await(await fetch('/api/stats')).json()).data||{};
     updateStatsDOM(d);
-  }catch(e){console.warn(e)}
+  }catch(e){
+    console.warn(e);
+    updateStatsDOM({});
+  }
 }
 
 // Mode card (reads from health)
