@@ -59,6 +59,7 @@ def _get_health_impl() -> dict:
 
     # Bot son aktif mi?
     bot_alive = False
+    elapsed_sec = None
     if heartbeat:
         try:
             hb_dt = datetime.fromisoformat(heartbeat.replace("Z", "+00:00"))
@@ -90,6 +91,7 @@ def _get_health_impl() -> dict:
         "telegram_configured": telegram.is_configured(),
         "bot_status": status,
         "bot_alive": bot_alive,
+        "last_seen_seconds": int(elapsed_sec) if elapsed_sec is not None else None,
         "last_heartbeat": heartbeat,
         "last_error": last_error,
         "circuit_breaker_active": cb_active,
