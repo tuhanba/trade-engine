@@ -30,7 +30,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("bot.log", encoding="utf-8")
+        logging.FileHandler("db/bot.log" if os.path.exists("db") else "bot.log", encoding="utf-8")
     ]
 )
 logger = logging.getLogger("ax.async_engine")

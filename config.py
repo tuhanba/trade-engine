@@ -31,7 +31,7 @@ def _env_float(key, default=0.0):
     except: return default
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH  = str(BASE_DIR / _env("DB_PATH", "trading.db"))
+DB_PATH  = str(BASE_DIR / _env("DB_PATH", "db/trading.db" if (BASE_DIR / "db").exists() else "trading.db"))
 
 # Execution
 EXECUTION_MODE          = _env("EXECUTION_MODE", "paper")

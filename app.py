@@ -371,6 +371,7 @@ def api_ml_status():
 def api_logs():
     import re
     LOG_PATHS = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "bot.log"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.log"),
         os.path.join(getattr(config, "LOG_DIR", "logs"), "ax_bot.log"),
         "/root/trade_engine/logs/ax_bot.log",
