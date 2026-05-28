@@ -454,8 +454,12 @@ function playDing() {
 // PnL Chart
 let chart=null;
 function initChart(){
-  const ctx=$('pnlChart').getContext('2d');
-  chart=new Chart(ctx,{type:'line',data:{labels:[],datasets:[{label:'PnL',data:[],borderColor:'#C8942A',backgroundColor:'rgba(200,148,42,.06)',borderWidth:1.5,pointRadius:0,pointHoverRadius:4,fill:true,tension:.35,pointHoverBackgroundColor:'#E8B84B'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{backgroundColor:'rgba(3,5,8,.97)',borderColor:'rgba(200,148,42,.35)',borderWidth:1,titleColor:'#4A5A7A',bodyColor:'#E8B84B',titleFont:{family:'Roboto Mono',size:10},bodyFont:{family:'Roboto Mono',size:12},callbacks:{label:c=>`${c.parsed.y>=0?'+':''}$${c.parsed.y.toFixed(2)}`}}},scales:{x:{display:false},y:{display:true,grid:{color:'rgba(255,255,255,.04)',drawTicks:false},border:{display:false},ticks:{color:'#4A5A7A',font:{family:'Roboto Mono',size:9},maxTicksLimit:5,callback:v=>`${v>=0?'+':''}$${Math.abs(v).toFixed(0)}`}}},animation:{duration:600},interaction:{mode:'index',intersect:false}}});
+  try {
+    const ctx=$('pnlChart').getContext('2d');
+    chart=new Chart(ctx,{type:'line',data:{labels:[],datasets:[{label:'PnL',data:[],borderColor:'#C8942A',backgroundColor:'rgba(200,148,42,.06)',borderWidth:1.5,pointRadius:0,pointHoverRadius:4,fill:true,tension:.35,pointHoverBackgroundColor:'#E8B84B'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{backgroundColor:'rgba(3,5,8,.97)',borderColor:'rgba(200,148,42,.35)',borderWidth:1,titleColor:'#4A5A7A',bodyColor:'#E8B84B',titleFont:{family:'Roboto Mono',size:10},bodyFont:{family:'Roboto Mono',size:12},callbacks:{label:c=>`${c.parsed.y>=0?'+':''}$${c.parsed.y.toFixed(2)}`}}},scales:{x:{display:false},y:{display:true,grid:{color:'rgba(255,255,255,.04)',drawTicks:false},border:{display:false},ticks:{color:'#4A5A7A',font:{family:'Roboto Mono',size:9},maxTicksLimit:5,callback:v=>`${v>=0?'+':''}$${Math.abs(v).toFixed(0)}`}}},animation:{duration:600},interaction:{mode:'index',intersect:false}}});
+  } catch(e) {
+    console.warn('Chart init err:', e);
+  }
 }
 
 function updateStatsDOM(d) {
@@ -774,8 +778,12 @@ async function fHeatmap() {
             });
             html += '</div>';
         });
+        html += `</div>`;
         $('hm-wrap').innerHTML = html;
-    } catch(e) { console.warn(e); }
+    } catch(e) {
+        console.warn(e);
+        $('hm-wrap').innerHTML = '<div class="empty">Heatmap yüklenemedi.</div>';
+    }
 }
 
 // Ana yenileme döngüsü
