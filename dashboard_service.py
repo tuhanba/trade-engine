@@ -82,9 +82,9 @@ def _get_health_impl() -> dict:
     return {
         "ok": db_ok,
         "db_connected": db_ok,
-        "execution_mode": config.EXECUTION_MODE,
+        "execution_mode": database.get_state("tg_execution_mode") or config.EXECUTION_MODE,
         "ax_mode": getattr(config, "AX_MODE", "execute"),
-        "human_mode": bool(getattr(config, "HUMAN_MODE", False)),
+        "human_mode": database.get_state("tg_human_mode") == "True" if database.get_state("tg_human_mode") is not None else bool(getattr(config, "HUMAN_MODE", False)),
         "live_trading_enabled": config.LIVE_TRADING_ENABLED,
         "dry_run": config.DRY_RUN,
         "telegram_configured": telegram.is_configured(),

@@ -618,12 +618,14 @@ class AdaptiveScorer:
             total_trades = _ghost_stats.get("total", 0) or 0
         except Exception:
             total_trades = 0
-        if total_trades < 10:
-            logger.debug(f"[Adaptive] {signal.symbol}: yetersiz veri ({total_trades}<10), base score kullanılıyor")
-            return round(base_score, 1)  # Boost/penalti yok, ham score döndür
 
         # 1. Ghost multiplier
-        ghost_mult = self.ghost.get_score_multiplier(signal.symbol, signal.side)
+        if total_trades < 10:
+            logger.debug(f"[Adaptive] {signal.symbol}: yetersiz ghost verisi ({total_trades}<10), ghost_mult=1.0 kullanılıyor")
+            ghost_mult = 1.0
+        else:
+            ghost_mult = self.ghost.get_score_multiplier(signal.symbol, signal.side)
+
         adjusted = base_score * ghost_mult
 
         # 2. Market trend alignment
@@ -762,7 +764,14 @@ def classify_signal(
 
     if regime == "CHOPPY":
         setup_quality = str(getattr(signal, "setup_quality", "") or "").upper()
-        if setup_quality not in ("S", "A+"):
+        
+        import config
+        is_scalp_mode = not getattr(config, "HUMAN_MODE", False)
+        confluence = float(ctx.get("confluence_score", getattr(signal, "confluence_score", 0)) or 0)
+        
+        if is_scalp_mode and setup_quality == "A" and confluence >= 3:
+            logger.debug("[Regime] CHOPPY'de Scalp Modu istisnası: A kalite + Yüksek Confluence kabul edildi.")
+        elif setup_quality not in ("S", "A+"):
             return AIDecisionResult(
                 decision=SignalDecision.VETO.value,
                 reason=f"CHOPPY piyasa — {setup_quality} kalite yetersiz (min A+)",

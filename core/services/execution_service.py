@@ -29,11 +29,18 @@ class ExecutionService:
         try:
             # Check thresholds (execution mode etc.)
             import config
-            trade_thr = config.HUMAN_TRADE_THRESHOLD if config.HUMAN_MODE else config.TRADE_THRESHOLD
+            is_scalp = not getattr(config, "HUMAN_MODE", False)
+            trade_thr = config.HUMAN_TRADE_THRESHOLD if not is_scalp else getattr(config, "TRADE_THRESHOLD", 55.0)
             
             sig = SignalData.from_dict(signal_dict)
             
-            if sig.final_score >= trade_thr and sig.setup_quality in config.EXECUTABLE_QUALITIES:
+            # Dinamik eşik: Scalp modunda ML skoru >= 65 ise barajı 3 puan düşür (Makineli tüfek bonusu)
+            ml_score = float(getattr(sig, "ml_score", 50.0) or 50.0)
+            if is_scalp and ml_score >= 65:
+                trade_thr -= 3.0
+                logger.debug(f"[ExecutionService] {symbol} Scalp ML Bonus: trade_thr {trade_thr+3.0} -> {trade_thr}")
+            
+            if sig.final_score >= trade_thr and sig.setup_quality in getattr(config, "EXECUTABLE_QUALITIES", ("S", "A+", "A", "B", "C")):
                 # Dispatch execution approval
                 await event_bus.publish(Event(type=EventType.EXECUTION_APPROVED, payload=payload))
                 
