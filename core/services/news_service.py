@@ -20,8 +20,27 @@ class NewsService:
         if cls._instance is None:
             cls._instance = super(NewsService, cls).__new__(cls)
             cls._instance._is_running = False
-            cls._instance.panic_keywords = ["sec sues", "hacked", "bankrupt", "market crash", "doj charges", "fbi", "launder"]
+            # Sadece gercek piyasa tehdidi icin cok kelimeli, spesifik ifadeler
+            # "crash" tek basina cok fazla yanlis alarm uretir (ornek: "crash bug", "fix crash" vb.)
+            cls._instance.panic_keywords = [
+                "sec sues",
+                "sec charges",
+                "exchange hacked",
+                "exchange hack",
+                "binance hacked",
+                "coinbase hacked",
+                "market crash",
+                "crypto crash",
+                "bitcoin crash",
+                "doj charges",
+                "fbi seizes",
+                "bankrupt",
+                "insolvency",
+                "emergency shutdown",
+                "trading halted",
+            ]
             cls._instance.rss_url = "https://cointelegraph.com/rss"
+            cls._instance._kill_switch_fired = False  # cooldown: bir kez tetiklendi mi?
         return cls._instance
 
     async def check_news(self):
@@ -33,16 +52,22 @@ class NewsService:
                         root = ET.fromstring(content)
                         
                         for item in root.findall('.//item'):
-                            title = item.find('title').text.lower()
+                            title_elem = item.find('title')
+                            if title_elem is None or not title_elem.text:
+                                continue
+                            title = title_elem.text.lower()
                             
                             for kw in self.panic_keywords:
                                 if kw in title:
+                                    if self._kill_switch_fired:
+                                        logger.warning(f"[NEWS AI] Kill switch already active, skipping repeat: '{kw}' in '{title}'")
+                                        return
                                     logger.critical(f"[NEWS AI] PANIC KEYWORD DETECTED: '{kw}' in '{title}'")
+                                    self._kill_switch_fired = True
                                     await event_bus.publish(Event(
                                         type=EventType.KILL_SWITCH_ACTIVATED,
                                         payload={"reason": f"News AI Panic: {kw}", "title": title}
                                     ))
-                                    # Bir kere tetiklendi mi yeterli, geri kalan haberlere bakmaya gerek yok
                                     return
         except Exception as e:
             logger.error(f"[NEWS AI] Haber tarama hatasi: {e}")

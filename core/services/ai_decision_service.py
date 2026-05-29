@@ -72,8 +72,8 @@ class AIDecisionService:
                 logger.debug(f"[AIDecisionService] {symbol} vetoed by AI: {decision['reason']}")
                 return
 
-            # Note: The data_layer is updated here (simulated state changes)
-            await asyncio.to_thread(data_layer.save_signal, sig)
+            # Signal record is already live in data_layer memory — no separate save needed.
+            # data_layer.save_signal() was removed (method does not exist on DataLayer).
 
             next_payload = {
                 "symbol": symbol,
@@ -83,7 +83,8 @@ class AIDecisionService:
             }
 
             await event_bus.publish(Event(type=EventType.AI_VALIDATED, payload=next_payload))
-            logger.debug(f"[AIDecisionService] {symbol} validated by AI (Score: {decision['final_score']})")
+            logger.info(f"[AIDecisionService] {symbol} AI_VALIDATED published (score={decision['final_score']:.1f} decision={decision['decision']})")
+
 
         except Exception as e:
             logger.error(f"[AIDecisionService] Error processing {symbol}: {e}")
