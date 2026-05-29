@@ -477,11 +477,11 @@ class GhostMemoryManager:
             try:
                 rows = conn.execute(
                     """
-                    SELECT status, COUNT(*) as cnt
-                    FROM signal_candidates
-                    WHERE symbol = ? AND created_at >= ?
-                    AND status IN ('TP_HIT', 'SL_HIT')
-                    GROUP BY status
+                    SELECT virtual_outcome as status, COUNT(*) as cnt
+                    FROM ghost_results
+                    WHERE symbol = ? AND evaluated_at >= ?
+                    AND virtual_outcome IN ('WIN', 'LOSS')
+                    GROUP BY virtual_outcome
                     """,
                     (symbol, cutoff),
                 ).fetchall()
@@ -489,9 +489,9 @@ class GhostMemoryManager:
                 tp_hits = 0
                 sl_hits = 0
                 for r in rows:
-                    if r["status"] == "TP_HIT":
+                    if r["status"] == "WIN":
                         tp_hits = r["cnt"]
-                    elif r["status"] == "SL_HIT":
+                    elif r["status"] == "LOSS":
                         sl_hits = r["cnt"]
 
                 total = tp_hits + sl_hits

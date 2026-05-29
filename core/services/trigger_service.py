@@ -33,11 +33,6 @@ class TriggerService:
                 logger.debug(f"[TriggerService] {symbol} rejected: quality D")
                 return
 
-            if trigger_result["quality"] == "C":
-                # Watchlist only, log it but don't proceed to RISK
-                logger.debug(f"[TriggerService] {symbol} quality C, watchlist only")
-                return
-
             next_payload = {
                 "symbol": symbol,
                 "signal_id": signal_id,

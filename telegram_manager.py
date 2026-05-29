@@ -119,6 +119,7 @@ class TelegramManager:
         cmd = text.lower().split()[0].split("@")[0]
         logger.info("Komut: %s", cmd)
         handlers = {
+            "/start":   self._cmd_help,
             "/help":    self._cmd_help,
             "/health":  self._cmd_health,
             "/status":  self._cmd_status,

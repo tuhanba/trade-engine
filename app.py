@@ -162,16 +162,18 @@ def api_dashboard_data():
     try:
         from core.services.macro_service import macro_service
         from database import get_open_trades, get_paper_balance
+        import dashboard_service
         
         sentiment = macro_service.get_market_sentiment()
         open_trades = get_open_trades()
-        # Mock daily PnL
-        daily_pnl = 0.0
+        real_stats = dashboard_service.get_stats()
+        
+        daily_pnl = real_stats.get("daily_pnl", 0.0)
             
         stats = {
-            "total_trades": len(open_trades),
-            "win_rate": 65.0, # Placeholder
-            "profit_factor": 1.5
+            "total_trades": real_stats.get("total_trades", len(open_trades)),
+            "win_rate": real_stats.get("win_rate", 0.0),
+            "profit_factor": real_stats.get("profit_factor", 1.0)
         }
         
         return jsonify({

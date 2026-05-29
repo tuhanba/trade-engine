@@ -183,15 +183,15 @@ class TrendEngine:
 
         # Trend Onayı
         trend_up = (
-            e9.iloc[-1] > e21.iloc[-1] > e50.iloc[-1]
-            and c > e21.iloc[-1]
+            e9.iloc[-1] > e21.iloc[-1]
+            and c > e50.iloc[-1]
             and adx_v > _MIN_ADX
             and pdi > mdi
         )
 
         trend_dn = (
-            e9.iloc[-1] < e21.iloc[-1] < e50.iloc[-1]
-            and c < e21.iloc[-1]
+            e9.iloc[-1] < e21.iloc[-1]
+            and c < e50.iloc[-1]
             and adx_v > _MIN_ADX
             and mdi > pdi
         )

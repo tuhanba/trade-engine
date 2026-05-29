@@ -367,12 +367,10 @@ _sent_ids_set: set = set()
 
 def deliver_signal(sig):
     try:
-        if sig.id in _sent_ids_set:
-            logger.debug(f"Duplicate sinyal engellendi: {sig.symbol}")
+        # C quality can now be sent if allowed by decision engine.
+        if sig.setup_quality not in ["S", "A+", "A", "B", "C"]:
             return False
-        if sig.setup_quality not in ["S", "A+", "A", "B"]:
-            return False
-        # BUG FIX: is_valid() metodu olmayabilir — AttributeError yakala
+        # BUG FIX: is_valid() metodu olmayabilir - AttributeError yakala
         try:
             if not sig.is_valid():
                 return False
@@ -381,9 +379,20 @@ def deliver_signal(sig):
             _entry = getattr(sig, 'entry_zone', None) or getattr(sig, 'entry_price', None)
             if not sig.symbol or not _entry:
                 return False
-        # BUG FIX: entry_zone None olabilir — güvenli al
+        # BUG FIX: entry_zone None olabilir - güvenli al
         _entry_zone = getattr(sig, 'entry_zone', None) or getattr(sig, 'entry_price', None) or 0
-        dedupe_key = f"{sig.symbol}:{sig.direction}:{round(float(_entry_zone), 6)}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+        dedupe_key = f"sig:{sig.symbol}:{sig.direction}:{round(float(_entry_zone), 6)}:{datetime.now(timezone.utc).strftime('%Y-%m-%d:%H:%M')}"
+        
+        try:
+            from database import get_conn
+            with get_conn() as conn:
+                exists = conn.execute("SELECT 1 FROM telegram_messages WHERE dedupe_key = ?", (dedupe_key,)).fetchone()
+                if exists:
+                    logger.debug(f"Duplicate sinyal DB'den engellendi: {dedupe_key}")
+                    return False
+        except Exception:
+            pass
+
         msg = format_signal(sig)
         saved = True
         try:
