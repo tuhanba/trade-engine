@@ -156,6 +156,35 @@ def api_health():
     except Exception as exc:
         return _error(str(exc))
 
+@app.route("/api/dashboard_data")
+def api_dashboard_data():
+    """Faz 6 V2 Dashboard için toplu veri sağlar."""
+    try:
+        from core.services.macro_service import macro_service
+        from database import get_open_trades, get_paper_balance
+        
+        sentiment = macro_service.get_market_sentiment()
+        open_trades = get_open_trades()
+        # Mock daily PnL
+        daily_pnl = 0.0
+            
+        stats = {
+            "total_trades": len(open_trades),
+            "win_rate": 65.0, # Placeholder
+            "profit_factor": 1.5
+        }
+        
+        return jsonify({
+            "market_regime": "NEUTRAL",
+            "macro_fng": sentiment.get("fng_value", 50),
+            "total_balance": get_paper_balance() or 1000.0,
+            "daily_pnl": daily_pnl,
+            "stats": stats,
+            "active_trades": open_trades
+        })
+    except Exception as e:
+        logger.error(f"Dashboard Data API Error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/live")
 def api_live():
