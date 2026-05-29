@@ -222,10 +222,10 @@ class TriggerEngine:
         score = 5.0
         quality = "C"
 
-        if rv > 2.0:
+        if rv > 1.2:
             score += 2.0
             quality = "B"
-        elif rv > 1.5:
+        elif rv > 1.0:
             score += 1.0
 
         if direction == "LONG" and mom3c > 1.5:
@@ -370,7 +370,8 @@ class TriggerEngine:
                 return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"ml_score_too_low_{ml_score}"}
                 
             # ── Gerçek "S" Seviye Kuralı ─────────────────────────────────────
-            if quality in ["S", "A+"] and ml_score < 70:
+            # ★ Gerçek "S" Seviye Kuralı ★ (Cold start istisnası ile)
+            if quality in ["S", "A+"] and ml_score < 70 and ml_score != 50:
                 quality = "A" 
                 score = max(score - 1.0, 0.0)
                 

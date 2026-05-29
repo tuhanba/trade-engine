@@ -30,7 +30,7 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-10000")  # 10MB cache (negatif = KB)
+    conn.execute("PRAGMA cache_size=-64000")  # 64MB cache (negatif = KB)
     conn.execute("PRAGMA temp_store=MEMORY")
     return conn
 
@@ -42,7 +42,7 @@ def get_conn() -> Generator[sqlite3.Connection, None, None]:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-10000")  # 10MB cache
+    conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
     try:
         with conn:
             yield conn
@@ -61,7 +61,7 @@ def open_db(db_path: str | None = None, timeout: int = 15) -> sqlite3.Connection
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-10000")
+    conn.execute("PRAGMA cache_size=-64000")
     return conn
 
 
@@ -488,7 +488,7 @@ def init_db() -> None:
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA cache_size=10000")
+        conn.execute("PRAGMA cache_size=-64000")
         conn.commit()
         conn.execute(_TRADES_DDL)
         conn.execute(_SIGNAL_CANDIDATES_DDL)

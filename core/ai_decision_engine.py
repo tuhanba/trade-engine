@@ -769,8 +769,8 @@ def classify_signal(
         is_scalp_mode = not getattr(config, "HUMAN_MODE", False)
         confluence = float(ctx.get("confluence_score", getattr(signal, "confluence_score", 0)) or 0)
         
-        if is_scalp_mode and setup_quality == "A" and confluence >= 3:
-            logger.debug("[Regime] CHOPPY'de Scalp Modu istisnası: A kalite + Yüksek Confluence kabul edildi.")
+        if is_scalp_mode and setup_quality in ("A", "B") and confluence >= 2:
+            logger.debug("[Regime] CHOPPY'de Scalp Modu istisnası: A/B kalite + Confluence kabul edildi.")
         elif setup_quality not in ("S", "A+"):
             return AIDecisionResult(
                 decision=SignalDecision.VETO.value,

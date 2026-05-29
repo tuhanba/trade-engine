@@ -122,7 +122,7 @@ PAPER_TRACK_HORIZON_HOURS       = _env_float("PAPER_TRACK_HORIZON_HOURS", 6.0)
 
 # Trigger Engine
 ALLOWED_QUALITIES          = ["S", "A+", "A", "B"]
-EXECUTABLE_QUALITIES       = _env("EXECUTABLE_QUALITIES", "S,A+,A").split(",")  # B kalite execute edilmez
+EXECUTABLE_QUALITIES       = _env("EXECUTABLE_QUALITIES", "S,A+,A,B").split(",")
 # London (08-12 UTC) + NY (13-17 UTC) = en aktif seanslar
 GOOD_HOURS_UTC             = list(range(8, 18))   # 08-17 UTC
 BAD_HOURS_UTC              = list(range(0, 6))    # 00-05 UTC (Asian close)
