@@ -35,7 +35,8 @@ class MacroService:
                             fng = data["data"][0]
                             self._cache["fear_greed_value"] = int(fng.get("value", 50))
                             self._cache["fear_greed_classification"] = fng.get("value_classification", "Neutral")
-                            self._cache["last_update"] = asyncio.get_event_loop().time()
+                            import time
+                            self._cache["last_update"] = time.time()
                             logger.info(f"[Macro] Fear & Greed: {self._cache['fear_greed_value']} ({self._cache['fear_greed_classification']})")
         except Exception as e:
             logger.error(f"[Macro] Fear & Greed API hatası: {e}")

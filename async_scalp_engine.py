@@ -164,6 +164,24 @@ class AsyncScalpEngine:
         
         await event_bus.stop()
 
+    async def _db_maintenance_loop(self):
+        """Perform SQLite VACUUM and WAL checkpoint every 24 hours."""
+        from database import get_conn
+        
+        def _run_vacuum():
+            logger.info("[Maintenance] Starting daily SQLite maintenance...")
+            try:
+                with get_conn() as conn:
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                    conn.execute("VACUUM;")
+                logger.info("[Maintenance] SQLite maintenance completed.")
+            except Exception as e:
+                logger.error(f"[Maintenance] Failed: {e}")
+
+        while True:
+            await asyncio.sleep(86400) # 24h
+            await asyncio.to_thread(_run_vacuum)
+
 def handle_exception(loop, context):
     msg = context.get("exception", context["message"])
     logger.error(f"Caught exception: {msg}")
@@ -192,17 +210,3 @@ if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(main())
-
-    async def _db_maintenance_loop(self):
-        "\""Perform SQLite VACUUM and WAL checkpoint every 24 hours."\""
-        from database import get_conn
-        while True:
-            await asyncio.sleep(86400) # 24h
-            try:
-                logger.info("[Maintenance] Starting daily SQLite maintenance...")
-                with get_conn() as conn:
-                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
-                    conn.execute("VACUUM;")
-                logger.info("[Maintenance] SQLite maintenance completed.")
-            except Exception as e:
-                logger.error(f"[Maintenance] Failed: {e}")
