@@ -664,21 +664,15 @@ def init_db() -> None:
                 scanned_at TEXT DEFAULT (datetime('now'))
             )
         """)
+        conn.execute("DROP TABLE IF EXISTS best_params")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS best_params (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                version         INTEGER DEFAULT 1,
-                rsi_period      INTEGER DEFAULT 14,
-                macd_fast       INTEGER DEFAULT 12,
-                macd_slow       INTEGER DEFAULT 26,
-                macd_signal     INTEGER DEFAULT 9,
-                bb_period       INTEGER DEFAULT 20,
-                bb_std          REAL DEFAULT 2.0,
-                atr_period      INTEGER DEFAULT 14,
-                sl_atr_multi    REAL DEFAULT 1.5,
-                tp_atr_multi    REAL DEFAULT 2.5,
-                score           REAL DEFAULT 0,
-                created_at      TEXT
+                data            TEXT,
+                params_json     TEXT,
+                win_rate        REAL,
+                profit_factor   REAL,
+                created_at      TEXT DEFAULT (datetime('now'))
             )
         """)
         conn.execute("""
