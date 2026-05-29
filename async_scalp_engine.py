@@ -84,6 +84,13 @@ class AsyncScalpEngine:
         self.telegram_manager = TelegramManager(telegram_delivery.send_message)
         self.telegram_manager.start()
 
+        # Start Macro Service
+        try:
+            from core.services.macro_service import macro_service
+            asyncio.create_task(macro_service.start_background_task())
+        except Exception as e:
+            logger.error(f"MacroService başlatılamadı: {e}")
+
         # Start WebSocket Data Feed
         await self.market_data.initialize()
         
@@ -137,6 +144,12 @@ class AsyncScalpEngine:
             self.telegram_manager.stop()
         if self.market_data:
             await self.market_data.stop()
+        
+        try:
+            from core.services.macro_service import macro_service
+            macro_service.stop()
+        except: pass
+        
         await event_bus.stop()
 
 def handle_exception(loop, context):

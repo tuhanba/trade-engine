@@ -772,6 +772,36 @@ def classify_signal(
     except Exception as e:
         logger.debug(f"[AI] Korelasyon kalkanı atlandı: {e}")
 
+    # ── Macro Sentiment Kalkanı (Faz 6) ────────────────────────────────
+    try:
+        from core.services.macro_service import macro_service
+        sentiment = macro_service.get_market_sentiment()
+        fng_val = sentiment.get("fng_value", 50)
+        
+        # Aşırı korku varsa LONG işlemlere kısıtlama
+        if fng_val < 25 and signal.side == "LONG":
+            if adjusted_score < 80:
+                return AIDecisionResult(
+                    decision=SignalDecision.VETO.value,
+                    reason=f"Macro Kalkanı: Piyasa Aşırı Korku seviyesinde (FNG={fng_val}). LONG işlemi reddedildi.",
+                    confidence=0.9,
+                )
+            else:
+                signal.risk_pct *= 0.5 # Riski yarıya düşür
+                
+        # Aşırı coşku varsa SHORT işlemlere kısıtlama
+        elif fng_val > 75 and signal.side == "SHORT":
+            if adjusted_score < 80:
+                return AIDecisionResult(
+                    decision=SignalDecision.VETO.value,
+                    reason=f"Macro Kalkanı: Piyasa Aşırı Açgözlülük seviyesinde (FNG={fng_val}). SHORT işlemi reddedildi.",
+                    confidence=0.9,
+                )
+            else:
+                signal.risk_pct *= 0.5
+    except Exception as e:
+        logger.debug(f"[AI] Macro kalkanı atlandı: {e}")
+
     # ── Piyasa Rejimi Filtresi ────────────────────────────────────────
     try:
         from database import get_market_regime as _get_regime

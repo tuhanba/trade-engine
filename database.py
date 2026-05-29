@@ -282,6 +282,7 @@ CREATE TABLE IF NOT EXISTS ghost_signals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     candidate_id    INTEGER,
     symbol          TEXT DEFAULT '',
+    timeframe       TEXT DEFAULT '5m',
     direction       TEXT DEFAULT '',
     entry_price     REAL DEFAULT 0,
     stop_loss       REAL DEFAULT 0,
@@ -694,6 +695,12 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status)"
         )
+        
+        # Migrations
+        try:
+            conn.execute("ALTER TABLE ghost_signals ADD COLUMN timeframe TEXT DEFAULT '5m'")
+        except Exception:
+            pass # Kolon zaten varsa hata verir, yoksay
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol)"
         )
@@ -1691,15 +1698,24 @@ def save_ghost_signal(data: dict) -> int:
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO ghost_signals
-               (coin, side, entry_price, stop_loss, take_profit,
+               (coin, symbol, side, direction, timeframe, entry_price, stop_loss, take_profit, tp1, tp2, tp3, atr, final_score, market_regime,
                 confidence, reject_reason, trigger_type, simulated)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
             (
                 data.get("coin") or data.get("symbol", ""),
+                data.get("symbol", ""),
                 data.get("side") or data.get("direction", ""),
+                data.get("direction") or data.get("side", ""),
+                data.get("timeframe", "5m"),
                 float(data.get("entry_price") or data.get("entry", 0)),
                 float(data.get("stop_loss") or data.get("sl", 0)),
                 float(data.get("take_profit") or data.get("tp1", 0)),
+                float(data.get("tp1", 0)),
+                float(data.get("tp2", 0)),
+                float(data.get("tp3", 0)),
+                float(data.get("atr", 0)),
+                float(data.get("final_score", 0)),
+                data.get("market_regime", "NEUTRAL"),
                 float(data.get("confidence", 0)),
                 data.get("reject_reason", ""),
                 data.get("trigger_type", "unknown"),
