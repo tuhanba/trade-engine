@@ -126,19 +126,28 @@ class Backtester:
             if trade_result:
                 # %2 risk simulasyonu
                 risk_amt = balance * 0.02
+                sl_dist = abs(entry_price - sl)
+                qty = risk_amt / sl_dist if sl_dist > 0 else 0
+                
+                # Binance Futures Taker (0.05%) + Maker (0.02%) ucreti (Ort. %0.07)
+                fee_rate = 0.0007
+                position_size = qty * entry_price
+                total_fee = position_size * fee_rate
+                
                 if trade_result == "WIN":
                     win_count += 1
                     profit = risk_amt * 1.5 # (TP1/SL orani 1.5R)
-                    balance += profit
+                    balance += (profit - total_fee)
                 else:
                     loss_count += 1
-                    balance -= risk_amt
+                    balance -= (risk_amt + total_fee)
                     
                 trades.append({
                     "time": df.iloc[i]['timestamp'],
                     "direction": direction,
                     "result": trade_result,
-                    "balance": balance
+                    "balance": balance,
+                    "fee_paid": total_fee
                 })
 
         total_trades = win_count + loss_count
