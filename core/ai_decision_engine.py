@@ -753,6 +753,25 @@ def classify_signal(
     # ── Adaptif score hesapla ────────────────────────────────────
     adjusted_score = scorer.compute_adjusted_score(signal, ctx)
 
+    # ── Portföy Korelasyon Kalkanı (Faz 5) ──────────────────────────
+    try:
+        from database import get_open_trades
+        open_trades = get_open_trades()
+        same_direction_count = sum(1 for t in open_trades if (t.get("direction") or t.get("side", "LONG")) == signal.side)
+        if same_direction_count >= 3:
+            # 3'ten fazla aynı yönde pozisyon var, risk yarıya düşürülmeli veya VETO verilmeli
+            if adjusted_score < 75:
+                return AIDecisionResult(
+                    decision=SignalDecision.VETO.value,
+                    reason=f"Korelasyon Kalkanı: Zaten {same_direction_count} adet {signal.side} pozisyon açık",
+                    confidence=0.8,
+                )
+            else:
+                # Skor iyiyse riski düşürtüp izin ver
+                signal.risk_pct *= 0.5
+    except Exception as e:
+        logger.debug(f"[AI] Korelasyon kalkanı atlandı: {e}")
+
     # ── Piyasa Rejimi Filtresi ────────────────────────────────────────
     try:
         from database import get_market_regime as _get_regime

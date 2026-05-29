@@ -344,7 +344,9 @@ class ExecutionEngine:
             total_pnl, accumulated, remaining_pnl,
         )
 
-        # ── AI Learning callback ─────────────────────────────────────
+        # =========================================================================
+        # 🧠 AI Learning callback (Kesintisiz Öğrenme)
+        # =========================================================================
         try:
             from core.ai_decision_engine import AIDecisionEngine as _AIDE
             _aide = _AIDE()
@@ -640,19 +642,23 @@ def _check_trade(client, t: dict) -> bool:
                 if is_long:
                     new_trail_sl = price - atr_val * TRAIL_ATR_MULT
                     if new_trail_sl > trail_f:
-                        trail_f = new_trail_sl
-                        active_stop = trail_f
-                        update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
-                        _update_live_sl_safe(symbol, direction, trail_f)
-                        save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
+                        diff_pct = ((new_trail_sl - trail_f) / trail_f * 100) if trail_f > 0 else 100.0
+                        if diff_pct > 0.1: # Sadece %0.1'den büyük fark varsa Binance'i güncelle
+                            trail_f = new_trail_sl
+                            active_stop = trail_f
+                            update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
+                            _update_live_sl_safe(symbol, direction, trail_f)
+                            save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
                 else:
                     new_trail_sl = price + atr_val * TRAIL_ATR_MULT
-                    if new_trail_sl < trail_f:
-                        trail_f = new_trail_sl
-                        active_stop = trail_f
-                        update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
-                        _update_live_sl_safe(symbol, direction, trail_f)
-                        save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
+                    if new_trail_sl < trail_f or trail_f == 0.0:
+                        diff_pct = ((trail_f - new_trail_sl) / trail_f * 100) if trail_f > 0 else 100.0
+                        if diff_pct > 0.1: # Sadece %0.1'den büyük fark varsa Binance'i güncelle
+                            trail_f = new_trail_sl
+                            active_stop = trail_f
+                            update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
+                            _update_live_sl_safe(symbol, direction, trail_f)
+                            save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
 
 
         # Runner stop vuruldu mu? (trail_stop veya breakeven sl)

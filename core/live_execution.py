@@ -211,6 +211,9 @@ class LiveExecutionEngine:
             entry_price = float(order.get('avgPrice', current_price))
             if entry_price == 0:
                 entry_price = current_price
+        except BinanceAPIException as e:
+            logger.error(f"[LIVE REJECTED] Market entry Binance tarafindan reddedildi {symbol}: {e.message} (Code: {e.code})")
+            return None
         except Exception as e:
             logger.error(f"[LIVE ERROR] Market entry basarisiz {symbol}: {e}")
             return None
