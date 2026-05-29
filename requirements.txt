@@ -10,6 +10,7 @@ numpy>=1.24.0
 # Environment & HTTP
 python-dotenv>=1.0.0
 requests>=2.31.0
+aiohttp>=3.9.0
 # Binance & Exchange API
 python-binance>=1.0.19
 ccxt>=4.2.0

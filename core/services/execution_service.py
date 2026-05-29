@@ -11,7 +11,11 @@ class ExecutionService:
     def __init__(self):
         self.execution_engine = ExecutionEngine()
         event_bus.subscribe(EventType.AI_VALIDATED, self.handle_ai_validated)
-        asyncio.create_task(self._monitoring_loop())
+        self._monitor_task = None
+
+    async def start(self):
+        """Monitoring loop'u başlat. async_scalp_engine.py'den çağrılır."""
+        self._monitor_task = asyncio.create_task(self._monitoring_loop())
 
     async def _monitoring_loop(self):
         while True:

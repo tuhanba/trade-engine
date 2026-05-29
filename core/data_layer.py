@@ -88,6 +88,39 @@ class SignalData:
     # ── ID alanı (deliver_signal dedupe için)
     id: Optional[str] = None
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "SignalData":
+        """_SignalRecord.to_dict() çıktısından SignalData oluşturur."""
+        sig = cls()
+        sig.symbol        = d.get("symbol", "")
+        sig.direction     = d.get("direction", "LONG")
+        sig.side          = d.get("direction", "LONG")
+        sig.entry_price   = float(d.get("entry_zone") or d.get("entry_price") or 0)
+        sig.entry_zone    = sig.entry_price
+        sig.stop_loss     = float(d.get("stop_loss") or 0)
+        sig.tp1           = float(d.get("tp1") or 0) or None
+        sig.tp2           = float(d.get("tp2") or 0) or None
+        sig.tp3           = float(d.get("tp3") or 0) or None
+        sig.final_score   = float(d.get("final_score") or 0)
+        sig.score         = sig.final_score
+        sig.setup_quality = d.get("setup_quality", "C")
+        sig.leverage      = int(d.get("leverage_suggestion") or d.get("leverage") or 10)
+        sig.risk_pct      = float(d.get("risk_percent") or d.get("risk_pct") or 0.75)
+        sig.position_size = float(d.get("position_size") or 0)
+        sig.confidence    = float(d.get("confidence") or 0.5)
+        sig.reason        = d.get("reason", "")
+        sig.rr            = float(d.get("rr") or 0) or None
+        sig.ml_score      = float(d.get("ml_score") or 50)
+        sig.trend_score   = float(d.get("trend_score") or 0)
+        sig.trigger_score = float(d.get("trigger_score") or 0)
+        sig.risk_score    = float(d.get("risk_score") or 0)
+        sig.confluence_score = float(d.get("confluence_score") or 2)
+        sig.notional_size = float(d.get("notional_size") or 0)
+        sig.leverage_suggestion = d.get("leverage_suggestion")
+        sig.max_loss      = float(d.get("max_loss") or 0)
+        sig.market_regime = d.get("market_regime", "NEUTRAL")
+        return sig
+
     def __post_init__(self):
         """direction ↔ side senkronizasyonu, entry_zone ↔ entry_price senkronizasyonu."""
         if self.direction and not self.side:

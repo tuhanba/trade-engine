@@ -12,16 +12,19 @@ from typing import List, Dict
 logger = logging.getLogger(__name__)
 
 try:
-    from config import COIN_UNIVERSE, BINANCE_API_KEY, MIN_VOLUME_USD
+    from config import COIN_UNIVERSE, BINANCE_API_KEY, DB_PATH
+    from config import MIN_VOLUME_USDT as MIN_VOLUME_USD
     from database import save_coin_library, disable_coin
 except ImportError:
     COIN_UNIVERSE = []
-    MIN_VOLUME_USD = 5_000_000
+    MIN_VOLUME_USD = 3_000_000
+    DB_PATH = "trading.db"
     save_coin_library = None
     disable_coin = None
 
 class AsyncMarketScanner:
-    def __init__(self, db_path="trade_engine.db"):
+    def __init__(self, db_path=None):
+        db_path = db_path or DB_PATH
         self.db_path = db_path
         self.min_volume = MIN_VOLUME_USD
         self.min_price = 0.001
