@@ -91,6 +91,13 @@ class AsyncScalpEngine:
         except Exception as e:
             logger.error(f"MacroService başlatılamadı: {e}")
 
+        # Start News Service
+        try:
+            from core.services.news_service import news_service
+            asyncio.create_task(news_service.start_background_task())
+        except Exception as e:
+            logger.error(f"NewsService başlatılamadı: {e}")
+
         # Start WebSocket Data Feed
         await self.market_data.initialize()
         
@@ -148,6 +155,11 @@ class AsyncScalpEngine:
         try:
             from core.services.macro_service import macro_service
             macro_service.stop()
+        except: pass
+        
+        try:
+            from core.services.news_service import news_service
+            news_service.stop()
         except: pass
         
         await event_bus.stop()

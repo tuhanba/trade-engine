@@ -920,7 +920,14 @@ def open_trade(client, signal_dict: dict, ax_result: dict):
             "funding_favorable": signal_dict.get("funding_favorable", 1),
             "ml_score":          signal_dict.get("ml_score", 50),
         }
-        balance  = database.get_paper_balance() or 250.0
+        # Auto-Compounding
+        import config
+        paper_balance = database.get_paper_balance() or 250.0
+        if getattr(config, 'AUTO_COMPOUNDING', True):
+            balance = paper_balance
+        else:
+            balance = getattr(config, 'BASE_ACCOUNT_SIZE', 1000.0)
+            
         trade    = build_trade_from_signal(sig, balance, config.DEFAULT_FEE_RATE, config.MAX_LEVERAGE)
         if trade is None:
             return None

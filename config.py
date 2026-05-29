@@ -51,7 +51,9 @@ TELEGRAM_CHAT_ID   = _env("TELEGRAM_CHAT_ID")
 SECRET_KEY         = _env("SECRET_KEY", "ax_secret_prod_2026")
 ANTHROPIC_API_KEY  = _env("ANTHROPIC_API_KEY")
 
-# Risk
+# Risk & Compounding
+AUTO_COMPOUNDING           = _env_bool("AUTO_COMPOUNDING", True)
+BASE_ACCOUNT_SIZE          = _env_float("BASE_ACCOUNT_SIZE", 1000.0) # Eger auto-compounding kapaliysa baz alinacak bakiye
 RISK_PCT                   = _env_float("RISK_PCT", 0.75)
 MAX_OPEN_TRADES            = _env_int("MAX_OPEN_TRADES", 5)
 DAILY_MAX_LOSS_PCT         = _env_float("DAILY_MAX_LOSS_PCT", 5.0)

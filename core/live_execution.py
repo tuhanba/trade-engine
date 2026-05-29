@@ -143,9 +143,18 @@ class LiveExecutionEngine:
         self._update_exchange_info()
         
         # 1. Bakiye kontrolu
-        balance = self._get_account_balance()
-        if balance < 10.0:
-            logger.error(f"Bakiye yetersiz: {balance} USDT")
+        live_balance = self._get_account_balance()
+        
+        # Auto-Compounding mantigi
+        if getattr(config, 'AUTO_COMPOUNDING', True):
+            balance = live_balance
+            logger.info(f"[Auto-Compound] Bakiye: {balance} USDT")
+        else:
+            balance = getattr(config, 'BASE_ACCOUNT_SIZE', 1000.0)
+            logger.info(f"[Fixed-Size] Bakiye: {balance} USDT (Live: {live_balance})")
+            
+        if live_balance < 10.0:
+            logger.error(f"Gercek bakiye yetersiz: {live_balance} USDT")
             return None
 
         # 2. Risk hesaplama (Kelly Dinamik Büyüklük)
