@@ -51,9 +51,7 @@ def maybe_ghost_log(signal: dict, reason: str) -> None:
     """
     try:
         confidence = float(signal.get("confidence") or signal.get("final_score", 0) / 100)
-        if confidence < 0.40:
-            return
-
+        
         from database import save_ghost_signal
         ghost_id = save_ghost_signal({
             "coin":         signal.get("symbol") or signal.get("coin", ""),

@@ -780,7 +780,7 @@ def classify_signal(
         
         # Aşırı korku varsa LONG işlemlere kısıtlama
         if fng_val < 25 and signal.side == "LONG":
-            if adjusted_score < 80:
+            if adjusted_score < 40:
                 return AIDecisionResult(
                     decision=SignalDecision.VETO.value,
                     reason=f"Macro Kalkanı: Piyasa Aşırı Korku seviyesinde (FNG={fng_val}). LONG işlemi reddedildi.",
@@ -791,7 +791,7 @@ def classify_signal(
                 
         # Aşırı coşku varsa SHORT işlemlere kısıtlama
         elif fng_val > 75 and signal.side == "SHORT":
-            if adjusted_score < 80:
+            if adjusted_score < 40:
                 return AIDecisionResult(
                     decision=SignalDecision.VETO.value,
                     reason=f"Macro Kalkanı: Piyasa Aşırı Açgözlülük seviyesinde (FNG={fng_val}). SHORT işlemi reddedildi.",
@@ -818,9 +818,9 @@ def classify_signal(
         is_scalp_mode = not getattr(config, "HUMAN_MODE", False)
         confluence = float(ctx.get("confluence_score", getattr(signal, "confluence_score", 0)) or 0)
         
-        if is_scalp_mode and setup_quality in ("A", "B") and confluence >= 2:
+        if is_scalp_mode and setup_quality in ("A", "B", "C") and confluence >= 1:
             logger.debug("[Regime] CHOPPY'de Scalp Modu istisnası: A/B kalite + Confluence kabul edildi.")
-        elif setup_quality not in ("S", "A+"):
+        elif setup_quality not in ("S", "A+", "A", "B"):
             return AIDecisionResult(
                 decision=SignalDecision.VETO.value,
                 reason=f"CHOPPY piyasa — {setup_quality} kalite yetersiz (min A+)",

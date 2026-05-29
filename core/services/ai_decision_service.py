@@ -54,6 +54,20 @@ class AIDecisionService:
             sig.confidence = decision["confidence"]
             sig.reason = decision["reason"]
 
+            candidate_id = payload.get("candidate_id")
+            if candidate_id:
+                try:
+                    from database import update_candidate_status
+                    await asyncio.to_thread(
+                        update_candidate_status,
+                        candidate_id,
+                        decision=decision["decision"],
+                        reject_reason=decision["reason"],
+                        ai_score=decision["final_score"]
+                    )
+                except Exception as db_e:
+                    logger.error(f"[AIDecisionService] DB Update Error: {db_e}")
+
             if decision["decision"] == "VETO":
                 logger.debug(f"[AIDecisionService] {symbol} vetoed by AI: {decision['reason']}")
                 return

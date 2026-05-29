@@ -40,6 +40,7 @@ class RiskService:
             next_payload = {
                 "symbol": symbol,
                 "signal_id": signal_id,
+                "candidate_id": payload.get("candidate_id"),
                 "tradeability_score": tradeability_score,
                 "trend_result": trend_result,
                 "trigger_result": trigger_result,

@@ -46,6 +46,25 @@ class TriggerService:
                 "trigger_result": trigger_result
             }
 
+            # DB'ye kaydet
+            try:
+                candidate_payload = {
+                    "signal_id": signal_id,
+                    "symbol": symbol,
+                    "direction": trend_result["direction"],
+                    "entry": trigger_result.get("entry_price", 0),
+                    "sl": trigger_result.get("stop_loss", 0),
+                    "tp1": trigger_result.get("tp1", 0),
+                    "setup_quality": trigger_result.get("quality", "C"),
+                    "decision": "PENDING",
+                    "market_regime": trend_result.get("market_trend", "NEUTRAL")
+                }
+                candidate_id = await asyncio.to_thread(save_candidate_signal, candidate_payload)
+                if candidate_id:
+                    next_payload["candidate_id"] = candidate_id
+            except Exception as e:
+                logger.error(f"[TriggerService] DB Save Error: {e}")
+
             await event_bus.publish(Event(type=EventType.TRIGGER_CHECKED, payload=next_payload))
             logger.debug(f"[TriggerService] {symbol} passed trigger check: quality {trigger_result['quality']}")
 

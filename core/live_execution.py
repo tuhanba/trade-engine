@@ -309,17 +309,6 @@ class LiveExecutionEngine:
             
         logger.info(f"[LIVE SUCCESS] Trade basariyla acildi: #{trade_id} {symbol} @ {entry_price}")
         
-        # Telegram
-        self.telegram.send_message(
-            f"🚀 <b>LIVE TRADE OPENED</b>\n"
-            f"Symbol: #{symbol} {direction}\n"
-            f"Entry: ${entry_price:.4f}\n"
-            f"SL: ${signal.stop_loss:.4f}\n"
-            f"Qty: {qty_str}\n"
-            f"Leverage: {config.MAX_LEVERAGE}x\n"
-            f"Risk: ${risk_usd:.2f} ({risk_pct}%)"
-        )
-        
         return trade_id
 
     def execute_live_close(self, symbol: str, direction: str, close_qty: float) -> Tuple[bool, float]:
