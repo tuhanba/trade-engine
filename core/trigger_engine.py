@@ -5,6 +5,7 @@ Giriş onayı, setup kalitesi, çoklu timeframe (5m + 1m), RSI, VWAP, MACD ve mo
 import logging
 import pandas as pd
 import numpy as np
+import time
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,9 @@ def _btc_allows(direction: str, btc_trend: str) -> tuple:
         return False, 0.0   # Kontrend — engelle
     return True, 0.8
 
+_GLOBAL_KLINE_CACHE = {}
+_GLOBAL_KLINE_TTL = {"1m": 15, "5m": 30, "15m": 60, "1h": 300, "4h": 300}
+
 class TriggerEngine:
     def __init__(self, client):
         self.client = client
@@ -57,6 +61,15 @@ class TriggerEngine:
         self._macro_filter = None
 
     def get_candles(self, symbol: str, interval: str, limit: int) -> pd.DataFrame:
+        cache_key = f"{symbol}_{interval}_{limit}"
+        now = time.time()
+        
+        if cache_key in _GLOBAL_KLINE_CACHE:
+            df, ts = _GLOBAL_KLINE_CACHE[cache_key]
+            ttl = _GLOBAL_KLINE_TTL.get(interval, 30)
+            if now - ts < ttl:
+                return df
+
         try:
             klines = self.client.futures_klines(symbol=symbol, interval=interval, limit=limit)
             df = pd.DataFrame(klines, columns=[
@@ -65,6 +78,8 @@ class TriggerEngine:
             ])
             for col in ["open", "high", "low", "close", "volume"]:
                 df[col] = df[col].astype(float)
+                
+            _GLOBAL_KLINE_CACHE[cache_key] = (df, now)
             return df
         except Exception as e:
             logger.error(f"Mum verisi alınamadı {symbol}: {e}")
