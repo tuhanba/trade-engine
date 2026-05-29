@@ -59,12 +59,23 @@ class ExecutionService:
                 
                 if trade_id:
                     trade_payload = {
-                        "trade_id": trade_id,
-                        "symbol": symbol,
-                        "signal_id": sig.id,
-                        "direction": sig.direction,
-                        "entry": sig.entry_price,
-                        "sl": sig.stop_loss
+                        "trade_id":      trade_id,
+                        "symbol":        symbol,
+                        "signal_id":     sig.id,
+                        "direction":     sig.direction,
+                        "entry":         sig.entry_price,
+                        "sl":            sig.stop_loss,
+                        "tp1":           sig.tp1,
+                        "tp2":           sig.tp2,
+                        "tp3":           sig.tp3,
+                        "leverage":      sig.leverage_suggestion or sig.leverage,
+                        "risk_usd":      sig.max_loss,
+                        "setup_quality": sig.setup_quality,
+                        "final_score":   sig.final_score,
+                        "rr":            sig.rr,
+                        "risk_pct":      sig.risk_pct,
+                        "position_size": sig.position_size,
+                        "notional":      sig.notional_size,
                     }
                     await event_bus.publish(Event(type=EventType.TRADE_OPENED, payload=trade_payload))
                     logger.info(f"[ExecutionService] {symbol} trade opened: #{trade_id}")
