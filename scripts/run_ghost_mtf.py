@@ -11,7 +11,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import config
 from database import save_ghost_signal
 from core.trend_engine import TrendEngine
-from core.ai_decision_engine import ai_decision_engine, SignalData
+from core.ai_decision_engine import AIDecisionEngine, SignalData
+ai_decision_engine = AIDecisionEngine()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger("ax.mtf_ghost")
