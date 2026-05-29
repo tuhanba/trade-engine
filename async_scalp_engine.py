@@ -85,9 +85,14 @@ class AsyncScalpEngine:
         await self.market_data.initialize()
         
         # Sinyal geldiğinde event bus'a bas (örnek - devre dışı bırakıldı)
-        # async def on_ticker_update(data):
-        #     await event_bus.publish("market_data_update", data)
-        # self.market_data.on_ticker(on_ticker_update)
+        async def on_ticker_update(data):
+            try:
+                from core.market_data import set_cached_price
+                if 'symbol' in data and 'last' in data:
+                    set_cached_price(data['symbol'], float(data['last']))
+            except Exception:
+                pass
+        self.market_data.on_ticker(on_ticker_update)
         
         # Tüm market için stream başlat
         await self.market_data.start_all_tickers()

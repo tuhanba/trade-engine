@@ -12,6 +12,11 @@ class ScannerService:
         self.scanner = AsyncMarketScanner()
         self.interval = interval_seconds
         self._running = False
+        event_bus.subscribe(EventType.KILL_SWITCH_ACTIVATED, self.handle_kill_switch)
+
+    async def handle_kill_switch(self, event: Event):
+        logger.critical("[ScannerService] KILL SWITCH ACTIVATED! Stopping scanner.")
+        self.stop()
 
     async def start(self):
         self._running = True

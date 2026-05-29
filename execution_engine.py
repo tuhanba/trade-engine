@@ -574,6 +574,7 @@ def _check_trade(client, t: dict) -> bool:
                 "stop_loss":    round(new_sl, 6),  # BUG FIX: DB kolonu
                 "sl":           round(new_sl, 6),  # compat
             })
+            _update_live_sl_safe(symbol, direction, new_sl)
             update_paper_balance(pnl_tp1)
             save_trade_event(trade_id, "TP1_HIT", f"price={tp1} pnl={pnl_tp1:.4f} new_sl={new_sl:.6f}")
             try:
@@ -608,6 +609,7 @@ def _check_trade(client, t: dict) -> bool:
                 "stop_loss":    entry,  # BUG FIX: DB kolonu
                 "sl":           entry,  # compat
             })
+            _update_live_sl_safe(symbol, direction, entry)
             update_paper_balance(pnl_tp2)
             save_trade_event(trade_id, "TP2_HIT", f"price={tp2} pnl={pnl_tp2:.4f} trail={new_trail:.6f}")
             try:
@@ -641,6 +643,7 @@ def _check_trade(client, t: dict) -> bool:
                         trail_f = new_trail_sl
                         active_stop = trail_f
                         update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
+                        _update_live_sl_safe(symbol, direction, trail_f)
                         save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
                 else:
                     new_trail_sl = price + atr_val * TRAIL_ATR_MULT
@@ -648,6 +651,7 @@ def _check_trade(client, t: dict) -> bool:
                         trail_f = new_trail_sl
                         active_stop = trail_f
                         update_trade(trade_id, {"trail_stop": round(trail_f, 6)})
+                        _update_live_sl_safe(symbol, direction, trail_f)
                         save_trade_event(trade_id, "TRAIL_UPDATED", f"trail={trail_f:.6f} price={price}")
 
 
@@ -947,3 +951,14 @@ def open_trade(client, signal_dict: dict, ax_result: dict):
     except Exception as e:
         logger.error("open_trade hata: %s", e)
         return None
+
+def _update_live_sl_safe(symbol: str, direction: str, new_sl: float):
+    import config
+    if config.EXECUTION_MODE == "live":
+        try:
+            from core.live_execution import LiveExecutionEngine
+            le = LiveExecutionEngine()
+            le.update_live_sl(symbol, direction, new_sl)
+        except Exception as e:
+            import logging
+            logging.getLogger("ax.execution").error(f"Live SL update failed {symbol}: {e}")

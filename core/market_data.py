@@ -87,13 +87,21 @@ def get_klines(
 
 
 # ── Güncel fiyat ────────────────────────────────────────────────────
+_PRICE_CACHE = {}
+
+def set_cached_price(symbol: str, price: float):
+    _PRICE_CACHE[symbol] = price
 
 @with_exponential_backoff(max_retries=2, base_delay=1.0)
 def get_current_price(symbol: str) -> Optional[float]:
     """
     Sembolün güncel fiyatını döner.
-    Hata varsa None döner.
+    Öncelikle RAM (WebSocket) önbelleğini kullanır.
+    Yoksa REST API ile çeker.
     """
+    if symbol in _PRICE_CACHE:
+        return _PRICE_CACHE[symbol]
+        
     try:
         resp = requests.get(
             f"{_BASE_URL}/fapi/v1/ticker/price",

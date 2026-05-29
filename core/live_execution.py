@@ -231,6 +231,29 @@ class LiveExecutionEngine:
             logger.critical(f"[LIVE FATAL] {symbol} SL EMRİ GÖNDERİLEMEDİ! Manuel kontrol edin! Hata: {e}")
             sl_order_id = "FAILED"
 
+        # 5.5 Borsaya Take Profit (Limit) Emirleri Yerleştirme
+        tp1_order_id, tp2_order_id = "NONE", "NONE"
+        try:
+            if getattr(signal, 'tp1', 0) > 0:
+                qty_tp1_str = self._format_quantity(symbol, qty_float * config.TP1_CLOSE_PCT / 100)
+                if float(qty_tp1_str) > 0:
+                    tp1_order = self.client.futures_create_order(
+                        symbol=symbol, side=sl_side, type='LIMIT', 
+                        price=self._format_price(symbol, signal.tp1), quantity=qty_tp1_str, reduceOnly='true', timeInForce='GTC'
+                    )
+                    tp1_order_id = tp1_order.get('orderId', "UNKNOWN")
+                    
+            if getattr(signal, 'tp2', 0) > 0:
+                qty_tp2_str = self._format_quantity(symbol, qty_float * config.TP2_CLOSE_PCT / 100)
+                if float(qty_tp2_str) > 0:
+                    tp2_order = self.client.futures_create_order(
+                        symbol=symbol, side=sl_side, type='LIMIT', 
+                        price=self._format_price(symbol, signal.tp2), quantity=qty_tp2_str, reduceOnly='true', timeInForce='GTC'
+                    )
+                    tp2_order_id = tp2_order.get('orderId', "UNKNOWN")
+        except Exception as e:
+            logger.error(f"[LIVE ERROR] TP emirleri gonderilemedi: {e}")
+
         # 6. DB Kaydi
         trade = TradeData(
             symbol=symbol,
@@ -318,3 +341,29 @@ class LiveExecutionEngine:
         except Exception as e:
             logger.error(f"[LIVE ERROR] Emir iptal edilemedi {symbol}: {e}")
             return False
+
+    def update_live_sl(self, symbol: str, direction: str, new_sl: float) -> str:
+        "\""Binance uzerindeki SL emrini gunceller. Onceki STOP emirlerini iptal eder."\""
+        if not self.client: return "FAILED"
+        try:
+            # Sadece STOP_MARKET emirlerini iptal edelim (TP limitleri iptal olmasin)
+            open_orders = self.client.futures_get_open_orders(symbol=symbol)
+            for order in open_orders:
+                if order['type'] == 'STOP_MARKET':
+                    self.client.futures_cancel_order(symbol=symbol, orderId=order['orderId'])
+            
+            # Yeni SL gonder
+            sl_side = "SELL" if direction == "LONG" else "BUY"
+            sl_price_str = self._format_price(symbol, new_sl)
+            sl_order = self.client.futures_create_order(
+                symbol=symbol,
+                side=sl_side,
+                type='STOP_MARKET',
+                stopPrice=sl_price_str,
+                closePosition='true',
+                timeInForce='GTC'
+            )
+            return str(sl_order.get('orderId'))
+        except Exception as e:
+            logger.error(f"[LIVE ERROR] SL guncellenemedi {symbol}: {e}")
+            return "FAILED"
