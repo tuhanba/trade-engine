@@ -360,7 +360,7 @@ class LiveExecutionEngine:
             return False
 
     def update_live_sl(self, symbol: str, direction: str, new_sl: float) -> str:
-        "\""Binance uzerindeki SL emrini gunceller. Onceki STOP emirlerini iptal eder."\""
+        """Binance uzerindeki SL emrini gunceller. Onceki STOP emirlerini iptal eder."""
         if not self.client: return "FAILED"
         try:
             # Sadece STOP_MARKET emirlerini iptal edelim (TP limitleri iptal olmasin)
