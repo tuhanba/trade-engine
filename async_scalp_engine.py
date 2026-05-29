@@ -87,6 +87,15 @@ class AsyncScalpEngine:
         # Start AI Brain Nightly Optimizer
         asyncio.create_task(self._ai_brain_loop())
 
+        # Start Watchdog
+        try:
+            from core.watchdog import SystemWatchdog
+            db_path = os.path.join(os.path.dirname(__file__), "db", "trading.db")
+            self.watchdog = SystemWatchdog(db_path)
+            self.watchdog.start()
+        except Exception as e:
+            logger.error(f"Watchdog başlatılamadı: {e}")
+
         # Start Telegram Command Manager
         self.telegram_manager = TelegramManager(telegram_delivery.send_message)
         self.telegram_manager.start()
@@ -156,6 +165,8 @@ class AsyncScalpEngine:
             self.scanner_service.stop()
         if hasattr(self, 'telegram_manager'):
             self.telegram_manager.stop()
+        if hasattr(self, 'watchdog'):
+            self.watchdog.stop()
         if self.market_data:
             await self.market_data.stop()
         

@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import database
 from core.event_bus import event_bus
 from core.event_types import Event, EventType
 from execution_engine import ExecutionEngine
@@ -10,6 +11,7 @@ logger = logging.getLogger("ax.services.execution")
 class ExecutionService:
     def __init__(self):
         self.execution_engine = ExecutionEngine()
+        self._trade_lock = asyncio.Lock()
         event_bus.subscribe(EventType.AI_VALIDATED, self.handle_ai_validated)
         self._monitor_task = None
 
@@ -18,14 +20,38 @@ class ExecutionService:
         self._monitor_task = asyncio.create_task(self._monitoring_loop())
 
     async def _monitoring_loop(self):
+        prev_open_ids = set()
         while True:
             try:
                 await asyncio.to_thread(self.execution_engine.update_open_trades)
+                current_open = await asyncio.to_thread(database.get_open_trades)
+                current_ids = {t['id'] for t in current_open}
+                closed_ids = prev_open_ids - current_ids
+                if closed_ids:
+                    for trade_id in closed_ids:
+                        closed = await asyncio.to_thread(database.get_trade_by_id, trade_id)
+                        if closed:
+                            await event_bus.publish(Event(
+                                type=EventType.TRADE_CLOSED,
+                                payload={
+                                    "trade_id":      trade_id,
+                                    "symbol":        closed.get("symbol"),
+                                    "direction":     closed.get("direction"),
+                                    "net_pnl":       closed.get("net_pnl", 0),
+                                    "reason":        closed.get("close_reason", "unknown"),
+                                    "balance_after": await asyncio.to_thread(database.get_paper_balance),
+                                }
+                            ))
+                prev_open_ids = current_ids
             except Exception as e:
                 logger.error(f"[ExecutionService] Monitor loop error: {e}")
             await asyncio.sleep(1)
 
     async def handle_ai_validated(self, event: Event):
+        async with self._trade_lock:
+            await self._execute_trade(event)
+
+    async def _execute_trade(self, event: Event):
         payload = event.payload
         symbol = payload.get("symbol")
         signal_dict = payload.get("signal_data")
