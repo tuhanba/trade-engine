@@ -148,8 +148,12 @@ class LiveExecutionEngine:
             logger.error(f"Bakiye yetersiz: {balance} USDT")
             return None
 
-        # 2. Risk hesaplama
-        risk_pct = config.RISK_PCT
+        # 2. Risk hesaplama (Kelly Dinamik Büyüklük)
+        base_risk = config.RISK_PCT
+        score = getattr(signal, "final_score", 75.0) or 75.0
+        dynamic_risk = base_risk * (score / 75.0)
+        risk_pct = max(base_risk * 0.5, min(dynamic_risk, base_risk * 1.5))
+        
         risk_usd = balance * (risk_pct / 100.0)
         
         current_price = signal.entry_price # Piyasaya en yakin deger
@@ -183,7 +187,18 @@ class LiveExecutionEngine:
             if 'No need to change margin type' not in str(e):
                 logger.warning(f"Margin tipi degistirilemedi: {e}")
 
-        # 4. Borsaya Emir Gonderimi (Entry - Market)
+        # Dinamik Take-Profit Oranları
+        regime = "TRENDING"
+        if signal.metadata and "market_regime" in signal.metadata:
+            regime = signal.metadata.get("market_regime", "TRENDING")
+        
+        if regime == "CHOPPY":
+            pct_tp1, pct_tp2, pct_runner = 0.70, 0.30, 0.0
+        else:
+            pct_tp1, pct_tp2, pct_runner = 0.30, 0.20, 0.50
+
+        # 4. Borsaya Emir Gonderimi (Entry - Smart Limit/Market)
+        # TODO: Şimdilik piyasayı kaçırmamak için MARKET atıyoruz (Slippage Chase eklenebilir)
         logger.info(f"[LIVE] {symbol} {side} MARKET Emri gonderiliyor. Qty: {qty_str}")
         try:
             order = self.client.futures_create_order(
@@ -192,26 +207,13 @@ class LiveExecutionEngine:
                 type='MARKET',
                 quantity=qty_str
             )
+            # Gerceklesme fiyatini al
+            entry_price = float(order.get('avgPrice', current_price))
+            if entry_price == 0:
+                entry_price = current_price
         except Exception as e:
-            logger.error(f"[LIVE ERROR] Entry emri basarisiz: {e}")
+            logger.error(f"[LIVE ERROR] Market entry basarisiz {symbol}: {e}")
             return None
-
-        # Gerceklesme bekle (HFT kucuk delay)
-        time.sleep(0.5)
-        
-        # Fill fiyatini al
-        entry_price = current_price
-        try:
-            my_trades = self.client.futures_account_trades(symbol=symbol, limit=5)
-            # orderId eslesmesi
-            fills = [t for t in my_trades if str(t['orderId']) == str(order['orderId'])]
-            if fills:
-                total_cost = sum(float(f['price']) * float(f['qty']) for f in fills)
-                total_qty = sum(float(f['qty']) for f in fills)
-                if total_qty > 0:
-                    entry_price = total_cost / total_qty
-        except Exception as e:
-            logger.warning(f"[LIVE] Fill fiyati okunamadi, tahmin kullaniliyor: {e}")
 
         # 5. Borsaya Stop Loss (Hard Stop) Yerlestirme
         sl_side = "SELL" if direction == "LONG" else "BUY"
@@ -235,7 +237,7 @@ class LiveExecutionEngine:
         tp1_order_id, tp2_order_id = "NONE", "NONE"
         try:
             if getattr(signal, 'tp1', 0) > 0:
-                qty_tp1_str = self._format_quantity(symbol, qty_float * config.TP1_CLOSE_PCT / 100)
+                qty_tp1_str = self._format_quantity(symbol, qty_float * pct_tp1)
                 if float(qty_tp1_str) > 0:
                     tp1_order = self.client.futures_create_order(
                         symbol=symbol, side=sl_side, type='LIMIT', 
@@ -244,7 +246,7 @@ class LiveExecutionEngine:
                     tp1_order_id = tp1_order.get('orderId', "UNKNOWN")
                     
             if getattr(signal, 'tp2', 0) > 0:
-                qty_tp2_str = self._format_quantity(symbol, qty_float * config.TP2_CLOSE_PCT / 100)
+                qty_tp2_str = self._format_quantity(symbol, qty_float * pct_tp2)
                 if float(qty_tp2_str) > 0:
                     tp2_order = self.client.futures_create_order(
                         symbol=symbol, side=sl_side, type='LIMIT', 
@@ -260,6 +262,9 @@ class LiveExecutionEngine:
             direction=direction,
             entry_price=entry_price,
             quantity=qty_float,
+            qty_tp1=qty_float * pct_tp1,
+            qty_tp2=qty_float * pct_tp2,
+            qty_runner=qty_float * pct_runner,
             stop_loss=signal.stop_loss,
             tp1=signal.tp1,
             tp2=signal.tp2,

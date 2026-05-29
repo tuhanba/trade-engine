@@ -74,6 +74,9 @@ class AsyncScalpEngine:
         # Start ML Background Training Loop
         asyncio.create_task(self._ml_training_loop())
 
+        # Start DB Maintenance Loop
+        asyncio.create_task(self._db_maintenance_loop())
+
         # Start Heartbeat Loop
         asyncio.create_task(self._heartbeat_loop())
 
@@ -164,3 +167,17 @@ if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(main())
+
+    async def _db_maintenance_loop(self):
+        "\""Perform SQLite VACUUM and WAL checkpoint every 24 hours."\""
+        from database import get_conn
+        while True:
+            await asyncio.sleep(86400) # 24h
+            try:
+                logger.info("[Maintenance] Starting daily SQLite maintenance...")
+                with get_conn() as conn:
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                    conn.execute("VACUUM;")
+                logger.info("[Maintenance] SQLite maintenance completed.")
+            except Exception as e:
+                logger.error(f"[Maintenance] Failed: {e}")

@@ -123,6 +123,9 @@ class TradeData:
     tp2: Optional[float] = None
     tp3: Optional[float] = None
     quantity: float = 0.0
+    qty_tp1: float = 0.0
+    qty_tp2: float = 0.0
+    qty_runner: float = 0.0
     leverage: int = 1
     notional: float = 0.0
     margin_used: float = 0.0

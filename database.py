@@ -832,12 +832,12 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
             """
             INSERT INTO trades
                 (symbol, direction, entry, sl, tp1, tp2, tp3,
-                 qty, leverage, notional_size, margin_used, risk_usd,
+                 qty, qty_tp1, qty_tp2, qty_runner, leverage, notional_size, margin_used, risk_usd,
                  risk_pct, status, open_time, current_price,
                  unrealized_pnl, realized_pnl, net_pnl,
                  remaining_qty, original_qty, close_price, close_reason,
                  total_fee, fee_rate, ax_mode, metadata)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 trade.symbol,
@@ -848,6 +848,9 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
                 trade.tp2 or 0,
                 trade.tp3 or 0,
                 getattr(trade, 'qty', None) or getattr(trade, 'quantity', 0),
+                getattr(trade, 'qty_tp1', 0),
+                getattr(trade, 'qty_tp2', 0),
+                getattr(trade, 'qty_runner', 0),
                 trade.leverage or 10,
                 getattr(trade, 'notional_size', None) or getattr(trade, 'notional', 0),
                 trade.margin_used or 0,

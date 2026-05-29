@@ -372,9 +372,17 @@ def build_trade_from_signal(
     if leverage <= 0:
         leverage = 1
 
+    # Dinamik Büyüklük (Kelly Kriteri Benzeri)
+    base_risk = signal.risk_pct
+    score = getattr(signal, "final_score", 75.0) or 75.0
+    dynamic_risk = base_risk * (score / 75.0)
+    # Sınırlar: Base riskin en az yarısı, en fazla 1.5 katı
+    dynamic_risk = max(base_risk * 0.5, min(dynamic_risk, base_risk * 1.5))
+    logger.debug(f"[Accounting] Dynamic Risk for {signal.symbol}: {base_risk}% -> {dynamic_risk:.2f}% (Score: {score})")
+
     pos = calculate_position_size(
         balance=balance,
-        risk_pct=signal.risk_pct,
+        risk_pct=dynamic_risk,
         entry_price=signal.entry_price,
         stop_loss=signal.stop_loss,
         leverage=leverage,
@@ -389,6 +397,22 @@ def build_trade_from_signal(
     margin_used = pos["margin"]
     risk_usd = pos["risk_usd"]
 
+    # Dinamik Take-Profit (Piyasa Rejimine Göre)
+    regime = "TRENDING"
+    if signal.metadata and "market_regime" in signal.metadata:
+        regime = signal.metadata.get("market_regime", "TRENDING")
+    
+    if regime == "CHOPPY":
+        # Testere piyasada hızlı kâr al, runner bırakma
+        pct_tp1, pct_tp2, pct_runner = 0.70, 0.30, 0.0
+    else:
+        # Trend piyasasında runner bırak
+        pct_tp1, pct_tp2, pct_runner = 0.30, 0.20, 0.50
+
+    qty_tp1 = quantity * pct_tp1
+    qty_tp2 = quantity * pct_tp2
+    qty_runner = quantity * pct_runner
+
     return TradeData(
         symbol=signal.symbol,
         side=signal.side,
@@ -398,6 +422,9 @@ def build_trade_from_signal(
         tp2=signal.tp2,
         tp3=signal.tp3,
         quantity=quantity,
+        qty_tp1=qty_tp1,
+        qty_tp2=qty_tp2,
+        qty_runner=qty_runner,
         leverage=leverage,
         notional=notional,
         margin_used=margin_used,
