@@ -81,6 +81,12 @@ class AsyncScalpEngine:
         # Start Heartbeat Loop
         asyncio.create_task(self._heartbeat_loop())
 
+        # Start Ghost Learning Loop
+        asyncio.create_task(self._ghost_learning_loop())
+
+        # Start AI Brain Nightly Optimizer
+        asyncio.create_task(self._ai_brain_loop())
+
         # Start Telegram Command Manager
         self.telegram_manager = TelegramManager(telegram_delivery.send_message)
         self.telegram_manager.start()
@@ -164,6 +170,34 @@ class AsyncScalpEngine:
         except: pass
         
         await event_bus.stop()
+
+    async def _ghost_learning_loop(self):
+        """Ghost sinyallerini 30 dakikada bir simüle eder ve AI'ya geri besler."""
+        from core.ghost_learning import process_pending_results
+        await asyncio.sleep(300)
+        while True:
+            try:
+                processed = await asyncio.to_thread(process_pending_results, self.client)
+                logger.info(f"[Ghost] process_pending_results tamamlandı: {processed} sinyal")
+            except Exception as e:
+                logger.error(f"[Ghost] Loop hatası: {e}")
+            await asyncio.sleep(1800)
+
+    async def _ai_brain_loop(self):
+        """Nightly parametre optimizasyonu — 24 saatte bir çalışır."""
+        import sys as _sys
+        import os as _os
+        _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "archive"))
+        await asyncio.sleep(3600)
+        while True:
+            try:
+                from ai_brain import analyze_and_adapt, set_client
+                set_client(self.client)
+                result = await asyncio.to_thread(analyze_and_adapt)
+                logger.info(f"[AIBrain] analyze_and_adapt tamamlandı: {str(result)[:120]}")
+            except Exception as e:
+                logger.error(f"[AIBrain] Nightly loop hatası: {e}")
+            await asyncio.sleep(86400)
 
     async def _db_maintenance_loop(self):
         """Perform SQLite VACUUM and WAL checkpoint every 24 hours."""
