@@ -1,0 +1,74 @@
+# ─── Python ─────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# ─── Gizli & Hassas Dosyalar (ASLA push etme!) ──────────────────────
+.env
+.env.*
+*.env
+.env.local
+.env.production
+.env.staging
+secrets.py
+credentials.json
+
+# ─── Veritabanı (kişisel trade verisi) ──────────────────────────────
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+trading.db
+test_trading.db
+
+# ─── Loglar ─────────────────────────────────────────────────────────
+logs/
+*.log
+log_*
+
+# ─── ML Model dosyaları (büyük binary) ──────────────────────────────
+*.pkl
+*.joblib
+*.h5
+*.model
+models/
+
+# ─── Yedek / Geçici dosyalar ────────────────────────────────────────
+.backup_pre_restore/
+*_backup_*/
+backups/
+*.bak
+*.bak_*
+*.save
+*.tmp
+*.swp
+*~
+
+# ─── OS & Editor ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/settings.json
+*.suo
+*.user
+
+# ─── Test artifacts ──────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ─── Claude / AI araç dosyaları ──────────────────────────────────────
+.claude/
+CLAUDE.md
+
+# ─── Patch & geçici script ───────────────────────────────────────────
+patch_*.py
