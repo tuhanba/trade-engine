@@ -3,120 +3,105 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AURVEX.Ai Premium Terminal</title>
-    <!-- Google Fonts: Inter -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css">
-    <!-- FontAwesome for Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>AURVEXAI Signal Intelligence Hub</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/hub.css">
 </head>
 <body>
-    <div class="glow-bg"></div>
-    <div class="container">
-        
-        <!-- Header Section -->
-        <header class="glass-panel">
-            <div class="logo">
-                <h1>AURVEX<span class="neon-text">.Ai</span></h1>
-                <p class="subtitle">Prop-Firm Grade Quant Execution Terminal</p>
-            </div>
-            <div class="header-stats">
-                <div class="stat-box">
-                    <span class="stat-label">Market Regime</span>
-                    <span class="stat-value regime-text" id="marketRegime">Loading...</span>
-                </div>
-                <div class="stat-box">
-                    <span class="stat-label">Macro Sentiment (FNG)</span>
-                    <span class="stat-value fng-text" id="macroSentiment">Loading...</span>
-                </div>
-                <div class="stat-box">
-                    <span class="stat-label">System Status</span>
-                    <span class="stat-value status-running"><i class="fas fa-circle-notch fa-spin"></i> Online</span>
-                </div>
-            </div>
-        </header>
+    <!-- CRT scanline overlay -->
+    <div class="crt-overlay"></div>
 
-        <!-- Main Dashboard Grid -->
-        <div class="dashboard-grid">
-            
-            <!-- Left Column: Metrics & Portfolio -->
-            <div class="col-left">
-                <!-- Portfolio Card -->
-                <div class="glass-panel card balance-card">
-                    <h2><i class="fas fa-wallet"></i> Paper Portfolio</h2>
-                    <div class="balance-display">
-                        <span class="currency">$</span>
-                        <span class="amount" id="totalBalance">0.00</span>
-                    </div>
-                    <div class="pnl-display">
-                        <span class="pnl-label">Daily PnL:</span>
-                        <span class="pnl-value" id="dailyPnl">0.00</span>
-                    </div>
-                </div>
+    <!-- Header -->
+    <header class="hub-header">
+        <div class="header-left">
+            <span class="brand">AURVEXAI</span>
+            <span class="version">SIGNAL INTELLIGENCE HUB · v4.3 · PAPER</span>
+        </div>
+        <div class="header-right">
+            <div class="live-indicator">
+                <div class="live-dot aBL"></div>
+                <span class="live-text">LIVE</span>
+            </div>
+            <span class="clock" id="clock">00:00:00 UTC</span>
+        </div>
+    </header>
 
-                <!-- Win Rate Card -->
-                <div class="glass-panel card stats-card">
-                    <h2><i class="fas fa-chart-pie"></i> Performance</h2>
-                    <div class="stats-grid">
-                        <div class="stat-item">
-                            <span class="label">Win Rate</span>
-                            <span class="value" id="winRate">0%</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="label">Total Trades</span>
-                            <span class="value" id="totalTrades">0</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="label">Profit Factor</span>
-                            <span class="value" id="profitFactor">0.0</span>
-                        </div>
-                    </div>
+    <!-- Metrics Row -->
+    <div class="metrics-row">
+        <!-- Ghost Win Rate -->
+        <div class="metric-cell" style="border-right: 1px solid rgba(212,168,67,.08)">
+            <div class="metric-label">GHOST WIN RATE</div>
+            <div class="metric-body">
+                <svg class="wr-ring" width="52" height="52" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="36" fill="none" stroke="rgba(212,168,67,.07)" stroke-width="11"/>
+                    <circle id="wrArc" cx="50" cy="50" r="36" fill="none" stroke="#d4a843" stroke-width="11"
+                        stroke-dasharray="226.19" stroke-dashoffset="74" stroke-linecap="round"/>
+                </svg>
+                <div>
+                    <div class="wr-value" id="wrValue">67.3%</div>
+                    <div class="wr-delta">↑ 2.3% THIS WEEK</div>
                 </div>
             </div>
+        </div>
 
-            <!-- Right Column: Active Trades & Logs -->
-            <div class="col-right">
-                
-                <!-- Active Trades -->
-                <div class="glass-panel card">
-                    <div class="card-header">
-                        <h2><i class="fas fa-satellite-dish"></i> Active Positions</h2>
-                        <span class="badge" id="activeTradesCount">0</span>
-                    </div>
-                    <div class="table-responsive">
-                        <table class="premium-table">
-                            <thead>
-                                <tr>
-                                    <th>Symbol</th>
-                                    <th>Side</th>
-                                    <th>Entry</th>
-                                    <th>Current</th>
-                                    <th>PnL</th>
-                                </tr>
-                            </thead>
-                            <tbody id="activeTradesBody">
-                                <!-- Dynamic Rows -->
-                            </tbody>
-                        </table>
-                    </div>
+        <!-- Active Signals -->
+        <div class="metric-cell" style="border-right: 1px solid rgba(212,168,67,.08)">
+            <div class="metric-label">ACTIVE SIGNALS</div>
+            <div class="signals-body">
+                <div>
+                    <div class="sig-count sig-long" id="longCount">0</div>
+                    <div class="sig-label" style="color: rgba(0,232,122,.4)">LONG</div>
                 </div>
-
-                <!-- AI Decision Logs -->
-                <div class="glass-panel card">
-                    <div class="card-header">
-                        <h2><i class="fas fa-brain"></i> AI Brain Feed</h2>
-                        <button id="refreshBtn" class="btn-glow"><i class="fas fa-sync-alt"></i></button>
-                    </div>
-                    <div class="terminal-box" id="aiLogsContainer">
-                        <!-- Dynamic Logs -->
-                        <div class="terminal-line"><span class="time">System</span> INITIALIZING GHOST NEURAL NET...</div>
-                    </div>
+                <div class="sig-divider"></div>
+                <div>
+                    <div class="sig-count sig-short" id="shortCount">0</div>
+                    <div class="sig-label" style="color: rgba(255,61,90,.4)">SHORT</div>
                 </div>
-
+                <div class="sig-divider"></div>
+                <div>
+                    <div class="sig-count sig-today" id="todayCount">23</div>
+                    <div class="sig-label" style="color: rgba(212,168,67,.38)">TODAY</div>
+                </div>
             </div>
+        </div>
+
+        <!-- ML Engine -->
+        <div class="metric-cell">
+            <div class="metric-label">ML ENGINE</div>
+            <div class="ml-value" id="mlValue">87.2<span class="ml-conf">CONF</span></div>
+            <div class="ml-bars" id="mlBars"></div>
+            <div class="ml-status">● ENSEMBLE · 17 FEATURES</div>
         </div>
     </div>
 
-    <script src="/static/js/main.js"></script>
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Coin Universe Grid -->
+        <div class="universe-panel">
+            <div class="panel-label" id="universeLabel">◆ UNIVERSE — 0 PAIRS</div>
+            <div class="coin-grid" id="coinGrid"></div>
+        </div>
+
+        <!-- Signal Feed -->
+        <div class="feed-panel">
+            <div class="panel-label">◆ HOT SIGNALS</div>
+            <div class="feed-list" id="feedList"></div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="hub-footer">
+        <div class="footer-left">
+            <div class="live-dot aBL" style="width:5px;height:5px"></div>
+            <span style="color: rgba(0,232,122,.48)">CONNECTED</span>
+            <span>· 143.198.90.104</span>
+        </div>
+        <div>DB: ONLINE · BOT: RUNNING · <span id="footerClock">00:00:00</span></div>
+        <div>
+            VIRT BAL:&nbsp;<span class="bal-value" id="balValue">$10,000.00</span>
+        </div>
+    </footer>
+
+    <script src="/static/js/hub.js"></script>
 </body>
 </html>
