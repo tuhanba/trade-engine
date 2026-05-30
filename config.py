@@ -24,11 +24,11 @@ def _env_bool(key, default=False):
 def _env_int(key, default=0):
     v = os.getenv(key, "").strip()
     try: return int(v) if v else default
-    except: return default
+    except Exception: return default
 def _env_float(key, default=0.0):
     v = os.getenv(key, "").strip()
     try: return float(v) if v else default
-    except: return default
+    except Exception: return default
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH  = str(BASE_DIR / _env("DB_PATH", "db/trading.db" if (BASE_DIR / "db").exists() else "trading.db"))

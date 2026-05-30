@@ -204,12 +204,12 @@ def api_stats():
         try:
             with get_conn() as conn:
                 return conn.execute(sql, params).fetchone()[0] or 0
-        except: return 0
+        except Exception: return 0
     def _get_safe_status(key):
         try:
             with get_conn() as conn:
                 return int(conn.execute("SELECT value FROM bot_status WHERE key=?", (key,)).fetchone()[0])
-        except: return 0
+        except Exception: return 0
 
     try:
         stats = dashboard_service.get_stats()
@@ -643,11 +643,11 @@ def api_signal_funnel():
         with get_conn() as conn:
             def safe_count(sql, params=()):
                 try: return conn.execute(sql, params).fetchone()[0] or 0
-                except: return 0
+                except Exception: return 0
 
             def safe_status(key):
                 try: return int(conn.execute("SELECT value FROM bot_status WHERE key=?", (key,)).fetchone()[0])
-                except: return 0
+                except Exception: return 0
 
             scanned   = safe_status("pipeline_scanned")
             candidate = safe_status("pipeline_candidate")

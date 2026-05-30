@@ -464,6 +464,27 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("reason",          "TEXT DEFAULT ''"),
         ("data",            "TEXT DEFAULT ''"),
     ],
+    "pattern_memory": [
+        ("adx",               "REAL DEFAULT 0"),
+        ("rv",                "REAL DEFAULT 1.0"),
+        ("rsi5",              "REAL DEFAULT 50"),
+        ("rsi1",              "REAL DEFAULT 50"),
+        ("funding_favorable", "INTEGER DEFAULT 0"),
+        ("bb_width_pct",      "REAL DEFAULT 0"),
+        ("ob_ratio",          "REAL DEFAULT 1.0"),
+        ("volume_m",          "REAL DEFAULT 0"),
+        ("btc_trend",         "TEXT DEFAULT 'NEUTRAL'"),
+        ("direction",         "TEXT DEFAULT 'LONG'"),
+        ("session",           "TEXT DEFAULT 'OFF'"),
+        ("hold_minutes",      "REAL DEFAULT 0"),
+        ("partial_exit",      "INTEGER DEFAULT 0"),
+        ("symbol",            "TEXT DEFAULT ''"),
+        ("result",            "TEXT DEFAULT ''"),
+        ("created_at",        "TEXT"),
+        ("bb_width_chg",      "REAL DEFAULT 0"),
+        ("momentum_3c",       "REAL DEFAULT 0"),
+        ("prev_result",       "TEXT DEFAULT 'NONE'"),
+    ],
 }
 
 
@@ -1926,24 +1947,72 @@ def upsert_pattern_memory(
                 "SELECT id, win_rate, occurrences FROM pattern_memory WHERE pattern_hash = ?",
                 (pattern_hash,)
             ).fetchone()
+            f = features or {}
             if existing:
                 old_occ = int(existing["occurrences"] or 1)
                 old_wr  = float(existing["win_rate"] or 0.0)
                 new_occ = old_occ + 1
-                # Running average win_rate
                 new_wr  = round((old_wr * old_occ + outcome) / new_occ, 4)
                 conn.execute(
                     """UPDATE pattern_memory
-                       SET win_rate=?, occurrences=?, last_seen=?
+                       SET win_rate=?, occurrences=?, last_seen=?,
+                           adx=?, rv=?, rsi5=?, rsi1=?, direction=?, session=?,
+                           hold_minutes=?, symbol=?, result=?, created_at=?,
+                           funding_favorable=?, bb_width_pct=?, ob_ratio=?,
+                           volume_m=?, btc_trend=?, partial_exit=?,
+                           bb_width_chg=?, momentum_3c=?, prev_result=?
                        WHERE pattern_hash=?""",
-                    (new_wr, new_occ, now, pattern_hash)
+                    (new_wr, new_occ, now,
+                     float(f.get("adx", 0) or 0),
+                     float(f.get("rv", 1) or 1),
+                     float(f.get("rsi5", 50) or 50),
+                     float(f.get("rsi1", 50) or 50),
+                     str(f.get("direction", "LONG") or "LONG"),
+                     str(f.get("session", "OFF") or "OFF"),
+                     float(f.get("hold_minutes", 0) or 0),
+                     str(f.get("symbol", "") or ""),
+                     "WIN" if outcome else "LOSS", now,
+                     int(f.get("funding_favorable", 0) or 0),
+                     float(f.get("bb_width_pct", 0) or 0),
+                     float(f.get("ob_ratio", 1.0) or 1.0),
+                     float(f.get("volume_m", 0) or 0),
+                     str(f.get("btc_trend", "NEUTRAL") or "NEUTRAL"),
+                     int(f.get("partial_exit", 0) or 0),
+                     float(f.get("bb_width_chg", 0) or 0),
+                     float(f.get("momentum_3c", 0) or 0),
+                     str(f.get("prev_result", "NONE") or "NONE"),
+                     pattern_hash)
                 )
             else:
                 conn.execute(
                     """INSERT INTO pattern_memory
-                       (pattern_hash, win_rate, occurrences, last_seen)
-                       VALUES (?, ?, ?, ?)""",
-                    (pattern_hash, float(outcome), 1, now)
+                       (pattern_hash, win_rate, occurrences, last_seen,
+                        adx, rv, rsi5, rsi1, funding_favorable, bb_width_pct,
+                        ob_ratio, volume_m, btc_trend, direction, session,
+                        hold_minutes, partial_exit, symbol, result, created_at,
+                        bb_width_chg, momentum_3c, prev_result)
+                       VALUES (?,?,?,?, ?,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?,?)""",
+                    (pattern_hash, float(outcome), 1, now,
+                     float(f.get("adx", 0) or 0),
+                     float(f.get("rv", 1.0) or 1.0),
+                     float(f.get("rsi5", 50) or 50),
+                     float(f.get("rsi1", 50) or 50),
+                     int(f.get("funding_favorable", 0) or 0),
+                     float(f.get("bb_width_pct", 0) or 0),
+                     float(f.get("ob_ratio", 1.0) or 1.0),
+                     float(f.get("volume_m", 0) or 0),
+                     str(f.get("btc_trend", "NEUTRAL") or "NEUTRAL"),
+                     str(f.get("direction", "LONG") or "LONG"),
+                     str(f.get("session", "OFF") or "OFF"),
+                     float(f.get("hold_minutes", 0) or 0),
+                     int(f.get("partial_exit", 0) or 0),
+                     str(f.get("symbol", "") or ""),
+                     "WIN" if outcome else "LOSS",
+                     now,
+                     float(f.get("bb_width_chg", 0) or 0),
+                     float(f.get("momentum_3c", 0) or 0),
+                     str(f.get("prev_result", "NONE") or "NONE"),
+                    )
                 )
     except Exception as exc:
         logger.warning("upsert_pattern_memory hatası [%s]: %s", pattern_hash, exc)

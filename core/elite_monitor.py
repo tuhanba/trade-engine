@@ -61,5 +61,5 @@ class EliteMonitor:
                 total, allowed = cursor.fetchone()
                 
                 return f"📊 *Elite Haftalık Rapor*\n- Toplam Sinyal: {total}\n- Onaylanan: {allowed}\n- Sistem Durumu: {self.get_system_health()['status']}"
-        except:
+        except Exception:
             return "Rapor hazırlanamadı."
