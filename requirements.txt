@@ -17,6 +17,8 @@ ccxt>=4.2.0
 # ML (ml_signal_scorer.py ve Optuna)
 scikit-learn>=1.3.0
 optuna>=3.0.0
+# Redis (hot-state cache — SQLite lock azaltma)
+redis>=5.0.0
 # Testing
 pytest>=7.0.0
 # Monitoring

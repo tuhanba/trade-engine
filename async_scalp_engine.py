@@ -43,6 +43,19 @@ class AsyncScalpEngine:
     async def start(self):
         logger.info("Starting Event-Driven Async Scalp Engine...")
         
+        # Init Redis (SQLite lock baskısını azaltır — yoksa SQLite fallback)
+        if getattr(config, "REDIS_ENABLED", True):
+            try:
+                from core import redis_state
+                redis_state.init(
+                    host=config.REDIS_HOST,
+                    port=config.REDIS_PORT,
+                    db=config.REDIS_DB,
+                    password=config.REDIS_PASSWORD,
+                )
+            except Exception as _re:
+                logger.warning("Redis başlatılamadı: %s — SQLite fallback aktif", _re)
+
         # Init DB
         await asyncio.to_thread(init_db)
         await asyncio.to_thread(init_paper_account)

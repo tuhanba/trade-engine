@@ -880,7 +880,13 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
             ),
         )
         conn.commit()
-        return cur.lastrowid
+        trade_id = cur.lastrowid
+        try:
+            from core import redis_state
+            redis_state.invalidate_open_trades()
+        except Exception:
+            pass
+        return trade_id
     except Exception as exc:
         logger.error("Trade oluşturulamadı: %s", exc)
         return None
@@ -991,6 +997,11 @@ def record_partial_close(
             "Partial close kaydedildi: #%s  qty=%.4f  pct=%.1f%%  pnl=%.4f  reason=%s",
             trade_id, close_qty, close_pct, partial_pnl, reason,
         )
+        try:
+            from core import redis_state
+            redis_state.invalidate_open_trades()
+        except Exception:
+            pass
     except Exception as exc:
         logger.error("Partial close kaydedilemedi [%s]: %s", trade_id, exc)
     finally:
@@ -1025,6 +1036,11 @@ def close_trade(
         # NOT: Bakiye güncellemesi çağıran tarafından (execution_engine._finalize veya
         # ExecutionEngine.close_trade) yapılır — double-counting'i önlemek için burada güncellenmez.
         logger.info("[DB] Trade #%s kapandı: pnl=%+.3f$", trade_id, realized_pnl)
+        try:
+            from core import redis_state
+            redis_state.invalidate_open_trades()
+        except Exception:
+            pass
     except Exception as exc:
         logger.error("Trade kapatılamadı [%s]: %s", trade_id, exc)
     finally:
@@ -1034,14 +1050,27 @@ def close_trade(
 # ── Trade sorgular ─────────────────────────────────────────────────
 
 def get_open_trades() -> list[dict]:
-    """Açık trade'leri dict listesi olarak döner.
-    BUG FIX: LOWER(status) — case-insensitive karşılaştırma."""
+    """Açık trade'leri döner. Redis cache (5s TTL) → SQLite fallback."""
+    try:
+        from core import redis_state
+        cached = redis_state.get("open_trades_cache")
+        if cached is not None:
+            return cached
+    except Exception:
+        pass
+
     conn = get_connection()
     try:
         rows = conn.execute(
             "SELECT * FROM trades WHERE LOWER(status) IN ('open','tp1_hit','runner') ORDER BY open_time DESC"
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = [dict(r) for r in rows]
+        try:
+            from core import redis_state
+            redis_state.set("open_trades_cache", result, ttl=5)
+        except Exception:
+            pass
+        return result
     except Exception as exc:
         logger.error("Open trades alınamadı: %s", exc)
         return []
@@ -1230,7 +1259,26 @@ def get_dashboard_stats() -> dict:
 # ── Bot status ─────────────────────────────────────────────────────
 
 def update_bot_status(key: str, value: str) -> None:
-    """Bot durum anahtarını günceller (upsert)."""
+    """Bot durum anahtarını günceller. Redis primary, SQLite sync (heartbeat hariç)."""
+    try:
+        from core import redis_state
+        redis_state.set(f"bot_status:{key}", value, ttl=600)
+    except Exception:
+        pass
+
+    # heartbeat her 10s gelir — SQLite'a her dakika yaz (lock baskısını azalt)
+    if key == "heartbeat":
+        try:
+            from core import redis_state as _rs
+            _last = _rs.get("bot_status_heartbeat_last_db_write", default=0)
+            import time as _time
+            now_ts = _time.time()
+            if now_ts - float(_last) < 60:
+                return
+            _rs.set("bot_status_heartbeat_last_db_write", now_ts)
+        except Exception:
+            pass
+
     now = datetime.now(timezone.utc).isoformat()
     conn = get_connection()
     try:
@@ -1250,10 +1298,18 @@ def update_bot_status(key: str, value: str) -> None:
 
 
 def get_bot_status(key: Optional[str] = None) -> dict:
-    """Bot durum bilgisini döner."""
-    conn = get_connection()
-    try:
-        if key is not None:
+    """Bot durum bilgisini döner. Redis first → SQLite fallback."""
+    if key is not None:
+        try:
+            from core import redis_state
+            cached = redis_state.get(f"bot_status:{key}")
+            if cached is not None:
+                from datetime import datetime, timezone as tz
+                return {"value": str(cached), "updated_at": datetime.now(tz.utc).isoformat()}
+        except Exception:
+            pass
+        conn = get_connection()
+        try:
             row = conn.execute(
                 "SELECT value, updated_at FROM bot_status WHERE key = ?",
                 (key,),
@@ -1261,7 +1317,14 @@ def get_bot_status(key: Optional[str] = None) -> dict:
             if row:
                 return {"value": row["value"], "updated_at": row["updated_at"]}
             return {}
+        except Exception as exc:
+            logger.error("Bot status alınamadı: %s", exc)
+            return {}
+        finally:
+            conn.close()
 
+    conn = get_connection()
+    try:
         rows = conn.execute(
             "SELECT key, value, updated_at FROM bot_status"
         ).fetchall()
@@ -1923,16 +1986,28 @@ def get_system_state(key: str, default="-") -> str:
 
 
 def get_market_regime() -> str:
-    """Son kaydedilen piyasa rejimini döner. Default: NEUTRAL"""
+    """Piyasa rejimini döner. Redis first → SQLite fallback. Default: NEUTRAL"""
+    try:
+        from core import redis_state
+        cached = redis_state.get("market_regime")
+        if cached:
+            return str(cached)
+    except Exception:
+        pass
     return get_system_state("market_regime", default="NEUTRAL")
 
 
 def set_market_regime(regime: str) -> None:
-    """Piyasa rejimini system_state tablosuna yazar."""
+    """Piyasa rejimini Redis + SQLite'a yazar."""
+    try:
+        from core import redis_state
+        redis_state.set("market_regime", regime)
+    except Exception:
+        pass
     try:
         update_system_state("market_regime", regime)
     except Exception as exc:
-        logger.warning("[DB] set_market_regime: %s", exc)
+        logger.warning("[DB] set_market_regime SQLite: %s", exc)
 
 
 def save_daily_summary(data: dict):
@@ -2143,7 +2218,13 @@ def get_coin_profile(symbol: str) -> dict:
 
 
 def is_coin_in_cooldown(symbol: str) -> bool:
-    """Coin'in cooldown listesinde olup olmadığını kontrol eder."""
+    """Coin cooldown'da mı? Redis TTL-bazlı kontrol → SQLite fallback."""
+    try:
+        from core import redis_state
+        if redis_state.exists(f"cooldown:{symbol}"):
+            return True
+    except Exception:
+        pass
     try:
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         with get_conn() as conn:
@@ -2154,6 +2235,15 @@ def is_coin_in_cooldown(symbol: str) -> bool:
             return row is not None
     except Exception:
         return False
+
+
+def set_coin_cooldown_redis(symbol: str, minutes: int) -> None:
+    """Coin cooldown'unu Redis'e yazar (TTL ile otomatik sona erer)."""
+    try:
+        from core import redis_state
+        redis_state.set(f"cooldown:{symbol}", 1, ttl=int(minutes * 60))
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────

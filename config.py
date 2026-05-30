@@ -185,6 +185,13 @@ COIN_MIN_MOVE_PCT    = _env_float("COIN_MIN_MOVE_PCT", 0.5)
 COIN_MIN_SCORE       = _env_float("COIN_MIN_SCORE", 40.0)
 COIN_UNIVERSE_LIMIT  = _env_int("COIN_UNIVERSE_LIMIT", 40)
 
+# Redis (hot-state cache — SQLite lock baskısını azaltır)
+REDIS_ENABLED  = _env_bool("REDIS_ENABLED", True)
+REDIS_HOST     = os.getenv("REDIS_HOST", "127.0.0.1")
+REDIS_PORT     = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_DB       = int(os.getenv("REDIS_DB", "0"))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "") or None
+
 # CVD / OI / Liquidity Zone parametreleri
 CVD_ENABLED         = _env_bool("CVD_ENABLED", True)
 OI_TRACKER_ENABLED  = _env_bool("OI_TRACKER_ENABLED", True)
