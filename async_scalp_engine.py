@@ -87,6 +87,9 @@ class AsyncScalpEngine:
         # Start AI Brain Nightly Optimizer
         asyncio.create_task(self._ai_brain_loop())
 
+        # Start Market Regime Loop
+        asyncio.create_task(self._market_regime_loop())
+
         # Start Watchdog
         try:
             from core.watchdog import SystemWatchdog
@@ -135,17 +138,42 @@ class AsyncScalpEngine:
             await asyncio.sleep(1)
 
     async def _ml_training_loop(self):
-        """Train the ML signal scorer every 24 hours."""
+        """Train the ML signal scorer every 24 hours, or when 50 new trades close."""
         from core.ml_signal_scorer import train_model
+        from database import get_conn
+
+        def _get_closed_count() -> int:
+            try:
+                with get_conn() as conn:
+                    row = conn.execute("SELECT COUNT(*) FROM trades WHERE status='closed'").fetchone()
+                    return int(row[0] or 0)
+            except Exception:
+                return 0
+
+        last_trained_at_count = _get_closed_count()
+
         while True:
             try:
-                # Train immediately on start, then every 24h
                 success = await asyncio.to_thread(train_model)
                 if success:
-                    logger.info("Background ML Training completed successfully.")
+                    last_trained_at_count = _get_closed_count()
+                    logger.info("[ML] Background training completed (count=%d).", last_trained_at_count)
             except Exception as e:
-                logger.error(f"Background ML Training failed: {e}")
-            await asyncio.sleep(86400) # 24h
+                logger.error("[ML] Background training failed: %s", e)
+
+            # Sleep 1h at a time; check trade count every hour for early trigger
+            for _ in range(24):
+                await asyncio.sleep(3600)
+                try:
+                    current_count = await asyncio.to_thread(_get_closed_count)
+                    if current_count - last_trained_at_count >= 50:
+                        logger.info(
+                            "[ML] 50 yeni trade kapandı (%d→%d), erken yeniden eğitim tetiklendi.",
+                            last_trained_at_count, current_count,
+                        )
+                        break
+                except Exception:
+                    pass
 
     async def _heartbeat_loop(self):
         """Update heartbeat in database every 10 seconds."""
@@ -209,6 +237,82 @@ class AsyncScalpEngine:
             except Exception as e:
                 logger.error(f"[AIBrain] Nightly loop hatası: {e}")
             await asyncio.sleep(86400)
+
+    async def _market_regime_loop(self):
+        """BTC piyasa rejimini 15 dakikada bir tespit eder ve DB'ye yazar.
+
+        Rejim tespiti:
+          BULLISH  — BTC 1h + 4h her ikisi de bullish
+          BEARISH  — BTC 1h + 4h her ikisi de bearish
+          CHOPPY   — 1h ile 4h ters yönde VEYA BTC 15m ATR% > 1.5%
+          NEUTRAL  — yukarıdakilerin hiçbiri
+        """
+        import pandas as pd
+        from core.trend_engine import TrendEngine
+        from database import set_market_regime
+
+        trend_engine = TrendEngine(self.client)
+        prev_regime = "NEUTRAL"
+        await asyncio.sleep(90)  # Startup'ta diğer servisler oturtu
+        while True:
+            try:
+                btc_trend = await asyncio.to_thread(trend_engine.get_btc_trend)
+                regime = "NEUTRAL"
+
+                if btc_trend == "BULLISH":
+                    regime = "BULLISH"
+                elif btc_trend == "BEARISH":
+                    regime = "BEARISH"
+                else:
+                    # NEUTRAL BTC: 1h vs 4h ters yöndeyse CHOPPY
+                    t1h = await asyncio.to_thread(trend_engine.get_1h_trend, "BTCUSDT")
+                    t4h = await asyncio.to_thread(trend_engine.get_4h_trend, "BTCUSDT")
+                    if t1h != "NEUTRAL" and t4h != "NEUTRAL" and t1h != t4h:
+                        regime = "CHOPPY"
+                    else:
+                        # ATR volatility check: 15m ATR% > 1.5% → CHOPPY
+                        try:
+                            df15 = await asyncio.to_thread(
+                                trend_engine.get_candles, "BTCUSDT", "15m", 30
+                            )
+                            if not df15.empty:
+                                h, l, c = df15["high"], df15["low"], df15["close"]
+                                tr = pd.concat(
+                                    [h - l, (h - c.shift()).abs(), (l - c.shift()).abs()],
+                                    axis=1,
+                                ).max(axis=1)
+                                atr_pct = float(tr.rolling(14).mean().iloc[-1]) / float(c.iloc[-1])
+                                if atr_pct > 0.015:
+                                    regime = "CHOPPY"
+                        except Exception:
+                            pass
+
+                await asyncio.to_thread(set_market_regime, regime)
+                logger.info("[Regime] Piyasa rejimi: %s (BTC=%s)", regime, btc_trend)
+
+                if regime != prev_regime:
+                    _emoji = {"BULLISH": "📈", "BEARISH": "📉", "CHOPPY": "⚡", "NEUTRAL": "➡️"}.get(regime, "")
+                    _desc = {
+                        "BULLISH": "Trend piyasası — LONG sinyaller öncelikli",
+                        "BEARISH": "Düşüş trendi — SHORT sinyaller öncelikli",
+                        "CHOPPY": "Kaotik piyasa — eşik yükseltildi (min A+)",
+                        "NEUTRAL": "Normal piyasa — standart kurallar geçerli",
+                    }.get(regime, "")
+                    try:
+                        import telegram_delivery
+                        await asyncio.to_thread(
+                            telegram_delivery.send_message,
+                            f"{_emoji} <b>Piyasa Rejimi Değişti</b>\n"
+                            f"{prev_regime} → <b>{regime}</b>\n"
+                            f"{_desc}",
+                        )
+                    except Exception:
+                        pass
+                    prev_regime = regime
+
+            except Exception as exc:
+                logger.error("[Regime] Loop hatası: %s", exc)
+            await asyncio.sleep(900)  # 15 dakika
 
     async def _db_maintenance_loop(self):
         """Perform SQLite VACUUM and WAL checkpoint every 24 hours."""

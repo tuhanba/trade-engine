@@ -29,26 +29,19 @@
 
 ### B1. Çoklu Zaman Dilimi Confluence Skoru
 
-Şu an `core/trend_engine.py` 1m + 5m + 1h + 4h analiz yapıyor ancak bu dört zaman diliminin **aynı yönde hizalanma oranı** tek bir sayıya indirilmiyor. Confluence skoru (0-4 arası) hesaplanmalı ve bu skor `trigger_engine.py`'deki setup kalitesi kararına dahil edilmeli.
-
-| Confluence | Setup Kalitesi Etkisi |
-|---|---|
-| 4/4 hizalı | A+ garantisi |
-| 3/4 hizalı | A veya B |
-| 2/4 hizalı | B veya C |
-| 1/4 hizalı | D (geç) |
+**[COMPLETED]** `core/trend_engine.py` `confluence_raw` (1-3, 15m/1h/4h) hesaplıyor. `core/trigger_engine.py` 5m ekleyerek `confluence_total` (2-4) üretiyor. Bu değer `AdaptiveScorer`'da skor çarpanı olarak ve `classify_signal()`'da CHOPPY filtresi için kullanılıyor. Setup kalitesi confluence'a göre otomatik upgrade/downgrade oluyor.
 
 ---
 
 ### B2. Dinamik Kaldıraç Motoru
 
-`execution_engine.py`'de kaldıraç sabit (`max_leverage` config'den). `ai_brain.py`'deki `suggest_leverage()` fonksiyonu (win_rate + profit_factor bazlı) `core/advanced_risk_engine.py`'ye taşınmalı. Yüksek güvenli sinyallerde kaldıraç artırılmalı, düşük win rate'li coinlerde otomatik düşürülmeli.
+**[COMPLETED]** `core/risk_engine.py`'de `RiskEngine.calculate()` içinde: coin_profiles.win_rate > 0.60 → `lev_multiplier=1.25`, win_rate < 0.35 → `lev_multiplier=0.50`. ATR stop distance'a göre base leverage hesaplanıyor. TP seviyeleri market regime'e göre ölçekleniyor (CHOPPY → daraltılmış TP, BULLISH/BEARISH → genişletilmiş runner).
 
 ---
 
 ### B3. Breakeven ve Trailing Stop Otomasyonu
 
-`execution_engine.py`'de trailing stop altyapısı mevcut ancak breakeven mantığı eksik. TP1'e ulaşıldığında SL otomatik olarak entry'e çekilmeli (breakeven). Bu, risk-free trade konseptini hayata geçirir ve drawdown'u önemli ölçüde azaltır.
+**[COMPLETED]** `core/trailing_engine.py`'de tam TP1/TP2/TP3 partial close + breakeven (TP1 vurulunca SL → entry + offset) + ATR-bazlı trailing stop devrede. `ExecutionEngine` sınıfı `TrailingEngine`'i kullanıyor ve exit state DB metadata'sında crash-safe şekilde saklanıyor.
 
 ---
 
@@ -62,13 +55,13 @@
 
 ### C1. Piyasa Rejimi Adaptasyonu
 
-`ai_brain.py`'deki `get_market_regime()` (BULLISH / BEARISH / CHOPPY / NEUTRAL) `core/ai_decision_engine.py`'ye kısmen entegre edildi ancak **rejime göre strateji değişimi** henüz yok. Önerilen davranışlar:
+**[COMPLETED]** `async_scalp_engine.py`'deki `_market_regime_loop` (15 dk interval) BTC 1h+4h trendine ve ATR volatilitesine göre BULLISH/BEARISH/CHOPPY/NEUTRAL tespit eder ve `database.set_market_regime()` ile yazar. Rejim değişimlerinde Telegram bildirimi gönderilir. Strateji değişimleri:
 
 | Rejim | Strateji Değişimi |
 |---|---|
-| BULLISH | Sadece LONG sinyaller onaylanır, SHORT eşiği yükseltilir |
-| BEARISH | Sadece SHORT sinyaller onaylanır, LONG eşiği yükseltilir |
-| CHOPPY | Minimum setup kalitesi A+ olarak zorlanır, günlük limit yarıya indirilir |
+| BULLISH | SHORT skoru × 0.88 ceza → `classify_signal()` |
+| BEARISH | LONG skoru × 0.88 ceza → `classify_signal()` |
+| CHOPPY | Min. setup kalitesi A+ zorlanır, TP seviyeleri %20 daraltılır → `risk_engine.py` |
 | NEUTRAL | Standart kurallar geçerli |
 
 ---
@@ -113,21 +106,25 @@ Sistem yalnızca Binance Futures'a bağlı. `execution_engine.py` soyutlanarak B
 
 ### D4. Otomatik Model Yeniden Eğitimi
 
-`ml_signal_scorer.py`'deki model manuel olarak eğitiliyor. Her 50 yeni trade sonrasında model otomatik yeniden eğitilmeli ve yeni model eski modelden daha iyi performans gösteriyorsa (CV accuracy karşılaştırması) otomatik olarak aktif hale getirilmeli.
+**[PARTIALLY COMPLETED]** `async_scalp_engine.py`'deki `_ml_training_loop` her 24h veya **50 yeni kapanan trade** sonrasında (hangisi önce gelirse) `train_model()` tetikliyor. Model CV accuracy karşılaştırması henüz yok — mevcut model her koşulda üzerine yazılıyor.
 
 ---
 
 ## Öncelik Özeti
 
-| Öncelik | Geliştirme | Tahmini Etki |
+| Durum | Geliştirme | Tahmini Etki |
 |---|---|---|
-| **Kritik** | ML Sinyal Skoru entegrasyonu | Sinyal kalitesi +%15-20 |
-| **Kritik** | Live Tracker → postmortem geri besleme | Parametre optimizasyonu daha hızlı |
-| **Kritik** | Coin Library → Risk Engine entegrasyonu | Coin bazlı SL/TP optimizasyonu |
-| **Yüksek** | Breakeven + trailing stop otomasyonu | Drawdown -%30 |
-| **Yüksek** | Günlük kayıp limiti kontrolü | Risk yönetimi tamamlanır |
-| **Yüksek** | Piyasa rejimi adaptasyonu | Choppy piyasada kayıp azalır |
-| **Orta** | Confluence skoru | Sahte sinyal oranı düşer |
-| **Orta** | Backtesting modülü | Parametre güvenilirliği artar |
-| **Uzun Vadeli** | Redis state yönetimi | Çok instance desteği |
-| **Uzun Vadeli** | Çoklu exchange desteği | Sistem dayanıklılığı artar |
+| ✅ DONE | ML Sinyal Skoru entegrasyonu | Sinyal kalitesi +%15-20 |
+| ✅ DONE | Live Tracker → Ghost Tracker | Parametre optimizasyonu |
+| ✅ DONE | Coin Library → Risk Engine entegrasyonu | Coin bazlı SL/TP |
+| ✅ DONE | Breakeven + trailing stop otomasyonu | Drawdown -%30 |
+| ✅ DONE | Günlük kayıp limiti kontrolü | Risk yönetimi |
+| ✅ DONE | Piyasa rejimi adaptasyonu (loop + filtreler) | Choppy piyasada kayıp azalır |
+| ✅ DONE | Confluence skoru (1m/5m/1h/4h) | Sahte sinyal oranı düşer |
+| ✅ DONE | Dinamik kaldıraç (win_rate bazlı) | Risk-reward optimize |
+| 🔄 PARTIAL | ML otomatik yeniden eğitim (50 trade trigger) | Model tazeliği |
+| ⏳ TODO | Backtesting modülü (core/backtester.py mevcut) | Parametre güvenilirliği |
+| ⏳ TODO | Portfolio Heat Map Dashboard | Manuel strateji desteği |
+| ⏳ TODO | 8h funding rate ortalaması (macro_filter) | Daha iyi macro filtre |
+| 🔮 Uzun Vadeli | Redis state yönetimi | Çok instance desteği |
+| 🔮 Uzun Vadeli | Çoklu exchange desteği | Sistem dayanıklılığı |
