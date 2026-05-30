@@ -12,11 +12,12 @@ from typing import List, Dict
 logger = logging.getLogger(__name__)
 
 try:
-    from config import COIN_UNIVERSE, BINANCE_API_KEY, DB_PATH
+    from config import COIN_UNIVERSE, BINANCE_API_KEY, DB_PATH, COIN_UNIVERSE_LIMIT
     from config import MIN_VOLUME_USDT as MIN_VOLUME_USD
     from database import save_coin_library, disable_coin
 except ImportError:
     COIN_UNIVERSE = []
+    COIN_UNIVERSE_LIMIT = 150
     MIN_VOLUME_USD = 3_000_000
     DB_PATH = "trading.db"
     save_coin_library = None
@@ -130,8 +131,10 @@ class AsyncMarketScanner:
                         })
 
                 candidates.sort(key=lambda x: x["tradeability_score"], reverse=True)
+                if COIN_UNIVERSE_LIMIT > 0:
+                    candidates = candidates[:COIN_UNIVERSE_LIMIT]
                 logger.info(f"Async Scan completed in {time.time() - start_time:.2f}s. "
-                            f"Found {len(candidates)} candidates from {len(valid_symbols)} USDT perps.")
+                            f"Found {len(candidates)} candidates (limit={COIN_UNIVERSE_LIMIT}) from {len(valid_symbols)} USDT perps.")
                 
                 # Update pipeline stats in DB for dashboard
                 try:
