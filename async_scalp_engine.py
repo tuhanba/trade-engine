@@ -106,7 +106,7 @@ class AsyncScalpEngine:
         # Start Watchdog
         try:
             from core.watchdog import SystemWatchdog
-            db_path = os.path.join(os.path.dirname(__file__), "db", "trading.db")
+            db_path = config.DB_PATH
             self.watchdog = SystemWatchdog(db_path)
             self.watchdog.start()
         except Exception as e:
@@ -213,12 +213,14 @@ class AsyncScalpEngine:
         try:
             from core.services.macro_service import macro_service
             macro_service.stop()
-        except: pass
-        
+        except Exception:
+            pass
+
         try:
             from core.services.news_service import news_service
             news_service.stop()
-        except: pass
+        except Exception:
+            pass
         
         await event_bus.stop()
 

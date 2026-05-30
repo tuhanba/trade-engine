@@ -550,7 +550,7 @@ def _check_trade(client, t: dict) -> bool:
         get_open_trades, update_paper_balance, get_paper_balance,
         save_trade_event,
     )
-    from core.accounting import calculate_runner_unrealized_pnl
+    from database import update_trade_stats
     try:
         from websocket_events import event_manager
     except Exception:
@@ -599,6 +599,19 @@ def _check_trade(client, t: dict) -> bool:
         update_trade(trade_id, {"unrealized_pnl": unreal, "current_price": price})
         if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), unreal, t.get("realized_pnl", 0))
 
+    # ── MFE/MAE Tracking (Bug #4) ────────────────────────────────────────────
+    if entry > 0:
+        if is_long:
+            favorable_pct = max(0.0, (price - entry) / entry)
+            adverse_pct   = max(0.0, (entry - price) / entry)
+        else:
+            favorable_pct = max(0.0, (entry - price) / entry)
+            adverse_pct   = max(0.0, (price - entry) / entry)
+        current_mfe = max(float(t.get("mfe") or 0), favorable_pct)
+        current_mae = max(float(t.get("mae") or 0), adverse_pct)
+        if current_mfe != float(t.get("mfe") or 0) or current_mae != float(t.get("mae") or 0):
+            update_trade_stats(trade_id, mfe=current_mfe, mae=current_mae)
+
     # ── SL Kontrolü (OPEN/TP1_HIT modları için — runner modda ayrı handle) ──
     if status != "runner":
         sl_hit = (is_long and price <= sl) or (not is_long and price >= sl)
@@ -639,6 +652,22 @@ def _check_trade(client, t: dict) -> bool:
             save_trade_event(trade_id, "TP1_HIT", f"price={tp1} pnl={pnl_tp1:.4f} new_sl={new_sl:.6f}")
             if event_manager: event_manager.broadcast_live_update(get_open_trades())
             if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), t.get("realized_pnl", 0) + pnl_tp1)
+            try:
+                import asyncio as _asyncio
+                from core.event_bus import event_bus as _ebus
+                from core.event_types import Event as _Event, EventType as _ET
+                _loop = _asyncio.get_event_loop()
+                if _loop and _loop.is_running():
+                    _asyncio.run_coroutine_threadsafe(
+                        _ebus.publish(_Event(type=_ET.TP_OR_SL_TRIGGERED, payload={
+                            "trade_id": trade_id, "symbol": symbol,
+                            "direction": direction, "level": "TP1",
+                            "price": tp1, "pnl": pnl_tp1,
+                        })),
+                        _loop
+                    )
+            except Exception as _ev_err:
+                logger.debug("TP1 event publish hatası: %s", _ev_err)
 
     # ── TP2 Kontrolü ────────────────────────────────────────────────────────
     if status == "tp1_hit":
@@ -666,6 +695,22 @@ def _check_trade(client, t: dict) -> bool:
             save_trade_event(trade_id, "TP2_HIT", f"price={tp2} pnl={pnl_tp2:.4f} trail={new_trail:.6f}")
             if event_manager: event_manager.broadcast_live_update(get_open_trades())
             if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), realized)
+            try:
+                import asyncio as _asyncio
+                from core.event_bus import event_bus as _ebus
+                from core.event_types import Event as _Event, EventType as _ET
+                _loop = _asyncio.get_event_loop()
+                if _loop and _loop.is_running():
+                    _asyncio.run_coroutine_threadsafe(
+                        _ebus.publish(_Event(type=_ET.TP_OR_SL_TRIGGERED, payload={
+                            "trade_id": trade_id, "symbol": symbol,
+                            "direction": direction, "level": "TP2",
+                            "price": tp2, "pnl": pnl_tp2,
+                        })),
+                        _loop
+                    )
+            except Exception as _ev_err:
+                logger.debug("TP2 event publish hatası: %s", _ev_err)
             logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ → RUNNER trail={new_trail:.6f}")
             return False
 
@@ -804,6 +849,7 @@ def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> flo
 def _finalize(trade_id: int, close_price: float, net_pnl: float,
               reason: str, t: dict):
     """Trade'i kapat, bakiyeyi güncelle."""
+    import database
     from database import (
         close_trade as db_close_trade,
         update_paper_balance, get_paper_balance,
@@ -840,15 +886,31 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
 
     result = "WIN" if net_pnl > 0 else "LOSS"
 
-    # Live Tracker Postmortem Analizi
+    # ── TRADE_CLOSED Event Bus Publish (Bug #3) ──────────────────────────────
     try:
-        from live_tracker import record_close as _record_close
-    except ImportError:
-        def _record_close(*args, **kwargs): pass
-    try:
-        _record_close(trade_id, close_price, reason)
-    except Exception as e:
-        logger.warning(f"Live tracker record_close hatası: {e}")
+        import asyncio as _asyncio
+        from core.event_bus import event_bus as _ebus
+        from core.event_types import Event as _Event, EventType as _ET
+        _entry_p = float(t.get("entry") or t.get("entry_price") or 1)
+        _sl_p    = float(t.get("sl") or t.get("stop_loss") or 1)
+        _sl_dist = max(abs(_entry_p - _sl_p), 1e-8)
+        _loop = _asyncio.get_event_loop()
+        if _loop and _loop.is_running():
+            _asyncio.run_coroutine_threadsafe(
+                _ebus.publish(_Event(type=_ET.TRADE_CLOSED, payload={
+                    "trade_id":      trade_id,
+                    "symbol":        t["symbol"],
+                    "direction":     t.get("direction", "LONG"),
+                    "net_pnl":       net_pnl,
+                    "reason":        reason,
+                    "r_multiple":    round(net_pnl / _sl_dist, 3),
+                    "balance_after": database.get_paper_balance(),
+                    "duration":      f"{hold_min:.0f}dk",
+                })),
+                _loop
+            )
+    except Exception as _ev_err:
+        logger.debug("TRADE_CLOSED event publish hatası: %s", _ev_err)
 
     # ── AI Öğrenme Döngüsü — Eksik 2 Düzeltmesi ──────────────────────────────
     # Her kapanan trade AI'ın Markov, heatmap ve parametre optimizasyonunu besler
@@ -888,17 +950,17 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
         )
     except Exception as e:
         logger.warning(f"CoinLibrary update_coin_stats hatası: {e}")
-    # ── AI Brain Postmortem Analizi ───────────────────────────────────────────
+    # ── AI Brain Postmortem Analizi (Bug #6: archive importu kaldırıldı) ──────
     try:
-        import threading
-        from ai_brain import post_trade_analysis
-        threading.Thread(
-            target=post_trade_analysis,
-            args=(trade_id,),
-            daemon=True
-        ).start()
+        ai_engine = _get_ai_engine()
+        if ai_engine and hasattr(ai_engine, "learn_from_outcome"):
+            ai_engine.learn_from_outcome(
+                symbol=t["symbol"],
+                net_pnl=net_pnl,
+                reason=reason,
+            )
     except Exception as e:
-        logger.warning(f"AI Brain post_trade_analysis hatası: {e}")
+        logger.warning("learn_from_outcome hatası: %s", e)
     logger.info(
         f"[Execution] KAPANDI #{trade_id} {t['symbol']} {t['direction']} "
         f"{reason.upper()} pnl={net_pnl:+.3f}$ hold={hold_min:.0f}dk"

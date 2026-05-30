@@ -71,8 +71,8 @@ class ExecutionService:
                 logger.debug(f"[ExecutionService] {symbol} Scalp ML Bonus: trade_thr {trade_thr+3.0} -> {trade_thr}")
             
             if sig.final_score >= trade_thr and sig.setup_quality in getattr(config, "EXECUTABLE_QUALITIES", ("S", "A+", "A", "B", "C")):
-                # Dispatch execution approval
-                await event_bus.publish(Event(type=EventType.EXECUTION_APPROVED, payload=payload))
+                # EXECUTION_APPROVED: abone yok, ilerideki journaling için bırakıldı
+                # await event_bus.publish(Event(type=EventType.EXECUTION_APPROVED, payload=payload))
                 
                 # Execute trade (Paper or Live)
                 if config.EXECUTION_MODE == "live":

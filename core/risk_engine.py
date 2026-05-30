@@ -287,9 +287,13 @@ def should_open_trade(
 class RiskEngine:
     """ATR bazlı SL/TP hesaplayan ve risk filtreleyen class."""
 
-    def __init__(self, client, db_path: str = "trading.db"):
+    def __init__(self, client, db_path: str = ""):
         self.client = client
-        self.db_path = db_path
+        try:
+            import config as _cfg
+            self.db_path = db_path or _cfg.DB_PATH
+        except Exception:
+            self.db_path = db_path or "trading.db"
 
     def calculate(self, symbol: str, direction: str, entry: float, quality: str, balance: float) -> dict:
         try:
