@@ -146,9 +146,8 @@ class AsyncScalpEngine:
         # Tüm market için stream başlat
         await self.market_data.start_all_tickers()
 
-        # Keep engine running
-        while True:
-            await asyncio.sleep(1)
+        # Engine çalışmaya devam eder — shutdown ana coroutine'de yönetilir
+        # (while True döngüsü kaldırıldı; ana task CancelledError ile bitecek)
 
     async def _ml_training_loop(self):
         """Train the ML signal scorer every 24 hours, or when 50 new trades close."""
@@ -352,22 +351,51 @@ def handle_exception(loop, context):
 async def main():
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(handle_exception)
-    
+
     engine = AsyncScalpEngine()
-    
+    # SIGTERM FIX: Event-tabanlı graceful shutdown.
+    # shutdown_signal() sadece event set eder; ana coroutine
+    # event'i bekleyip engine.stop()'u await eder.
+    # Böylece systemd SIGTERM sonrası SIGKILL atmak zorunda kalmaz.
+    _shutdown_event = asyncio.Event()
+
     def shutdown_signal():
-        logger.info("Received shutdown signal")
-        asyncio.create_task(engine.stop())
-        
+        logger.info("[Shutdown] SIGTERM/SIGINT alındı — graceful shutdown başlıyor...")
+        _shutdown_event.set()
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, shutdown_signal)
-        
+
     try:
         from telegram_delivery import send_message
         send_message("🟢 <b>Sistem Başlatıldı!</b>\n🤖 Asenkron Scalp Motoru piyasayı taramaya başladı.")
-        await engine.start()
-    except asyncio.CancelledError:
+    except Exception:
         pass
+
+    # Engine'i arkaplanda başlat (start() bloklayıcı döngü içeriyor)
+    engine_task = asyncio.create_task(engine.start())
+
+    # Shutdown sinyali veya engine task tamamlanana kadar bekle
+    done, pending = await asyncio.wait(
+        [engine_task, asyncio.create_task(_shutdown_event.wait())],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+
+    # Temiz kapanma
+    logger.info("[Shutdown] Engine durduruluyor...")
+    try:
+        await asyncio.wait_for(engine.stop(), timeout=8.0)
+    except asyncio.TimeoutError:
+        logger.warning("[Shutdown] engine.stop() 8 saniyede tamamlanamadı, zorla çıkılıyor.")
+
+    # Kalan task'ları iptal et
+    for t in pending:
+        t.cancel()
+    if not engine_task.done():
+        engine_task.cancel()
+
+    logger.info("[Shutdown] Temiz kapanma tamamlandı.")
+
 
 if __name__ == "__main__":
     if sys.platform == "win32":
