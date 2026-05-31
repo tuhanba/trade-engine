@@ -419,7 +419,14 @@ class MockBinanceClient:
         self.data_manager = data_manager
 
     def futures_klines(self, symbol, interval, limit=500, startTime=None, endTime=None):
-        return self.data_manager.get_candles(symbol, interval, limit)
+        klines = self.data_manager.get_candles(symbol, interval, limit)
+        if not klines:
+            if not hasattr(self, "_empty_warn_count"):
+                self._empty_warn_count = 0
+            if self._empty_warn_count < 10:
+                logger.warning(f"MockBinanceClient returning EMPTY candles for {symbol} {interval} at {current_sim_time}")
+                self._empty_warn_count += 1
+        return klines
 
     def futures_order_book(self, symbol, limit=20):
         return {
@@ -529,6 +536,10 @@ class BacktestRunner:
 
     def run(self):
         logger.info(f"Starting simulation from {self.start_time} to {self.end_time}...")
+        logger.info(f"Symbols in simulation: {self.symbols}")
+        # Print loaded candle count statistics
+        for (symbol, interval), candles in self.data_manager.candles.items():
+            logger.info(f"Loaded {len(candles)} candles for {symbol} {interval}")
         
         global current_sim_time
         current_sim_time = self.start_time
