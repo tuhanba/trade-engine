@@ -182,12 +182,15 @@ CREATE TABLE IF NOT EXISTS signal_candidates (
 
 _BALANCE_LEDGER_DDL = """
 CREATE TABLE IF NOT EXISTS balance_ledger (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    balance         REAL NOT NULL,
-    realized_pnl    REAL DEFAULT 0,
-    unrealized_pnl  REAL DEFAULT 0,
-    note            TEXT DEFAULT '',
-    created_at      TEXT NOT NULL
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id       INTEGER,
+    symbol         TEXT DEFAULT '',
+    event_type     TEXT DEFAULT 'CLOSE',
+    amount         REAL NOT NULL DEFAULT 0,
+    balance_before REAL DEFAULT 0,
+    balance_after  REAL NOT NULL DEFAULT 0,
+    note           TEXT DEFAULT '',
+    created_at     TEXT DEFAULT (datetime('now'))
 )
 """
 
@@ -1196,6 +1199,43 @@ def get_partial_closes(trade_id: int) -> list[dict]:
 import time as _time
 _stats_cache = {"data": {}, "time": 0}
 
+def get_total_pnl() -> dict:
+    """
+    Sistem genelinde tek PnL hesabı.
+    Her yerde bu fonksiyon kullanılacak — farklı formüller üretmesin.
+    Döner:
+        closed_pnl  : Kapanan trade'lerin net_pnl toplamı
+        open_unreal : Açık trade'lerin unrealized_pnl toplamı
+        open_partial: Açık trade'lerde biriken partial close PnL'i
+        total       : Üçünün toplamı
+    """
+    try:
+        with get_conn() as conn:
+            closed = conn.execute(
+                "SELECT COALESCE(SUM(net_pnl),0) FROM trades WHERE LOWER(status)='closed'"
+            ).fetchone()[0]
+            open_u = conn.execute(
+                "SELECT COALESCE(SUM(unrealized_pnl),0) FROM trades"
+                " WHERE LOWER(status) IN ('open','tp1_hit','runner')"
+            ).fetchone()[0]
+            open_p = conn.execute(
+                "SELECT COALESCE(SUM(realized_pnl),0) FROM trades"
+                " WHERE LOWER(status) IN ('open','tp1_hit','runner')"
+            ).fetchone()[0]
+        closed = float(closed or 0)
+        open_u = float(open_u or 0)
+        open_p = float(open_p or 0)
+        return {
+            "closed_pnl":   round(closed, 4),
+            "open_unreal":  round(open_u, 4),
+            "open_partial": round(open_p, 4),
+            "total":        round(closed + open_u + open_p, 4),
+        }
+    except Exception as exc:
+        logger.error("get_total_pnl hatası: %s", exc)
+        return {"closed_pnl": 0, "open_unreal": 0, "open_partial": 0, "total": 0}
+
+
 def get_dashboard_stats() -> dict:
     """Dashboard için özet istatistikler."""
     global _stats_cache
@@ -1213,22 +1253,11 @@ def get_dashboard_stats() -> dict:
             "SELECT COUNT(*) FROM trades WHERE LOWER(status)='closed'"
         ).fetchone()[0]
 
-        # BUG FIX: net_pnl kullan (realized_pnl TP1/TP2 partial toplamlarını da içerir)
-        rpnl_row = conn.execute(
-            "SELECT COALESCE(SUM(net_pnl), 0) FROM trades WHERE LOWER(status)='closed'"
-        ).fetchone()
-        realized_pnl = float(rpnl_row[0]) if rpnl_row else 0.0
-
-        upnl_row = conn.execute(
-            "SELECT COALESCE(SUM(unrealized_pnl), 0) FROM trades WHERE LOWER(status) IN ('open', 'tp1_hit', 'runner')"
-        ).fetchone()
-        unrealized_pnl = float(upnl_row[0]) if upnl_row else 0.0
-
-        # Accumulated partial PnL (açık trade'lerdeki)
-        accum_row = conn.execute(
-            "SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE LOWER(status) IN ('open', 'tp1_hit', 'runner')"
-        ).fetchone()
-        accumulated_pnl = float(accum_row[0]) if accum_row else 0.0
+        # Tek kaynaktan PnL — get_total_pnl() kullan
+        _pnl = get_total_pnl()
+        realized_pnl    = _pnl["closed_pnl"]
+        unrealized_pnl  = _pnl["open_unreal"]
+        accumulated_pnl = _pnl["open_partial"]
 
         win_count = conn.execute(
             "SELECT COUNT(*) FROM trades WHERE LOWER(status)='closed' AND net_pnl > 0"
@@ -1634,12 +1663,29 @@ def get_paper_balance() -> float:
         return _default
 
 
-def update_paper_balance(amount: float) -> float:
+def update_paper_balance(
+    amount: float,
+    trade_id: int = None,
+    symbol: str = "",
+    event_type: str = "CLOSE",
+) -> float:
+    """paper_account bakiyesini günceller ve balance_ledger'a kayıt açar."""
     with get_conn() as conn:
         row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
         current = float(row[0]) if row else 500.0
         new_balance = current + amount
-        conn.execute("UPDATE paper_account SET balance = ? WHERE id=1", (new_balance,))
+        conn.execute(
+            "UPDATE paper_account SET balance = ? WHERE id=1", (new_balance,)
+        )
+        try:
+            conn.execute(
+                """INSERT INTO balance_ledger
+                       (trade_id, symbol, event_type, amount, balance_before, balance_after)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (trade_id, symbol or "", event_type, amount, current, new_balance),
+            )
+        except Exception as _le:
+            logger.debug("[Balance] Ledger yazılamadı: %s", _le)
         return new_balance
 
 
