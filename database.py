@@ -444,7 +444,25 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("exit_price", "REAL DEFAULT 0"),
     ],
     "coin_profiles": [
-        ("last_updated", "TEXT DEFAULT (datetime('now'))"),  # P0 BUG FIX #2
+        ("win_rate", "REAL DEFAULT 0.5"),
+        ("avg_r", "REAL DEFAULT 0"),
+        ("profit_factor", "REAL DEFAULT 0"),
+        ("tp1_hit_rate", "REAL DEFAULT 0"),
+        ("tp2_hit_rate", "REAL DEFAULT 0"),
+        ("runner_contribution", "REAL DEFAULT 0"),
+        ("avg_duration", "REAL DEFAULT 0"),
+        ("fakeout_rate", "REAL DEFAULT 0"),
+        ("fee_drag", "REAL DEFAULT 0"),
+        ("best_hour", "INTEGER"),
+        ("best_session", "TEXT"),
+        ("long_bias", "REAL DEFAULT 0.5"),
+        ("short_bias", "REAL DEFAULT 0.5"),
+        ("regime_performance", "TEXT"),
+        ("danger_score", "REAL DEFAULT 0"),
+        ("sample_size", "INTEGER DEFAULT 0"),
+        ("total_trades", "INTEGER DEFAULT 0"),
+        ("updated_at", "TEXT DEFAULT (datetime('now'))"),
+        ("last_updated", "TEXT DEFAULT (datetime('now'))"),
     ],
     "telegram_messages": [
         ("sig_id", "TEXT"),  # BUG FIX: save_telegram_message sig_id kullanıyor
