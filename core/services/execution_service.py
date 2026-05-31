@@ -65,7 +65,11 @@ class ExecutionService:
                     _sl    = float(closed.get("sl") or closed.get("stop_loss") or 1)
                     _sl_d  = max(abs(_entry - _sl), 1e-8)
                     _pnl   = float(closed.get("net_pnl") or 0)
-                    _r     = round(_pnl / _sl_d, 3) if _sl_d > 0 else 0
+                    _risk_usd = float(closed.get("risk_usd") or 0)
+                    if _risk_usd <= 0:
+                        _qty = float(closed.get("qty") or closed.get("quantity") or 0)
+                        _risk_usd = _qty * _sl_d if _qty > 0 else _sl_d
+                    _r     = round(_pnl / _risk_usd, 3) if _risk_usd > 0 else 0
 
                     balance = await asyncio.to_thread(database.get_active_balance)
 

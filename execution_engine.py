@@ -894,6 +894,11 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
         _entry_p = float(t.get("entry") or t.get("entry_price") or 1)
         _sl_p    = float(t.get("sl") or t.get("stop_loss") or 1)
         _sl_dist = max(abs(_entry_p - _sl_p), 1e-8)
+        _risk_usd = float(t.get("risk_usd") or 0)
+        if _risk_usd <= 0:
+            _qty_p = float(t.get("qty") or t.get("quantity") or 0)
+            _risk_usd = _qty_p * _sl_dist if _qty_p > 0 else _sl_dist
+        _r_mult = round(net_pnl / _risk_usd, 3) if _risk_usd > 0 else 0
         _loop = _asyncio.get_event_loop()
         if _loop and _loop.is_running():
             _asyncio.run_coroutine_threadsafe(
@@ -903,7 +908,7 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
                     "direction":     t.get("direction", "LONG"),
                     "net_pnl":       net_pnl,
                     "reason":        reason,
-                    "r_multiple":    round(net_pnl / _sl_dist, 3),
+                    "r_multiple":    _r_mult,
                     "balance_after": database.get_active_balance(),
                     "duration":      f"{hold_min:.0f}dk",
                 })),
