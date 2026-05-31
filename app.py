@@ -161,7 +161,7 @@ def api_dashboard_data():
     """Faz 6 V2 Dashboard için toplu veri sağlar."""
     try:
         from core.services.macro_service import macro_service
-        from database import get_open_trades, get_paper_balance
+        from database import get_open_trades, get_active_balance
         import dashboard_service
         
         sentiment = macro_service.get_market_sentiment()
@@ -179,7 +179,7 @@ def api_dashboard_data():
         return jsonify({
             "market_regime": "NEUTRAL",
             "macro_fng": sentiment.get("fng_value", 50),
-            "total_balance": get_paper_balance() or 1000.0,
+            "total_balance": get_active_balance() or 1000.0,
             "daily_pnl": daily_pnl,
             "stats": stats,
             "active_trades": open_trades
@@ -349,13 +349,65 @@ def api_partial_closes(trade_id: int):
 @app.route("/api/balance")
 def api_balance():
     try:
+        from database import get_active_balance_details, get_paper_balance
+        details = get_active_balance_details()
         paper_balance = get_paper_balance()
         return jsonify({"ok": True, "data": {
             "paper_balance":  round(paper_balance, 4),
-            "usdt_balance":   round(paper_balance, 4),
-            "usdt_available": round(paper_balance, 4),
+            "usdt_balance":   round(details.get("total", paper_balance), 4),
+            "usdt_available": round(details.get("available", paper_balance), 4),
+            "execution_mode": details.get("execution_mode", "paper"),
         }})
     except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/config/update ────────────────────────────────────────────────────────
+@app.route("/api/config/update", methods=["POST"])
+def api_config_update():
+    try:
+        data = request.get_json() or {}
+        key = data.get("key")
+        value = data.get("value")
+        if not key or value is None:
+            return jsonify({"ok": False, "error": "Invalid payload: key and value are required"}), 400
+        
+        # Valid key checking
+        allowed_keys = [
+            "trade_threshold", "telegram_threshold", "watchlist_threshold", "data_threshold",
+            "tg_execution_mode", "tg_human_mode"
+        ]
+        if key not in allowed_keys:
+            return jsonify({"ok": False, "error": f"Unauthorized configuration parameter: {key}"}), 403
+        
+        # Save to SQLite system_state table
+        with get_conn() as conn:
+            conn.execute("""
+                INSERT INTO system_state (key, value, updated_at)
+                VALUES (?, ?, datetime('now'))
+                ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
+            """, (key, str(value), str(value)))
+            
+            # If we updated tg_execution_mode, also write to bot_status key 'tg_execution_mode' for fallback
+            if key == "tg_execution_mode":
+                conn.execute("""
+                    INSERT INTO bot_status (key, value, updated_at)
+                    VALUES (?, ?, datetime('now'))
+                    ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
+                """, (key, str(value), str(value)))
+            elif key == "tg_human_mode":
+                conn.execute("""
+                    INSERT INTO bot_status (key, value, updated_at)
+                    VALUES (?, ?, datetime('now'))
+                    ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
+                """, (key, str(value), str(value)))
+                
+            conn.commit()
+            
+        logger.info(f"[Config] Updated config '{key}' to '{value}' via Dashboard API")
+        return jsonify({"ok": True, "message": f"Successfully updated {key} to {value}"})
+    except Exception as e:
+        logger.error(f"[Config] Configuration update failed: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 

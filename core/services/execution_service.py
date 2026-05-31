@@ -67,7 +67,7 @@ class ExecutionService:
                     _pnl   = float(closed.get("net_pnl") or 0)
                     _r     = round(_pnl / _sl_d, 3) if _sl_d > 0 else 0
 
-                    balance = await asyncio.to_thread(database.get_paper_balance)
+                    balance = await asyncio.to_thread(database.get_active_balance)
 
                     await event_bus.publish(Event(
                         type=EventType.TRADE_CLOSED,

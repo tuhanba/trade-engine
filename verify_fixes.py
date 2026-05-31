@@ -98,7 +98,7 @@ def test_daily_summary_ddl():
 
 def test_ghost_sql_no_evaluated_at():
     """Ghost stats sorgusu 'evaluated_at' içermemeli."""
-    with open("core/ai_decision_engine.py", "r") as f:
+    with open("core/ai_decision_engine.py", "r", encoding="utf-8") as f:
         content = f.read()
     if "evaluated_at" in content:
         raise AssertionError(
@@ -110,7 +110,7 @@ def test_ghost_sql_no_evaluated_at():
 
 def test_ghost_sql_uses_join():
     """Ghost stats sorgusu JOIN ghost_signals kullanmalı."""
-    with open("core/ai_decision_engine.py", "r") as f:
+    with open("core/ai_decision_engine.py", "r", encoding="utf-8") as f:
         content = f.read()
     if "JOIN ghost_signals" not in content:
         raise AssertionError(
@@ -122,7 +122,7 @@ def test_ghost_sql_uses_join():
 
 def test_ghost_sql_simulated_at():
     """Ghost stats sorgusu simulated_at kullanmalı."""
-    with open("core/ai_decision_engine.py", "r") as f:
+    with open("core/ai_decision_engine.py", "r", encoding="utf-8") as f:
         content = f.read()
     if "r.simulated_at" not in content and "simulated_at" not in content:
         raise AssertionError("Ghost sorgusu simulated_at kullanmıyor")
@@ -142,7 +142,7 @@ def test_ghost_manager_runs():
 
 def test_no_duplicate_telegram_in_execution_engine():
     """execution_engine.py'de send_trade_open çağrısı olmamalı."""
-    with open("execution_engine.py", "r") as f:
+    with open("execution_engine.py", "r", encoding="utf-8") as f:
         content = f.read()
     if "send_trade_open as _tg_open" in content:
         raise AssertionError(
@@ -232,11 +232,11 @@ def test_telegram_delivery_imports():
 
 def test_telegram_no_duplicate_path():
     """telegram_delivery.py'de execution_engine'e özgü Telegram çağrısı yok."""
-    with open("telegram_delivery.py", "r") as f:
+    with open("telegram_delivery.py", "r", encoding="utf-8") as f:
         content = f.read()
     # Kontrol: execution_engine'den duplicate çağrı gelmemeli
     # Bu test execution_engine'i kontrol eder
-    with open("execution_engine.py", "r") as f:
+    with open("execution_engine.py", "r", encoding="utf-8") as f:
         eng_content = f.read()
     if "send_trade_open as _tg_open" in eng_content:
         raise AssertionError("execution_engine.py'de duplicate Telegram çağrısı var")
@@ -245,7 +245,7 @@ def test_telegram_no_duplicate_path():
 
 def test_app_diagnostics_endpoint():
     """app.py'de /api/diagnostics endpoint'i tanımlı."""
-    with open("app.py", "r") as f:
+    with open("app.py", "r", encoding="utf-8") as f:
         content = f.read()
     if "/api/diagnostics" not in content:
         raise AssertionError("/api/diagnostics endpoint'i app.py'de yok")
@@ -254,7 +254,7 @@ def test_app_diagnostics_endpoint():
 
 def test_app_funnel_uses_signal_events():
     """/api/stats funnel metrikleri signal_events'i okumalı."""
-    with open("app.py", "r") as f:
+    with open("app.py", "r", encoding="utf-8") as f:
         content = f.read()
     checks = ["risk_reject", "ai_veto", "executed", "trend_ok"]
     missing = [c for c in checks if c not in content]

@@ -396,7 +396,7 @@ class ExecutionEngine:
             if event_manager:
                 _dir = trade.get("direction") or trade.get("side", "LONG")
                 event_manager.broadcast_trade_closed(trade["symbol"], _dir, total_pnl, reason)
-                _new_bal = database.get_paper_balance() or 0.0
+                _new_bal = database.get_active_balance() or 0.0
                 event_manager.broadcast_pnl_update(_new_bal, 0, total_pnl)
         except Exception as _ws_err:
             logger.debug("[WS] broadcast hatası: %s", _ws_err)
@@ -881,7 +881,7 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     update_paper_balance(incremental_pnl)
     _dir = t.get("direction") or t.get("side", "LONG")
     if event_manager: event_manager.broadcast_trade_closed(t["symbol"], _dir, net_pnl, reason)
-    if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), 0, net_pnl)
+    if event_manager: event_manager.broadcast_pnl_update(database.get_active_balance(), 0, net_pnl)
     save_trade_event(trade_id, "CLOSE", f"reason={reason} close_price={close_price} net_pnl={net_pnl:.4f}")
 
     result = "WIN" if net_pnl > 0 else "LOSS"
@@ -904,7 +904,7 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
                     "net_pnl":       net_pnl,
                     "reason":        reason,
                     "r_multiple":    round(net_pnl / _sl_dist, 3),
-                    "balance_after": database.get_paper_balance(),
+                    "balance_after": database.get_active_balance(),
                     "duration":      f"{hold_min:.0f}dk",
                 })),
                 _loop

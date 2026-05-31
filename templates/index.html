@@ -3,105 +3,298 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AURVEXAI Signal Intelligence Hub</title>
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+    <title>AURVEXAI // Advanced Signal Intelligence Hub</title>
+    <!-- Premium Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js and Socket.IO -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <!-- Custom Style Sheet -->
     <link rel="stylesheet" href="/static/css/hub.css">
 </head>
 <body>
-    <!-- CRT scanline overlay -->
-    <div class="crt-overlay"></div>
+    <div class="glass-bg-radial"></div>
 
-    <!-- Header -->
-    <header class="hub-header">
-        <div class="header-left">
-            <span class="brand">AURVEXAI</span>
-            <span class="version">SIGNAL INTELLIGENCE HUB · v4.3 · PAPER</span>
-        </div>
-        <div class="header-right">
-            <div class="live-indicator">
-                <div class="live-dot aBL"></div>
-                <span class="live-text">LIVE</span>
+    <!-- MAIN CONTAINER -->
+    <div class="app-container">
+        
+        <!-- HEADER -->
+        <header class="app-header">
+            <div class="header-logo">
+                <div class="pulse-ring"></div>
+                <span class="logo-text">AURVEX<span class="gold-text">AI</span></span>
+                <span class="logo-divider">/</span>
+                <span class="logo-subtitle">Signal Intelligence Hub v6.1</span>
             </div>
-            <span class="clock" id="clock">00:00:00 UTC</span>
-        </div>
-    </header>
-
-    <!-- Metrics Row -->
-    <div class="metrics-row">
-        <!-- Ghost Win Rate -->
-        <div class="metric-cell" style="border-right: 1px solid rgba(212,168,67,.08)">
-            <div class="metric-label">GHOST WIN RATE</div>
-            <div class="metric-body">
-                <svg class="wr-ring" width="52" height="52" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="36" fill="none" stroke="rgba(212,168,67,.07)" stroke-width="11"/>
-                    <circle id="wrArc" cx="50" cy="50" r="36" fill="none" stroke="#d4a843" stroke-width="11"
-                        stroke-dasharray="226.19" stroke-dashoffset="74" stroke-linecap="round"/>
-                </svg>
-                <div>
-                    <div class="wr-value" id="wrValue">67.3%</div>
-                    <div class="wr-delta">↑ 2.3% THIS WEEK</div>
+            
+            <div class="header-status">
+                <div class="status-badge" id="botStatusBadge">
+                    <span class="badge-dot dot-green"></span>
+                    <span class="badge-text" id="botStatusText">BOT RUNNING</span>
+                </div>
+                <div class="status-badge" id="modeBadge">
+                    <span class="badge-dot dot-gold"></span>
+                    <span class="badge-text" id="modeText">PAPER MODE</span>
+                </div>
+                <div class="clock-display">
+                    <i class="fa-regular fa-clock"></i>
+                    <span id="headerClock">00:00:00 UTC</span>
                 </div>
             </div>
-        </div>
+        </header>
 
-        <!-- Active Signals -->
-        <div class="metric-cell" style="border-right: 1px solid rgba(212,168,67,.08)">
-            <div class="metric-label">ACTIVE SIGNALS</div>
-            <div class="signals-body">
-                <div>
-                    <div class="sig-count sig-long" id="longCount">0</div>
-                    <div class="sig-label" style="color: rgba(0,232,122,.4)">LONG</div>
-                </div>
-                <div class="sig-divider"></div>
-                <div>
-                    <div class="sig-count sig-short" id="shortCount">0</div>
-                    <div class="sig-label" style="color: rgba(255,61,90,.4)">SHORT</div>
-                </div>
-                <div class="sig-divider"></div>
-                <div>
-                    <div class="sig-count sig-today" id="todayCount">23</div>
-                    <div class="sig-label" style="color: rgba(212,168,67,.38)">TODAY</div>
-                </div>
-            </div>
-        </div>
+        <!-- MAIN LAYOUT -->
+        <main class="main-layout">
+            
+            <!-- LEFT PANEL: STATS & LISTS -->
+            <section class="panel-left">
+                
+                <!-- PORTFOLIO / OVERVIEW ROW -->
+                <div class="stats-grid">
+                    
+                    <div class="glass-card stat-card glow-blue">
+                        <div class="stat-icon"><i class="fa-solid fa-wallet"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-label">TOTAL WALLET</span>
+                            <span class="stat-value" id="walletBalance">$0.00</span>
+                        </div>
+                    </div>
 
-        <!-- ML Engine -->
-        <div class="metric-cell">
-            <div class="metric-label">ML ENGINE</div>
-            <div class="ml-value" id="mlValue">87.2<span class="ml-conf">CONF</span></div>
-            <div class="ml-bars" id="mlBars"></div>
-            <div class="ml-status">● ENSEMBLE · 17 FEATURES</div>
-        </div>
+                    <div class="glass-card stat-card glow-green">
+                        <div class="stat-icon"><i class="fa-solid fa-chart-line"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-label">DAILY PNL</span>
+                            <span class="stat-value" id="dailyPnl">$0.00</span>
+                        </div>
+                    </div>
+
+                    <div class="glass-card stat-card glow-gold">
+                        <div class="stat-icon"><i class="fa-solid fa-percentage"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-label">WIN RATE</span>
+                            <span class="stat-value" id="winRate">0.0%</span>
+                        </div>
+                    </div>
+
+                    <div class="glass-card stat-card glow-purple">
+                        <div class="stat-icon"><i class="fa-solid fa-scale-balanced"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-label">PROFIT FACTOR</span>
+                            <span class="stat-value" id="profitFactor">0.00</span>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- EQUITY CHART -->
+                <div class="glass-card chart-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-chart-area"></i> Equity Growth (30 Days)</h3>
+                        <div class="header-actions">
+                            <span class="badge-flat" id="pctChangeText">0.00% change</span>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="equityChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- ACTIVE POSITIONS -->
+                <div class="glass-card positions-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-briefcase"></i> Active Positions (<span id="activeTradesCount">0</span>)</h3>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Direction</th>
+                                    <th>Entry Price</th>
+                                    <th>Mark Price</th>
+                                    <th>Unrealized PnL</th>
+                                    <th>SL / TPs</th>
+                                    <th>Margin / Lev</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="activeTradesBody">
+                                <tr>
+                                    <td colspan="8" class="empty-row">No active positions. Scanning markets...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- RECENT TRADES -->
+                <div class="glass-card history-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-clock-rotate-left"></i> Historic Closed Trades</h3>
+                    </div>
+                    <div class="table-container">
+                        <table class="premium-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Direction</th>
+                                    <th>Entry Price</th>
+                                    <th>Exit Price</th>
+                                    <th>Realized PnL</th>
+                                    <th>Duration</th>
+                                    <th>Close Reason</th>
+                                    <th>Closed At</th>
+                                </tr>
+                            </thead>
+                            <tbody id="closedTradesBody">
+                                <tr>
+                                    <td colspan="8" class="empty-row">No trade history found.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- RIGHT PANEL: CONTROLS & TIMELINE -->
+            <section class="panel-right">
+                
+                <!-- CONTROL PANEL CARD -->
+                <div class="glass-card control-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-sliders"></i> Engine Controls</h3>
+                    </div>
+                    <div class="control-form">
+                        
+                        <div class="control-group">
+                            <label>Execution Mode</label>
+                            <div class="toggle-switch">
+                                <button type="button" class="toggle-btn active" id="btnModePaper">Paper</button>
+                                <button type="button" class="toggle-btn" id="btnModeLive">Live</button>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label>Human Intervention Mode</label>
+                            <div class="toggle-switch">
+                                <button type="button" class="toggle-btn" id="btnHumanFalse">Disabled (Auto)</button>
+                                <button type="button" class="toggle-btn" id="btnHumanTrue">Enabled</button>
+                            </div>
+                        </div>
+
+                        <div class="slider-group">
+                            <div class="slider-label">
+                                <span>Trade Threshold</span>
+                                <span class="slider-val" id="valTradeThreshold">55.0</span>
+                            </div>
+                            <input type="range" min="10" max="100" value="55" step="0.5" class="premium-slider" id="sliderTradeThreshold">
+                        </div>
+
+                        <div class="slider-group">
+                            <div class="slider-label">
+                                <span>Telegram Alert Threshold</span>
+                                <span class="slider-val" id="valTelegramThreshold">35.0</span>
+                            </div>
+                            <input type="range" min="10" max="100" value="35" step="0.5" class="premium-slider" id="sliderTelegramThreshold">
+                        </div>
+
+                        <div class="slider-group">
+                            <div class="slider-label">
+                                <span>Watchlist Filter Threshold</span>
+                                <span class="slider-val" id="valWatchlistThreshold">28.0</span>
+                            </div>
+                            <input type="range" min="10" max="100" value="28" step="0.5" class="premium-slider" id="sliderWatchlistThreshold">
+                        </div>
+
+                        <div class="slider-group">
+                            <div class="slider-label">
+                                <span>Base Data Threshold</span>
+                                <span class="slider-val" id="valDataThreshold">20.0</span>
+                            </div>
+                            <input type="range" min="10" max="100" value="20" step="0.5" class="premium-slider" id="sliderDataThreshold">
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- PIPELINE FUNNEL -->
+                <div class="glass-card funnel-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-filter"></i> Signal Pipeline Funnel (Today)</h3>
+                    </div>
+                    <div class="funnel-container">
+                        
+                        <div class="funnel-stage">
+                            <span class="stage-label">1. SCANNED</span>
+                            <div class="stage-bar-bg">
+                                <div class="stage-bar fill-scanned" id="barScanned" style="width: 100%"></div>
+                                <span class="stage-value" id="valScanned">0</span>
+                            </div>
+                        </div>
+
+                        <div class="funnel-stage">
+                            <span class="stage-label">2. ELIGIBLE / WATCH</span>
+                            <div class="stage-bar-bg">
+                                <div class="stage-bar fill-eligible" id="barEligible" style="width: 0%"></div>
+                                <span class="stage-value" id="valEligible">0</span>
+                            </div>
+                        </div>
+
+                        <div class="funnel-stage">
+                            <span class="stage-label">3. TREND & TRIGGER CHECK</span>
+                            <div class="stage-bar-bg">
+                                <div class="stage-bar fill-trend" id="barTrend" style="width: 0%"></div>
+                                <span class="stage-value" id="valTrend">0</span>
+                            </div>
+                        </div>
+
+                        <div class="funnel-stage">
+                            <span class="stage-label">4. RISK APPROVED</span>
+                            <div class="stage-bar-bg">
+                                <div class="stage-bar fill-risk" id="barRisk" style="width: 0%"></div>
+                                <span class="stage-value" id="valRisk">0</span>
+                            </div>
+                        </div>
+
+                        <div class="funnel-stage">
+                            <span class="stage-label">5. TELEGRAM ALERTS</span>
+                            <div class="stage-bar-bg">
+                                <div class="stage-bar fill-telegram" id="barTelegram" style="width: 0%"></div>
+                                <span class="stage-value" id="valTelegram">0</span>
+                            </div>
+                        </div>
+
+                        <div class="funnel-stage">
+                            <span class="stage-label">6. EXECUTED TRADES</span>
+                            <div class="stage-bar-bg">
+                                <div class="stage-bar fill-executed" id="barExecuted" style="width: 0%"></div>
+                                <span class="stage-value" id="valExecuted">0</span>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- SIGNAL INTELLIGENCE FEED -->
+                <div class="glass-card logs-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-brain"></i> Live AI Log Terminal</h3>
+                    </div>
+                    <div class="logs-container" id="logsTerminal">
+                        <div class="log-line text-muted">[System] Ready. Waiting for signals...</div>
+                    </div>
+                </div>
+
+            </section>
+
+        </main>
+        
     </div>
 
-    <!-- Main Content -->
-    <div class="main-content">
-        <!-- Coin Universe Grid -->
-        <div class="universe-panel">
-            <div class="panel-label" id="universeLabel">◆ UNIVERSE — 0 PAIRS</div>
-            <div class="coin-grid" id="coinGrid"></div>
-        </div>
-
-        <!-- Signal Feed -->
-        <div class="feed-panel">
-            <div class="panel-label">◆ HOT SIGNALS</div>
-            <div class="feed-list" id="feedList"></div>
-        </div>
-    </div>
-
-    <!-- Footer -->
-    <footer class="hub-footer">
-        <div class="footer-left">
-            <div class="live-dot aBL" style="width:5px;height:5px"></div>
-            <span style="color: rgba(0,232,122,.48)">CONNECTED</span>
-            <span>· 143.198.90.104</span>
-        </div>
-        <div>DB: ONLINE · BOT: RUNNING · <span id="footerClock">00:00:00</span></div>
-        <div>
-            VIRT BAL:&nbsp;<span class="bal-value" id="balValue">$10,000.00</span>
-        </div>
-    </footer>
-
+    <!-- JS Source -->
     <script src="/static/js/hub.js"></script>
 </body>
 </html>

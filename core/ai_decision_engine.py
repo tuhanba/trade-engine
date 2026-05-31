@@ -502,7 +502,7 @@ class GhostMemoryManager:
         Belirli sembol için ghost trade başarı istatistiklerini döner.
         BUG FIX: ghost_results'ta symbol kolonu yok.
         ghost_signals JOIN ghost_results ile sorgu yapılır.
-        evaluated_at → simulated_at (doğru kolon adı).
+        eval_at → simulated_at (doğru kolon adı).
         """
         try:
             cutoff = (

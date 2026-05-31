@@ -50,7 +50,7 @@ class NotificationService:
                 send_trade_close(
                     symbol=payload.get("symbol", "?"),
                     net_pnl=float(payload.get("net_pnl", 0)),
-                    total_fee=0,  # Or pass it if payload has it
+                    total_fee=float(payload.get("total_fee", 0)),  # Or pass it if payload has it
                     reason=payload.get("reason", "unknown"),
                     duration_str=payload.get("duration", "?"),
                     direction=payload.get("direction", ""),

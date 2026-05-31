@@ -1681,6 +1681,55 @@ def get_paper_balance() -> float:
         return _default
 
 
+def get_active_balance() -> float:
+    """
+    Dinamik olarak aktif bakiyeyi döner. Canlı modda Binance Futures cüzdan bakiyesini,
+    paper modda SQLite paper_account bakiyesini kullanır.
+    """
+    try:
+        import config
+        # System_state'den canlı mod kontrolü (config.EXECUTION_MODE dynamic load fallback)
+        exec_mode = getattr(config, "EXECUTION_MODE", "paper")
+        if exec_mode == "live":
+            from binance.client import Client
+            if config.BINANCE_API_KEY and config.BINANCE_API_SECRET:
+                client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET)
+                account = client.futures_account()
+                balance = float(account.get('totalWalletBalance', 0.0))
+                if balance > 0:
+                    return balance
+    except Exception as e:
+        logger.debug(f"[Balance] Canlı bakiye alınamadı, paper bakiye kullanılıyor: {e}")
+    return get_paper_balance()
+
+
+def get_active_balance_details() -> dict:
+    """
+    Aktif bakiye detaylarını döner (total, available, execution_mode).
+    """
+    paper = get_paper_balance()
+    res = {
+        "execution_mode": "paper",
+        "total": paper,
+        "available": paper
+    }
+    try:
+        import config
+        exec_mode = getattr(config, "EXECUTION_MODE", "paper")
+        if exec_mode == "live":
+            res["execution_mode"] = "live"
+            from binance.client import Client
+            if config.BINANCE_API_KEY and config.BINANCE_API_SECRET:
+                client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET)
+                account = client.futures_account()
+                res["total"] = float(account.get('totalWalletBalance', 0.0))
+                res["available"] = float(account.get('availableBalance', 0.0))
+                return res
+    except Exception as e:
+        logger.debug(f"[Balance] Canlı bakiye detayları alınamadı: {e}")
+    return res
+
+
 def update_paper_balance(
     amount: float,
     trade_id: int = None,
