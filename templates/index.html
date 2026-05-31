@@ -45,250 +45,300 @@
             </div>
         </header>
 
+        <!-- TAB NAVIGATION -->
+        <div class="tab-navigation">
+            <button class="tab-btn active" onclick="switchTab('overview')">
+                <i class="fa-solid fa-chart-pie"></i> Overview & Analytics
+            </button>
+            <button class="tab-btn" onclick="switchTab('trades')">
+                <i class="fa-solid fa-briefcase"></i> Trade Center
+            </button>
+            <button class="tab-btn" onclick="switchTab('aibrain')">
+                <i class="fa-solid fa-brain"></i> AI Brain & Funnel
+            </button>
+        </div>
+
         <!-- MAIN LAYOUT -->
         <main class="main-layout">
             
-            <!-- LEFT PANEL: STATS & LISTS -->
-            <section class="panel-left">
-                
-                <!-- PORTFOLIO / OVERVIEW ROW -->
-                <div class="stats-grid">
-                    
-                    <div class="glass-card stat-card glow-blue">
-                        <div class="stat-icon"><i class="fa-solid fa-wallet"></i></div>
-                        <div class="stat-info">
-                            <span class="stat-label">TOTAL WALLET</span>
-                            <span class="stat-value" id="walletBalance">$0.00</span>
-                        </div>
-                    </div>
+            <!-- TAB 1: OVERVIEW & ANALYTICS -->
+            <div id="tab-overview" class="tab-content active">
+                <div class="overview-layout">
+                    <!-- Left: Stats Grid + Equity Chart -->
+                    <div class="overview-left">
+                        <div class="stats-grid">
+                            <div class="glass-card stat-card glow-blue">
+                                <div class="stat-icon"><i class="fa-solid fa-wallet"></i></div>
+                                <div class="stat-info">
+                                    <span class="stat-label">TOTAL WALLET</span>
+                                    <span class="stat-value" id="walletBalance">$0.00</span>
+                                </div>
+                            </div>
 
-                    <div class="glass-card stat-card glow-green">
-                        <div class="stat-icon"><i class="fa-solid fa-chart-line"></i></div>
-                        <div class="stat-info">
-                            <span class="stat-label">DAILY PNL</span>
-                            <span class="stat-value" id="dailyPnl">$0.00</span>
-                        </div>
-                    </div>
+                            <div class="glass-card stat-card glow-green">
+                                <div class="stat-icon"><i class="fa-solid fa-chart-line"></i></div>
+                                <div class="stat-info">
+                                    <span class="stat-label">DAILY PNL</span>
+                                    <span class="stat-value" id="dailyPnl">$0.00</span>
+                                </div>
+                            </div>
 
-                    <div class="glass-card stat-card glow-gold">
-                        <div class="stat-icon"><i class="fa-solid fa-percentage"></i></div>
-                        <div class="stat-info">
-                            <span class="stat-label">WIN RATE</span>
-                            <span class="stat-value" id="winRate">0.0%</span>
-                        </div>
-                    </div>
+                            <div class="glass-card stat-card glow-gold">
+                                <div class="stat-icon"><i class="fa-solid fa-percentage"></i></div>
+                                <div class="stat-info">
+                                    <span class="stat-label">WIN RATE</span>
+                                    <span class="stat-value" id="winRate">0.0%</span>
+                                </div>
+                            </div>
 
-                    <div class="glass-card stat-card glow-purple">
-                        <div class="stat-icon"><i class="fa-solid fa-scale-balanced"></i></div>
-                        <div class="stat-info">
-                            <span class="stat-label">PROFIT FACTOR</span>
-                            <span class="stat-value" id="profitFactor">0.00</span>
-                        </div>
-                    </div>
-
-                </div>
-
-                <!-- EQUITY CHART -->
-                <div class="glass-card chart-card">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-chart-area"></i> Equity Growth (30 Days)</h3>
-                        <div class="header-actions">
-                            <span class="badge-flat" id="pctChangeText">0.00% change</span>
-                        </div>
-                    </div>
-                    <div class="chart-container">
-                        <canvas id="equityChart"></canvas>
-                    </div>
-                </div>
-
-                <!-- ACTIVE POSITIONS -->
-                <div class="glass-card positions-card">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-briefcase"></i> Active Positions (<span id="activeTradesCount">0</span>)</h3>
-                    </div>
-                    <div class="table-container">
-                        <table class="premium-table">
-                            <thead>
-                                <tr>
-                                    <th>Symbol</th>
-                                    <th>Direction</th>
-                                    <th>Entry Price</th>
-                                    <th>Mark Price</th>
-                                    <th>Unrealized PnL</th>
-                                    <th>SL / TPs</th>
-                                    <th>Margin / Lev</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="activeTradesBody">
-                                <tr>
-                                    <td colspan="8" class="empty-row">No active positions. Scanning markets...</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- RECENT TRADES -->
-                <div class="glass-card history-card">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-clock-rotate-left"></i> Historic Closed Trades</h3>
-                    </div>
-                    <div class="table-container">
-                        <table class="premium-table">
-                            <thead>
-                                <tr>
-                                    <th>Symbol</th>
-                                    <th>Direction</th>
-                                    <th>Entry Price</th>
-                                    <th>Exit Price</th>
-                                    <th>Realized PnL</th>
-                                    <th>Duration</th>
-                                    <th>Close Reason</th>
-                                    <th>Closed At</th>
-                                </tr>
-                            </thead>
-                            <tbody id="closedTradesBody">
-                                <tr>
-                                    <td colspan="8" class="empty-row">No trade history found.</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-            </section>
-
-            <!-- RIGHT PANEL: CONTROLS & TIMELINE -->
-            <section class="panel-right">
-                
-                <!-- CONTROL PANEL CARD -->
-                <div class="glass-card control-card">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-sliders"></i> Engine Controls</h3>
-                    </div>
-                    <div class="control-form">
-                        
-                        <div class="control-group">
-                            <label>Execution Mode</label>
-                            <div class="toggle-switch">
-                                <button type="button" class="toggle-btn active" id="btnModePaper">Paper</button>
-                                <button type="button" class="toggle-btn" id="btnModeLive">Live</button>
+                            <div class="glass-card stat-card glow-purple">
+                                <div class="stat-icon"><i class="fa-solid fa-scale-balanced"></i></div>
+                                <div class="stat-info">
+                                    <span class="stat-label">PROFIT FACTOR</span>
+                                    <span class="stat-value" id="profitFactor">0.00</span>
+                                </div>
                             </div>
                         </div>
 
-                        <div class="control-group">
-                            <label>Human Intervention Mode</label>
-                            <div class="toggle-switch">
-                                <button type="button" class="toggle-btn" id="btnHumanFalse">Disabled (Auto)</button>
-                                <button type="button" class="toggle-btn" id="btnHumanTrue">Enabled</button>
+                        <!-- EQUITY CHART -->
+                        <div class="glass-card chart-card" style="margin-top: 16px;">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-chart-area"></i> Equity Growth (30 Days)</h3>
+                                <div class="header-actions">
+                                    <span class="badge-flat" id="pctChangeText">0.00% change</span>
+                                </div>
+                            </div>
+                            <div class="chart-container">
+                                <canvas id="equityChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Engine Controls + Logs Terminal -->
+                    <div class="overview-right">
+                        <!-- CONTROL PANEL CARD -->
+                        <div class="glass-card control-card">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-sliders"></i> Engine Controls</h3>
+                            </div>
+                            <div class="control-form">
+                                <div class="control-group">
+                                    <label>Execution Mode</label>
+                                    <div class="toggle-switch">
+                                        <button type="button" class="toggle-btn active" id="btnModePaper">Paper</button>
+                                        <button type="button" class="toggle-btn" id="btnModeLive">Live</button>
+                                    </div>
+                                </div>
+
+                                <div class="control-group">
+                                    <label>Human Intervention Mode</label>
+                                    <div class="toggle-switch">
+                                        <button type="button" class="toggle-btn" id="btnHumanFalse">Disabled (Auto)</button>
+                                        <button type="button" class="toggle-btn" id="btnHumanTrue">Enabled</button>
+                                    </div>
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-label">
+                                        <span>Trade Threshold</span>
+                                        <span class="slider-val" id="valTradeThreshold">55.0</span>
+                                    </div>
+                                    <input type="range" min="10" max="100" value="55" step="0.5" class="premium-slider" id="sliderTradeThreshold">
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-label">
+                                        <span>Telegram Alert Threshold</span>
+                                        <span class="slider-val" id="valTelegramThreshold">35.0</span>
+                                    </div>
+                                    <input type="range" min="10" max="100" value="35" step="0.5" class="premium-slider" id="sliderTelegramThreshold">
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-label">
+                                        <span>Watchlist Filter Threshold</span>
+                                        <span class="slider-val" id="valWatchlistThreshold">28.0</span>
+                                    </div>
+                                    <input type="range" min="10" max="100" value="28" step="0.5" class="premium-slider" id="sliderWatchlistThreshold">
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-label">
+                                        <span>Base Data Threshold</span>
+                                        <span class="slider-val" id="valDataThreshold">20.0</span>
+                                    </div>
+                                    <input type="range" min="10" max="100" value="20" step="0.5" class="premium-slider" id="sliderDataThreshold">
+                                </div>
                             </div>
                         </div>
 
-                        <div class="slider-group">
-                            <div class="slider-label">
-                                <span>Trade Threshold</span>
-                                <span class="slider-val" id="valTradeThreshold">55.0</span>
+                        <!-- SIGNAL INTELLIGENCE FEED -->
+                        <div class="glass-card logs-card" style="margin-top: 16px;">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-brain"></i> Live AI Log Terminal</h3>
                             </div>
-                            <input type="range" min="10" max="100" value="55" step="0.5" class="premium-slider" id="sliderTradeThreshold">
-                        </div>
-
-                        <div class="slider-group">
-                            <div class="slider-label">
-                                <span>Telegram Alert Threshold</span>
-                                <span class="slider-val" id="valTelegramThreshold">35.0</span>
+                            <div class="logs-container" id="logsTerminal">
+                                <div class="log-line text-muted">[System] Ready. Waiting for signals...</div>
                             </div>
-                            <input type="range" min="10" max="100" value="35" step="0.5" class="premium-slider" id="sliderTelegramThreshold">
                         </div>
-
-                        <div class="slider-group">
-                            <div class="slider-label">
-                                <span>Watchlist Filter Threshold</span>
-                                <span class="slider-val" id="valWatchlistThreshold">28.0</span>
-                            </div>
-                            <input type="range" min="10" max="100" value="28" step="0.5" class="premium-slider" id="sliderWatchlistThreshold">
-                        </div>
-
-                        <div class="slider-group">
-                            <div class="slider-label">
-                                <span>Base Data Threshold</span>
-                                <span class="slider-val" id="valDataThreshold">20.0</span>
-                            </div>
-                            <input type="range" min="10" max="100" value="20" step="0.5" class="premium-slider" id="sliderDataThreshold">
-                        </div>
-
                     </div>
                 </div>
+            </div>
 
-                <!-- PIPELINE FUNNEL -->
-                <div class="glass-card funnel-card">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-filter"></i> Signal Pipeline Funnel (Today)</h3>
+            <!-- TAB 2: TRADE CENTER -->
+            <div id="tab-trades" class="tab-content">
+                <div class="trades-layout">
+                    <!-- ACTIVE POSITIONS -->
+                    <div class="glass-card positions-card" style="flex: 1; display: flex; flex-direction: column;">
+                        <div class="card-header">
+                            <h3><i class="fa-solid fa-briefcase"></i> Active Positions (<span id="activeTradesCount">0</span>)</h3>
+                        </div>
+                        <div class="table-container" style="flex: 1; max-height: none;">
+                            <table class="premium-table">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Direction</th>
+                                        <th>Entry Price</th>
+                                        <th>Mark Price</th>
+                                        <th>Unrealized PnL</th>
+                                        <th>SL / TPs</th>
+                                        <th>Margin / Lev</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="activeTradesBody">
+                                    <tr>
+                                        <td colspan="8" class="empty-row">No active positions. Scanning markets...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                    <div class="funnel-container">
-                        
-                        <div class="funnel-stage">
-                            <span class="stage-label">1. SCANNED</span>
-                            <div class="stage-bar-bg">
-                                <div class="stage-bar fill-scanned" id="barScanned" style="width: 100%"></div>
-                                <span class="stage-value" id="valScanned">0</span>
-                            </div>
+
+                    <!-- RECENT TRADES -->
+                    <div class="glass-card history-card" style="flex: 1; display: flex; flex-direction: column; margin-top: 16px;">
+                        <div class="card-header">
+                            <h3><i class="fa-solid fa-clock-rotate-left"></i> Historic Closed Trades</h3>
                         </div>
-
-                        <div class="funnel-stage">
-                            <span class="stage-label">2. ELIGIBLE / WATCH</span>
-                            <div class="stage-bar-bg">
-                                <div class="stage-bar fill-eligible" id="barEligible" style="width: 0%"></div>
-                                <span class="stage-value" id="valEligible">0</span>
-                            </div>
+                        <div class="table-container" style="flex: 1; max-height: none;">
+                            <table class="premium-table">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Direction</th>
+                                        <th>Entry Price</th>
+                                        <th>Exit Price</th>
+                                        <th>Realized PnL</th>
+                                        <th>Duration</th>
+                                        <th>Close Reason</th>
+                                        <th>Closed At</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="closedTradesBody">
+                                    <tr>
+                                        <td colspan="8" class="empty-row">No trade history found.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
-
-                        <div class="funnel-stage">
-                            <span class="stage-label">3. TREND & TRIGGER CHECK</span>
-                            <div class="stage-bar-bg">
-                                <div class="stage-bar fill-trend" id="barTrend" style="width: 0%"></div>
-                                <span class="stage-value" id="valTrend">0</span>
-                            </div>
-                        </div>
-
-                        <div class="funnel-stage">
-                            <span class="stage-label">4. RISK APPROVED</span>
-                            <div class="stage-bar-bg">
-                                <div class="stage-bar fill-risk" id="barRisk" style="width: 0%"></div>
-                                <span class="stage-value" id="valRisk">0</span>
-                            </div>
-                        </div>
-
-                        <div class="funnel-stage">
-                            <span class="stage-label">5. TELEGRAM ALERTS</span>
-                            <div class="stage-bar-bg">
-                                <div class="stage-bar fill-telegram" id="barTelegram" style="width: 0%"></div>
-                                <span class="stage-value" id="valTelegram">0</span>
-                            </div>
-                        </div>
-
-                        <div class="funnel-stage">
-                            <span class="stage-label">6. EXECUTED TRADES</span>
-                            <div class="stage-bar-bg">
-                                <div class="stage-bar fill-executed" id="barExecuted" style="width: 0%"></div>
-                                <span class="stage-value" id="valExecuted">0</span>
-                            </div>
-                        </div>
-
-                    </div>
-                </div>
-
-                <!-- SIGNAL INTELLIGENCE FEED -->
-                <div class="glass-card logs-card">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-brain"></i> Live AI Log Terminal</h3>
-                    </div>
-                    <div class="logs-container" id="logsTerminal">
-                        <div class="log-line text-muted">[System] Ready. Waiting for signals...</div>
                     </div>
                 </div>
+            </div>
 
-            </section>
+            <!-- TAB 3: AI BRAIN & FUNNEL -->
+            <div id="tab-aibrain" class="tab-content">
+                <div class="aibrain-layout">
+                    <!-- Left: Pipeline Funnel -->
+                    <div class="aibrain-left">
+                        <div class="glass-card funnel-card" style="height: 100%;">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-filter"></i> Signal Pipeline Funnel (Today)</h3>
+                            </div>
+                            <div class="funnel-container">
+                                <div class="funnel-stage">
+                                    <span class="stage-label">1. SCANNED</span>
+                                    <div class="stage-bar-bg">
+                                        <div class="stage-bar fill-scanned" id="barScanned" style="width: 100%"></div>
+                                        <span class="stage-value" id="valScanned">0</span>
+                                    </div>
+                                </div>
+
+                                <div class="funnel-stage">
+                                    <span class="stage-label">2. ELIGIBLE / WATCH</span>
+                                    <div class="stage-bar-bg">
+                                        <div class="stage-bar fill-eligible" id="barEligible" style="width: 0%"></div>
+                                        <span class="stage-value" id="valEligible">0</span>
+                                    </div>
+                                </div>
+
+                                <div class="funnel-stage">
+                                    <span class="stage-label">3. TREND & TRIGGER CHECK</span>
+                                    <div class="stage-bar-bg">
+                                        <div class="stage-bar fill-trend" id="barTrend" style="width: 0%"></div>
+                                        <span class="stage-value" id="valTrend">0</span>
+                                    </div>
+                                </div>
+
+                                <div class="funnel-stage">
+                                    <span class="stage-label">4. RISK APPROVED</span>
+                                    <div class="stage-bar-bg">
+                                        <div class="stage-bar fill-risk" id="barRisk" style="width: 0%"></div>
+                                        <span class="stage-value" id="valRisk">0</span>
+                                    </div>
+                                </div>
+
+                                <div class="funnel-stage">
+                                    <span class="stage-label">5. TELEGRAM ALERTS</span>
+                                    <div class="stage-bar-bg">
+                                        <div class="stage-bar fill-telegram" id="barTelegram" style="width: 0%"></div>
+                                        <span class="stage-value" id="valTelegram">0</span>
+                                    </div>
+                                </div>
+
+                                <div class="funnel-stage">
+                                    <span class="stage-label">6. EXECUTED TRADES</span>
+                                    <div class="stage-bar-bg">
+                                        <div class="stage-bar fill-executed" id="barExecuted" style="width: 0%"></div>
+                                        <span class="stage-value" id="valExecuted">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Ghost Learning Insights -->
+                    <div class="aibrain-right">
+                        <div class="glass-card ghost-stats-card" style="height: 100%; display: flex; flex-direction: column;">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-ghost"></i> Ghost Learning Insights</h3>
+                            </div>
+                            <div class="ghost-details" style="flex: 1; overflow-y: auto;">
+                                <div class="ghost-stats-summary">
+                                    <div class="ghost-stat-box">
+                                        <span class="ghost-stat-lbl">Simulated Signals</span>
+                                        <span class="ghost-stat-val" id="ghostSimTotal">0</span>
+                                    </div>
+                                    <div class="ghost-stat-box">
+                                        <span class="ghost-stat-lbl">Virtual Win Rate</span>
+                                        <span class="ghost-stat-val" id="ghostWinRate">0.0%</span>
+                                    </div>
+                                    <div class="ghost-stat-box">
+                                        <span class="ghost-stat-lbl">Ghost Profit</span>
+                                        <span class="ghost-stat-val" id="ghostPnl">0.00 R</span>
+                                    </div>
+                                </div>
+                                <div class="ghost-patterns-list">
+                                    <h4>Top Missed Patterns</h4>
+                                    <ul id="ghostPatternsBody">
+                                        <li class="empty-pattern">No ghost insights gathered yet.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
         </main>
         

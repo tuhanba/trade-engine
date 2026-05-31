@@ -221,7 +221,9 @@ class TelegramManager:
 
     def _cmd_status(self):
         import database
-        bal     = database.get_paper_balance() or 0
+        bal     = database.get_active_balance() or 0
+        exec_mode = getattr(config, "EXECUTION_MODE", "paper")
+        bal_label = "Canlı Cüzdan (Binance)" if exec_mode == "live" else "Sanal Kasa"
         init    = getattr(config, "INITIAL_PAPER_BALANCE", 2000.0)
         roi     = ((bal - init) / init * 100) if init else 0
         open_t  = database.get_open_trades()
@@ -235,7 +237,7 @@ class TelegramManager:
             with database.get_conn() as conn:
                 today_pnl = conn.execute("""
                     SELECT COALESCE(SUM(net_pnl), 0) FROM trades
-                    WHERE LOWER(status)='closed' AND DATE(close_time)=?
+                    WHERE LOWER(status)='closed' AND DATE(close_time)=? AND is_valid_for_stats=1
                 """, (today,)).fetchone()[0] or 0
                 ghost_n = conn.execute(
                     "SELECT COUNT(*) FROM ghost_signals"
@@ -261,11 +263,11 @@ class TelegramManager:
             f"📈 **Sistem Durum Raporu**\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"🔍 **Motor Durumu:** {paused}\n"
-            f"🎯 **Çalışma Modu:** {'🧠 İnsan (Özenli)' if config.HUMAN_MODE else '⚡ Scalp (Agresif)'} | {config.EXECUTION_MODE.upper()}\n"
+            f"🎯 **Çalışma Modu:** {'🧠 İnsan (Özenli)' if config.HUMAN_MODE else '⚡ Scalp (Agresif)'} | {exec_mode.upper()}\n"
             f"🌊 **Piyasa Yönü (Rejim):** {regime}\n"
             f"⏱ **Kesintisiz Çalışma:** {h} Saat, {m} Dakika\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"💰 **Sanal Kasa:** ${bal:.2f} (Büyüme: {roi:+.1f}%)\n"
+            f"💰 **{bal_label}:** ${bal:.2f} (Büyüme: {roi:+.1f}%)\n"
             f"📅 **Bugünün Kârı:** ${today_pnl:+.2f}\n"
             f"📊 **Toplam Kâr:** ${stats.get('total_pnl', 0):+.2f}\n"
             f"👻 **YZ Öğrenme Havuzu:** {ghost_n} simülasyon\n"
@@ -273,6 +275,7 @@ class TelegramManager:
             f"🟢 **Açık İşlemler ({len(open_t)} adet):**{open_lines}\n\n"
             f"💡 *Detaylar için /stats veya /open yazabilirsin.*"
         )
+
 
     def _cmd_stats(self):
         import database
@@ -317,28 +320,33 @@ class TelegramManager:
 
     def _cmd_balance(self):
         import database
-        bal  = database.get_paper_balance() or 0
+        details = database.get_active_balance_details()
+        mode_str = "Live (Gerçek)" if details.get("execution_mode") == "live" else "Sanal (Paper)"
+        bal = details.get("total", 0.0)
+        avail = details.get("available", 0.0)
         init = getattr(config, "INITIAL_PAPER_BALANCE", 2000.0)
         diff = bal - init
         try:
             with database.get_conn() as conn:
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 row   = conn.execute(
-                    "SELECT COALESCE(SUM(realized_pnl),0) FROM trades WHERE DATE(close_time)=? AND status='closed'",
+                    "SELECT COALESCE(SUM(net_pnl),0) FROM trades WHERE DATE(close_time)=? AND status='closed' AND is_valid_for_stats=1",
                     (today,)
                 ).fetchone()
             today_pnl = float(row[0]) if row else 0.0
         except Exception:
             today_pnl = 0.0
         self.send_fn(
-            f"💳 **Bakiye ve Kazanç Özeti**\n\n"
-            f"Sisteme tanımlı başlangıç kasan ve şu anki büyüme:\n\n"
-            f"🔹 Başlangıç Kası: ${init:.2f}\n"
-            f"🔹 **Şu Anki Kasa:** ${bal:.2f}\n"
+            f"💳 **Bakiye ve Kazanç Özeti [{mode_str}]**\n\n"
+            f"Sisteme tanımlı başlangıç kasanız ve şu anki büyüme:\n\n"
+            f"🔹 Başlangıç Kasası: ${init:.2f}\n"
+            f"🔹 **Toplam Bakiye:** ${bal:.2f}\n"
+            f"🔹 **Kullanılabilir Bakiye:** ${avail:.2f}\n"
             f"🔹 Toplam Kâr/Zarar: ${diff:+.2f}\n"
             f"🔹 Sadece Bugün Kazanılan: ${today_pnl:+.2f}\n\n"
-            f"💡 *Canlı ticarete (Live Trading) geçtiğinde burada gerçek Binance cüzdanını göreceksin.*"
+            f"💡 *Canlı ticarete (Live Trading) geçtiğinizde burada gerçek Binance cüzdanınızı göreceksiniz.*"
         )
+
 
     def _cmd_open(self):
         import database
@@ -431,10 +439,10 @@ class TelegramManager:
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 row   = conn.execute(
                     """SELECT COUNT(*),
-                              SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END),
-                              SUM(CASE WHEN realized_pnl <= 0 THEN 1 ELSE 0 END),
-                              COALESCE(SUM(realized_pnl), 0)
-                       FROM trades WHERE DATE(close_time)=? AND status='closed'""",
+                              SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END),
+                              SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END),
+                              COALESCE(SUM(net_pnl), 0)
+                       FROM trades WHERE DATE(close_time)=? AND status='closed' AND is_valid_for_stats=1""",
                     (today,)
                 ).fetchone()
             total  = row[0] or 0
@@ -443,13 +451,18 @@ class TelegramManager:
             pnl    = float(row[3] or 0)
             wr     = round(wins / total * 100, 1) if total else 0
             self.send_fn(
-                f"Bugun ({today})\n\n"
-                f"Trade: {total} | {wins}W / {losses}L\n"
-                f"Winrate: {wr:.1f}%\n"
-                f"Gunluk PnL: ${pnl:+.2f}"
+                f"📅 **Bugünün İşlem Özeti ({today})**\n"
+                f"━━━━━━━━━━━━━━━━\n"
+                f"🔸 **Toplam İşlem:** {total} adet\n"
+                f"🔸 **Sonuç:** {wins} Galibiyet / {losses} Mağlubiyet\n"
+                f"🔸 **Kazanma Oranı:** %{wr:.1f}\n"
+                f"🔸 **Günlük Net PnL:** ${pnl:+.2f}\n"
+                f"━━━━━━━━━━━━━━━━\n"
+                f"💡 *Veriler anlık olarak güncellenir.*"
             )
         except Exception as e:
-            self.send_fn(f"Gunluk ozet alinamadi: {e}")
+            self.send_fn(f"Günlük özet alınamadı: {e}")
+
 
     def _cmd_mode(self):
         is_human = config.HUMAN_MODE

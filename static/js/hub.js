@@ -486,6 +486,59 @@ function connectWebSocket() {
 }
 
 // ----------------------------------------------------
+// 🗂 TAB NAVIGATION & GHOST STATS
+// ----------------------------------------------------
+function switchTab(tabId) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    
+    const targetContent = document.getElementById(`tab-${tabId}`);
+    if (targetContent) targetContent.classList.add('active');
+    
+    const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => {
+        const attr = b.getAttribute('onclick');
+        return attr && attr.includes(tabId);
+    });
+    if (btn) btn.classList.add('active');
+    
+    addConsoleLog(`Switched tab to ${tabId.toUpperCase()}`, 'info');
+}
+window.switchTab = switchTab;
+
+async function fetchGhostStats() {
+    try {
+        const resp = await fetch('/api/ghost-stats');
+        if (!resp.ok) return;
+        const json = await resp.json();
+        if (json.ok) {
+            document.getElementById('ghostSimTotal').textContent = json.total || 0;
+            document.getElementById('ghostWinRate').textContent = (json.ghost_win_rate || 0).toFixed(1) + '%';
+            document.getElementById('ghostPnl').textContent = (json.ghost_pnl || 0).toFixed(2) + ' R';
+
+            const patternsBody = document.getElementById('ghostPatternsBody');
+            const patterns = json.top_patterns || [];
+            if (patterns.length === 0) {
+                patternsBody.innerHTML = `<li class="empty-pattern">No ghost insights gathered yet.</li>`;
+                return;
+            }
+
+            patternsBody.innerHTML = '';
+            patterns.forEach(p => {
+                const li = document.createElement('li');
+                li.className = 'ghost-pattern-item';
+                li.innerHTML = `
+                    <span class="ghost-pattern-name">${p.pattern}</span>
+                    <span class="ghost-pattern-stats">${p.win_rate}% WR | ${p.avg_r >= 0 ? '+' : ''}${p.avg_r.toFixed(2)}R avg</span>
+                `;
+                patternsBody.appendChild(li);
+            });
+        }
+    } catch(e) {
+        console.error("Ghost stats fetch error:", e);
+    }
+}
+
+// ----------------------------------------------------
 // 🚀 INITIALIZATION
 // ----------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
@@ -501,6 +554,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchHistory();
     fetchLogs();
     initEquityChart();
+    fetchGhostStats();
 
     // Setup WebSockets
     connectWebSocket();
@@ -509,5 +563,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => {
         fetchStatsAndFunnel();
         fetchLogs();
+        fetchGhostStats();
     }, 8000);
 });
+

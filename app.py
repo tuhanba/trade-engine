@@ -1028,8 +1028,9 @@ def api_diagnostics():
 @app.route("/api/ghost-stats")
 def api_ghost_stats():
     try:
-        from core.ghost_learning import get_ghost_learning_stats, calculate_dynamic_ghost_weight
+        from core.ghost_learning import get_ghost_learning_stats, calculate_dynamic_ghost_weight, summarize_ghost_results
         stats = get_ghost_learning_stats()
+        g2_summary = summarize_ghost_results()
         dynamic_weight = calculate_dynamic_ghost_weight()
 
         with get_conn() as conn:
@@ -1064,10 +1065,12 @@ def api_ghost_stats():
 
         return jsonify({
             "ok": True,
-            "total": total,
-            "ghost_wins": stats.get("ghost_wins", 0),
-            "ghost_losses": stats.get("ghost_losses", 0),
-            "ghost_win_rate": round(stats.get("ghost_win_rate", 0) * 100, 1),
+            "total": g2_summary.get("total", 0),
+            "ghost_wins": g2_summary.get("wins", 0),
+            "ghost_losses": g2_summary.get("losses", 0),
+            "ghost_win_rate": g2_summary.get("win_rate", 0),
+            "ghost_pnl": g2_summary.get("ghost_pnl", 0.0),
+            "top_patterns": g2_summary.get("top_patterns", []),
             "correct_skips": stats.get("correct_skips", 0),
             "accuracy_pct": accuracy,
             "avg_mfe_r": stats.get("avg_mfe", 0),
@@ -1087,6 +1090,7 @@ def api_ghost_stats():
     except Exception as e:
         logger.error(f"[API] /api/ghost-stats hatasi: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 # ── /api/ghost-replay ───────────────────────────────────────────────────────
