@@ -183,14 +183,14 @@ CVD_CONFIRM_BONUS   = _env_float("CVD_CONFIRM_BONUS", 1.0)    # CVD confirm bonu
 
 # Guvenlik
 def is_live_trading_allowed() -> bool:
-    return (EXECUTION_MODE == "live" and LIVE_TRADING_ENABLED and CONFIRM_LIVE_TRADING)
+    return (__getattr__("EXECUTION_MODE") == "live" and LIVE_TRADING_ENABLED and CONFIRM_LIVE_TRADING)
 
 def is_private_api_allowed() -> bool:
     return USE_BINANCE_PRIVATE_API
 
 def safety_summary() -> dict:
     return {
-        "execution_mode": EXECUTION_MODE, "ax_mode": AX_MODE,
+        "execution_mode": __getattr__("EXECUTION_MODE"), "ax_mode": AX_MODE,
         "live_trading_enabled": LIVE_TRADING_ENABLED, "dry_run": DRY_RUN,
         "live_allowed": is_live_trading_allowed(),
     }

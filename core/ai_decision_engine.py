@@ -805,6 +805,9 @@ def classify_signal(
             else:
                 # Skor iyiyse riski düşürtüp izin ver
                 signal.risk_pct *= 0.5
+                signal.position_size = round(signal.position_size * 0.5, 6)
+                signal.notional_size = round(signal.notional_size * 0.5, 4)
+                signal.max_loss = round(signal.max_loss * 0.5, 4)
     except Exception as e:
         logger.debug(f"[AI] Korelasyon kalkanı atlandı: {e}")
 
@@ -824,6 +827,9 @@ def classify_signal(
                 )
             else:
                 signal.risk_pct *= 0.5 # Riski yarıya düşür
+                signal.position_size = round(signal.position_size * 0.5, 6)
+                signal.notional_size = round(signal.notional_size * 0.5, 4)
+                signal.max_loss = round(signal.max_loss * 0.5, 4)
                 
         # Aşırı coşku varsa SHORT işlemlere kısıtlama
         elif fng_val > 75 and signal.side == "SHORT":
@@ -835,6 +841,9 @@ def classify_signal(
                 )
             else:
                 signal.risk_pct *= 0.5
+                signal.position_size = round(signal.position_size * 0.5, 6)
+                signal.notional_size = round(signal.notional_size * 0.5, 4)
+                signal.max_loss = round(signal.max_loss * 0.5, 4)
     except Exception as e:
         logger.debug(f"[AI] Macro kalkanı atlandı: {e}")
 

@@ -157,11 +157,13 @@ class LiveExecutionEngine:
             logger.error(f"Gercek bakiye yetersiz: {live_balance} USDT")
             return None
 
-        # 2. Risk hesaplama (Kelly Dinamik Büyüklük)
-        base_risk = config.RISK_PCT
-        score = getattr(signal, "final_score", 75.0) or 75.0
-        dynamic_risk = base_risk * (score / 75.0)
-        risk_pct = max(base_risk * 0.5, min(dynamic_risk, base_risk * 1.5))
+        # 2. Risk hesaplama (Approved dynamic risk from SignalData)
+        risk_pct = getattr(signal, "risk_pct", 0) or getattr(signal, "risk_percent", 0)
+        if risk_pct <= 0:
+            base_risk = config.RISK_PCT
+            score = getattr(signal, "final_score", 75.0) or 75.0
+            dynamic_risk = base_risk * (score / 75.0)
+            risk_pct = max(base_risk * 0.5, min(dynamic_risk, base_risk * 1.5))
         
         risk_usd = balance * (risk_pct / 100.0)
         
@@ -182,11 +184,16 @@ class LiveExecutionEngine:
             logger.error(f"Hesaplanan miktar borsanin min limitinden kucuk. Bakiye yetersiz olabilir.")
             return None
             
-        margin_used = (qty_float * current_price) / config.MAX_LEVERAGE
+        leverage = int(getattr(signal, "leverage", 0) or getattr(signal, "leverage_suggestion", 0) or config.MAX_LEVERAGE)
+        leverage = min(leverage, config.MAX_LEVERAGE)
+        if leverage <= 0:
+            leverage = 10
+            
+        margin_used = (qty_float * current_price) / leverage
 
         # 3. Kaldirac ve Margin Modu Ayarlama
         try:
-            self.client.futures_change_leverage(symbol=symbol, leverage=config.MAX_LEVERAGE)
+            self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
         except BinanceAPIException as e:
             logger.debug(f"Kaldirac ayari (zaten ayni olabilir): {e}")
             
@@ -281,7 +288,7 @@ class LiveExecutionEngine:
             tp1=signal.tp1,
             tp2=signal.tp2,
             tp3=signal.tp3,
-            leverage=config.MAX_LEVERAGE,
+            leverage=leverage,
             margin_used=margin_used,
             notional=qty_float * entry_price,
             risk_pct=risk_pct,

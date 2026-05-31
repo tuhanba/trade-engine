@@ -303,6 +303,19 @@ class _SignalRecord:
         """AI engine uyumluluğu — direction alanından oku."""
         return getattr(self, 'direction', 'LONG') or 'LONG'
 
+    @side.setter
+    def side(self, val: str):
+        self.direction = val
+
+    @property
+    def risk_pct(self) -> float:
+        """AI engine ve risk engine uyumluluğu — risk_percent alanından oku."""
+        return self.risk_percent
+
+    @risk_pct.setter
+    def risk_pct(self, val: float):
+        self.risk_percent = val
+
     def is_valid(self) -> bool:
         return bool(
             self.symbol

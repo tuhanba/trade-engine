@@ -1294,10 +1294,9 @@ def get_dashboard_stats() -> dict:
         ).fetchone()
         today_pnl = float(today_row[0]) if today_row else 0.0
 
-        # Bakiye: paper_account tek kaynak of truth
+        # Bakiye: dinamik get_active_balance() kullanımı
         try:
-            _bal_row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
-            balance = float(_bal_row[0]) if _bal_row else getattr(config, 'INITIAL_PAPER_BALANCE', 2000.0)
+            balance = get_active_balance()
         except Exception:
             balance = getattr(config, 'INITIAL_PAPER_BALANCE', 2000.0)
 
@@ -1681,22 +1680,34 @@ def get_paper_balance() -> float:
         return _default
 
 
+_last_live_balance_fetch = 0.0
+_cached_live_balance = 0.0
+_last_live_details_fetch = 0.0
+_cached_live_details = {}
+
 def get_active_balance() -> float:
     """
     Dinamik olarak aktif bakiyeyi döner. Canlı modda Binance Futures cüzdan bakiyesini,
     paper modda SQLite paper_account bakiyesini kullanır.
     """
+    global _last_live_balance_fetch, _cached_live_balance
     try:
         import config
-        # System_state'den canlı mod kontrolü (config.EXECUTION_MODE dynamic load fallback)
+        import time
         exec_mode = getattr(config, "EXECUTION_MODE", "paper")
         if exec_mode == "live":
+            now = time.time()
+            if now - _last_live_balance_fetch < 15.0 and _cached_live_balance > 0:
+                return _cached_live_balance
+            
             from binance.client import Client
             if config.BINANCE_API_KEY and config.BINANCE_API_SECRET:
                 client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET)
                 account = client.futures_account()
                 balance = float(account.get('totalWalletBalance', 0.0))
                 if balance > 0:
+                    _cached_live_balance = balance
+                    _last_live_balance_fetch = now
                     return balance
     except Exception as e:
         logger.debug(f"[Balance] Canlı bakiye alınamadı, paper bakiye kullanılıyor: {e}")
@@ -1707,6 +1718,7 @@ def get_active_balance_details() -> dict:
     """
     Aktif bakiye detaylarını döner (total, available, execution_mode).
     """
+    global _last_live_details_fetch, _cached_live_details
     paper = get_paper_balance()
     res = {
         "execution_mode": "paper",
@@ -1715,8 +1727,13 @@ def get_active_balance_details() -> dict:
     }
     try:
         import config
+        import time
         exec_mode = getattr(config, "EXECUTION_MODE", "paper")
         if exec_mode == "live":
+            now = time.time()
+            if now - _last_live_details_fetch < 15.0 and _cached_live_details:
+                return _cached_live_details
+            
             res["execution_mode"] = "live"
             from binance.client import Client
             if config.BINANCE_API_KEY and config.BINANCE_API_SECRET:
@@ -1724,6 +1741,8 @@ def get_active_balance_details() -> dict:
                 account = client.futures_account()
                 res["total"] = float(account.get('totalWalletBalance', 0.0))
                 res["available"] = float(account.get('availableBalance', 0.0))
+                _cached_live_details = res.copy()
+                _last_live_details_fetch = now
                 return res
     except Exception as e:
         logger.debug(f"[Balance] Canlı bakiye detayları alınamadı: {e}")

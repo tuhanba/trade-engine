@@ -13,7 +13,7 @@ import asyncio
 from core.event_bus import event_bus
 from core.event_types import Event, EventType
 from core.risk_engine import RiskEngine
-from database import get_paper_balance
+from database import get_active_balance
 
 logger = logging.getLogger("ax.services.risk")
 
@@ -43,7 +43,7 @@ class RiskService:
                 logger.warning("[RiskService] %s entry=0 — trigger_result keys: %s",
                                symbol, list(trigger_result.keys()))
 
-            balance = await asyncio.to_thread(get_paper_balance)
+            balance = await asyncio.to_thread(get_active_balance)
 
             risk_result = await asyncio.to_thread(
                 self.risk_engine.calculate,
