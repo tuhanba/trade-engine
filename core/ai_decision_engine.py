@@ -877,17 +877,25 @@ def classify_signal(
             f"({ghost_stats['tp_hits']}W/{ghost_stats['sl_hits']}L)"
         )
 
+    try:
+        import config
+        trade_threshold = config.HUMAN_TRADE_THRESHOLD if getattr(config, "HUMAN_MODE", False) else getattr(config, "TRADE_THRESHOLD", 55.0)
+        watchlist_threshold = getattr(config, "WATCHLIST_THRESHOLD", 28.0)
+    except Exception:
+        trade_threshold = 55.0
+        watchlist_threshold = 28.0
+
     # ── Karar ────────────────────────────────────────────────────
     decision = SignalDecision.WATCH.value
     reason = f"Adjusted score: {adjusted_score}"
     confidence = 0.4
 
-    if adjusted_score >= 30:
+    if adjusted_score >= trade_threshold:
         decision = SignalDecision.ALLOW.value
         reason = f"Score yeterli: {adjusted_score:.1f} (ham={signal.score:.1f})"
         confidence = min(0.5 + adjusted_score / 150, 0.95)
 
-    elif adjusted_score >= 15:
+    elif adjusted_score >= watchlist_threshold:
         decision = SignalDecision.WATCH.value
         reason = f"Orta score: {adjusted_score:.1f} – izleme"
         confidence = 0.35

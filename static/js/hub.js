@@ -13,12 +13,6 @@ const CIRC = 2 * Math.PI * 36;
 
 function rnd(a, b) { return a + Math.random() * (b - a); }
 
-function mkSignal(coin) {
-  const r = Math.random();
-  const type = r < 0.13 ? "LONG" : r < 0.25 ? "SHORT" : "NEUTRAL";
-  return { coin, type, score: +(type === "NEUTRAL" ? rnd(8, 45) : rnd(65, 97)).toFixed(1) };
-}
-
 function sigCol(t) { return t === "LONG" ? "#00e87a" : t === "SHORT" ? "#ff3d5a" : "#3a3a50"; }
 function sigBg(t)  { return t === "LONG" ? "rgba(0,232,122,.05)" : t === "SHORT" ? "rgba(255,61,90,.05)" : "transparent"; }
 function sigBdr(t) { return t === "LONG" ? "rgba(0,232,122,.28)" : t === "SHORT" ? "rgba(255,61,90,.28)" : "rgba(212,168,67,.1)"; }
@@ -27,25 +21,9 @@ function fmtTime(ts) { return new Date(ts).toTimeString().slice(0, 8); }
 const state = {
   coins: {},
   feed: [],
-  bal: 10000.00,
-  m: { wr: 67.3, ml: 87.2, today: 23 },
+  bal: 2000.00,
+  m: { wr: 50.0, ml: 87.2, today: 0 },
 };
-
-function initCoins() {
-  COINS.forEach(c => { state.coins[c] = mkSignal(c); });
-}
-
-function initFeed() {
-  state.feed = [...COINS].sort(() => Math.random() - 0.5).slice(0, 12)
-    .map((coin, i) => ({
-      id: Math.random(),
-      coin,
-      type: Math.random() < 0.58 ? "LONG" : "SHORT",
-      score: +rnd(68, 97).toFixed(1),
-      ts: Date.now() - i * rnd(40000, 280000),
-    }))
-    .sort((a, b) => b.ts - a.ts);
-}
 
 function buildMlBars() {
   const container = document.getElementById("mlBars");
@@ -78,23 +56,28 @@ function buildCoinGrid() {
   document.getElementById("universeLabel").textContent = `◆ UNIVERSE — ${COINS.length} PAIRS`;
 
   COINS.forEach(coin => {
-    const d = state.coins[coin];
+    const d = state.coins[coin] || { coin, type: "NEUTRAL", score: 0 };
     const card = document.createElement("div");
+    const isActive = d.active;
+
     card.className = "coin-card cc" + (d.type === "LONG" ? " aGL" : d.type === "SHORT" ? " aGS" : "");
     card.id = "coin-" + coin;
-    card.style.background = sigBg(d.type);
-    card.style.border = "1px solid " + sigBdr(d.type);
+    card.style.background = isActive ? "rgba(212,168,67,.06)" : sigBg(d.type);
+    card.style.border = isActive ? "1px solid #d4a843" : sigBdr(d.type);
+    if (isActive) {
+      card.style.boxShadow = "0 0 10px rgba(212,168,67,.28)";
+    }
 
     card.innerHTML = `
       <div class="coin-top">
         <span class="coin-name">${coin}</span>
-        ${d.type !== "NEUTRAL" ? `<span class="coin-dot aBL" style="background:${sigCol(d.type)}"></span>` : ""}
+        ${d.type !== "NEUTRAL" ? `<span class="coin-dot aBL" style="background:${isActive ? '#d4a843' : sigCol(d.type)}"></span>` : ""}
       </div>
-      <div class="coin-signal" style="color:${d.type !== "NEUTRAL" ? sigCol(d.type) : "rgba(212,168,67,.15)"}">
-        ${d.type !== "NEUTRAL" ? d.type[0] + " " + d.score : "—"}
+      <div class="coin-signal" style="color:${isActive ? '#d4a843' : (d.type !== "NEUTRAL" ? sigCol(d.type) : "rgba(212,168,67,.15)")}">
+        ${d.type !== "NEUTRAL" ? (isActive ? "★ ACTIVE" : d.type[0] + " " + d.score) : "—"}
       </div>
       <div class="coin-bar-bg">
-        <div class="coin-bar" style="width:${d.score}%;background:${sigCol(d.type)};opacity:${d.type === "NEUTRAL" ? .1 : .62}"></div>
+        <div class="coin-bar" style="width:${d.score}%;background:${isActive ? '#d4a843' : sigCol(d.type)};opacity:${d.type === "NEUTRAL" ? .1 : .62}"></div>
       </div>`;
     grid.appendChild(card);
   });
@@ -102,30 +85,41 @@ function buildCoinGrid() {
 
 function updateCoinCard(coin) {
   const d = state.coins[coin];
+  if (!d) return;
   const card = document.getElementById("coin-" + coin);
   if (!card) return;
 
+  const isActive = d.active;
   card.className = "coin-card cc" + (d.type === "LONG" ? " aGL" : d.type === "SHORT" ? " aGS" : "");
-  card.style.background = sigBg(d.type);
-  card.style.border = "1px solid " + sigBdr(d.type);
+  card.style.background = isActive ? "rgba(212,168,67,.06)" : sigBg(d.type);
+  card.style.border = isActive ? "1px solid #d4a843" : sigBdr(d.type);
+  if (isActive) {
+    card.style.boxShadow = "0 0 10px rgba(212,168,67,.28)";
+  } else {
+    card.style.boxShadow = "none";
+  }
 
   const top = card.querySelector(".coin-top");
   top.innerHTML = `<span class="coin-name">${coin}</span>` +
-    (d.type !== "NEUTRAL" ? `<span class="coin-dot aBL" style="background:${sigCol(d.type)}"></span>` : "");
+    (d.type !== "NEUTRAL" ? `<span class="coin-dot aBL" style="background:${isActive ? '#d4a843' : sigCol(d.type)}"></span>` : "");
 
   const sig = card.querySelector(".coin-signal");
-  sig.style.color = d.type !== "NEUTRAL" ? sigCol(d.type) : "rgba(212,168,67,.15)";
-  sig.textContent = d.type !== "NEUTRAL" ? d.type[0] + " " + d.score : "—";
+  sig.style.color = isActive ? '#d4a843' : (d.type !== "NEUTRAL" ? sigCol(d.type) : "rgba(212,168,67,.15)");
+  sig.textContent = d.type !== "NEUTRAL" ? (isActive ? "★ ACTIVE" : d.type[0] + " " + d.score) : "—";
 
   const bar = card.querySelector(".coin-bar");
   bar.style.width = d.score + "%";
-  bar.style.background = sigCol(d.type);
+  bar.style.background = isActive ? '#d4a843' : sigCol(d.type);
   bar.style.opacity = d.type === "NEUTRAL" ? .1 : .62;
 }
 
 function renderFeed() {
   const list = document.getElementById("feedList");
   list.innerHTML = "";
+  if (state.feed.length === 0) {
+    list.innerHTML = `<div class="feed-item" style="text-align:center;color:rgba(212,168,67,.3)">NO RECENT SIGNALS</div>`;
+    return;
+  }
   state.feed.forEach(item => {
     const div = document.createElement("div");
     div.className = "feed-item aFI";
@@ -142,8 +136,8 @@ function renderFeed() {
 
 function updateCounts() {
   const vals = Object.values(state.coins);
-  document.getElementById("longCount").textContent = vals.filter(c => c.type === "LONG").length;
-  document.getElementById("shortCount").textContent = vals.filter(c => c.type === "SHORT").length;
+  document.getElementById("longCount").textContent = vals.filter(c => c.active && c.type === "LONG").length;
+  document.getElementById("shortCount").textContent = vals.filter(c => c.active && c.type === "SHORT").length;
   document.getElementById("todayCount").textContent = state.m.today;
 }
 
@@ -168,60 +162,148 @@ function updateClock() {
   const utc = now.toUTCString().slice(17, 25);
   const local = now.toTimeString().slice(0, 8);
   document.getElementById("clock").textContent = utc + " UTC";
-  document.getElementById("footerClock").textContent = local;
+  const footerClockEl = document.getElementById("footerClock");
+  if (footerClockEl) footerClockEl.textContent = local;
 }
 
-function tick() {
-  const picks = [...COINS].sort(() => Math.random() - .5).slice(0, Math.ceil(rnd(2, 5)));
-  const newItems = [];
+async function tick() {
+  try {
+    // 1. Fetch `/api/dashboard_data`
+    const dbDataResp = await fetch('/api/dashboard_data');
+    if (!dbDataResp.ok) return;
+    const dbData = await dbDataResp.json();
+    
+    // 2. Fetch `/api/learning`
+    let learning = null;
+    try {
+      const learningResp = await fetch('/api/learning');
+      if (learningResp.ok) learning = await learningResp.json();
+    } catch(e) {}
+    
+    // 3. Fetch `/api/signals`
+    let signals = null;
+    try {
+      const signalsResp = await fetch('/api/signals');
+      if (signalsResp.ok) signals = await signalsResp.json();
+    } catch(e) {}
+    
+    // 4. Fetch `/api/ml_status`
+    let mlStatus = null;
+    try {
+      const mlResp = await fetch('/api/ml_status');
+      if (mlResp.ok) mlStatus = await mlResp.json();
+    } catch(e) {}
 
-  picks.forEach(coin => {
-    const d = mkSignal(coin);
-    if (Math.random() < .43) {
-      d.type = Math.random() < .57 ? "LONG" : "SHORT";
-      d.score = +rnd(68, 97).toFixed(1);
-      newItems.push({ id: Date.now() + Math.random(), coin, type: d.type, score: d.score, ts: Date.now() });
+    // 5. Fetch `/api/coin_profiles`
+    let coinProfiles = null;
+    try {
+      const cpResp = await fetch('/api/coin_profiles');
+      if (cpResp.ok) coinProfiles = await cpResp.json();
+    } catch(e) {}
+
+    // 6. Update state balance
+    if (dbData && dbData.total_balance !== undefined) {
+      state.bal = dbData.total_balance;
     }
-    state.coins[coin] = d;
-    updateCoinCard(coin);
-  });
-
-  picks.forEach(coin => {
-    const card = document.getElementById("coin-" + coin);
-    if (card) {
-      card.classList.add("aFL");
-      setTimeout(() => card.classList.remove("aFL"), 620);
+    
+    // 7. Update metrics (win rate)
+    if (dbData && dbData.stats) {
+      state.m.wr = dbData.stats.win_rate || 0.0;
     }
-  });
+    
+    if (mlStatus && mlStatus.data) {
+      state.m.ml = (mlStatus.data.cv_accuracy || 0.87) * 100;
+      const mlStatusText = `● ENSEMBLE · ${mlStatus.data.n_samples || 0} SAMPLES`;
+      const mlStatusEl = document.querySelector(".ml-status");
+      if (mlStatusEl) mlStatusEl.textContent = mlStatusText;
+    }
+    
+    // 8. Process active signals / trades
+    const activeTrades = dbData.active_trades || [];
+    
+    // Today's total closed trades count
+    try {
+      const statsResp = await fetch('/api/stats');
+      const statsJson = await statsResp.json();
+      if (statsJson.ok && statsJson.data) {
+        state.m.today = statsJson.data.funnel ? statsJson.data.funnel.trade : statsJson.data.total_trades || 0;
+      }
+    } catch(e){}
 
-  if (newItems.length) {
-    state.feed = [...newItems, ...state.feed].slice(0, 25);
-    renderFeed();
+    // Update state.coins
+    // First, reset all coins to NEUTRAL
+    COINS.forEach(c => {
+      state.coins[c] = { coin: c, type: "NEUTRAL", score: 0 };
+    });
+
+    // Apply coin profiles
+    if (coinProfiles && coinProfiles.data) {
+      coinProfiles.data.forEach(p => {
+        const base = p.symbol.replace("USDT", "");
+        if (COINS.includes(base)) {
+          const wr = p.win_rate_pct || 50;
+          state.coins[base] = {
+            coin: base,
+            type: wr >= 55.0 ? "LONG" : (wr <= 45.0 ? "SHORT" : "NEUTRAL"),
+            score: wr
+          };
+        }
+      });
+    }
+
+    // Overlay active trades (highest priority)
+    const pickedActiveCoins = [];
+    activeTrades.forEach(t => {
+      const base = t.symbol.replace("USDT", "");
+      if (COINS.includes(base)) {
+        state.coins[base] = {
+          coin: base,
+          type: t.direction,
+          score: t.final_score || 75,
+          active: true
+        };
+        pickedActiveCoins.push(base);
+      }
+    });
+
+    // Rebuild coin grid to update UI
+    buildCoinGrid();
+
+    // Trigger visual highlight flash for active coins
+    pickedActiveCoins.forEach(coin => {
+      const card = document.getElementById("coin-" + coin);
+      if (card) {
+        card.classList.add("aFL");
+        setTimeout(() => card.classList.remove("aFL"), 620);
+      }
+    });
+
+    // Reprocess feed from recent signals
+    if (signals && signals.data) {
+      state.feed = signals.data.slice(0, 15).map(s => ({
+        coin: s.symbol.replace("USDT", ""),
+        type: s.direction,
+        score: s.final_score || s.score || 50,
+        ts: s.created_at ? new Date(s.created_at.replace(" ", "T") + "Z").getTime() : Date.now()
+      }));
+      renderFeed();
+    }
+
+    updateCounts();
+    updateWinRate();
+    updateMl();
+    updateBal();
+
+  } catch (error) {
+    console.error("Error refreshing dashboard data in tick:", error);
   }
-
-  state.m.wr = Math.max(50, Math.min(82, state.m.wr + rnd(-.4, .4)));
-  state.m.ml = Math.max(72, Math.min(98, state.m.ml + rnd(-.22, .22)));
-  state.m.today += Math.random() < .25 ? 1 : 0;
-  state.bal = +Math.max(9200, Math.min(12500, state.bal + rnd(-18, 28))).toFixed(2);
-
-  updateCounts();
-  updateWinRate();
-  updateMl();
-  updateBal();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  initCoins();
-  initFeed();
   buildMlBars();
-  buildCoinGrid();
-  renderFeed();
-  updateCounts();
-  updateWinRate();
-  updateMl();
-  updateBal();
   updateClock();
+  tick(); // Load real data immediately
 
   setInterval(updateClock, 1000);
-  setInterval(tick, 7500);
+  setInterval(tick, 5000); // Poll every 5 seconds for real-time updates
 });
