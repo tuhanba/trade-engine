@@ -61,22 +61,47 @@ class AIDecisionResult:
 # ── AIDecisionEngine constants ───────────────────────────────────────
 
 try:
-    from config import DATA_THRESHOLD, WATCHLIST_THRESHOLD, TELEGRAM_THRESHOLD, TRADE_THRESHOLD
-    _BAD_HOURS = getattr(__import__('config'), 'BAD_HOURS_UTC', [])
-    _GOOD_HOURS = getattr(__import__('config'), 'GOOD_HOURS_UTC', [])
+    import config
+    _BAD_HOURS = getattr(config, 'BAD_HOURS_UTC', [])
+    _GOOD_HOURS = getattr(config, 'GOOD_HOURS_UTC', [])
     MIN_TRADES_FOR_RISK_UPDATE = 10
     MIN_CANDIDATES_FOR_THRESHOLD_UPDATE = 20
     MIN_CANDIDATES_FOR_COIN_LEARNING = 5
     PARAM_BOUNDS = {"sl_atr_mult": (0.8, 3.0), "tp_atr_mult": (1.0, 5.0), "risk_pct": (0.3, 3.0)}
     def clamp(v, lo, hi): return max(lo, min(hi, v))
 except Exception:
-    DATA_THRESHOLD = 55.0; WATCHLIST_THRESHOLD = 60.0
-    TELEGRAM_THRESHOLD = 65.0; TRADE_THRESHOLD = 72.0
     _BAD_HOURS = []; _GOOD_HOURS = []
     MIN_TRADES_FOR_RISK_UPDATE = 10; MIN_CANDIDATES_FOR_THRESHOLD_UPDATE = 20
     MIN_CANDIDATES_FOR_COIN_LEARNING = 5
     PARAM_BOUNDS = {"sl_atr_mult": (0.8, 3.0), "tp_atr_mult": (1.0, 5.0), "risk_pct": (0.3, 3.0)}
     def clamp(v, lo, hi): return max(lo, min(hi, v))
+
+
+class DynamicThresholds:
+    def __init__(self, fallback_dict):
+        self.fallback = fallback_dict
+
+    def __getitem__(self, key):
+        try:
+            import config
+            if key == "trade":
+                return getattr(config, "TRADE_THRESHOLD", self.fallback["trade"])
+            elif key == "data":
+                return getattr(config, "DATA_THRESHOLD", self.fallback["data"])
+            elif key == "watchlist":
+                return getattr(config, "WATCHLIST_THRESHOLD", self.fallback["watchlist"])
+            elif key == "telegram":
+                return getattr(config, "TELEGRAM_THRESHOLD", self.fallback["telegram"])
+        except Exception:
+            pass
+        return self.fallback.get(key)
+
+    def __setitem__(self, key, value):
+        self.fallback[key] = value
+
+    def get(self, key, default=None):
+        val = self[key]
+        return val if val is not None else default
 
 
 # ── AIDecisionEngine ─────────────────────────────────────────────────
@@ -92,12 +117,12 @@ class AIDecisionEngine:
         self.max_daily_signals = 40  # Backtest: kalite > miktar
         self.recent_coins = []
         self.last_reset_date = datetime.now(timezone.utc).date()
-        self.thresholds = {
-            "data": DATA_THRESHOLD,
-            "watchlist": WATCHLIST_THRESHOLD,
-            "telegram": TELEGRAM_THRESHOLD,
-            "trade": TRADE_THRESHOLD,
-        }
+        self.thresholds = DynamicThresholds({
+            "data": 55.0,
+            "watchlist": 60.0,
+            "telegram": 65.0,
+            "trade": 72.0,
+        })
 
         # Dinamik parametreler
         self.params = {
@@ -293,6 +318,7 @@ class AIDecisionEngine:
 
             # Parametreleri optimize et
             self._optimize_params()
+            self._update_threshold_from_ghost()
 
         except Exception as e:
             logger.error(f"AI öğrenme hatası: {e}")
@@ -337,6 +363,12 @@ class AIDecisionEngine:
                         }),
                     ),
                 )
+                # system_state tablosuna da yaz (dinamik config için)
+                conn.execute("""
+                    INSERT INTO system_state (key, value, updated_at)
+                    VALUES ('trade_threshold', ?, datetime('now'))
+                    ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
+                """, (str(new_threshold), str(new_threshold)))
                 conn.commit()
             logger.info(
                 f"[AI] TRADE_THRESHOLD {old_threshold:.1f} -> {new_threshold:.1f} "
@@ -445,6 +477,7 @@ class AIDecisionEngine:
             logger.info(
                 f"[AI] {symbol} profil: wr={wins/total:.1%} pf={pf} avg_r={avg_r:.2f} n={total}"
             )
+            self._update_threshold_from_ghost()
         except Exception as e:
             logger.warning(f"[AI] learn_from_outcome hatası {symbol}: {e}")
 

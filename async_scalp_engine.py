@@ -116,6 +116,12 @@ class AsyncScalpEngine:
         self.telegram_manager = TelegramManager(telegram_delivery.send_message)
         self.telegram_manager.start()
 
+        # Recover queued Telegram messages on startup
+        try:
+            telegram_delivery.recover_queued_messages()
+        except Exception as e:
+            logger.error(f"Telegram queue recovery failed: {e}")
+
         # Start Macro Service
         try:
             from core.services.macro_service import macro_service

@@ -5,6 +5,7 @@ Merge conflict cozuldu. Her iki branch'in en iyisi birlestirme.
 import os
 import logging
 from pathlib import Path
+from typing import Any
 
 try:
     from dotenv import load_dotenv
@@ -193,3 +194,34 @@ def safety_summary() -> dict:
         "live_trading_enabled": LIVE_TRADING_ENABLED, "dry_run": DRY_RUN,
         "live_allowed": is_live_trading_allowed(),
     }
+
+# ── Dynamic Configuration Bridging ───────────────────────────────────────────
+_DYNAMIC_PARAMS_MAP = {
+    "TRADE_THRESHOLD":      ("trade_threshold", float),
+    "TELEGRAM_THRESHOLD":   ("telegram_threshold", float),
+    "WATCHLIST_THRESHOLD":  ("watchlist_threshold", float),
+    "DATA_THRESHOLD":       ("data_threshold", float),
+    "HUMAN_MODE":           ("tg_human_mode", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "EXECUTION_MODE":       ("tg_execution_mode", str),
+}
+
+def __getattr__(name: str) -> Any:
+    """Modül düzeyinde dinamik parametreleri veritabanından okur."""
+    if name in _DYNAMIC_PARAMS_MAP:
+        try:
+            db_key, cast_fn = _DYNAMIC_PARAMS_MAP[name]
+            import sqlite3
+            # Dairesel importu önlemek için raw connection:
+            conn = sqlite3.connect(DB_PATH, timeout=5)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT value FROM system_state WHERE key = ?", (db_key,)).fetchone()
+            conn.close()
+            if row and row["value"] is not None:
+                return cast_fn(row["value"])
+        except Exception:
+            pass
+
+    # Fallback to local globals
+    if name in globals():
+        return globals()[name]
+    raise AttributeError(f"module {__name__} has no attribute {name}")

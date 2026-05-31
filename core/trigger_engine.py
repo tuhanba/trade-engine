@@ -191,7 +191,7 @@ class TriggerEngine:
         vwap_val = self._vwap(df1)
 
         import config
-        is_human = getattr(config, "HUMAN_MODE_ENABLED", True)
+        is_human = getattr(config, "HUMAN_MODE", False)
 
         is_micro_scalp = False
         if not is_human:

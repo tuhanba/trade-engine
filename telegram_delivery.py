@@ -145,8 +145,14 @@ def _send_raw_detailed(text: str, parse_mode: str = "HTML") -> tuple[bool, int]:
             f"[Telegram] Raw send failed: HTTP {resp.status_code} — {resp.text[:100]}"
         )
         return False, resp.status_code
+    except requests.exceptions.ConnectTimeout:
+        logger.warning("[Telegram] Connect timeout")
+        return False, 499
+    except requests.exceptions.ReadTimeout:
+        logger.warning("[Telegram] Read timeout")
+        return False, 408
     except requests.exceptions.Timeout:
-        logger.warning("[Telegram] Raw send timeout")
+        logger.warning("[Telegram] General timeout")
         return False, 408
     except Exception as e:
         logger.debug(f"_send_raw error: {e}")
@@ -205,11 +211,24 @@ class _Queue:
                                 pass
                     else:
                         is_client_error = status_code in (400, 401, 404)
+                        is_read_timeout = status_code == 408
                         if is_client_error:
                             logger.error(
                                 f"[Telegram Queue Worker] Kalıcı gönderim hatası (HTTP {status_code}). Retry iptal edildi. DedupeKey: {dk}"
                             )
                             attempts = 99
+                        elif is_read_timeout:
+                            logger.warning(
+                                f"[Telegram Queue Worker] Read timeout (HTTP 408). Mesajın gönderilmiş olma ihtimali yüksek. "
+                                f"Mükerrer gönderimi önlemek için retry iptal ediliyor. DedupeKey: {dk}"
+                            )
+                            attempts = 99
+                            if dk:
+                                try:
+                                    from database import mark_telegram_message_sent
+                                    mark_telegram_message_sent(dk)
+                                except Exception:
+                                    pass
                         else:
                             attempts += 1
                         
@@ -223,7 +242,7 @@ class _Queue:
                             with self._lock:
                                 self._q.appendleft((text, pm, dk, attempts))
                             self._event.set()
-                        else:
+                        elif attempts != 99:  # attempts == 99 is either client error or read timeout (already handled)
                             logger.error(
                                 f"[Telegram Queue Worker] Gönderim KALICI olarak başarısız. DedupeKey: {dk}"
                             )
@@ -422,7 +441,7 @@ def deliver_signal(sig):
         return False
 
 
-def send_trade_open(data: dict):
+def send_trade_open(data: dict) -> bool:
     """Trade açılış bildirimi."""
     try:
         direction_emoji = "🟢 LONG" if str(data.get("direction", "")).upper() == "LONG" else "🔴 SHORT"
@@ -440,13 +459,25 @@ def send_trade_open(data: dict):
             f"💰 <b>Risk USD:</b> ${_fmt(data.get('risk_usd', 0), 2)}\n"
             f"⚡ <b>Kalite:</b>   {data.get('setup_quality', '-')} (Skor: {_fmt(data.get('final_score', 0), 1)})\n"
         )
-        _queue.push(text)
+        
+        dedupe_key = f"open:{symbol}:{data.get('direction', '')}:{_fmt(data.get('entry', 0))}"
+        try:
+            saved = save_telegram_message("", symbol, dedupe_key, text, status="queued")
+            if not saved:
+                logger.debug(f"Duplicate trade open message blocked by DB: {dedupe_key}")
+                return False
+        except Exception as e:
+            logger.warning(f"save_telegram_message error: {e}")
+            
+        _queue.push(text, dedupe_key=dedupe_key, symbol=symbol)
+        return True
     except Exception as e:
         logger.error(f"Trade open bildirim hatası: {e}")
+        return False
 
 
 def send_tp_hit(symbol: str, tp_level: int, net_pnl: float,
-                remaining_qty: float, balance_after: float = 0):
+                remaining_qty: float, balance_after: float = 0) -> bool:
     """TP1 veya TP2 vurdu bildirimi."""
     try:
         emoji  = "🎯" if tp_level == 1 else "🏆"
@@ -461,15 +492,27 @@ def send_tp_hit(symbol: str, tp_level: int, net_pnl: float,
             text += "🏃 <i>Runner aktif. İşlem izleniyor.</i>\n"
         
         text += f"💳 Bakiye: <b>${balance_after:.2f}</b>\n"
-        _queue.push(text)
+        
+        dedupe_key = f"tp:{symbol}:{tp_level}:{_fmt(net_pnl)}"
+        try:
+            saved = save_telegram_message("", symbol, dedupe_key, text, status="queued")
+            if not saved:
+                logger.debug(f"Duplicate TP hit message blocked by DB: {dedupe_key}")
+                return False
+        except Exception as e:
+            logger.warning(f"save_telegram_message error: {e}")
+            
+        _queue.push(text, dedupe_key=dedupe_key, symbol=symbol)
+        return True
     except Exception as e:
         logger.error(f"TP{tp_level} bildirim hatası: {e}")
+        return False
 
 
 def send_trade_close(symbol: str, net_pnl: float, total_fee: float,
                      reason: str, duration_str: str,
                      direction: str = "", r_multiple: float = 0,
-                     balance_after: float = 0):
+                     balance_after: float = 0) -> bool:
     """Trade kapanış bildirimi."""
     try:
         sign   = "+" if net_pnl >= 0 else ""
@@ -503,9 +546,21 @@ def send_trade_close(symbol: str, net_pnl: float, total_fee: float,
             f"⏱️ <b>Süre:</b> {duration_str}\n\n"
             f"💳 <b>Güncel Bakiye:</b> ${balance_after:.2f}"
         )
-        _queue.push(text)
+        
+        dedupe_key = f"close:{symbol}:{direction}:{reason}:{_fmt(net_pnl)}"
+        try:
+            saved = save_telegram_message("", symbol, dedupe_key, text, status="queued")
+            if not saved:
+                logger.debug(f"Duplicate trade close message blocked by DB: {dedupe_key}")
+                return False
+        except Exception as e:
+            logger.warning(f"save_telegram_message error: {e}")
+            
+        _queue.push(text, dedupe_key=dedupe_key, symbol=symbol)
+        return True
     except Exception as e:
         logger.error(f"Trade close bildirim hatası: {e}")
+        return False
 
 
 def send_message(text):

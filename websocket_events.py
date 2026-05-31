@@ -1,29 +1,52 @@
 """
-websocket_events.py — Realtime WebSocket Event Emitter
+websocket_events.py — Realtime WebSocket Event Emitter v6.0
 ========================================================
 
 Dashboard'a gerçek zamanlı olayları gönderir.
-Kullanım: app.py'da socketio instance'ı ile birlikte çalışır.
-
-Events:
-- live_update: Açık pozisyon güncellemesi
-- pnl_update: PnL değişimi
-- trade_closed: Trade kapatıldı
-- signal_generated: Yeni sinyal
-- dashboard_refresh: Tam dashboard yenilemesi
+Farklı process'lerde çalışan Bot ve Flask süreçlerini birbirine
+bağlamak için Redis Pub/Sub köprüsü kullanılır.
 """
 
 import logging
+import json
+import threading
 from datetime import datetime, timezone
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
+# SocketIO plugin check
+SOCKETIO_AVAILABLE = True
+
+_redis_client = None
+
+def get_redis_client():
+    """Redis bağlantısını döner."""
+    global _redis_client
+    if _redis_client is None:
+        try:
+            import redis
+            import config
+            _redis_client = redis.Redis(
+                host=getattr(config, "REDIS_HOST", "127.0.0.1"),
+                port=getattr(config, "REDIS_PORT", 6379),
+                db=getattr(config, "REDIS_DB", 0),
+                password=getattr(config, "REDIS_PASSWORD", None) or None,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+                decode_responses=True,
+            )
+            _redis_client.ping()
+        except Exception as e:
+            logger.debug(f"[WebSocket] Redis connection failed (fallback to local/no-op): {e}")
+            _redis_client = False
+    return _redis_client if _redis_client is not False else None
+
 
 class WebSocketEventManager:
-    """Merkezi WebSocket event yöneticisi"""
+    """Merkezi WebSocket event yöneticisi (Redis Pub/Sub destekli)"""
     
-    def __init__(self, socketio):
+    def __init__(self, socketio=None):
         self.socketio = socketio
         self.connected_clients = set()
     
@@ -36,124 +59,157 @@ class WebSocketEventManager:
         """İstemci ayrıldığında kayıt sil"""
         self.connected_clients.discard(sid)
         logger.info(f"[WebSocket] İstemci ayrıldı: {sid}")
+
+    def _publish_event(self, event: str, payload: dict):
+        """Event'i yerel socketio veya Redis pub/sub üzerinden yayınlar."""
+        # 1. Eğer Flask process'indeysek (socketio aktif) doğrudan emit et:
+        if self.socketio:
+            try:
+                self.socketio.emit(event, payload, broadcast=True)
+                logger.debug(f"[WebSocket] Local emit: {event}")
+                return
+            except Exception as e:
+                logger.error(f"[WebSocket] Local emit hatası: {e}")
+
+        # 2. Bot process'indeysek Redis Pub/Sub üzerinden publish et:
+        r = get_redis_client()
+        if r:
+            try:
+                msg = json.dumps({"event": event, "payload": payload})
+                r.publish("ax_websocket_events", msg)
+                logger.debug(f"[WebSocket] Redis publish: {event}")
+            except Exception as e:
+                logger.error(f"[WebSocket] Redis publish hatası: {e}")
+        else:
+            logger.debug(f"[WebSocket] Event yutuldu (No SocketIO & No Redis): {event}")
     
     def broadcast_live_update(self, positions: list):
         """Açık pozisyonları broadcast et"""
-        try:
-            self.socketio.emit('live_update', {
-                'positions': positions,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'count': len(positions),
-            }, broadcast=True)
-            logger.debug(f"[WebSocket] Live update gönderildi: {len(positions)} pozisyon")
-        except Exception as e:
-            logger.error(f"[WebSocket] Live update hatası: {e}")
+        self._publish_event('live_update', {
+            'positions': positions,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'count': len(positions),
+        })
     
     def broadcast_pnl_update(self, balance: float, unrealized_pnl: float, realized_pnl: float):
         """PnL güncellemesi broadcast et"""
-        try:
-            self.socketio.emit('pnl_update', {
-                'balance': round(balance, 4),
-                'unrealized_pnl': round(unrealized_pnl, 6),
-                'realized_pnl': round(realized_pnl, 6),
-                'total_pnl': round(unrealized_pnl + realized_pnl, 6),
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-            }, broadcast=True)
-            logger.debug(f"[WebSocket] PnL update gönderildi: {balance:.2f}$")
-        except Exception as e:
-            logger.error(f"[WebSocket] PnL update hatası: {e}")
+        self._publish_event('pnl_update', {
+            'balance': round(balance, 4),
+            'unrealized_pnl': round(unrealized_pnl, 6),
+            'realized_pnl': round(realized_pnl, 6),
+            'total_pnl': round(unrealized_pnl + realized_pnl, 6),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        })
     
     def broadcast_trade_closed(self, symbol: str, direction: str, pnl: float, status: str):
         """Trade kapatıldığında broadcast et"""
-        try:
-            self.socketio.emit('trade_closed', {
-                'symbol': symbol,
-                'direction': direction,
-                'pnl': round(pnl, 6),
-                'status': status,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-            }, broadcast=True)
-            logger.debug(f"[WebSocket] Trade kapatıldı: {symbol} {direction} {pnl:.2f}$")
-        except Exception as e:
-            logger.error(f"[WebSocket] Trade closed hatası: {e}")
+        self._publish_event('trade_closed', {
+            'symbol': symbol,
+            'direction': direction,
+            'pnl': round(pnl, 6),
+            'status': status,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        })
     
     def broadcast_signal_generated(self, symbol: str, direction: str, quality: str, score: float):
         """Yeni sinyal oluşturulduğunda broadcast et"""
-        try:
-            self.socketio.emit('signal_generated', {
-                'symbol': symbol,
-                'direction': direction,
-                'quality': quality,
-                'score': round(score, 4),
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-            }, broadcast=True)
-            logger.debug(f"[WebSocket] Sinyal: {symbol} {quality} {score:.2f}")
-        except Exception as e:
-            logger.error(f"[WebSocket] Signal generated hatası: {e}")
+        self._publish_event('signal_generated', {
+            'symbol': symbol,
+            'direction': direction,
+            'quality': quality,
+            'score': round(score, 4),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        })
     
     def broadcast_dashboard_refresh(self):
         """Tam dashboard yenilemesi iste"""
-        try:
-            self.socketio.emit('dashboard_refresh', {
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-            }, broadcast=True)
-            logger.debug("[WebSocket] Dashboard refresh istendi")
-        except Exception as e:
-            logger.error(f"[WebSocket] Dashboard refresh hatası: {e}")
+        self._publish_event('dashboard_refresh', {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        })
 
     def broadcast_signal_rejected(self, symbol: str, direction: str, reason: str):
         """Sinyal reddedildiğinde broadcast et"""
-        try:
-            self.socketio.emit('signal_rejected', {
-                'symbol': symbol,
-                'direction': direction,
-                'reason': reason,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-            }, broadcast=True)
-            logger.debug(f"[WebSocket] Sinyal reddedildi: {symbol} {direction} {reason}")
-        except Exception as e:
-            logger.error(f"[WebSocket] Signal rejected hatası: {e}")
+        self._publish_event('signal_rejected', {
+            'symbol': symbol,
+            'direction': direction,
+            'reason': reason,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        })
     
     def send_to_client(self, sid: str, event: str, data: Dict[str, Any]):
-        """Belirli bir istemciye mesaj gönder"""
-        try:
-            self.socketio.emit(event, data, to=sid)
-            logger.debug(f"[WebSocket] Mesaj gönderildi {sid}: {event}")
-        except Exception as e:
-            logger.error(f"[WebSocket] Send to client hatası: {e}")
+        """Belirli bir istemciye mesaj gönder (Sadece Flask/Local)"""
+        if self.socketio:
+            try:
+                self.socketio.emit(event, data, to=sid)
+                logger.debug(f"[WebSocket] Mesaj gönderildi {sid}: {event}")
+            except Exception as e:
+                logger.error(f"[WebSocket] Send to client hatası: {e}")
 
 
-# Global instance (app.py'da başlatılır)
-event_manager: WebSocketEventManager = None
+# Global instance (app.py veya execution_engine.py import eder)
+event_manager: WebSocketEventManager = WebSocketEventManager()
+
+
+def start_redis_listener(socketio):
+    """Flask process'inde Redis Pub/Sub kanalını dinleyen thread'i başlatır."""
+    def listener():
+        r = get_redis_client()
+        if not r:
+            logger.warning("[WebSocket] Redis Pub/Sub dinleyicisi başlatılamadı (Redis bağlantısı yok)")
+            return
+            
+        pubsub = r.pubsub()
+        pubsub.subscribe("ax_websocket_events")
+        logger.info("[WebSocket] Redis Pub/Sub dinleyicisi aktif (ax_websocket_events dinleniyor)")
+        
+        for message in pubsub.listen():
+            if message['type'] == 'message':
+                try:
+                    data = json.loads(message['data'])
+                    event_name = data.get("event")
+                    payload = data.get("payload")
+                    if event_name and payload:
+                        # Flask SocketIO kullanarak tüm bağlı browser'lara ilet
+                        socketio.emit(event_name, payload, broadcast=True)
+                        logger.debug(f"[WebSocket] Redis'ten gelen event broadcast edildi: {event_name}")
+                except Exception as e:
+                    logger.error(f"[WebSocket] Redis listener mesaj işleme hatası: {e}")
+                    
+    thread = threading.Thread(target=listener, daemon=True, name="redis-ws-listener")
+    thread.start()
 
 
 def initialize_websocket_events(socketio):
-    """WebSocket event manager'ı başlat"""
+    """WebSocket event manager'ı Flask process'inde başlat ve Redis dinleyicisini çalıştır"""
     global event_manager
-    event_manager = WebSocketEventManager(socketio)
+    event_manager.socketio = socketio
     
     @socketio.on('connect')
     def on_connect():
         from flask import request
         sid = request.sid
         event_manager.register_client(sid)
-        logger.info(f"[WebSocket] Bağlantı kuruldu: {sid}")
+        logger.info(f"[WebSocket] İstemci bağlandı (Local): {sid}")
     
     @socketio.on('disconnect')
     def on_disconnect():
         from flask import request
         sid = request.sid
         event_manager.unregister_client(sid)
-        logger.info(f"[WebSocket] Bağlantı koptu: {sid}")
+        logger.info(f"[WebSocket] İstemci ayrıldı (Local): {sid}")
     
     @socketio.on('dashboard_ready')
     def on_dashboard_ready():
         from flask import request
-        logger.info(f"[WebSocket] Dashboard hazır: {request.sid}")
+        logger.info(f"[WebSocket] Dashboard hazır (Local): {request.sid}")
     
     @socketio.on('heartbeat')
     def on_heartbeat():
         from flask import request
-        logger.debug(f"[WebSocket] Heartbeat: {request.sid}")
+        logger.debug(f"[WebSocket] Heartbeat (Local): {request.sid}")
+    
+    # Redis dinleyicisini başlat
+    start_redis_listener(socketio)
     
     return event_manager
+

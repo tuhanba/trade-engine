@@ -213,7 +213,8 @@ def generate_threshold_suggestions(ghost_stats: list | None = None) -> list:
         from database import save_ghost_suggestion
 
         try:
-            from config import TRADE_THRESHOLD as _current_threshold
+            import config
+            _current_threshold = getattr(config, "TRADE_THRESHOLD", 72.0)
         except Exception:
             _current_threshold = 72.0
 
