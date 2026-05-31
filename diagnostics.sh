@@ -29,7 +29,7 @@ echo -e "--------------------------------------------------"
 echo -e "Python Path:      $(which python3)"
 echo -e "Python Version:   $(python3 --version 2>&1)"
 echo -e "Active Processes:"
-ps aux | grep -E "python3.*(app\.py|main\.py|service|engine)" | grep -v grep | awk '{print "  PID: " $2 " | CPU: " $3 "% | RAM: " $4 "% | Cmd: " $11 " " $12}' || echo -e "  ${RED}No active Python trading processes found.${RESET}"
+ps aux | grep -E "(python3?|python).*(app\.py|main\.py|async_scalp_engine\.py|service|engine)" | grep -v grep | awk '{print "  PID: " $2 " | CPU: " $3 "% | RAM: " $4 "% | Cmd: " $11 " " $12 " " $13}' || echo -e "  ${RED}No active Python trading processes found.${RESET}"
 
 # 3. GIT STATUS & FILES
 echo -e "\n${BOLD}[3] Repository & Directory Structure Audit${RESET}"
@@ -45,7 +45,11 @@ find . -maxdepth 3 -not -path '*/.*' -not -path './venv*' -type f -exec du -h {}
 # 4. DATABASE INTEGRITY & SCHEMAS
 echo -e "\n${BOLD}[4] Database Auditing (SQLite)${RESET}"
 echo -e "--------------------------------------------------"
-DB_FILE="trading.db"
+DB_FILE="db/trading.db"
+if [ ! -f "$DB_FILE" ]; then
+    DB_FILE="trading.db"
+fi
+
 if [ -f "$DB_FILE" ]; then
     DB_SIZE=$(du -h "$DB_FILE" | cut -f1)
     WAL_SIZE="0"
