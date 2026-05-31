@@ -28,7 +28,7 @@ fi
 
 # 2. Syntax Check
 echo -e "\n${YELLOW}🧪 [2/4] Verifying Code Syntax...${NC}"
-if python3 -m compileall -q .; then
+if python3 -m compileall -q -x "\.venv|venv|env|__pycache__" .; then
     echo -e "${GREEN}✅ Syntax doğrulaması başarılı.${NC}"
 else
     echo -e "${RED}❌ Syntax hatası tespit edildi! Lütfen son kod değişikliklerinizi kontrol edin.${NC}"
