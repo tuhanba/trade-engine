@@ -29,7 +29,19 @@ echo -e "--------------------------------------------------"
 echo -e "Python Path:      $(which python3)"
 echo -e "Python Version:   $(python3 --version 2>&1)"
 echo -e "Active Processes:"
-ps aux | grep -E "(python3?|python).*(app\.py|main\.py|async_scalp_engine\.py|service|engine)" | grep -v grep | awk '{print "  PID: " $2 " | CPU: " $3 "% | RAM: " $4 "% | Cmd: " $11 " " $12 " " $13}' || echo -e "  ${RED}No active Python trading processes found.${RESET}"
+ps aux | grep -E "(python3?|python).*(app\.py|main\.py|async_scalp_engine\.py|service|engine)" | grep -v grep | awk '{
+    ppid = "1"
+    cmd = "ps -p " $2 " -o ppid="
+    if ((cmd | getline ppid) <= 0) { ppid = "1" }
+    close(cmd)
+    
+    pname = "systemd"
+    cmd2 = "ps -p " ppid " -o comm="
+    if ((cmd2 | getline pname) <= 0) { pname = "systemd" }
+    close(cmd2)
+    
+    print "  PID: " $2 " (PPID: " ppid " [" pname "]) | CPU: " $3 "% | RAM: " $4 "% | Cmd: " $11 " " $12 " " $13
+}' || echo -e "  ${RED}No active Python trading processes found.${RESET}"
 
 # 3. GIT STATUS & FILES
 echo -e "\n${BOLD}[3] Repository & Directory Structure Audit${RESET}"
