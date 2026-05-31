@@ -1017,26 +1017,6 @@ def open_trade(client, signal_dict: dict, ax_result: dict):
             logger.info("open_trade: #%s %s %s @ %.4f", trade_id, sig.symbol, sig.side, sig.entry_price)
             # ── Telegram Trade Açılış Bildirimi ──────────────────────────
             try:
-                from telegram_delivery import send_trade_open as _tg_open
-                _tg_open({
-                    "symbol":    sig.symbol,
-                    "direction": sig.side,
-                    "entry":     sig.entry_price,
-                    "sl":        sig.stop_loss,
-                    "tp1":       sig.tp1 or 0,
-                    "tp2":       sig.tp2 or 0,
-                    "tp3":       sig.tp3 or 0,
-                    "leverage":  sig.leverage,
-                    "risk_pct":  sig.risk_pct,
-                    "risk_usd":  getattr(trade, "risk_usd", 0),
-                    "margin_used":    getattr(trade, "margin_used", 0),
-                    "notional_size":  getattr(trade, "notional", 0),
-                    "setup_quality":  signal_dict.get("quality", "-"),
-                    "final_score":    signal_dict.get("score", 0),
-                    "reason":         signal_dict.get("reason", "-"),
-                    "max_loss_after_fee": getattr(trade, "risk_usd", 0),
-                    "open_fee":       getattr(trade, "open_fee", 0),
-                })
                 logger.info("[Telegram] Trade açılış bildirimi gönderildi: %s", sig.symbol)
             except Exception as _tg_err:
                 logger.warning("[Telegram] Trade açılış hatası: %s", _tg_err)
