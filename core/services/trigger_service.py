@@ -31,6 +31,15 @@ class TriggerService:
 
             if trigger_result["quality"] == "D":
                 logger.debug(f"[TriggerService] {symbol} rejected: quality D")
+                try:
+                    from database import save_signal_event
+                    _reject = trigger_result.get("reject_reason", "quality_D")
+                    await asyncio.to_thread(
+                        save_signal_event, signal_id, "TRIGGER_REJECTED",
+                        symbol=symbol, reject_reason=_reject
+                    )
+                except Exception:
+                    pass
                 return
 
             next_payload = {

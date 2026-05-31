@@ -28,7 +28,14 @@ class TrendService:
             
             if trend_result["direction"] == "NO TRADE":
                 logger.debug(f"[TrendService] {symbol} rejected: NO TRADE direction")
-                # Optional: Publish REJECTED event
+                try:
+                    from database import save_signal_event
+                    await asyncio.to_thread(
+                        save_signal_event, None, "TREND_REJECTED",
+                        symbol=symbol, reject_reason="NO_TRADE"
+                    )
+                except Exception:
+                    pass
                 return
             
             # Create the initial signal id in database

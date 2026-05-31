@@ -144,15 +144,16 @@ def _get_live_trades_impl() -> list:
                 else 100.0
             ),
             "total_pnl":     round(
-                (t.get("unrealized_pnl") or 0) +
-                (t.get("realized_pnl") or t.get("accumulated_pnl") or 0), 4
+                float(t.get("unrealized_pnl") or 0) +
+                float(t.get("realized_pnl") or 0), 4
             ),
             "status":        t.get("status", "open"),
             "opened_at":     t.get("open_time") or t.get("opened_at", ""),
             "setup_quality": t.get("setup_quality", "-"),
-            # Exit state
-            "tp1_hit":          exit_state.get("tp1_hit", False),
-            "tp2_hit":          exit_state.get("tp2_hit", False),
+            # Exit state — tp1/tp2 birincil kaynak: trades kolonları
+            # trailing/breakeven yalnızca metadata'da var, oradan okunur
+            "tp1_hit":          bool(t.get("tp1_hit") or exit_state.get("tp1_hit", False)),
+            "tp2_hit":          bool(t.get("tp2_hit") or exit_state.get("tp2_hit", False)),
             "trailing_active":  exit_state.get("trailing_active", False),
             "breakeven_set":    exit_state.get("breakeven_set", False),
             "trailing_sl":      exit_state.get("current_sl", 0),

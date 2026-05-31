@@ -70,6 +70,14 @@ class AIDecisionService:
 
             if decision["decision"] == "VETO":
                 logger.debug(f"[AIDecisionService] {symbol} vetoed by AI: {decision['reason']}")
+                try:
+                    from database import save_signal_event
+                    await asyncio.to_thread(
+                        save_signal_event, signal_id, "AI_VETOED",
+                        symbol=symbol, reject_reason=decision.get("reason", "ai_veto")
+                    )
+                except Exception:
+                    pass
                 return
 
             # Signal record is already live in data_layer memory — no separate save needed.

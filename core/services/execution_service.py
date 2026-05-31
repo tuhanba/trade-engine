@@ -84,6 +84,19 @@ class ExecutionService:
                     trade_id = await asyncio.to_thread(self.execution_engine.process_signal, sig)
                 
                 if trade_id:
+                    # Candidate kaydını trade ile ilişkilendir
+                    _cid = payload.get("candidate_id")
+                    if _cid:
+                        try:
+                            from database import update_candidate_status
+                            await asyncio.to_thread(
+                                update_candidate_status,
+                                _cid,
+                                decision="EXECUTED",
+                                linked_trade_id=trade_id,
+                            )
+                        except Exception as _link_err:
+                            logger.debug("[ExecutionService] linked_trade_id yazılamadı: %s", _link_err)
                     trade_payload = {
                         "trade_id":      trade_id,
                         "symbol":        symbol,
