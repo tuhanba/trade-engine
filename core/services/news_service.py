@@ -3,6 +3,8 @@ import asyncio
 import aiohttp
 import xml.etree.ElementTree as ET
 from typing import List
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from core.event_bus import event_bus
 from core.event_types import Event, EventType
 
@@ -51,10 +53,23 @@ class NewsService:
                         content = await response.text()
                         root = ET.fromstring(content)
                         
+                        now = datetime.now(timezone.utc)
                         for item in root.findall('.//item'):
                             title_elem = item.find('title')
                             if title_elem is None or not title_elem.text:
                                 continue
+                            
+                            # Haber tarihini kontrol et (eski haberleri atla)
+                            pub_date_elem = item.find('pubDate')
+                            if pub_date_elem is not None and pub_date_elem.text:
+                                try:
+                                    pub_date = parsedate_to_datetime(pub_date_elem.text)
+                                    # 1 saatten (3600 sn) eski haberleri değerlendirmeye alma
+                                    if (now - pub_date).total_seconds() > 3600:
+                                        continue
+                                except Exception as date_err:
+                                    logger.debug(f"[NEWS AI] Haber tarihi ayristirma hatasi: {date_err}")
+                            
                             title = title_elem.text.lower()
                             
                             for kw in self.panic_keywords:
