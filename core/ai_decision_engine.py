@@ -500,7 +500,9 @@ class GhostMemoryManager:
     def get_symbol_ghost_stats(self, symbol: str, days: int = 14) -> dict:
         """
         Belirli sembol için ghost trade başarı istatistiklerini döner.
-        Son N gündeki VETO edilen sinyallerin TP/SL oranı.
+        BUG FIX: ghost_results'ta symbol kolonu yok.
+        ghost_signals JOIN ghost_results ile sorgu yapılır.
+        evaluated_at → simulated_at (doğru kolon adı).
         """
         try:
             cutoff = (
@@ -510,11 +512,12 @@ class GhostMemoryManager:
             try:
                 rows = conn.execute(
                     """
-                    SELECT virtual_outcome as status, COUNT(*) as cnt
-                    FROM ghost_results
-                    WHERE symbol = ? AND evaluated_at >= ?
-                    AND virtual_outcome IN ('WIN', 'LOSS')
-                    GROUP BY virtual_outcome
+                    SELECT r.virtual_outcome as status, COUNT(*) as cnt
+                    FROM ghost_results r
+                    JOIN ghost_signals g ON g.id = r.ghost_id
+                    WHERE g.symbol = ? AND r.simulated_at >= ?
+                    AND r.virtual_outcome IN ('WIN', 'LOSS')
+                    GROUP BY r.virtual_outcome
                     """,
                     (symbol, cutoff),
                 ).fetchall()

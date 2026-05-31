@@ -226,8 +226,32 @@ def api_stats():
             "win_rate":        stats.get("win_rate", stats.get("winrate", 0)),
             "today_pnl":       stats.get("today_pnl", 0),
             "funnel": {
-                "scanned": _get_safe_status("pipeline_scanned"),
-                "candidate": _get_safe_status("pipeline_candidate"),
+                "scanned":   _get_safe_status("pipeline_scanned"),
+                "eligible":  _get_safe_status("pipeline_eligible"),
+                "trend_ok":  _get_safe_count(
+                    "SELECT COUNT(*) FROM signal_events "
+                    "WHERE stage='TREND_CHECKED' AND DATE(created_at)=DATE('now')"
+                ),
+                "trigger_ok": _get_safe_count(
+                    "SELECT COUNT(*) FROM signal_events "
+                    "WHERE stage='TRIGGER_CHECKED' AND DATE(created_at)=DATE('now')"
+                ),
+                "risk_ok":   _get_safe_count(
+                    "SELECT COUNT(*) FROM signal_events "
+                    "WHERE stage='RISK_APPROVED' AND DATE(created_at)=DATE('now')"
+                ),
+                "risk_reject": _get_safe_count(
+                    "SELECT COUNT(*) FROM signal_events "
+                    "WHERE stage='RISK_REJECTED' AND DATE(created_at)=DATE('now')"
+                ),
+                "ai_veto":   _get_safe_count(
+                    "SELECT COUNT(*) FROM signal_events "
+                    "WHERE stage='AI_VETOED' AND DATE(created_at)=DATE('now')"
+                ),
+                "executed":  _get_safe_count(
+                    "SELECT COUNT(*) FROM signal_events "
+                    "WHERE stage='EXECUTED' AND DATE(created_at)=DATE('now')"
+                ),
                 "watchlist": _get_safe_count("SELECT COUNT(*) FROM signal_candidates WHERE status NOT IN ('NEW','rejected')"),
                 "telegram": _get_safe_count("SELECT COUNT(*) FROM telegram_messages WHERE status IN ('queued','sent')"),
                 "trade": stats.get("total_trades", 0),

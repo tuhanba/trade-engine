@@ -545,6 +545,24 @@ def init_db() -> None:
         conn.execute(_SIGNAL_EVENTS_DDL)
         conn.execute(_PAPER_ACCOUNT_DDL)
         conn.execute(_COIN_CONFIGS_DDL)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS daily_summary (
+                date         TEXT PRIMARY KEY,
+                trade_count  INTEGER DEFAULT 0,
+                win_count    INTEGER DEFAULT 0,
+                loss_count   INTEGER DEFAULT 0,
+                win_rate     REAL DEFAULT 0,
+                gross_pnl    REAL DEFAULT 0,
+                net_pnl      REAL DEFAULT 0,
+                avg_r        REAL DEFAULT 0,
+                max_drawdown REAL DEFAULT 0,
+                balance_eod  REAL DEFAULT 0,
+                sent         INTEGER DEFAULT 0,
+                best_coin    TEXT DEFAULT '',
+                worst_coin   TEXT DEFAULT ''
+            )
+        """)
         conn.execute(_GHOST_SIGNALS_DDL)
         conn.execute(_GHOST_RESULTS_DDL)
         conn.execute(_GHOST_THRESHOLD_SUGGESTIONS_DDL)
