@@ -169,7 +169,7 @@ COIN_UNIVERSE_LIMIT  = _env_int("COIN_UNIVERSE_LIMIT", 150)
 
 # Redis (hot-state cache — SQLite lock baskısını azaltır)
 REDIS_ENABLED  = _env_bool("REDIS_ENABLED", True)
-REDIS_HOST     = os.getenv("REDIS_HOST", "127.0.0.1")
+REDIS_HOST     = os.getenv("REDIS_HOST", "redis" if os.path.exists("/.dockerenv") else "127.0.0.1")
 REDIS_PORT     = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB       = int(os.getenv("REDIS_DB", "0"))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "") or None
