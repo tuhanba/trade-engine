@@ -17,7 +17,6 @@ services:
     command: python async_scalp_engine.py
     volumes:
       - ./:/app
-      - db_data:/app/db  # DB'yi kalıcı (persistent) yapıyoruz
     ports:
       - "8000:8000"  # Prometheus metrik portu
     environment:
@@ -33,14 +32,11 @@ services:
     command: python app.py
     volumes:
       - ./:/app
-      - db_data:/app/db  # Engine ile aynı DB'ye bağlanır (WAL modu sayesinde çakışmaz)
     ports:
-      - "5001:5000"
+      - "5000:5000"
     environment:
       - TZ=UTC
     depends_on:
       - engine
       - redis
 
-volumes:
-  db_data:
