@@ -380,14 +380,15 @@ async def main():
     except Exception:
         pass
 
-    # Engine'i arkaplanda başlat (start() bloklayıcı döngü içeriyor)
-    engine_task = asyncio.create_task(engine.start())
+    # Engine'i başlat (kurulumu tamamla)
+    try:
+        await engine.start()
+    except Exception as e:
+        logger.error(f"Engine başlatılırken kritik hata oluştu: {e}")
+        return
 
-    # Shutdown sinyali veya engine task tamamlanana kadar bekle
-    done, pending = await asyncio.wait(
-        [engine_task, asyncio.create_task(_shutdown_event.wait())],
-        return_when=asyncio.FIRST_COMPLETED,
-    )
+    # Sadece shutdown sinyalini bekle
+    await _shutdown_event.wait()
 
     # Temiz kapanma
     logger.info("[Shutdown] Engine durduruluyor...")
@@ -395,12 +396,6 @@ async def main():
         await asyncio.wait_for(engine.stop(), timeout=8.0)
     except asyncio.TimeoutError:
         logger.warning("[Shutdown] engine.stop() 8 saniyede tamamlanamadı, zorla çıkılıyor.")
-
-    # Kalan task'ları iptal et
-    for t in pending:
-        t.cancel()
-    if not engine_task.done():
-        engine_task.cancel()
 
     logger.info("[Shutdown] Temiz kapanma tamamlandı.")
 

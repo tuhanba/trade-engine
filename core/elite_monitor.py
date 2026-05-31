@@ -27,7 +27,7 @@ class EliteMonitor:
                 cutoff_date = (datetime.now() - timedelta(days=days_to_keep)).strftime('%Y-%m-%d %H:%M:%S')
                 
                 # Eski AI loglarını temizle
-                cursor.execute("DELETE FROM ai_logs WHERE timestamp < ?", (cutoff_date,))
+                cursor.execute("DELETE FROM ai_logs WHERE created_at < ?", (cutoff_date,))
                 # Eski aday sinyalleri temizle (Ghost Trading verileri hariç)
                 cursor.execute("DELETE FROM signal_candidates WHERE created_at < ? AND decision NOT IN ('ALLOW', 'WATCH')", (cutoff_date,))
                 

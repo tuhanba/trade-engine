@@ -80,7 +80,7 @@ class SystemWatchdog:
                 # Eski AI logları temizle (30 günden eski)
                 cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
                 conn.execute(
-                    "DELETE FROM ai_logs WHERE timestamp < ?", (cutoff,)
+                    "DELETE FROM ai_logs WHERE created_at < ?", (cutoff,)
                 )
 
                 # Eski signal_candidates temizle (ALLOW/WATCH hariç, 14 günden eski)
