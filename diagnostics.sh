@@ -74,7 +74,7 @@ fi
 # 5. SYSTEMD SERVICE MONITORING
 echo -e "\n${BOLD}[5] Systemd Service Monitoring${RESET}"
 echo -e "--------------------------------------------------"
-SERVICES=("aurvex-bot" "aurvex-dashboard" "ax-bot" "ax-dashboard")
+SERVICES=("aurvex-bot" "aurvex-dashboard" "ax-bot" "ax-dashboard" "aurvex-watchdog" "ax-watchdog")
 for SVC in "${SERVICES[@]}"; do
     if systemctl list-unit-files | grep -q "^${SVC}\.service"; then
         STATUS=$(systemctl is-active "$SVC")
