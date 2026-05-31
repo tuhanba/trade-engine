@@ -8,6 +8,7 @@ def test_telegram_format_contains_required_fields():
     sig.risk_percent = 1
     sig.max_loss = 10
     msg = format_signal(sig)
-    assert "Mode:" in msg
-    assert "Why this trade?" in msg
-    assert "Invalidasyon" in msg
+    assert "ETHUSDT" in msg
+    assert "Giriş" in msg
+    assert "Stop" in msg
+    assert "Skor" in msg

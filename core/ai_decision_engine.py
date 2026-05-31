@@ -944,7 +944,7 @@ def classify_signal(
                     "sl":           signal.stop_loss,
                     "tp1":          getattr(signal, "tp1", None) or 0,
                     "confidence":   result.confidence,
-                    "trigger_type": getattr(signal, "trigger_type", "UNKNOWN"),
+                    "trigger_type": getattr(signal, "trigger_type", None) or getattr(signal, "setup_quality", None) or "UNKNOWN",
                     "final_score":  result.score_adjusted,
                 },
                 reason=result.decision,
