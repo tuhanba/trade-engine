@@ -205,6 +205,12 @@ _DYNAMIC_PARAMS_MAP = {
     "EXECUTION_MODE":       ("tg_execution_mode", str),
 }
 
+_AI_PARAMS_MAP = {
+    "SL_ATR_MULT":          ("sl_atr_mult", float),
+    "RISK_PCT":             ("risk_pct", float),
+    "TP2_R":                ("tp_atr_mult", float),
+}
+
 def __getattr__(name: str) -> Any:
     """Modül düzeyinde dinamik parametreleri veritabanından okur."""
     if name in _DYNAMIC_PARAMS_MAP:
@@ -221,7 +227,30 @@ def __getattr__(name: str) -> Any:
         except Exception:
             pass
 
+    if name in _AI_PARAMS_MAP:
+        try:
+            db_col, cast_fn = _AI_PARAMS_MAP[name]
+            import sqlite3
+            conn = sqlite3.connect(DB_PATH, timeout=5)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM params ORDER BY id DESC LIMIT 1").fetchone()
+            conn.close()
+            if row and row[db_col] is not None:
+                return cast_fn(row[db_col])
+        except Exception:
+            pass
+
+    if name in _STATIC_DEFAULTS:
+        return _STATIC_DEFAULTS[name]
+
     # Fallback to local globals
     if name in globals():
         return globals()[name]
     raise AttributeError(f"module {__name__} has no attribute {name}")
+
+# ── Clean up globals for dynamic parameters to force __getattr__ lookup ──────
+_STATIC_DEFAULTS = {}
+for name in list(_DYNAMIC_PARAMS_MAP.keys()) + list(_AI_PARAMS_MAP.keys()):
+    if name in globals():
+        _STATIC_DEFAULTS[name] = globals()[name]
+        del globals()[name]
