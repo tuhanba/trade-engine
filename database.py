@@ -1354,6 +1354,7 @@ def get_dashboard_stats() -> dict:
             "accumulated_pnl": round(accumulated_pnl, 4),
             "total_pnl": round(realized_pnl + unrealized_pnl + accumulated_pnl, 4),
             "today_pnl": round(today_pnl, 4),
+            "daily_pnl": round(today_pnl, 4),  # Alias key for frontend/dashboard
             "winrate": winrate,
             "win_rate": winrate,          # BUG FIX: alias — frontend win_rate bekliyor
             "win_trades": win_count,      # BUG FIX: frontend için eksikti

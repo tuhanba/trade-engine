@@ -168,7 +168,7 @@ def api_dashboard_data():
         open_trades = get_open_trades()
         real_stats = dashboard_service.get_stats()
         
-        daily_pnl = real_stats.get("daily_pnl", 0.0)
+        daily_pnl = real_stats.get("daily_pnl") or real_stats.get("today_pnl", 0.0)
             
         stats = {
             "total_trades": real_stats.get("total_trades", len(open_trades)),
