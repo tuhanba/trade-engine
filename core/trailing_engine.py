@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
-import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger("ax.trailing_engine")
 
@@ -193,7 +193,6 @@ class TrailingEngine:
             opened = trade.get("open_time", "") or trade.get("opened_at", "")
             if opened:
                 try:
-                    from datetime import timezone
                     if isinstance(opened, str):
                         dt = datetime.fromisoformat(opened.replace("Z", "+00:00"))
                         if dt.tzinfo is None:
