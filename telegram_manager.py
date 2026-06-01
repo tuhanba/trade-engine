@@ -274,30 +274,30 @@ class TelegramManager:
 
     def _cmd_help(self):
         self.send_fn(
-            "🤖 **AurvexAI Yönetim Merkezi**\n\n"
+            "🤖 <b>AurvexAI Yönetim Merkezi</b>\n\n"
             "Merhaba! Ben senin yapay zeka destekli alım-satım asistanın. Sistemin kalbini buradan kontrol edebilirsin. İşte yapabileceklerim:\n\n"
-            "📊 **Gözlem ve Raporlama**\n"
-            "🔹 `/health` — Sistem sağlığını, RAM ve veritabanı durumunu kontrol eder.\n"
-            "🔹 `/status` — Sistemin genel sağlığını, aktif modunu ve kârını özetler.\n"
-            "🔹 `/open` — Şu an açık olan işlemlerini (giriş, stop, kâr) gösterir ve kapatma butonu sunar.\n"
-            "🔹 `/stats` — Tüm zamanların performans özetini (Win Rate vb.) çıkarır.\n"
-            "🔹 `/daily` — Bugüne özel kaç işlem açıldığını ve güncel kâr/zararı listeler.\n"
-            "🔹 `/balance` — Kasanın büyüme oranını detaylıca gösterir.\n"
-            "🔹 `/trades` — Kapanan son 5 işlemi (Neden kapandığıyla birlikte) listeler.\n"
-            "🔹 `/ghost` — Yapay zekanın (Ghost Learning) arka planda ne kadar öğrendiğini gösterir.\n\n"
-            "⚙️ **Strateji ve Mod Değişimi**\n"
-            "🔹 `/mode` — Şu an hangi stratejide çalıştığımızı söyler.\n"
-            "🔹 `/set <key> <val>` — Dinamik parametre değiştirir (Örn: `/set trade_threshold 55.0`).\n"
-            "🔹 `/close <id>` — Belirtilen ID'ye sahip açık pozisyonu anında kapatır.\n"
-            "🔹 `/human` — İnsan Modu: Az ama öz, sadece en kaliteli sinyallere girer (A+/S).\n"
-            "🔹 `/scalp` — Scalp Modu: Piyasayı agresif tarar, çok işleme girer ve hızlı çıkar.\n"
-            "🔹 `/paper` — Sanal Para Modu: Kendi sanal kasasıyla risksiz işlem açar.\n"
-            "🔹 `/live` — Canlı İşlem Modu: Gerçek Binance bakiyenizle gerçek işlem açar.\n\n"
-            "🛑 **Acil Durum Kontrolleri**\n"
-            "🔹 `/pause` — Piyasalar çok riskliyse botu duraklat. (Açık işlemler takip edilir, yeni işleme girilmez).\n"
-            "🔹 `/resume` — Her şey yolundaysa botu tekrar ava çıkar.\n"
-            "🔹 `/finish` — Mevcut işlemler kapandığı an botu tamamen uykuya al.\n\n"
-            "💡 *İpucu: Komutlara tıklayarak veya aşağıdaki butonları kullanarak işlem yapabilirsin!*",
+            "📊 <b>Gözlem ve Raporlama</b>\n"
+            "🔹 <code>/health</code> — Sistem sağlığını, RAM ve veritabanı durumunu kontrol eder.\n"
+            "🔹 <code>/status</code> — Sistemin genel sağlığını, aktif modunu ve kârını özetler.\n"
+            "🔹 <code>/open</code> — Şu an açık olan işlemlerini (giriş, stop, kâr) gösterir ve kapatma butonu sunar.\n"
+            "🔹 <code>/stats</code> — Tüm zamanların performans özetini (Win Rate vb.) çıkarır.\n"
+            "🔹 <code>/daily</code> — Bugüne özel kaç işlem açıldığını ve güncel kâr/zararı listeler.\n"
+            "🔹 <code>/balance</code> — Kasanın büyüme oranını detaylıca gösterir.\n"
+            "🔹 <code>/trades</code> — Kapanan son 5 işlemi (Neden kapandığıyla birlikte) listeler.\n"
+            "🔹 <code>/ghost</code> — Yapay zekanın (Ghost Learning) arka planda ne kadar öğrendiğini gösterir.\n\n"
+            "⚙️ <b>Strateji ve Mod Değişimi</b>\n"
+            "🔹 <code>/mode</code> — Şu an hangi stratejide çalıştığımızı söyler.\n"
+            "🔹 <code>/set &lt;key&gt; &lt;val&gt;</code> — Dinamik parametre değiştirir (Örn: <code>/set trade_threshold 55.0</code>).\n"
+            "🔹 <code>/close &lt;id&gt;</code> — Belirtilen ID'ye sahip açık pozisyonu anında kapatır.\n"
+            "🔹 <code>/human</code> — İnsan Modu: Az ama öz, sadece en kaliteli sinyallere girer (A+/S).\n"
+            "🔹 <code>/scalp</code> — Scalp Modu: Piyasayı agresif tarar, çok işleme girer ve hızlı çıkar.\n"
+            "🔹 <code>/paper</code> — Sanal Para Modu: Kendi sanal kasasıyla risksiz işlem açar.\n"
+            "🔹 <code>/live</code> — Canlı İşlem Modu: Gerçek Binance bakiyenizle gerçek işlem açar.\n\n"
+            "🛑 <b>Acil Durum Kontrolleri</b>\n"
+            "🔹 <code>/pause</code> — Piyasalar çok riskliyse botu duraklat. (Açık işlemler takip edilir, yeni işleme girilmez).\n"
+            "🔹 <code>/resume</code> — Her şey yolundaysa botu tekrar ava çıkar.\n"
+            "🔹 <code>/finish</code> — Mevcut işlemler kapandığı an botu tamamen uykuya al.\n\n"
+            "💡 <i>İpucu: Komutlara tıklayarak veya aşağıdaki butonları kullanarak işlem yapabilirsin!</i>",
             reply_markup=self._get_help_markup()
         )
 
@@ -334,15 +334,15 @@ class TelegramManager:
         db_ping = int((t2 - t1) * 1000)
         
         self.send_fn(
-            f"🏥 **Sistem Sağlık Raporu**\n"
+            f"🏥 <b>Sistem Sağlık Raporu</b>\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"⏱ **Kesintisiz Çalışma:** {h} Saat {m} Dakika\n"
-            f"💾 **Veritabanı Boyutu:** {db_size:.1f} MB\n"
-            f"🔄 **Veritabanı WAL:** {wal_size:.1f} MB\n"
-            f"⚡ **DB Gecikmesi (Ping):** {db_ping} ms\n"
-            f"🧠 **RAM Kullanımı:** {ram_text}\n"
+            f"⏱ <b>Kesintisiz Çalışma:</b> {h} Saat {m} Dakika\n"
+            f"💾 <b>Veritabanı Boyutu:</b> {db_size:.1f} MB\n"
+            f"🔄 <b>Veritabanı WAL:</b> {wal_size:.1f} MB\n"
+            f"⚡ <b>DB Gecikmesi (Ping):</b> {db_ping} ms\n"
+            f"🧠 <b>RAM Kullanımı:</b> {ram_text}\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"✅ *Tüm arka plan servisleri ve veritabanı aktif şekilde çalışıyor.*"
+            f"✅ <i>Tüm arka plan servisleri ve veritabanı aktif şekilde çalışıyor.</i>"
         )
 
     def _cmd_status(self):
@@ -390,20 +390,20 @@ class TelegramManager:
             open_lines += f"\n  {sym} {side} @{entry:.4f} {upnl:+.2f}${tp_marker}"
 
         text = (
-            f"📈 **Sistem Durum Raporu**\n"
+            f"📈 <b>Sistem Durum Raporu</b>\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"🔍 **Motor Durumu:** {paused}\n"
-            f"🎯 **Çalışma Modu:** {'🧠 İnsan (Özenli)' if config.HUMAN_MODE else '⚡ Scalp (Agresif)'} | {exec_mode.upper()}\n"
-            f"🌊 **Piyasa Yönü (Rejim):** {regime}\n"
-            f"⏱ **Kesintisiz Çalışma:** {h} Saat, {m} Dakika\n"
+            f"🔍 <b>Motor Durumu:</b> {paused}\n"
+            f"🎯 <b>Çalışma Modu:</b> {'🧠 İnsan (Özenli)' if config.HUMAN_MODE else '⚡ Scalp (Agresif)'} | {exec_mode.upper()}\n"
+            f"🌊 <b>Piyasa Yönü (Rejim):</b> {regime}\n"
+            f"⏱ <b>Kesintisiz Çalışma:</b> {h} Saat, {m} Dakika\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"💰 **{bal_label}:** ${bal:.2f} (Büyüme: {roi:+.1f}%)\n"
-            f"📅 **Bugünün Kârı:** ${today_pnl:+.2f}\n"
-            f"📊 **Toplam Kâr:** ${stats.get('total_pnl', 0):+.2f}\n"
-            f"👻 **YZ Öğrenme Havuzu:** {ghost_n} simülasyon\n"
+            f"💰 <b>{bal_label}:</b> ${bal:.2f} (Büyüme: {roi:+.1f}%)\n"
+            f"📅 <b>Bugünün Kârı:</b> ${today_pnl:+.2f}\n"
+            f"📊 <b>Toplam Kâr:</b> ${stats.get('total_pnl', 0):+.2f}\n"
+            f"👻 <b>YZ Öğrenme Havuzu:</b> {ghost_n} simülasyon\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"🟢 **Açık İşlemler ({len(open_t)} adet):**{open_lines}\n\n"
-            f"💡 *Detaylar için /stats veya /open yazabilirsin.*"
+            f"🟢 <b>Açık İşlemler ({len(open_t)} adet):</b>{open_lines}\n\n"
+            f"💡 <i>Detaylar için /stats veya /open yazabilirsin.</i>"
         )
         return text, self._get_status_markup()
 
@@ -420,17 +420,17 @@ class TelegramManager:
         init  = getattr(config, "INITIAL_PAPER_BALANCE", 2000.0)
         roi   = ((bal - init) / init * 100) if init else 0
         self.send_fn(
-            f"📊 **Genel Performans İstatistikleri**\n\n"
+            f"📊 <b>Genel Performans İstatistikleri</b>\n\n"
             f"Bu veriler botun şu ana kadar gösterdiği tüm başarı oranını özetler:\n\n"
-            f"🔸 **Toplam Kapanan İşlem:** {total} adet\n"
-            f"🔸 **Başarı Oranı (Kazanılan/Kaybedilen):** {wins} Başarılı / {loss} Zararlı\n"
-            f"🔸 **Win Rate (Kazanma Yüzdesi):** %{wr:.1f}\n"
-            f"🔸 **Kümülatif Net Kâr:** ${pnl:+.2f}\n\n"
-            f"💼 **Kasa Durumu:**\n"
+            f"🔸 <b>Toplam Kapanan İşlem:</b> {total} adet\n"
+            f"🔸 <b>Başarı Oranı (Kazanılan/Kaybedilen):</b> {wins} Başarılı / {loss} Zararlı\n"
+            f"🔸 <b>Win Rate (Kazanma Yüzdesi):</b> %{wr:.1f}\n"
+            f"🔸 <b>Kümülatif Net Kâr:</b> ${pnl:+.2f}\n\n"
+            f"💼 <b>Kasa Durumu:</b>\n"
             f"🔸 Başlangıç: ${init:.2f}\n"
             f"🔸 Güncel Bakiye: ${bal:.2f}\n"
             f"🔸 Toplam Büyüme (ROI): %{roi:+.1f}\n\n"
-            f"💡 *Not: Yüksek kâr faktörü, düşük win rate'den daha önemlidir. Bot kârı uzatıp zararı erken keser.*"
+            f"💡 <i>Not: Yüksek kâr faktörü, düşük win rate'den daha önemlidir. Bot kârı uzatıp zararı erken keser.</i>"
         )
 
     def _cmd_trades(self):
@@ -447,7 +447,7 @@ class TelegramManager:
             reason = t.get("close_reason") or "?"
             icon   = "✅ KÂR" if pnl > 0 else "❌ ZARAR"
             lines.append(f"{icon} | {sym} ({side})\n   └ Kâr: {pnl:+.3f}$ | Sebep: {reason}")
-        self.send_fn("📜 **Kapanan Son 5 İşlemin Analizi**\n\n" + "\n\n".join(lines) + "\n\n💡 *Not: Neden kapandığına (reason) bakarak botun hangi stratejiyi uyguladığını (SL, TP, Trail) görebilirsin.*")
+        self.send_fn("📜 <b>Kapanan Son 5 İşlemin Analizi</b>\n\n" + "\n\n".join(lines) + "\n\n💡 <i>Not: Neden kapandığına (reason) bakarak botun hangi stratejiyi uyguladığını (SL, TP, Trail) görebilirsin.</i>")
 
     def _cmd_balance(self):
         import database
@@ -468,14 +468,14 @@ class TelegramManager:
         except Exception:
             today_pnl = 0.0
         self.send_fn(
-            f"💳 **Bakiye ve Kazanç Özeti [{mode_str}]**\n\n"
+            f"💳 <b>Bakiye ve Kazanç Özeti [{mode_str}]</b>\n\n"
             f"Sisteme tanımlı başlangıç kasanız ve şu anki büyüme:\n\n"
             f"🔹 Başlangıç Kasası: ${init:.2f}\n"
-            f"🔹 **Toplam Bakiye:** ${bal:.2f}\n"
-            f"🔹 **Kullanılabilir Bakiye:** ${avail:.2f}\n"
+            f"🔹 <b>Toplam Bakiye:</b> ${bal:.2f}\n"
+            f"🔹 <b>Kullanılabilir Bakiye:</b> ${avail:.2f}\n"
             f"🔹 Toplam Kâr/Zarar: ${diff:+.2f}\n"
             f"🔹 Sadece Bugün Kazanılan: ${today_pnl:+.2f}\n\n"
-            f"💡 *Canlı ticarete (Live Trading) geçtiğinizde burada gerçek Binance cüzdanınızı göreceksiniz.*"
+            f"💡 <i>Canlı ticarete (Live Trading) geçtiğinizde burada gerçek Binance cüzdanınızı göreceksiniz.</i>"
         )
 
 
@@ -507,18 +507,18 @@ class TelegramManager:
                 except Exception:
                     pass
             lines.append(
-                f"🪙 **{sym}** ({side}) {hold}\n"
+                f"🪙 <b>{sym}</b> ({side}) {hold}\n"
                 f"   ├ Giriş Fiyatı: ${ep:.4f}\n"
                 f"   ├ Stop Loss: ${sl:.4f} (Korunuyor)\n"
                 f"   ├ Hedef TP1: ${tp1:.4f}\n"
-                f"   └ **Anlık Durum (PnL):** {upnl:+.2f}$"
+                f"   └ <b>Anlık Durum (PnL):</b> {upnl:+.2f}$"
             )
-        text = f"🟢 **Aktif Açık İşlemler ({len(trades)} adet)**\n\n" + "\n\n".join(lines)
+        text = f"🟢 <b>Aktif Açık İşlemler ({len(trades)} adet)</b>\n\n" + "\n\n".join(lines)
         return text, self._get_open_markup(trades)
 
     def _cmd_close(self, args: list):
         if not args:
-            self.send_fn("Kapatılacak işlem ID'sini belirtin. Örnek: `/close 15`")
+            self.send_fn("Kapatılacak işlem ID'sini belirtin. Örnek: <code>/close 15</code>")
             return
         try:
             trade_id = int(args[0])
@@ -557,15 +557,15 @@ class TelegramManager:
     def _cmd_set(self, args: list):
         if not args or len(args) < 2:
             self.send_fn(
-                "🛠 **Dinamik Parametre Değiştir**\n"
-                "Kullanım: `/set <parametre> <değer>`\n\n"
+                "🛠 <b>Dinamik Parametre Değiştir</b>\n"
+                "Kullanım: <code>/set &lt;parametre&gt; &lt;değer&gt;</code>\n\n"
                 "Desteklenen parametreler:\n"
-                "• `trade_threshold` (Örn: 55.0)\n"
-                "• `telegram_threshold` (Örn: 35.0)\n"
-                "• `max_spread_pct` (Örn: 0.15)\n"
-                "• `max_open_trades` (Örn: 5)\n"
-                "• `human_mode` (true/false)\n"
-                "• `execution_mode` (live/paper)"
+                "• <code>trade_threshold</code> (Örn: 55.0)\n"
+                "• <code>telegram_threshold</code> (Örn: 35.0)\n"
+                "• <code>max_spread_pct</code> (Örn: 0.15)\n"
+                "• <code>max_open_trades</code> (Örn: 5)\n"
+                "• <code>human_mode</code> (true/false)\n"
+                "• <code>execution_mode</code> (live/paper)"
             )
             return
 
@@ -592,7 +592,7 @@ class TelegramManager:
             casted_val = cast_fn(raw_val)
             import database
             database.set_state(db_key, str(casted_val))
-            self.send_fn(f"✅ Başarılı! **{param_name}** değeri **{casted_val}** olarak güncellendi.")
+            self.send_fn(f"✅ Başarılı! <b>{param_name}</b> değeri <b>{casted_val}</b> olarak güncellendi.")
         except Exception as e:
             self.send_fn(f"❌ Değer dönüştürme/yazma hatası: {e}")
 
@@ -631,13 +631,13 @@ class TelegramManager:
             resolved = gr_wins + gr_loss
             vwr = round(gr_wins / resolved * 100, 1) if resolved > 0 else 0
             self.send_fn(
-                f"👻 **Yapay Zeka & Ghost Learning 2.0 Durumu**\n"
+                f"👻 <b>Yapay Zeka & Ghost Learning 2.0 Durumu</b>\n"
                 f"━━━━━━━━━━━━━━━━\n"
                 f"Bu modül botun beynidir. İşleme girmese bile sanal sinyaller üretip sonuçlarından ders çıkarır.\n\n"
-                f"🧠 **Toplanan Veri Seti:** {gs_total} sinyal incelendi.\n"
-                f"⚙️ **İşlenen (Simüle):** {gs_sim} | Bekleyen: {gs_total - gs_sim}\n"
+                f"🧠 <b>Toplanan Veri Seti:</b> {gs_total} sinyal incelendi.\n"
+                f"⚙️ <b>İşlenen (Simüle):</b> {gs_sim} | Bekleyen: {gs_total - gs_sim}\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"📊 **Öğrenme Başarısı:**\n"
+                f"📊 <b>Öğrenme Başarısı:</b>\n"
                 f"🔹 Doğru Tahmin (WIN): {gr_wins} adet\n"
                 f"🔹 Yanlış Tahmin (LOSS): {gr_loss} adet\n"
                 f"🔹 Sanal Win Rate: %{vwr:.1f}\n"
@@ -666,14 +666,14 @@ class TelegramManager:
             pnl    = float(row[3] or 0)
             wr     = round(wins / total * 100, 1) if total else 0
             self.send_fn(
-                f"📅 **Bugünün İşlem Özeti ({today})**\n"
+                f"📅 <b>Bugünün İşlem Özeti ({today})</b>\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"🔸 **Toplam İşlem:** {total} adet\n"
-                f"🔸 **Sonuç:** {wins} Galibiyet / {losses} Mağlubiyet\n"
-                f"🔸 **Kazanma Oranı:** %{wr:.1f}\n"
-                f"🔸 **Günlük Net PnL:** ${pnl:+.2f}\n"
+                f"🔸 <b>Toplam İşlem:</b> {total} adet\n"
+                f"🔸 <b>Sonuç:</b> {wins} Galibiyet / {losses} Mağlubiyet\n"
+                f"🔸 <b>Kazanma Oranı:</b> %{wr:.1f}\n"
+                f"🔸 <b>Günlük Net PnL:</b> ${pnl:+.2f}\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"💡 *Veriler anlık olarak güncellenir.*"
+                f"💡 <i>Veriler anlık olarak güncellenir.</i>"
             )
         except Exception as e:
             self.send_fn(f"Günlük özet alınamadı: {e}")
@@ -695,8 +695,8 @@ class TelegramManager:
             f"Execution: {config.EXECUTION_MODE.upper()}\n"
             f"AX Mode: {config.AX_MODE.upper()}\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"/human — İnsan moduna geç\n"
-            f"/scalp — Scalp moduna geç"
+            f"<code>/human</code> — İnsan moduna geç\n"
+            f"<code>/scalp</code> — Scalp moduna geç"
         )
 
     def _cmd_pause(self):
@@ -707,10 +707,10 @@ class TelegramManager:
         except Exception:
             pass
         self.send_fn(
-            "⏸ **SİSTEM DURAKLATILDI (PAUSE)**\n\n"
-            "Bot şu an yeni piyasa fırsatlarını aramayı ve yeni işlem açmayı tamamen **durdurdu**.\n\n"
+            "⏸ <b>SİSTEM DURAKLATILDI (PAUSE)</b>\n\n"
+            "Bot şu an yeni piyasa fırsatlarını aramayı ve yeni işlem açmayı tamamen <b>durdurdu</b>.\n\n"
             "💡 Ancak endişelenme! Hali hazırda açık olan işlemlerinin SL, TP ve Kâr alma seviyeleri takip edilmeye devam ediyor.\n\n"
-            "Piyasa tehlikesiz göründüğünde botu tekrar işe göndermek için `/resume` komutunu kullan."
+            "Piyasa tehlikesiz göründüğünde botu tekrar işe göndermek için <code>/resume</code> komutunu kullan."
         )
 
     def _cmd_resume(self):
@@ -721,7 +721,7 @@ class TelegramManager:
         except Exception:
             pass
         self.send_fn(
-            "▶️ **SİSTEM YENİDEN AKTİF (RESUME)**\n\n"
+            "▶️ <b>SİSTEM YENİDEN AKTİF (RESUME)</b>\n\n"
             "Bot uykudan uyandı! Yeniden piyasayı taramaya ve uygun sinyallerde işlem açmaya başlıyor."
         )
 
@@ -755,7 +755,7 @@ class TelegramManager:
             "TP: Uzak (1.5R-2.5R)\n"
             "Maks açık trade: 2\n"
             "Sadece A+/S kalite\n\n"
-            "/scalp ile normal moda dön."
+            "<code>/scalp</code> ile normal moda dön."
         )
 
     def _cmd_human_off(self):
@@ -775,7 +775,7 @@ class TelegramManager:
             "TP: 1.5R - 2.5R\n"
             "Min R:R: 1.5\n"
             "Maks açık trade: 5\n"
-            "/human ile insan moduna geç."
+            "<code>/human</code> ile insan moduna geç."
         )
 
     def _cmd_paper(self):
@@ -784,7 +784,7 @@ class TelegramManager:
             _cfg.EXECUTION_MODE = "paper"
             import database as _db
             _db.set_state("tg_execution_mode", "paper")
-            self.send_fn("💵 **PAPER MODE AKTİF**\nSistem artık sanal parayla işlem yapacak. Gerçek paranız güvende.")
+            self.send_fn("💵 <b>PAPER MODE AKTİF</b>\nSistem artık sanal parayla işlem yapacak. Gerçek paranız güvende.")
         except Exception as e:
             self.send_fn(f"Hata: {e}")
 
@@ -794,6 +794,6 @@ class TelegramManager:
             _cfg.EXECUTION_MODE = "live"
             import database as _db
             _db.set_state("tg_execution_mode", "live")
-            self.send_fn("🔥 **LIVE TRADING AKTİF**\n\n⚠️ **DİKKAT:** Sistem şu andan itibaren GERÇEK Binance bakiyenizle işlem açacaktır. Kemerlerinizi bağlayın!")
+            self.send_fn("🔥 <b>LIVE TRADING AKTİF</b>\n\n⚠️ <b>DİKKAT:</b> Sistem şu andan itibaren GERÇEK Binance bakiyenizle işlem açacaktır. Kemerlerinizi bağlayın!")
         except Exception as e:
             self.send_fn(f"Hata: {e}")
