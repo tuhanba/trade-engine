@@ -22,6 +22,15 @@ def get_db_size():
     size_bytes = os.path.getsize(db_path)
     size_mb = size_bytes / (1024 * 1024)
     
+    # Check journal mode
+    journal_mode = "unknown"
+    try:
+        conn = sqlite3.connect(db_path)
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        conn.close()
+    except Exception:
+        pass
+        
     # WAL file size
     wal_path = db_path + "-wal"
     wal_size = ""
@@ -29,7 +38,7 @@ def get_db_size():
         wal_bytes = os.path.getsize(wal_path)
         wal_size = f" (WAL: {wal_bytes / (1024 * 1024):.2f} MB)"
         
-    return f"{size_mb:.2f} MB{wal_size}", size_bytes
+    return f"{size_mb:.2f} MB{wal_size} [Journal Mode: {journal_mode.upper()}]", size_bytes
 
 def get_row_counts():
     db_path = config.DB_PATH
@@ -62,13 +71,36 @@ def check_redis():
     if not getattr(config, "REDIS_ENABLED", True):
         return "Disabled in config"
     
+    host = config.REDIS_HOST
+    port = config.REDIS_PORT
+    
+    # Try connecting via socket (supports checking localhost from host machine when config is set to service name)
+    import socket
+    connected = False
+    connected_host = host
+    for test_host in [host, "127.0.0.1"]:
+        if test_host == "redis" and test_host != host:
+            # Skip if we are running in a context where "redis" hostname cannot resolve (like host)
+            continue
+        try:
+            s = socket.create_connection((test_host, port), timeout=1)
+            s.close()
+            connected = True
+            connected_host = test_host
+            break
+        except Exception:
+            pass
+            
+    if not connected:
+        return f"Connection failed (could not open port {port} on {host} / 127.0.0.1)"
+        
     if not REDIS_MODULE:
-        return "Python redis library not installed"
+        return f"Port {port} on {connected_host} is OPEN (Python redis library not installed on host)"
         
     try:
         r = redis.Redis(
-            host=config.REDIS_HOST,
-            port=config.REDIS_PORT,
+            host=connected_host,
+            port=port,
             db=config.REDIS_DB,
             password=config.REDIS_PASSWORD,
             socket_timeout=2
@@ -78,9 +110,9 @@ def check_redis():
             info = r.info()
             clients = info.get("connected_clients", "unknown")
             used_mem = info.get("used_memory_human", "unknown")
-            return f"Connected (Clients: {clients}, Memory: {used_mem})"
+            return f"Connected to {connected_host}:{port} (Clients: {clients}, Memory: {used_mem})"
     except Exception as e:
-        return f"Connection failed: {e}"
+        return f"Port {port} on {connected_host} is open, but Redis protocol ping failed: {e}"
 
 def check_systemd_services():
     system = platform.system()
