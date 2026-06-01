@@ -65,7 +65,7 @@ class WebSocketEventManager:
         # 1. Eğer Flask process'indeysek (socketio aktif) doğrudan emit et:
         if self.socketio:
             try:
-                self.socketio.emit(event, payload, broadcast=True)
+                self.socketio.emit(event, payload)
                 logger.debug(f"[WebSocket] Local emit: {event}")
                 return
             except Exception as e:
@@ -207,7 +207,7 @@ def start_redis_listener(socketio):
                     payload = data.get("payload")
                     if event_name and payload:
                         # Flask SocketIO kullanarak tüm bağlı browser'lara ilet
-                        socketio.emit(event_name, payload, broadcast=True)
+                        socketio.emit(event_name, payload)
                         logger.debug(f"[WebSocket] Redis'ten gelen event broadcast edildi: {event_name}")
                 except Exception as e:
                     logger.error(f"[WebSocket] Redis listener mesaj işleme hatası: {e}")
