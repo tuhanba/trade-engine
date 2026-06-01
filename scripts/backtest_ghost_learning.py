@@ -15,9 +15,27 @@ import sqlite3
 import logging
 import argparse
 import math
-from datetime import datetime, timezone, timedelta
-import pandas as pd
-import numpy as np
+
+import datetime as real_datetime
+
+# Global variable to track current simulation time
+current_sim_time = None
+
+class SimulatedDatetime(real_datetime.datetime):
+    @classmethod
+    def now(cls, tz=None):
+        if current_sim_time is None:
+            return real_datetime.datetime.now(tz)
+        if tz is not None and current_sim_time.tzinfo is None:
+            return current_sim_time.replace(tzinfo=timezone.utc).astimezone(tz)
+        return current_sim_time
+    @classmethod
+    def utcnow(cls):
+        if current_sim_time is None:
+            return real_datetime.datetime.utcnow()
+        return current_sim_time
+
+datetime = SimulatedDatetime
 
 # Set DB Path and Redis settings before importing other modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,27 +54,6 @@ from core.ai_decision_engine import AIDecisionEngine
 from execution_engine import ExecutionEngine
 import core.ghost_learning
 
-# ── Patch Datetime ────────────────────────────────────────────────────────────
-
-from datetime import datetime as real_datetime
-
-# Global variable to track current simulation time
-current_sim_time = None
-
-class SimulatedDatetime(real_datetime):
-    @classmethod
-    def now(cls, tz=None):
-        if current_sim_time is None:
-            return real_datetime.now(tz)
-        if tz is not None and current_sim_time.tzinfo is None:
-            return current_sim_time.replace(tzinfo=timezone.utc).astimezone(tz)
-        return current_sim_time
-    @classmethod
-    def utcnow(cls):
-        if current_sim_time is None:
-            return real_datetime.utcnow()
-        return current_sim_time
-
 # Monkey patch modules to use simulated datetime
 database.datetime = SimulatedDatetime
 import core.data_layer
@@ -73,6 +70,11 @@ import core.trigger_engine
 core.trigger_engine.datetime = SimulatedDatetime
 import core.ghost_learning
 core.ghost_learning.datetime = SimulatedDatetime
+
+# Now we can import standard library types
+from datetime import timezone, timedelta
+import pandas as pd
+import numpy as np
 
 # Disable caching in trend and trigger engines to prevent lookahead / time lag
 import core.trend_engine

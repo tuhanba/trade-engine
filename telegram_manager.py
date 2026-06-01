@@ -36,6 +36,10 @@ class TelegramManager:
         if not self._is_configured():
             logger.warning("TelegramManager: token/chat_id eksik")
             return
+        
+        # Register commands on Telegram Bot Menu
+        self._register_commands()
+
         # Önceki offset'i veritabanından yükle — restart sonrası eski komutları önle
         try:
             import database as _db
@@ -243,6 +247,36 @@ class TelegramManager:
                 ]
             ]
         }
+
+    def _register_commands(self):
+        url = f"https://api.telegram.org/bot{self.token}/setMyCommands"
+        payload = {
+            "commands": [
+                {"command": "help", "description": "Yardım menüsü ve komut listesi"},
+                {"command": "status", "description": "Botun genel durumunu ve kârını özetler"},
+                {"command": "open", "description": "Açık işlemleri listeler ve kapatma imkanı sunar"},
+                {"command": "health", "description": "Sistem sağlığı ve kaynak durumunu kontrol eder"},
+                {"command": "stats", "description": "Tüm zamanların performans özetini çıkarır"},
+                {"command": "trades", "description": "Kapanan son 5 işlemi listeler"},
+                {"command": "ghost", "description": "AI öğrenme istatistiklerini gösterir"},
+                {"command": "daily", "description": "Bugünün işlem ve kâr özetini çıkarır"},
+                {"command": "mode", "description": "Güncel çalışma modunu gösterir"},
+                {"command": "pause", "description": "Yeni işlemleri duraklatır"},
+                {"command": "resume", "description": "Botu tekrar aktif eder"},
+                {"command": "human", "description": "İnsan Modu: Kaliteli ve az işlemler"},
+                {"command": "scalp", "description": "Scalp Modu: Agresif tarama ve sık işlemler"},
+                {"command": "paper", "description": "Sanal Para Modu (Paper Trading)"},
+                {"command": "live", "description": "Gerçek Para Modu (Live Trading)"}
+            ]
+        }
+        try:
+            resp = requests.post(url, json=payload, timeout=_TIMEOUT)
+            if resp.status_code == 200 and resp.json().get("ok"):
+                logger.info("Telegram komut listesi menüye başarıyla kaydedildi.")
+            else:
+                logger.warning(f"Telegram komut listesi kaydedilemedi: {resp.text}")
+        except Exception as e:
+            logger.warning(f"Telegram komut listesi kaydı sırasında hata: {e}")
 
     def _get_help_markup(self) -> dict:
         return {

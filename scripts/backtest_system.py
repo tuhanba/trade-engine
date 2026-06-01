@@ -55,42 +55,6 @@ class SimulatedDatetime(real_datetime):
             return real_datetime.utcnow()
         return current_sim_time
 
-# Monkey patch modules to use simulated datetime
-database.datetime = SimulatedDatetime
-import core.data_layer
-core.data_layer.datetime = SimulatedDatetime
-import execution_engine
-execution_engine.datetime = SimulatedDatetime
-import core.trailing_engine
-core.trailing_engine.datetime = SimulatedDatetime
-import core.risk_engine
-core.risk_engine.datetime = SimulatedDatetime
-import core.ai_decision_engine
-core.ai_decision_engine.datetime = SimulatedDatetime
-import core.trigger_engine
-core.trigger_engine.datetime = SimulatedDatetime
-
-# Disable caching in trend and trigger engines to prevent lookahead / time lag
-import core.trend_engine
-core.trend_engine._GLOBAL_KLINE_TTL = {k: -1 for k in core.trend_engine._GLOBAL_KLINE_TTL}
-core.trigger_engine._GLOBAL_KLINE_TTL = {k: -1 for k in core.trigger_engine._GLOBAL_KLINE_TTL}
-
-# Silence real Telegram delivery
-import telegram_delivery
-telegram_delivery.TelegramDelivery.send_message = lambda self, text, *args, **kwargs: None
-
-# Disable web sockets
-import websocket_events
-websocket_events.event_manager = None
-
-# Mock macro market sentiment to be neutral
-try:
-    from core.services.macro_service import macro_service
-    macro_service.get_market_sentiment = lambda: {"fng_value": 50, "bias": "NEUTRAL"}
-except Exception:
-    pass
-
-# Mock daily risk governor limits to match simulation date
 def mock_check_daily_loss_limit(balance):
     try:
         sim_today_str = current_sim_time.strftime("%Y-%m-%d")
@@ -105,7 +69,43 @@ def mock_check_daily_loss_limit(balance):
     except Exception as e:
         return True
 
-core.risk_engine.check_daily_loss_limit = mock_check_daily_loss_limit
+if __name__ == "__main__":
+    # Monkey patch modules to use simulated datetime
+    database.datetime = SimulatedDatetime
+    import core.data_layer
+    core.data_layer.datetime = SimulatedDatetime
+    import execution_engine
+    execution_engine.datetime = SimulatedDatetime
+    import core.trailing_engine
+    core.trailing_engine.datetime = SimulatedDatetime
+    import core.risk_engine
+    core.risk_engine.datetime = SimulatedDatetime
+    import core.ai_decision_engine
+    core.ai_decision_engine.datetime = SimulatedDatetime
+    import core.trigger_engine
+    core.trigger_engine.datetime = SimulatedDatetime
+
+    # Disable caching in trend and trigger engines to prevent lookahead / time lag
+    import core.trend_engine
+    core.trend_engine._GLOBAL_KLINE_TTL = {k: -1 for k in core.trend_engine._GLOBAL_KLINE_TTL}
+    core.trigger_engine._GLOBAL_KLINE_TTL = {k: -1 for k in core.trigger_engine._GLOBAL_KLINE_TTL}
+
+    # Silence real Telegram delivery
+    import telegram_delivery
+    telegram_delivery.TelegramDelivery.send_message = lambda self, text, *args, **kwargs: None
+
+    # Disable web sockets
+    import websocket_events
+    websocket_events.event_manager = None
+
+    # Mock macro market sentiment to be neutral
+    try:
+        from core.services.macro_service import macro_service
+        macro_service.get_market_sentiment = lambda: {"fng_value": 50, "bias": "NEUTRAL"}
+    except Exception:
+        pass
+
+    core.risk_engine.check_daily_loss_limit = mock_check_daily_loss_limit
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("ax.backtest")

@@ -50,7 +50,8 @@ def get_conn() -> Generator[sqlite3.Connection, None, None]:
         conn.close()
 
 
-def open_db(db_path: str | None = None, timeout: int = 15) -> sqlite3.Connection:
+@contextmanager
+def open_db(db_path: str | None = None, timeout: int = 15) -> Generator[sqlite3.Connection, None, None]:
     """
     Herhangi bir yol için WAL modunda bağlantı açar.
     db_path verilmezse config.DB_PATH kullanılır.
@@ -62,7 +63,10 @@ def open_db(db_path: str | None = None, timeout: int = 15) -> sqlite3.Connection
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA cache_size=-64000")
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 # ── Tablo DDL'leri ───────────────────────────────────────────────────

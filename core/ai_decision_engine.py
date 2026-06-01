@@ -25,11 +25,14 @@ from collections import defaultdict
 
 from core.data_layer import SignalData, SignalDecision
 
+from contextlib import contextmanager
+
 try:
     import sys as _sys, os as _os
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
     from database import open_db as _open_db
 except Exception:
+    @contextmanager
     def _open_db(db_path=None, timeout=15):  # type: ignore[misc]
         if db_path is None:
             try:
@@ -41,7 +44,10 @@ except Exception:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
-        return conn
+        try:
+            yield conn
+        finally:
+            conn.close()
 
 logger = logging.getLogger("ax.ai_decision")
 
@@ -508,8 +514,7 @@ class GhostMemoryManager:
             cutoff = (
                 datetime.now(timezone.utc) - timedelta(days=days)
             ).isoformat()
-            conn = _open_db(self.db_path, timeout=15)
-            try:
+            with _open_db(self.db_path, timeout=15) as conn:
                 rows = conn.execute(
                     """
                     SELECT r.virtual_outcome as status, COUNT(*) as cnt
@@ -539,8 +544,6 @@ class GhostMemoryManager:
                     "sl_hits": sl_hits,
                     "ghost_winrate": ghost_wr,
                 }
-            finally:
-                conn.close()
         except Exception as exc:
             logger.debug("Ghost stats alınamadı [%s]: %s", symbol, exc)
             return {"total": 0, "tp_hits": 0, "sl_hits": 0, "ghost_winrate": 0.0}
@@ -554,8 +557,7 @@ class GhostMemoryManager:
             cutoff = (
                 datetime.now(timezone.utc) - timedelta(days=days)
             ).isoformat()
-            conn = _open_db(self.db_path, timeout=15)
-            try:
+            with _open_db(self.db_path, timeout=15) as conn:
                 rows = conn.execute(
                     """
                     SELECT side, status, COUNT(*) as cnt
@@ -584,8 +586,6 @@ class GhostMemoryManager:
                     result[side] = {"total": total, "winrate": wr}
 
                 return result
-            finally:
-                conn.close()
         except Exception as exc:
             logger.debug("Direction bias alınamadı: %s", exc)
             return {}
@@ -1269,8 +1269,7 @@ def get_learning_summary() -> dict:
     """Tüm ghost learning istatistiklerini döner."""
     ghost = _get_ghost_manager()
     try:
-        conn = _open_db(ghost.db_path, timeout=15)
-        try:
+        with _open_db(ghost.db_path, timeout=15) as conn:
             total = conn.execute(
                 "SELECT COUNT(*) FROM signal_candidates"
             ).fetchone()[0]
@@ -1316,8 +1315,6 @@ def get_learning_summary() -> dict:
                     for r in top_symbols
                 ],
             }
-        finally:
-            conn.close()
     except Exception as exc:
         logger.error("Learning summary hatası: %s", exc)
         return {
