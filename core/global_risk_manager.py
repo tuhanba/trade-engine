@@ -22,14 +22,16 @@ class GlobalRiskManager:
         self.running = False
         self.start_balance = 0.0
         self.is_killed = False
+        self.last_reset_day = None
 
     async def start(self):
         """Risk izleme döngüsünü başlatır."""
         self.running = True
         
-        # Gün başlangıcındaki bakiyeyi al (şimdilik anlık alıyoruz, daha iyisi günlük ilk açılışta almak)
+        # Gün başlangıcındaki bakiyeyi al (günlük ilk açılışta alınacak)
         stats = get_dashboard_stats()
         self.start_balance = stats.get("balance", config.INITIAL_PAPER_BALANCE if hasattr(config, "INITIAL_PAPER_BALANCE") else 2000.0)
+        self.last_reset_day = datetime.now(timezone.utc).date()
         
         logger.info(f"Global Risk Manager başlatıldı. Başlangıç Bakiyesi: ${self.start_balance}, DD Limiti: %{self.drawdown_limit_pct}")
         
@@ -38,6 +40,15 @@ class GlobalRiskManager:
     async def _monitor_loop(self):
         while self.running:
             try:
+                # Gün değişimi kontrolü (Gece yarısı UTC'de reset)
+                today = datetime.now(timezone.utc).date()
+                if self.last_reset_day is None or today > self.last_reset_day:
+                    current_balance = get_paper_balance()
+                    self.start_balance = current_balance
+                    self.last_reset_day = today
+                    self.is_killed = False
+                    logger.info(f"[GlobalRiskManager] Günlük sıfırlama tamamlandı. Yeni başlangıç bakiyesi: ${self.start_balance:.2f}")
+
                 if self.is_killed:
                     await asyncio.sleep(60)
                     continue

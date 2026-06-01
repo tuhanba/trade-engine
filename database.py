@@ -777,6 +777,21 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_signals_created ON signal_candidates(created_at)"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_signal_events_created ON signal_events(created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_signal_events_stage ON signal_events(stage)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_signal_events_sigid ON signal_events(signal_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scanned_coins_created ON scanned_coins(scanned_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_telegram_messages_created ON telegram_messages(created_at)"
+        )
         init_ghost_tables()   # Ghost Learning 2.0
         conn.commit()
         logger.info("DB tabloları hazır: %s", config.DB_PATH)
@@ -902,6 +917,7 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
     conn = get_connection()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     try:
+        env = getattr(trade, 'environment', None) or getattr(config, 'EXECUTION_MODE', 'paper')
         cur = conn.execute(
             """
             INSERT INTO trades
@@ -910,8 +926,8 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
                  risk_pct, status, open_time, current_price,
                  unrealized_pnl, realized_pnl, net_pnl,
                  remaining_qty, original_qty, close_price, close_reason,
-                 total_fee, fee_rate, ax_mode, setup_quality, final_score, metadata)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 total_fee, fee_rate, ax_mode, setup_quality, final_score, metadata, environment)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 trade.symbol,
@@ -946,6 +962,7 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
                 getattr(trade, 'setup_quality', ''),
                 getattr(trade, 'final_score', 0.0),
                 metadata or "{}",
+                env,
             ),
         )
         conn.commit()

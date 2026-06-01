@@ -233,8 +233,30 @@ _AI_PARAMS_MAP = {
     "TP2_R":                ("tp_atr_mult", float),
 }
 
+_CONFIG_CACHE = {}
+_CONFIG_CACHE_TTL = 2.0
+
 def __getattr__(name: str) -> Any:
-    """Modül düzeyinde dinamik parametreleri veritabanından okur."""
+    """Modül düzeyinde dinamik parametreleri veritabanından okur, 2 sn önbellekleme ile."""
+    import time
+    import sys
+    
+    is_testing = "pytest" in sys.modules
+    now = time.time()
+    
+    if not is_testing and name in _CONFIG_CACHE:
+        val, expires = _CONFIG_CACHE[name]
+        if now < expires:
+            return val
+            
+    val = _read_dynamic_param_from_db(name)
+    
+    if not is_testing:
+        _CONFIG_CACHE[name] = (val, now + _CONFIG_CACHE_TTL)
+        
+    return val
+
+def _read_dynamic_param_from_db(name: str) -> Any:
     if name in _DYNAMIC_PARAMS_MAP:
         try:
             db_key, cast_fn = _DYNAMIC_PARAMS_MAP[name]

@@ -29,6 +29,7 @@ class SystemWatchdog:
         self._daily_report_hour = 23  # Her gün saat 23:00 UTC'de
         self._error_count = 0
         self._restart_count = 0
+        self._consecutive_latency_violations = 0
 
     def get_uptime(self) -> str:
         """Sistem uptime'ını döner."""
@@ -225,8 +226,19 @@ class SystemWatchdog:
             latency = (time.time() - start) * 1000
             
             if latency > 2000: # 2 seconds latency is critical
-                logger.critical(f"[Watchdog] EXTREME LATENCY DETECTED ({latency:.0f}ms). Triggering Panic Shutdown!")
-                self._trigger_panic_shutdown(f"High Latency: {latency:.0f}ms")
+                self._consecutive_latency_violations += 1
+                logger.warning(
+                    f"[Watchdog] High latency detected ({latency:.0f}ms) - "
+                    f"violation {self._consecutive_latency_violations}/3"
+                )
+                if self._consecutive_latency_violations >= 3:
+                    logger.critical(
+                        f"[Watchdog] EXTREME LATENCY DETECTED FOR 3 CONSECUTIVE CHECKS ({latency:.0f}ms). "
+                        f"Triggering Panic Shutdown!"
+                    )
+                    self._trigger_panic_shutdown(f"High Latency: {latency:.0f}ms (3 consecutive checks)")
+            else:
+                self._consecutive_latency_violations = 0
         except Exception as e:
             logger.warning(f"[Watchdog] Latency check failed: {e}")
 

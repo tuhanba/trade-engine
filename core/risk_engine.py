@@ -20,7 +20,7 @@ logger = logging.getLogger("ax.risk_engine")
 # BAĞIMSIZ RISK GOVERNOR FONKSİYONLARI (class dışı, modül seviyesi)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def check_daily_loss_limit(balance: float) -> bool:
+def check_daily_loss_limit(balance: float, environment: str = "live") -> bool:
     """
     Bugünkü net PnL, günlük max kayıp limitini aştı mı?
     Returns True: trade açılabilir. Returns False: bloke.
@@ -35,7 +35,7 @@ def check_daily_loss_limit(balance: float) -> bool:
         with get_conn() as conn:
             row = conn.execute(
                 "SELECT COALESCE(SUM(net_pnl), 0) FROM trades "
-                "WHERE DATE(close_time) = ? AND status = 'closed'", (today,)
+                "WHERE DATE(close_time) = ? AND status = 'closed' AND environment = ?", (today, environment)
             ).fetchone()
         daily_pnl = float(row[0] or 0)
         limit = balance * (DAILY_MAX_LOSS_PCT / 100)
@@ -304,15 +304,19 @@ class RiskEngine:
             if quality_mult == 0:
                 return {"valid": False, "score": 0, "risk_reject_reason": f"quality_{quality}_blocked"}
 
+            # Human mode veya scalp mode'a göre parametreler
+            _human = bool(getattr(config, "HUMAN_MODE", False))
+            max_open = int(getattr(config, "HUMAN_MAX_OPEN_TRADES" if _human else "MAX_OPEN_TRADES", 2 if _human else 5))
+
             open_trades = database.get_open_trades()
-            if len(open_trades) >= int(getattr(config, "MAX_OPEN_TRADES", 5)):
+            if len(open_trades) >= max_open:
                 return {"valid": False, "score": 0, "risk_reject_reason": "max_open_trades"}
 
             if symbol in {t.get("symbol") for t in open_trades}:
                 return {"valid": False, "score": 0, "risk_reject_reason": "duplicate_symbol"}
 
             is_paper = getattr(config, "EXECUTION_MODE", "paper") == "paper"
-            if not is_paper and not check_daily_loss_limit(balance):
+            if not is_paper and not check_daily_loss_limit(balance, "live"):
                 return {"valid": False, "score": 0, "risk_reject_reason": "daily_loss_limit"}
 
             if not check_coin_cooldown(symbol):
@@ -320,9 +324,6 @@ class RiskEngine:
 
             if not check_correlated_exposure(symbol, direction, open_trades):
                 return {"valid": False, "score": 0, "risk_reject_reason": "directional_correlation_blocked"}
-
-            # Human mode veya scalp mode'a göre parametreler
-            _human = bool(getattr(config, "HUMAN_MODE", False))
             sl_atr_mult = float(getattr(config, "HUMAN_SL_ATR_MULT" if _human else "SL_ATR_MULT", 2.0 if _human else 1.8))
             tp1_r = float(getattr(config, "HUMAN_TP1_R" if _human else "TP1_R", 1.5 if _human else 1.5))
             tp2_r = float(getattr(config, "HUMAN_TP2_R" if _human else "TP2_R", 2.5 if _human else 2.5))
