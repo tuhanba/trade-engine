@@ -218,7 +218,9 @@ class TriggerEngine:
             if bull5 and not (25 < rsi1 < 85): return {"quality": "D", "score": 0, "entry": 0}
             if bear5 and not (15 < rsi1 < 75): return {"quality": "D", "score": 0, "entry": 0}
 
-        # Makro Filtre (24h Funding Trend)
+        # Makro Filtre (24h/8h Funding Trend)
+        funding_8h = 0.0
+        funding_8h_bias = "NEUTRAL"
         try:
             from core.macro_filter import MacroFilter as _MacroFilter
             if self._macro_filter is None:
@@ -227,12 +229,17 @@ class TriggerEngine:
             macro_data = self._macro_filter.get_24h_funding_trend(symbol)
             funding = macro_data.get("avg_rate", 0.0)
             bias = macro_data.get("bias", "NEUTRAL")
+
+            # Fetch 8-hour average
+            macro_data_8h = self._macro_filter.get_8h_funding_average(symbol)
+            funding_8h = macro_data_8h.get("avg_rate", 0.0)
+            funding_8h_bias = macro_data_8h.get("bias", "NEUTRAL")
             
             # Squeeze Kalkanı:
-            if direction == "LONG" and bias == "EXTREME_GREED":
-                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"macro_extreme_greed_squeeze_danger_{funding:.5f}"}
-            if direction == "SHORT" and bias == "EXTREME_FEAR":
-                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"macro_extreme_fear_squeeze_danger_{funding:.5f}"}
+            if direction == "LONG" and (bias == "EXTREME_GREED" or funding_8h_bias == "EXTREME_GREED"):
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"macro_extreme_greed_squeeze_danger_{funding:.5f}_8h_{funding_8h:.5f}"}
+            if direction == "SHORT" and (bias == "EXTREME_FEAR" or funding_8h_bias == "EXTREME_FEAR"):
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"macro_extreme_fear_squeeze_danger_{funding:.5f}_8h_{funding_8h:.5f}"}
             
             # Eski anlık limitlere göre hard-block (config'den)
             if direction == "LONG" and funding > FUNDING_LONG_MAX:
@@ -429,6 +436,7 @@ class TriggerEngine:
                 "prev_result": prev_result,
                 "volume_m": volume_m,
                 "funding_rate": funding,
+                "funding_rate_8h": funding_8h,
                 "cvd_value": cvd_data.get("cvd_value", 0.0),
                 "oi_change_pct": oi_data.get("oi_change_pct", 0.0),
             }
@@ -491,6 +499,7 @@ class TriggerEngine:
             "prev_result":   prev_result,
             "volume_m":      round(volume_m, 4),
             "funding_rate":  funding,
+            "funding_rate_8h": funding_8h,
             "cvd_value":     cvd_data.get("cvd_value", 0.0),
             "funding_favorable": funding_fav,
             "ob_ratio":      ob_ratio_val,

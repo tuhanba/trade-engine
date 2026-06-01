@@ -134,6 +134,193 @@ class LiveExecutionEngine:
                 return self._cached_balance
             return 0.0
 
+    def _execute_chase_limit_order(self, symbol: str, side: str, qty_str: str, entry_price: float, max_chase_pct: float = 0.15) -> Optional[Dict[str, Any]]:
+        """
+        Slippage-Reducing Chase Limit Order:
+        Submits an initial LIMIT order, chases it dynamically, and falls back to MARKET order if needed.
+        """
+        if not self.client:
+            return None
+
+        total_qty = float(qty_str)
+        remaining_qty = total_qty
+        max_duration = 3.0
+        tick_interval = 0.25 # 250ms
+        
+        # Calculate chase limits
+        if side == "BUY":
+            limit_bound = entry_price * (1 + max_chase_pct / 100.0)
+        else:
+            limit_bound = entry_price * (1 - max_chase_pct / 100.0)
+
+        logger.info(f"[Limit Chase] Symbol: {symbol}, Side: {side}, Qty: {qty_str}, Entry: {entry_price}, Limit Bound: {limit_bound}, Max Chase Pct: {max_chase_pct}%")
+
+        order_ids = []
+        filled_qty = 0.0
+        cum_quote = 0.0 # total spend to calculate average price
+
+        def emit_progress(status, price):
+            try:
+                from websocket_events import event_manager
+                if event_manager:
+                    event_manager.broadcast_limit_chase_progress(
+                        symbol=symbol,
+                        side=side,
+                        status=status,
+                        filled_qty=filled_qty,
+                        total_qty=total_qty,
+                        price=price
+                    )
+            except Exception as _e:
+                logger.debug(f"[Limit Chase WS] Emit progress error: {_e}")
+
+        emit_progress("STARTED", entry_price)
+        start_time = time.time()
+
+        while (time.time() - start_time) < max_duration and remaining_qty > 0:
+            # 1. Fetch current orderbook
+            try:
+                ob = self.client.futures_order_book(symbol=symbol, limit=5)
+                bids = ob.get('bids', [])
+                asks = ob.get('asks', [])
+                if not bids or not asks:
+                    raise ValueError("Bos order book")
+                
+                best_bid = float(bids[0][0])
+                best_ask = float(asks[0][0])
+            except Exception as e:
+                logger.warning(f"[Limit Chase] Ticker/Orderbook alinamadi: {e}. Fallback to entry_price.")
+                best_bid = entry_price
+                best_ask = entry_price
+
+            # Determine limit price to place
+            if side == "BUY":
+                # For buy, we place at best_bid to try to be maker, capped at limit_bound
+                target_price = min(best_bid, limit_bound)
+            else:
+                # For sell, we place at best_ask or capped at limit_bound
+                target_price = max(best_ask, limit_bound)
+
+            # Check if price has already crossed the limit bound
+            if side == "BUY" and best_ask > limit_bound:
+                logger.warning(f"[Limit Chase] Fiyat siniri asti (Ask: {best_ask} > Bound: {limit_bound}). Market emrine geciliyor.")
+                emit_progress("MARKET_FALLBACK", limit_bound)
+                break
+            elif side == "SELL" and best_bid < limit_bound:
+                logger.warning(f"[Limit Chase] Fiyat siniri asti (Bid: {best_bid} < Bound: {limit_bound}). Market emrine geciliyor.")
+                emit_progress("MARKET_FALLBACK", limit_bound)
+                break
+
+            price_str = self._format_price(symbol, target_price)
+            current_qty_str = self._format_quantity(symbol, remaining_qty)
+            if float(current_qty_str) <= 0:
+                break
+
+            logger.info(f"[Limit Chase] Limit emir yerlestiriliyor: Price={price_str}, Qty={current_qty_str}")
+            try:
+                order = self.client.futures_create_order(
+                    symbol=symbol,
+                    side=side,
+                    type='LIMIT',
+                    price=price_str,
+                    quantity=current_qty_str,
+                    timeInForce='GTC'
+                )
+                current_order_id = order.get('orderId')
+                order_ids.append(current_order_id)
+                emit_progress("CHASING", target_price)
+            except Exception as e:
+                logger.error(f"[Limit Chase] Limit emir yerlestirme basarisiz: {e}")
+                break
+
+            # Wait 250ms
+            time.sleep(tick_interval)
+
+            # Query order status
+            try:
+                status_res = self.client.futures_get_order(symbol=symbol, orderId=current_order_id)
+                status = status_res.get('status')
+                exec_qty = float(status_res.get('executedQty', 0.0))
+                avg_price = float(status_res.get('avgPrice', 0.0))
+                if avg_price == 0:
+                    avg_price = float(status_res.get('price', 0.0))
+
+                logger.info(f"[Limit Chase] Status: {status}, Executed: {exec_qty}/{current_qty_str}")
+
+                if status == 'FILLED':
+                    filled_qty += exec_qty
+                    cum_quote += exec_qty * avg_price
+                    remaining_qty = total_qty - filled_qty
+                    emit_progress("CHASING", avg_price)
+                    break
+                elif status in ('PARTIALLY_FILLED', 'NEW'):
+                    # Cancel order
+                    try:
+                        self.client.futures_cancel_order(symbol=symbol, orderId=current_order_id)
+                    except Exception as ce:
+                        logger.debug(f"[Limit Chase] Cancel hatasi (zaten dolmus olabilir): {ce}")
+
+                    # Fetch final status after cancel
+                    final_res = self.client.futures_get_order(symbol=symbol, orderId=current_order_id)
+                    final_exec_qty = float(final_res.get('executedQty', 0.0))
+                    final_avg_price = float(final_res.get('avgPrice', 0.0))
+                    if final_avg_price == 0:
+                        final_avg_price = target_price
+
+                    # Calculate new fill
+                    new_fill = final_exec_qty
+                    filled_qty += new_fill
+                    cum_quote += new_fill * final_avg_price
+                    remaining_qty = total_qty - filled_qty
+                    logger.info(f"[Limit Chase] Iptal sonrasi gerceklesen: {final_exec_qty}, Kalan: {remaining_qty}")
+                    emit_progress("CHASING", final_avg_price)
+                else:
+                    exec_qty = float(status_res.get('executedQty', 0.0))
+                    filled_qty += exec_qty
+                    cum_quote += exec_qty * avg_price
+                    remaining_qty = total_qty - filled_qty
+                    emit_progress("CHASING", avg_price or target_price)
+            except Exception as e:
+                logger.error(f"[Limit Chase] Emir sorgulama/iptal hatasi: {e}")
+
+        # Fallback to MARKET order for remaining qty if any
+        if remaining_qty > 0:
+            rem_qty_str = self._format_quantity(symbol, remaining_qty)
+            if float(rem_qty_str) > 0:
+                logger.info(f"[Limit Chase] Kalan miktar icin MARKET emri gonderiliyor: {rem_qty_str}")
+                emit_progress("MARKET_FALLBACK", entry_price)
+                try:
+                    m_order = self.client.futures_create_order(
+                        symbol=symbol,
+                        side=side,
+                        type='MARKET',
+                        quantity=rem_qty_str
+                    )
+                    m_exec_qty = float(m_order.get('executedQty', remaining_qty))
+                    m_avg_price = float(m_order.get('avgPrice', 0.0))
+                    if m_avg_price == 0:
+                        m_avg_price = entry_price
+                    filled_qty += m_exec_qty
+                    cum_quote += m_exec_qty * m_avg_price
+                    remaining_qty = total_qty - filled_qty
+                    if 'orderId' in m_order:
+                        order_ids.append(m_order['orderId'])
+                except Exception as e:
+                    logger.error(f"[Limit Chase] Market fallback basarisiz: {e}")
+
+        if filled_qty > 0:
+            final_avg_price = cum_quote / filled_qty
+            emit_progress("COMPLETED", final_avg_price)
+            return {
+                'avgPrice': final_avg_price,
+                'executedQty': filled_qty,
+                'orderId': order_ids[-1] if order_ids else None,
+                'orderIds': order_ids
+            }
+        else:
+            emit_progress("FAILED", entry_price)
+            return None
+
     def open_live_trade(self, signal: SignalData) -> Optional[int]:
         """
         Gercek emirleri borsaya gonderir ve DB'ye isler.
@@ -243,26 +430,23 @@ class LiveExecutionEngine:
         except Exception as e:
             logger.debug(f"[Slippage Guard] Kontrol hatası: {e}")
 
-        # 4. Borsaya Emir Gonderimi (Entry - Smart Limit/Market)
-        # TODO: Şimdilik piyasayı kaçırmamak için MARKET atıyoruz (Slippage Chase eklenebilir)
-        logger.info(f"[LIVE] {symbol} {side} MARKET Emri gonderiliyor. Qty: {qty_str}")
-        try:
-            order = self.client.futures_create_order(
-                symbol=symbol,
-                side=side,
-                type='MARKET',
-                quantity=qty_str
-            )
-            # Gerceklesme fiyatini al
-            entry_price = float(order.get('avgPrice', current_price))
-            if entry_price == 0:
-                entry_price = current_price
-        except BinanceAPIException as e:
-            logger.error(f"[LIVE REJECTED] Market entry Binance tarafindan reddedildi {symbol}: {e.message} (Code: {e.code})")
+        # 4. Borsaya Emir Gonderimi (Entry - Smart Limit/Market Chase)
+        max_chase_pct = getattr(signal, "max_chase_pct", None) or getattr(config, "MAX_CHASE_PCT", 0.15)
+        chase_result = self._execute_chase_limit_order(
+            symbol=symbol,
+            side=side,
+            qty_str=qty_str,
+            entry_price=current_price,
+            max_chase_pct=max_chase_pct
+        )
+
+        if not chase_result:
+            logger.error(f"[LIVE REJECTED] Limit chase entry basarisiz veya reddedildi {symbol}")
             return None
-        except Exception as e:
-            logger.error(f"[LIVE ERROR] Market entry basarisiz {symbol}: {e}")
-            return None
+
+        entry_price = chase_result['avgPrice']
+        qty_float = chase_result['executedQty']
+        qty_str = self._format_quantity(symbol, qty_float)
 
         # 5. Borsaya Stop Loss (Hard Stop) Yerlestirme
         sl_side = "SELL" if direction == "LONG" else "BUY"
@@ -335,7 +519,8 @@ class LiveExecutionEngine:
         
         # Eger Binance siparis id'leri gerekiyorsa metadata icine gomulebilir
         meta_dict = initial_state.to_dict()
-        meta_dict['binance_entry_order_id'] = order.get('orderId')
+        meta_dict['binance_entry_order_id'] = chase_result.get('orderId')
+        meta_dict['binance_entry_order_ids'] = chase_result.get('orderIds', [])
         meta_dict['binance_sl_order_id'] = sl_order_id
         if signal.metadata:
             meta_dict.update(signal.metadata)

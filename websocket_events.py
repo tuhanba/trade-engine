@@ -135,6 +135,43 @@ class WebSocketEventManager:
             'reason': reason,
             'timestamp': datetime.now(timezone.utc).isoformat(),
         })
+
+    def broadcast_trailing_stop_updated(self, symbol: str, trade_id: int, old_sl: float, new_sl: float, current_price: float):
+        """Trailing stop güncellendiğinde broadcast et"""
+        self._publish_event('trailing_stop_updated', {
+            'symbol': symbol,
+            'trade_id': trade_id,
+            'old_sl': round(old_sl, 6),
+            'new_sl': round(new_sl, 6),
+            'current_price': round(current_price, 6),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        })
+
+    def broadcast_limit_chase_progress(self, symbol: str, side: str, status: str, filled_qty: float, total_qty: float, price: float):
+        """Limit chase aşamalarını ve durumunu broadcast et"""
+        self._publish_event('limit_chase_progress', {
+            'symbol': symbol,
+            'side': side,
+            'status': status,
+            'filled_qty': round(filled_qty, 6),
+            'total_qty': round(total_qty, 6),
+            'price': round(price, 6),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        })
+
+    def broadcast_agent_votes(self, symbol: str, direction: str, decision: str, votes: dict, adjusted_score: float, confidence: float, reason: str):
+        """Agent oylamalarını ve konsensüs sonucunu broadcast et"""
+        self._publish_event('agent_votes', {
+            'symbol': symbol,
+            'direction': direction,
+            'decision': decision,
+            'votes': votes,
+            'adjusted_score': round(adjusted_score, 2),
+            'confidence': round(confidence, 2),
+            'reason': reason,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        })
+
     
     def send_to_client(self, sid: str, event: str, data: Dict[str, Any]):
         """Belirli bir istemciye mesaj gönder (Sadece Flask/Local)"""

@@ -1,8 +1,8 @@
 #!/bin/bash
-# ═══════════════════════════════════════════════════════════════════════════
-# AurvexAI — Git Pull & Service Restart Script
+# ======================================================================
+# AurvexAI — Docker Git Pull & Clean Restart Manager
 # Kullanım: bash restart.sh
-# ═══════════════════════════════════════════════════════════════════════════
+# ======================================================================
 
 set -e
 
@@ -11,55 +11,73 @@ GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+GOLD='\033[1;33m'
+NC='\033[0m'
 
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${CYAN}🚀 AurvexAI — Pulling Latest Code & Restarting Services...${NC}"
+echo -e "${CYAN}🚀 AurvexAI — Git Pulling & Docker Service Clean Restart...${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 # 1. Git Pull
-echo -e "\n${YELLOW}📥 [1/4] Git Pulling from Remote Repository...${NC}"
+echo -e "\n${YELLOW}📥 [1/5] Git Pulling from Remote Repository...${NC}"
+# Satır sonu veya yetki çakışmalarını önlemek için diagnostics.sh'ı sıfırlayarak çekelim
+git checkout -- diagnostics.sh 2>/dev/null || true
 if git pull origin main; then
-    echo -e "${GREEN}✅ Git pull tamamlandı.${NC}"
+    echo -e "${GREEN}✅ Git pull başarıyla tamamlandı.${NC}"
 else
-    echo -e "${RED}❌ Git pull başarısız oldu! İnternet veya yetki sorunlarını kontrol edin.${NC}"
+    echo -e "${RED}❌ Git pull başarısız oldu! Çakışmaları kontrol edin.${NC}"
     exit 1
 fi
 
 # 2. Syntax Check
-echo -e "\n${YELLOW}🧪 [2/4] Verifying Code Syntax...${NC}"
+echo -e "\n${YELLOW}🧪 [2/5] Verifying Code Syntax...${NC}"
 if python3 -m compileall -q -x "\.venv|venv|env|__pycache__" .; then
-    echo -e "${GREEN}✅ Syntax doğrulaması başarılı.${NC}"
+    echo -e "${GREEN}✅ Syntax doğrulaması başarılı. Hatalı kod bulunamadı.${NC}"
 else
-    echo -e "${RED}❌ Syntax hatası tespit edildi! Lütfen son kod değişikliklerinizi kontrol edin.${NC}"
+    echo -e "${RED}❌ Syntax hatası tespit edildi! Lütfen kodunuzu kontrol edin.${NC}"
     exit 1
 fi
 
-# 3. Systemd Restart
-echo -e "\n${YELLOW}🔄 [3/4] Restarting systemd services...${NC}"
-SERVICES=("ax-bot" "ax-dashboard")
-for svc in "${SERVICES[@]}"; do
-    echo -e "   Yeniden başlatılıyor: ${svc}..."
-    if sudo systemctl restart "${svc}" 2>/dev/null; then
-        echo -e "   ${GREEN}✅ ${svc} başarıyla restart edildi.${NC}"
-    else
-        echo -e "   ${RED}❌ ${svc} restart edilemedi (systemctl yetkisi yok veya servis kurulu değil).${NC}"
-        echo -e "   ${YELLOW}💡 Alternatif manuel başlatma denenebilir.${NC}"
+# 3. Stop Host Services (Conflict Prevention)
+echo -e "\n${YELLOW}🛑 [3/5] Disabling conflicting Host Systemd services...${NC}"
+HOST_SERVICES=("ax-bot" "ax-dashboard" "aurvex-bot" "aurvex-dashboard" "aurvex-watchdog")
+for svc in "${HOST_SERVICES[@]}"; do
+    if systemctl list-unit-files | grep -q "^${svc}\.service"; then
+        echo -e "   Durduruluyor ve devre dışı bırakılıyor: ${svc}..."
+        sudo systemctl stop "${svc}" 2>/dev/null || true
+        sudo systemctl disable "${svc}" 2>/dev/null || true
     fi
 done
 
-# 4. Status Check
-echo -e "\n${YELLOW}🔍 [4/4] Checking Status of Services...${NC}"
-for svc in "${SERVICES[@]}"; do
-    echo -e "\n📊 ${svc} durumu:"
-    if sudo systemctl is-active --quiet "${svc}" 2>/dev/null; then
-        echo -e "   Durum: ${GREEN}AKTİF (Çalışıyor)${NC}"
-        sudo systemctl status "${svc}" --no-pager -n 5 2>/dev/null | tail -n 3 || true
+# 4. Clean Host Zombie Processes
+echo -e "\n${YELLOW}🧹 [4/5] Killing any orphaned Python bot/dashboard processes on Host...${NC}"
+sudo pkill -9 -f "async_scalp_engine.py" 2>/dev/null || true
+sudo pkill -9 -f "app.py" 2>/dev/null || true
+echo -e "${GREEN}✅ Host temizliği tamamlandı.${NC}"
+
+# 5. Docker Rebuild & Reload
+echo -e "\n${YELLOW}🔄 [5/5] Restarting and rebuilding Docker Containers...${NC}"
+if [ -f "docker-compose.yml" ]; then
+    echo -e "   Docker konteynerleri durduruluyor..."
+    docker-compose down || docker compose down || true
+    
+    echo -e "   Docker konteynerleri yeniden inşa ediliyor ve başlatılıyor..."
+    if docker-compose up -d --build || docker compose up -d --build; then
+        echo -e "${GREEN}✅ Docker servisleri başarıyla başlatıldı!${NC}"
     else
-        echo -e "   Durum: ${RED}PASİF (DURMUŞ)${NC}"
+        echo -e "${RED}❌ Docker başlatma başarısız oldu! Docker daemon çalışıyor mu?${NC}"
+        exit 1
     fi
-done
+else
+    echo -e "${RED}❌ docker-compose.yml bulunamadı!${NC}"
+    exit 1
+fi
+
+# 6. Execute Diagnostics Audit
+echo -e "\n${YELLOW}📊 Running system audit to verify single process health...${NC}"
+chmod +x diagnostics.sh
+./diagnostics.sh
 
 echo -e "\n${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}✅ İşlemler Tamamlandı! Sistem güncel ve aktif.${NC}"
+echo -e "${GREEN}✅ İşlemler Tamamlandı! Sunucu Docker üzerinden 10/10 aktif.${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"

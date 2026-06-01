@@ -59,6 +59,7 @@ RISK_PCT                   = _env_float("RISK_PCT", 0.75)
 MAX_OPEN_TRADES            = _env_int("MAX_OPEN_TRADES", 5)
 DAILY_MAX_LOSS_PCT         = _env_float("DAILY_MAX_LOSS_PCT", 5.0)
 MAX_LEVERAGE               = _env_int("MAX_LEVERAGE", 10)
+MAX_CHASE_PCT              = _env_float("MAX_CHASE_PCT", 0.15)
 DEFAULT_FEE_RATE           = _env_float("DEFAULT_FEE_RATE", 0.0004)
 MAX_CONSECUTIVE_LOSSES     = _env_int("MAX_CONSECUTIVE_LOSSES", 5)
 COIN_COOLDOWN_MINUTES      = _env_int("COIN_COOLDOWN_MINUTES", 30)
@@ -91,6 +92,19 @@ RUNNER_CLOSE_PCT = _env_float("RUNNER_CLOSE_PCT", 30) # 25→30: toplam=100
 TRAIL_ATR_MULT       = _env_float("TRAIL_ATR_MULT", 1.5)
 BREAKEVEN_ENABLED    = _env_bool("BREAKEVEN_ENABLED", True)
 BREAKEVEN_OFFSET_PCT = _env_float("BREAKEVEN_OFFSET_PCT", 0.1)
+
+# Time Decay Stop Loss Settings
+TIME_DECAY_ENABLED                 = _env_bool("TIME_DECAY_ENABLED", True)
+TIME_DECAY_START_MINUTES           = _env_int("TIME_DECAY_START_MINUTES", 45)
+TIME_DECAY_BREAKEVEN_MINUTES       = _env_int("TIME_DECAY_BREAKEVEN_MINUTES", 105)
+
+# Scalp-specific Time Decay Stop Loss Settings
+SCALP_TIME_DECAY_START_MINUTES     = _env_int("SCALP_TIME_DECAY_START_MINUTES", 5)
+SCALP_TIME_DECAY_BREAKEVEN_MINUTES = _env_int("SCALP_TIME_DECAY_BREAKEVEN_MINUTES", 15)
+
+# Spread & Fee-Aware Take-Profit Optimizer Settings
+SCALP_TP_OPTIMIZER_ENABLED         = _env_bool("SCALP_TP_OPTIMIZER_ENABLED", True)
+MIN_TP_FEE_SPREAD_RATIO            = _env_float("MIN_TP_FEE_SPREAD_RATIO", 2.5)
 
 # Paper / Timing
 INITIAL_PAPER_BALANCE = _env_float("INITIAL_PAPER_BALANCE", 2000.0)
@@ -205,6 +219,7 @@ _DYNAMIC_PARAMS_MAP = {
     "EXECUTION_MODE":       ("tg_execution_mode", str),
     "MAX_SPREAD_PCT":       ("max_spread_pct", float),
     "MAX_OPEN_TRADES":      ("max_open_trades", int),
+    "MAX_CHASE_PCT":        ("max_chase_pct", float),
 }
 
 _AI_PARAMS_MAP = {

@@ -48,3 +48,31 @@ class MacroFilter:
             logger.debug(f"[MacroFilter] {symbol} funding rate çekilirken hata: {e}")
             return {"bias": "NEUTRAL", "avg_rate": 0.0}
 
+    def get_8h_funding_average(self, symbol: str) -> dict:
+        """
+        Son 8 fonlama oranını çekip ortalamasını alır (yaklaşık 64 saatlik trend).
+        """
+        try:
+            result = self.client.futures_funding_rate(symbol=symbol, limit=8)
+            if not result or len(result) == 0:
+                return {"avg_rate": 0.0, "bias": "NEUTRAL"}
+
+            rates = [float(r["fundingRate"]) for r in result]
+            avg_rate = sum(rates) / len(rates)
+
+            # Eşik kontrolü: 8-periyot ortalaması için
+            bias = "NEUTRAL"
+            if avg_rate >= 0.0003:
+                bias = "EXTREME_GREED"
+            elif avg_rate <= -0.0003:
+                bias = "EXTREME_FEAR"
+
+            return {
+                "bias": bias,
+                "avg_rate": avg_rate,
+                "rates": rates
+            }
+        except Exception as e:
+            logger.debug(f"[MacroFilter] {symbol} 8h funding average error: {e}")
+            return {"bias": "NEUTRAL", "avg_rate": 0.0}
+

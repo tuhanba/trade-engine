@@ -103,5 +103,34 @@ class TestMLFeatures(unittest.TestCase):
         score = score_signal(test_sig)
         self.assertTrue(0 <= score <= 100)
 
+    def test_ml_training(self):
+        # Insert 35 mock pattern memory rows
+        conn = database.get_connection()
+        conn.execute("DELETE FROM pattern_memory WHERE pattern_hash LIKE 'mock_hash_%'")
+        
+        now = datetime.now(timezone.utc).isoformat()
+        for i in range(35):
+            conn.execute(
+                """INSERT INTO pattern_memory
+                   (pattern_hash, win_rate, occurrences, last_seen,
+                    adx, rv, rsi5, rsi1, funding_favorable, bb_width_pct,
+                    ob_ratio, volume_m, btc_trend, direction, session,
+                    hold_minutes, partial_exit, symbol, result, created_at,
+                    bb_width_chg, momentum_3c, prev_result,
+                    funding_rate, cvd_value, oi_change_pct)
+                   VALUES (?,?,?,?, ?,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?)""",
+                (f"mock_hash_{i}", 1.0 if i % 2 == 0 else 0.0, 1, now,
+                 30.0, 1.5, 60.0, 55.0, 1, 0.05, 1.2, 50.0, 'BULLISH', 'LONG', 'LONDON',
+                 5.0, 0, 'BTCUSDT', 'WIN' if i % 2 == 0 else 'LOSS', now,
+                 0.01, 1.5, 'WIN' if i % 2 == 0 else 'LOSS',
+                 0.0001, 1000.0, 3.5)
+            )
+        conn.commit()
+        conn.close()
+
+        # Run training
+        res = train_model()
+        self.assertTrue(res)
+
 if __name__ == "__main__":
     unittest.main()

@@ -34,6 +34,18 @@ logger = logging.getLogger("ax.telegram")
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 _TIMEOUT = 10
 
+_client_instance = None
+
+def _get_binance_client():
+    global _client_instance
+    if _client_instance is None:
+        try:
+            from binance.client import Client
+            _client_instance = Client(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
+        except Exception as e:
+            logger.debug("[Telegram] Binance client başlatılamadı: %s", e)
+    return _client_instance
+
 
 # ── Yardımcı ──────────────────────────────────────────────────────────────────
 
@@ -143,6 +155,30 @@ def _send_raw_detailed(text: str, parse_mode: str = "HTML", reply_markup: Option
         return False, 500
 
 
+def _send_photo_raw(photo_bytes: bytes, caption: str, parse_mode: str = "HTML") -> tuple[bool, int]:
+    token = config.TELEGRAM_BOT_TOKEN
+    chat_id = config.TELEGRAM_CHAT_ID
+    if not token or not chat_id:
+        logger.debug("[Telegram] Token/chat_id boş — fotoğraf atlandı.")
+        return False, 0
+    try:
+        files = {"photo": ("chart.png", photo_bytes, "image/png")}
+        payload = {"chat_id": chat_id, "caption": caption[:1024], "parse_mode": parse_mode}
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendPhoto",
+            data=payload,
+            files=files,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            return True, 200
+        logger.warning("[Telegram] sendPhoto HTTP %d — %s", resp.status_code, resp.text[:100])
+        return False, resp.status_code
+    except Exception as e:
+        logger.debug("[Telegram] sendPhoto hata: %s", e)
+        return False, 500
+
+
 def _send_raw(text: str, parse_mode: str = "HTML") -> bool:
     ok, _ = _send_raw_detailed(text, parse_mode)
     return ok
@@ -160,7 +196,8 @@ class _Queue:
 
     def push(self, text: str, parse_mode: str = "HTML",
              dedupe_key: str = None, sig_id=None, symbol: str = None,
-             attempts: int = 0, reply_markup: Optional[dict] = None):
+             attempts: int = 0, reply_markup: Optional[dict] = None,
+             photo_bytes: Optional[bytes] = None):
         if not dedupe_key:
             import uuid
             dedupe_key = f"msg:{uuid.uuid4()}"
@@ -170,7 +207,7 @@ class _Queue:
             except Exception as e:
                 logger.debug("[Telegram] save_telegram_message: %s", e)
         with self._lock:
-            self._q.append((text, parse_mode, dedupe_key, attempts, reply_markup))
+            self._q.append((text, parse_mode, dedupe_key, attempts, reply_markup, photo_bytes))
         self._event.set()
 
     def _worker(self):
@@ -183,8 +220,11 @@ class _Queue:
                         if not self._q:
                             break
                         item = self._q.popleft()
-                    text, pm, dk, attempts, reply_markup = item[0], item[1], item[2], item[3], item[4]
-                    ok, status_code = _send_raw_detailed(text, pm, reply_markup)
+                    text, pm, dk, attempts, reply_markup, photo_bytes = item[0], item[1], item[2], item[3], item[4], item[5]
+                    if photo_bytes:
+                        ok, status_code = _send_photo_raw(photo_bytes, text, pm)
+                    else:
+                        ok, status_code = _send_raw_detailed(text, pm, reply_markup)
                     if ok:
                         if dk:
                             try:
@@ -215,7 +255,7 @@ class _Queue:
                                            attempts, backoff, dk)
                             time.sleep(backoff)
                             with self._lock:
-                                self._q.appendleft((text, pm, dk, attempts))
+                                self._q.appendleft((text, pm, dk, attempts, reply_markup, photo_bytes))
                             self._event.set()
                         elif attempts != 99:
                             logger.error("[TGQueue] Kalıcı başarısız key=%s", dk)
@@ -257,7 +297,8 @@ def recover_queued_messages():
 
 
 def _push_with_dedupe(text: str, dedupe_key: str,
-                      symbol: str = "", sig_id: str = "") -> bool:
+                      symbol: str = "", sig_id: str = "",
+                      photo_bytes: Optional[bytes] = None) -> bool:
     """DB'ye kaydet (duplicate kontrolü), kuyruğa ekle."""
     try:
         saved = save_telegram_message(sig_id, symbol, dedupe_key, text, status="queued")
@@ -266,7 +307,7 @@ def _push_with_dedupe(text: str, dedupe_key: str,
             return False
     except Exception as e:
         logger.warning("[Telegram] save_telegram_message: %s", e)
-    _queue.push(text, dedupe_key=dedupe_key, symbol=symbol)
+    _queue.push(text, dedupe_key=dedupe_key, symbol=symbol, photo_bytes=photo_bytes)
     return True
 
 
@@ -530,9 +571,29 @@ def deliver_signal(sig) -> bool:
         except Exception:
             pass
 
+        # Generate chart bytes
+        photo_bytes = None
+        try:
+            from core.signal_visualizer import generate_chart_bytes
+            client = _get_binance_client()
+            if client:
+                photo_bytes = generate_chart_bytes(
+                    symbol=sig.symbol,
+                    entry=float(_entry),
+                    sl=float(sig.stop_loss),
+                    tp1=float(sig.tp1) if sig.tp1 else None,
+                    tp2=float(sig.tp2) if sig.tp2 else None,
+                    tp3=float(sig.tp3) if sig.tp3 else None,
+                    direction=sig.direction,
+                    client=client
+                )
+        except Exception as e:
+            logger.warning("[Telegram] Grafik oluşturulamadı: %s", e)
+
         msg = format_signal(sig)
         saved = _push_with_dedupe(msg, dk, symbol=sig.symbol,
-                                  sig_id=str(getattr(sig, "id", "")))
+                                  sig_id=str(getattr(sig, "id", "")),
+                                  photo_bytes=photo_bytes)
         if saved:
             sig.telegram_status = "sent"
             logger.info("[Telegram] Sinyal gönderildi: %s %s %s RR=%.2f",

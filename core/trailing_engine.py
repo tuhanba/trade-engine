@@ -57,6 +57,8 @@ class TradeExitState:
     current_sl: float = 0.0      # Güncel trailing SL seviyesi
     highest_price: float = 0.0   # LONG için en yüksek, SHORT için en düşük
     qty_remaining_pct: float = 100.0  # Kalan pozisyon yüzdesi
+    initial_sl: float = 0.0      # İlk stop loss seviyesi
+    is_scalp: bool = False       # Scalp trade olup olmadığı
 
     def to_dict(self) -> dict:
         return {
@@ -68,6 +70,8 @@ class TradeExitState:
             "current_sl": self.current_sl,
             "highest_price": self.highest_price,
             "qty_remaining_pct": self.qty_remaining_pct,
+            "initial_sl": self.initial_sl,
+            "is_scalp": self.is_scalp,
         }
 
     @classmethod
@@ -81,6 +85,8 @@ class TradeExitState:
             current_sl=float(d.get("current_sl", 0.0)),
             highest_price=float(d.get("highest_price", 0.0)),
             qty_remaining_pct=float(d.get("qty_remaining_pct", 100.0)),
+            initial_sl=float(d.get("initial_sl", 0.0)),
+            is_scalp=d.get("is_scalp", False),
         )
 
 
@@ -179,6 +185,64 @@ class TrailingEngine:
 
         # Kullanılacak SL: state'deki güncel SL (trailing hareket etmiş olabilir)
         active_sl = state.current_sl if state.current_sl > 0 else sl
+
+        # ── Time-Decay Stop Loss Tightening ─────────────────────────
+        import config
+        if getattr(config, "TIME_DECAY_ENABLED", True):
+            opened = trade.get("open_time", "") or trade.get("opened_at", "")
+            if opened:
+                try:
+                    from datetime import datetime, timezone
+                    if isinstance(opened, str):
+                        dt = datetime.fromisoformat(opened.replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        opened_dt = dt
+                    else:
+                        opened_dt = opened
+                    
+                    now_dt = datetime.now(timezone.utc)
+                    elapsed = (now_dt - opened_dt).total_seconds() / 60.0
+                    
+                    if state.is_scalp:
+                        decay_start = getattr(config, "SCALP_TIME_DECAY_START_MINUTES", 5)
+                        decay_be = getattr(config, "SCALP_TIME_DECAY_BREAKEVEN_MINUTES", 15)
+                    else:
+                        decay_start = getattr(config, "TIME_DECAY_START_MINUTES", 45)
+                        decay_be = getattr(config, "TIME_DECAY_BREAKEVEN_MINUTES", 105)
+                        
+                    if elapsed > decay_start:
+                        initial_sl = state.initial_sl
+                        if initial_sl == 0.0:
+                            initial_sl = sl
+                            state.initial_sl = initial_sl
+                            
+                        if initial_sl > 0 and entry > 0:
+                            duration = float(decay_be - decay_start)
+                            if duration > 0:
+                                decay_factor = min(1.0, (elapsed - decay_start) / duration)
+                                computed_sl = initial_sl + (entry - initial_sl) * decay_factor
+                                
+                                if side == "LONG":
+                                    if computed_sl > active_sl:
+                                        logger.info(
+                                            "[Trailing] Time Decay SL (LONG): #%s %s elapsed=%.1fm, "
+                                            "Initial SL=%.4f, Entry=%.4f, Active SL=%.4f -> Decayed SL=%.4f",
+                                            trade_id, symbol, elapsed, initial_sl, entry, active_sl, computed_sl
+                                        )
+                                        active_sl = computed_sl
+                                        state.current_sl = computed_sl
+                                else:  # SHORT
+                                    if active_sl == 0 or computed_sl < active_sl:
+                                        logger.info(
+                                            "[Trailing] Time Decay SL (SHORT): #%s %s elapsed=%.1fm, "
+                                            "Initial SL=%.4f, Entry=%.4f, Active SL=%.4f -> Decayed SL=%.4f",
+                                            trade_id, symbol, elapsed, initial_sl, entry, active_sl, computed_sl
+                                        )
+                                        active_sl = computed_sl
+                                        state.current_sl = computed_sl
+                except Exception as _e:
+                    logger.error(f"[Trailing] Error in Time-Decay calculations: {_e}")
 
         # ── 1. SL vuruldu mu? ────────────────────────────────────────
         if self._sl_hit(side, current_price, active_sl):
@@ -309,6 +373,9 @@ class TrailingEngine:
 
         # ── 8. Max hold time kontrolü (timeout) ──────────────────────
         # Bu kontrol execution_engine.py tarafından yapılır.
+
+        if state.current_sl > 0 and state.current_sl != sl:
+            return PartialCloseResult(new_sl=state.current_sl)
 
         return PartialCloseResult()  # Aksiyon yok
 

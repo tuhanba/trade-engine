@@ -103,6 +103,9 @@ class AsyncScalpEngine:
         # Start Market Regime Loop
         asyncio.create_task(self._market_regime_loop())
 
+        # Start Optuna Hyperparameter Tuner Loop
+        asyncio.create_task(self._optuna_tuning_loop())
+
         # Start Watchdog
         try:
             from core.watchdog import SystemWatchdog
@@ -135,6 +138,13 @@ class AsyncScalpEngine:
             asyncio.create_task(news_service.start_background_task())
         except Exception as e:
             logger.error(f"NewsService başlatılamadı: {e}")
+
+        # Start Sentiment Scraper Agent
+        try:
+            from core.services.sentiment_scraper import sentiment_scraper
+            asyncio.create_task(sentiment_scraper.start_background_task())
+        except Exception as e:
+            logger.error(f"SentimentScraper başlatılamadı: {e}")
 
         # Start WebSocket Data Feed
         await self.market_data.initialize()
@@ -197,6 +207,18 @@ class AsyncScalpEngine:
                 except Exception:
                     pass
 
+    async def _optuna_tuning_loop(self):
+        """Run Optuna parameter optimization loop every 4 hours."""
+        from core.hyperparameter_tuner import optimize_parameters
+        # Delay startup execution by 10 minutes (600s) to let the bot stabilize
+        await asyncio.sleep(600)
+        while True:
+            try:
+                await asyncio.to_thread(optimize_parameters)
+            except Exception as e:
+                logger.error(f"[Tuner Loop] Background optimization task failed: {e}")
+            await asyncio.sleep(14400)  # 4 hours
+
     async def _heartbeat_loop(self):
         """Update heartbeat in database every 10 seconds."""
         from database import update_bot_status
@@ -229,6 +251,12 @@ class AsyncScalpEngine:
         try:
             from core.services.news_service import news_service
             news_service.stop()
+        except Exception:
+            pass
+
+        try:
+            from core.services.sentiment_scraper import sentiment_scraper
+            sentiment_scraper.stop()
         except Exception:
             pass
         

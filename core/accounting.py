@@ -314,8 +314,11 @@ def validate_risk(
     tp1 = signal.tp1 or 0
     if tp1 > 0:
         rr = calculate_rr(signal.entry_price, signal.stop_loss, tp1)
-        if rr < 1.0:
-            return False, f"RR ({rr}) minimum 1.0 altında"
+        import config
+        is_scalp = not getattr(config, "HUMAN_MODE", False)
+        min_rr = 0.2 if is_scalp else getattr(config, "MIN_RR", 1.0)
+        if rr < min_rr:
+            return False, f"RR ({rr}) minimum {min_rr} altında"
 
     return True, "OK"
 
@@ -361,6 +364,51 @@ def build_trade_from_signal(
     SignalData'dan TradeData oluşturur.
     Risk doğrulaması başarısızsa None döner.
     """
+    import config
+
+    # ── Spread & Fee-Aware Take-Profit Optimizer (Scalp Recommendation) ──
+    is_scalp = not getattr(config, "HUMAN_MODE", False)
+    if is_scalp and getattr(config, "SCALP_TP_OPTIMIZER_ENABLED", True):
+        try:
+            from core.market_data import get_book_ticker
+            book = get_book_ticker(signal.symbol)
+            if book:
+                spread = abs(float(book.get("askPrice", 0)) - float(book.get("bidPrice", 0)))
+            else:
+                spread = signal.entry_price * 0.0005
+                
+            # Clamp spread to prevent outlier/abnormal values
+            max_allowed_spread = signal.entry_price * 0.005
+            if spread > max_allowed_spread:
+                spread = max_allowed_spread
+                
+            round_trip_fee = signal.entry_price * fee_rate * 2.0
+            min_profit_diff = (round_trip_fee + spread) * getattr(config, "MIN_TP_FEE_SPREAD_RATIO", 2.5)
+            
+            if signal.tp1 and signal.tp1 > 0:
+                current_diff = abs(signal.tp1 - signal.entry_price)
+                if current_diff < min_profit_diff:
+                    old_tp1 = signal.tp1
+                    if signal.side == "LONG":
+                        signal.tp1 = signal.entry_price + min_profit_diff
+                        if signal.tp2:
+                            signal.tp2 = max(signal.tp2, signal.tp1 + max(abs(signal.tp2 - old_tp1), min_profit_diff))
+                        if signal.tp3:
+                            signal.tp3 = max(signal.tp3, (signal.tp2 or signal.tp1) + max(abs(signal.tp3 - (signal.tp2 or old_tp1)), min_profit_diff))
+                    else:  # SHORT
+                        signal.tp1 = signal.entry_price - min_profit_diff
+                        if signal.tp2:
+                            signal.tp2 = min(signal.tp2, signal.tp1 - max(abs(old_tp1 - signal.tp2), min_profit_diff))
+                        if signal.tp3:
+                            signal.tp3 = min(signal.tp3, (signal.tp2 or signal.tp1) - max(abs((signal.tp2 or old_tp1) - signal.tp3), min_profit_diff))
+                            
+                    logger.info(
+                        "[Accounting] Scalp TP Optimizer: Symbol=%s, Entry=%.4f. Old TP1=%.4f -> Optimized TP1=%.4f (Min Profit Diff Required=%.4f, Spread=%.4f, Est Fee=%.4f)",
+                        signal.symbol, signal.entry_price, old_tp1, signal.tp1, min_profit_diff, spread, round_trip_fee
+                    )
+        except Exception as _e:
+            logger.error(f"[Accounting] Error optimizing take profit: {_e}")
+
     valid, reason = validate_risk(signal, balance, max_leverage)
     if not valid:
         logger.warning(
@@ -372,13 +420,35 @@ def build_trade_from_signal(
     if leverage <= 0:
         leverage = 1
 
-    # Dinamik Büyüklük (Kelly Kriteri Benzeri)
+    # ── Piyasa Rejimi tespiti ─────────────────────────────────────────
+    regime = "TRENDING"
+    if signal.metadata and "market_regime" in signal.metadata:
+        regime = signal.metadata.get("market_regime", "TRENDING")
+    else:
+        try:
+            from database import get_market_regime
+            regime = get_market_regime()
+        except Exception:
+            regime = "TRENDING"
+
+    # Dinamik Büyüklük (Kelly Kriteri Benzeri + Piyasa Rejimi Koruyucusu)
     base_risk = signal.risk_pct
     score = getattr(signal, "final_score", 75.0) or 75.0
     dynamic_risk = base_risk * (score / 75.0)
-    # Sınırlar: Base riskin en az yarısı, en fazla 1.5 katı
-    dynamic_risk = max(base_risk * 0.5, min(dynamic_risk, base_risk * 1.5))
-    logger.debug(f"[Accounting] Dynamic Risk for {signal.symbol}: {base_risk}% -> {dynamic_risk:.2f}% (Score: {score})")
+    
+    if score >= 80.0:
+        dynamic_risk *= 1.3
+    elif score <= 55.0:
+        dynamic_risk *= 0.6
+        
+    if regime == "CHOPPY":
+        dynamic_risk *= 0.5
+    elif regime in ("BULLISH", "BEARISH"):
+        dynamic_risk *= 1.1
+
+    dynamic_risk = max(base_risk * 0.2, min(dynamic_risk, base_risk * 2.0))
+    dynamic_risk = max(0.2, min(dynamic_risk, 3.0))
+    logger.info(f"[Accounting] Dynamic Risk for {signal.symbol}: Base={base_risk}% -> Dynamic={dynamic_risk:.2f}% (Score={score}, Regime={regime})")
 
     pos = calculate_position_size(
         balance=balance,
@@ -429,7 +499,7 @@ def build_trade_from_signal(
         notional=notional,
         margin_used=margin_used,
         risk_usd=round(risk_usd, 4),
-        risk_pct=signal.risk_pct,
+        risk_pct=dynamic_risk,
         status=TradeStatus.OPEN.value,
         current_price=signal.entry_price,
     )

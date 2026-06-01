@@ -259,17 +259,31 @@ class MLSignalScorer:
         ensemble.fit(X_scaled, y)
 
         # Cross-validation
+        new_cv_accuracy = 0.0
         try:
             cv = StratifiedKFold(n_splits=min(5, max(2, len(rows)//15)), shuffle=True, random_state=42)
             cv_scores = cross_val_score(ensemble, X_scaled, y, cv=cv, scoring="roc_auc")
-            self.cv_accuracy = float(cv_scores.mean())
-            logger.info(f"ML CV ROC-AUC: {self.cv_accuracy:.3f} ± {cv_scores.std():.3f}")
+            new_cv_accuracy = float(cv_scores.mean())
+            logger.info(f"ML CV ROC-AUC: {new_cv_accuracy:.3f} ± {cv_scores.std():.3f}")
         except Exception as e:
             logger.debug(f"CV hatası: {e}")
-            self.cv_accuracy = 0.0
+            new_cv_accuracy = 0.0
+
+        # Model Gating Check
+        if self.trained and self.model is not None and self.cv_accuracy > 0.0:
+            # We compare new_cv_accuracy with existing cv_accuracy
+            # Standard gate: new ROC-AUC should not degrade by more than 3%
+            degradation_threshold = self.cv_accuracy * 0.97
+            if new_cv_accuracy < degradation_threshold:
+                logger.warning(
+                    f"[ML Gating] Yeni model performansı yetersiz. Değişim reddedildi. "
+                    f"Yeni CV ROC-AUC: {new_cv_accuracy:.3f} < Eşik: {degradation_threshold:.3f} (Mevcut: {self.cv_accuracy:.3f})"
+                )
+                return False
 
         self.model      = ensemble
         self.scaler     = scaler
+        self.cv_accuracy = new_cv_accuracy
         self.trained    = True
         self.n_samples  = len(rows)
         self.last_train = datetime.now(timezone.utc)

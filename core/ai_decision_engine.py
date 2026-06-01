@@ -743,6 +743,240 @@ def _get_ghost_manager() -> GhostMemoryManager:
     if _ghost_manager is None:
         _ghost_manager = GhostMemoryManager()
     return _ghost_manager
+class TechnicalAgent:
+    def __init__(self, scorer=None):
+        self.scorer = scorer
+
+    def evaluate(self, signal: SignalData, context: dict) -> tuple[str, float, str]:
+        """
+        Technical agent evaluates indicators, volume, and score from AdaptiveScorer.
+        """
+        # Calculate base score from scorer or signal
+        if self.scorer:
+            base_score = self.scorer.compute_adjusted_score(signal, context)
+        else:
+            base_score = float(signal.score)
+
+        score = base_score
+        reasons = []
+
+        # Volatility check
+        volatility = context.get("volatility", "normal")
+        if volatility == "high":
+            score -= 5
+            reasons.append("High volatility penalty")
+        elif volatility == "low":
+            score -= 2
+            reasons.append("Low volatility penalty")
+
+        # Trend check
+        market_trend = context.get("market_trend", "neutral")
+        side = str(getattr(signal, "side", "") or getattr(signal, "direction", "")).upper()
+        if market_trend.upper() == "BULLISH" and side == "LONG":
+            score += 5
+            reasons.append("Bullish trend alignment")
+        elif market_trend.upper() == "BEARISH" and side == "SHORT":
+            score += 5
+            reasons.append("Bearish trend alignment")
+        elif market_trend.upper() == "BULLISH" and side == "SHORT":
+            score -= 10
+            reasons.append("Trend conflict: Short in Bullish")
+        elif market_trend.upper() == "BEARISH" and side == "LONG":
+            score -= 10
+            reasons.append("Trend conflict: Long in Bearish")
+
+        score = max(0.0, min(100.0, score))
+        
+        # Decide vote
+        # VETO if score is extremely low (< 45)
+        if score < 45:
+            vote = "VETO"
+        elif score < 65:
+            vote = "WATCH"
+        else:
+            vote = "ALLOW"
+
+        reason_str = ", ".join(reasons) if reasons else "Neutral Technicals"
+        return vote, score, reason_str
+
+
+class SentimentAgent:
+    def evaluate(self, signal: SignalData, context: dict) -> tuple[str, float, str]:
+        """
+        Sentiment agent evaluates Fear and Greed index, news sentiment, and macro indicators.
+        """
+        # Fetch FNG value
+        fng_val = context.get("fng_value")
+        if fng_val is None:
+            try:
+                from core.services.macro_service import macro_service
+                sentiment = macro_service.get_market_sentiment()
+                fng_val = sentiment.get("fng_value", 50)
+            except Exception:
+                fng_val = 50
+
+        side = str(getattr(signal, "side", "") or getattr(signal, "direction", "")).upper()
+        score = 70.0
+        reasons = []
+
+        if fng_val < 25:
+            # Extreme Fear
+            if side == "LONG":
+                score -= 30
+                reasons.append(f"Extreme Fear (FNG={fng_val}) on LONG")
+            else:
+                score += 10
+                reasons.append(f"Fear supports SHORT (FNG={fng_val})")
+        elif fng_val > 75:
+            # Extreme Greed
+            if side == "SHORT":
+                score -= 30
+                reasons.append(f"Extreme Greed (FNG={fng_val}) on SHORT")
+            else:
+                score += 10
+                reasons.append(f"Greed supports LONG (FNG={fng_val})")
+        else:
+            reasons.append(f"Neutral FNG ({fng_val})")
+
+        # News / Macro sentiment
+        macro_sentiment = context.get("macro_sentiment")
+        if macro_sentiment is None:
+            try:
+                from database import get_system_state
+                macro_sentiment = get_system_state("sentiment_scraper_macro", "neutral")
+            except Exception:
+                macro_sentiment = "neutral"
+
+        if macro_sentiment == "bullish" and side == "LONG":
+            score += 5
+            reasons.append("Bullish macro sentiment")
+        elif macro_sentiment == "bearish" and side == "SHORT":
+            score += 5
+            reasons.append("Bearish macro sentiment")
+        elif macro_sentiment == "bearish" and side == "LONG":
+            score -= 10
+            reasons.append("Bearish macro sentiment restricts LONG")
+        elif macro_sentiment == "bullish" and side == "SHORT":
+            score -= 10
+            reasons.append("Bullish macro sentiment restricts SHORT")
+
+        # 8-Hour average funding rate check (Faz C2 Macro Filter)
+        funding_rate_8h = context.get("funding_rate_8h")
+        if funding_rate_8h is None and signal.metadata:
+            funding_rate_8h = signal.metadata.get("funding_rate_8h")
+        
+        if funding_rate_8h is not None:
+            funding_rate_8h = float(funding_rate_8h)
+            if side == "LONG" and funding_rate_8h >= 0.0003:
+                score -= 30
+                reasons.append(f"Extreme 8h positive funding rate ({funding_rate_8h:.5f}) on LONG (Squeeze risk)")
+            elif side == "SHORT" and funding_rate_8h <= -0.0003:
+                score -= 30
+                reasons.append(f"Extreme 8h negative funding rate ({funding_rate_8h:.5f}) on SHORT (Squeeze risk)")
+
+        score = max(0.0, min(100.0, score))
+
+        if score < 45:
+            vote = "VETO"
+        elif score < 60:
+            vote = "WATCH"
+        else:
+            vote = "ALLOW"
+
+        return vote, score, ", ".join(reasons)
+
+
+class OrderFlowAgent:
+    def evaluate(self, signal: SignalData, context: dict) -> tuple[str, float, str]:
+        """
+        OrderFlow agent evaluates CVD delta, Open Interest, Funding rate, and Orderbook ratio.
+        """
+        cvd_delta = float(context.get("cvd_delta", 0.0))
+        oi_trend = str(context.get("open_interest_trend", "flat")).lower()
+        funding_rate = float(context.get("funding_rate", 0.0))
+        ob_ratio = float(context.get("orderbook_ratio", 1.0))
+        
+        side = str(getattr(signal, "side", "") or getattr(signal, "direction", "")).upper()
+        score = 70.0
+        reasons = []
+
+        # CVD Delta
+        if cvd_delta > 0 and side == "LONG":
+            score += 10
+            reasons.append("Positive CVD")
+        elif cvd_delta < 0 and side == "SHORT":
+            score += 10
+            reasons.append("Negative CVD")
+        elif cvd_delta > 0 and side == "SHORT":
+            score -= 10
+            reasons.append("Adverse positive CVD on SHORT")
+        elif cvd_delta < 0 and side == "LONG":
+            score -= 10
+            reasons.append("Adverse negative CVD on LONG")
+
+        # Open Interest
+        if oi_trend == "rising":
+            score += 5
+            reasons.append("Rising Open Interest")
+        elif oi_trend == "falling":
+            score -= 5
+            reasons.append("Falling Open Interest")
+
+        # Funding rate
+        if side == "LONG" and funding_rate > 0.05:
+            score -= 10
+            reasons.append(f"High Funding Rate ({funding_rate}%) on LONG")
+        elif side == "SHORT" and funding_rate < -0.05:
+            score -= 10
+            reasons.append(f"High Negative Funding Rate ({funding_rate}%) on SHORT")
+
+        # Orderbook bid/ask depth ratio
+        if side == "LONG":
+            if ob_ratio > 1.2:
+                score += 5
+                reasons.append(f"Strong bid depth ratio: {ob_ratio:.2f}")
+            elif ob_ratio < 0.8:
+                score -= 10
+                reasons.append(f"Weak bid depth ratio: {ob_ratio:.2f}")
+        elif side == "SHORT":
+            if ob_ratio < 0.8:
+                score += 5
+                reasons.append(f"Strong ask depth ratio: {ob_ratio:.2f}")
+            elif ob_ratio > 1.2:
+                score -= 10
+                reasons.append(f"Weak ask depth ratio: {ob_ratio:.2f}")
+
+        # Open Interest Spike check (Faz C2 Macro Filter)
+        oi_change_pct = context.get("oi_change_pct")
+        if oi_change_pct is None and signal.metadata:
+            oi_change_pct = signal.metadata.get("oi_change_pct")
+        
+        if oi_change_pct is not None:
+            oi_change_pct = float(oi_change_pct)
+            # If there's a massive spike (e.g. >= 12%), it's highly volatile/risky (VETO due to liquidation hazard)
+            if abs(oi_change_pct) >= 12.0:
+                score -= 30
+                reasons.append(f"Extreme Open Interest Spike ({oi_change_pct:+.1f}%) -> Squeeze risk")
+            # If there's an OI spike (e.g. >= 8%), check for CVD alignment
+            elif abs(oi_change_pct) >= 8.0:
+                # If CVD is opposite to our direction, it's a trap/squeeze (Divergence)
+                if (side == "LONG" and cvd_delta < 0) or (side == "SHORT" and cvd_delta > 0):
+                    score -= 20
+                    reasons.append(f"OI Spike ({oi_change_pct:+.1f}%) with opposite CVD ({cvd_delta}) -> Divergence/Trap risk")
+                else:
+                    score -= 5
+                    reasons.append(f"OI Spike ({oi_change_pct:+.1f}%) -> Volatility warning")
+
+        score = max(0.0, min(100.0, score))
+
+        if score < 45:
+            vote = "VETO"
+        elif score < 60:
+            vote = "WATCH"
+        else:
+            vote = "ALLOW"
+
+        return vote, score, ", ".join(reasons)
 
 
 def classify_signal(
@@ -761,6 +995,26 @@ def classify_signal(
     ctx = context or {}
     ghost = _get_ghost_manager()
     scorer = AdaptiveScorer(ghost)
+
+    votes_to_broadcast = {}
+
+    def return_decision(res):
+        if votes_to_broadcast:
+            try:
+                from websocket_events import event_manager
+                if event_manager:
+                    event_manager.broadcast_agent_votes(
+                        symbol=signal.symbol,
+                        direction=signal.side,
+                        decision=res.decision,
+                        votes=votes_to_broadcast,
+                        adjusted_score=res.score_adjusted or signal.score,
+                        confidence=res.confidence,
+                        reason=res.reason
+                    )
+            except Exception as _e:
+                logger.debug(f"WS agent votes broadcast error: {_e}")
+        return res
 
     # ── Temel validasyon ─────────────────────────────────────────
     if signal.entry_price <= 0 or signal.stop_loss <= 0:
@@ -786,8 +1040,38 @@ def classify_signal(
             confidence=0.9,
         )
 
-    # ── Adaptif score hesapla ────────────────────────────────────
-    adjusted_score = scorer.compute_adjusted_score(signal, ctx)
+    # ── Multi-Agent Consensus Framework (Feature 3) ──────────────
+    tech_agent = TechnicalAgent(scorer)
+    sent_agent = SentimentAgent()
+    flow_agent = OrderFlowAgent()
+
+    tech_vote, tech_score, tech_reason = tech_agent.evaluate(signal, ctx)
+    sent_vote, sent_score, sent_reason = sent_agent.evaluate(signal, ctx)
+    flow_vote, flow_score, flow_reason = flow_agent.evaluate(signal, ctx)
+
+    adjusted_score = tech_score * 0.4 + flow_score * 0.4 + sent_score * 0.2
+
+    votes_to_broadcast.update({
+        "Technical": {"vote": tech_vote, "score": tech_score, "reason": tech_reason},
+        "Sentiment": {"vote": sent_vote, "score": sent_score, "reason": sent_reason},
+        "OrderFlow": {"vote": flow_vote, "score": flow_score, "reason": flow_reason}
+    })
+
+    # Check for VETO from any agent
+    if tech_vote == "VETO" or sent_vote == "VETO" or flow_vote == "VETO":
+        veto_reasons = []
+        if tech_vote == "VETO": veto_reasons.append(f"Tech: {tech_reason}")
+        if sent_vote == "VETO": veto_reasons.append(f"Sentiment: {sent_reason}")
+        if flow_vote == "VETO": veto_reasons.append(f"OrderFlow: {flow_reason}")
+        
+        reason_msg = "Consensus VETO | " + " | ".join(veto_reasons)
+        logger.info(f"[AI Consensus] VETO issued for {signal.symbol}: {reason_msg}")
+        return return_decision(AIDecisionResult(
+            decision=SignalDecision.VETO.value,
+            reason=reason_msg,
+            confidence=0.9,
+            score_adjusted=adjusted_score
+        ))
 
     # ── Portföy Korelasyon Kalkanı (Faz 5) ──────────────────────────
     try:
@@ -797,11 +1081,11 @@ def classify_signal(
         if same_direction_count >= 3:
             # 3'ten fazla aynı yönde pozisyon var, risk yarıya düşürülmeli veya VETO verilmeli
             if adjusted_score < 75:
-                return AIDecisionResult(
+                return return_decision(AIDecisionResult(
                     decision=SignalDecision.VETO.value,
                     reason=f"Korelasyon Kalkanı: Zaten {same_direction_count} adet {signal.side} pozisyon açık",
                     confidence=0.8,
-                )
+                ))
             else:
                 # Skor iyiyse riski düşürtüp izin ver
                 signal.risk_pct *= 0.5
@@ -820,11 +1104,11 @@ def classify_signal(
         # Aşırı korku varsa LONG işlemlere kısıtlama
         if fng_val < 25 and signal.side == "LONG":
             if adjusted_score < 40:
-                return AIDecisionResult(
+                return return_decision(AIDecisionResult(
                     decision=SignalDecision.VETO.value,
                     reason=f"Macro Kalkanı: Piyasa Aşırı Korku seviyesinde (FNG={fng_val}). LONG işlemi reddedildi.",
                     confidence=0.9,
-                )
+                ))
             else:
                 signal.risk_pct *= 0.5 # Riski yarıya düşür
                 signal.position_size = round(signal.position_size * 0.5, 6)
@@ -834,11 +1118,11 @@ def classify_signal(
         # Aşırı coşku varsa SHORT işlemlere kısıtlama
         elif fng_val > 75 and signal.side == "SHORT":
             if adjusted_score < 40:
-                return AIDecisionResult(
+                return return_decision(AIDecisionResult(
                     decision=SignalDecision.VETO.value,
                     reason=f"Macro Kalkanı: Piyasa Aşırı Açgözlülük seviyesinde (FNG={fng_val}). SHORT işlemi reddedildi.",
                     confidence=0.9,
-                )
+                ))
             else:
                 signal.risk_pct *= 0.5
                 signal.position_size = round(signal.position_size * 0.5, 6)
@@ -866,12 +1150,12 @@ def classify_signal(
         if is_scalp_mode and setup_quality in ("A", "B", "C") and confluence >= 1:
             logger.debug("[Regime] CHOPPY'de Scalp Modu istisnası: A/B kalite + Confluence kabul edildi.")
         elif setup_quality not in ("S", "A+", "A", "B"):
-            return AIDecisionResult(
+            return return_decision(AIDecisionResult(
                 decision=SignalDecision.VETO.value,
                 reason=f"CHOPPY piyasa — {setup_quality} kalite yetersiz (min A+)",
                 confidence=0.85,
                 score_adjusted=adjusted_score,
-            )
+            ))
     elif regime == "BULLISH" and side_upper == "SHORT":
         adjusted_score = round(adjusted_score * 0.88, 1)
         logger.debug("[Regime] BULLISH + SHORT → score *0.88 → %.1f", adjusted_score)
@@ -976,7 +1260,7 @@ def classify_signal(
             logger.debug("[classify_signal] ghost log atlandı: %s", _ghost_err)
     # ─────────────────────────────────────────────────────────────────
 
-    return result
+    return return_decision(result)
 
 
 # ── Ghost learning summary ────────────────────────────────────────────

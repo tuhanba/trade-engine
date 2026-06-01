@@ -96,10 +96,15 @@ class ExecutionEngine:
         initial_state = TradeExitState(
             current_sl=trade.stop_loss,
             highest_price=trade.entry_price,
+            initial_sl=trade.stop_loss,
+            is_scalp=not getattr(config, "HUMAN_MODE", False),
         )
         meta_dict = initial_state.to_dict()
         if signal.metadata:
             meta_dict.update(signal.metadata)
+        # Ensure is_scalp and initial_sl are set
+        meta_dict["is_scalp"] = initial_state.is_scalp
+        meta_dict["initial_sl"] = initial_state.initial_sl
         state_json = json.dumps(meta_dict)
 
         trade_id = database.create_trade(trade, metadata=state_json)
@@ -190,8 +195,21 @@ class ExecutionEngine:
             return
 
         # ── State güncelle (SL değişmişse) ───────────────────────
-        if result.new_sl and result.new_sl != (state.current_sl or trade.get("sl") or trade.get("stop_loss", 0)):
+        if result.new_sl and result.new_sl != (trade.get("sl") or trade.get("stop_loss", 0)):
+            old_sl = trade.get("sl") or trade.get("stop_loss", 0)
             database.update_trade_sl(trade_id, result.new_sl)
+            try:
+                from websocket_events import event_manager
+                if event_manager:
+                    event_manager.broadcast_trailing_stop_updated(
+                        symbol=symbol,
+                        trade_id=trade_id,
+                        old_sl=old_sl,
+                        new_sl=result.new_sl,
+                        current_price=current
+                    )
+            except Exception as _e:
+                logger.debug(f"WS trailing stop broadcast error: {_e}")
 
         # Exit state'i DB'ye yaz
         self._save_exit_state(trade_id, state)
@@ -239,6 +257,23 @@ class ExecutionEngine:
 
         # Exit state kaydet
         self._save_exit_state(trade_id, state)
+
+        # Emit trailing stop updated event if new_sl is set and different
+        if result.new_sl:
+            old_sl = state.current_sl or trade.get("sl") or trade.get("stop_loss", 0)
+            if result.new_sl != old_sl:
+                try:
+                    from websocket_events import event_manager
+                    if event_manager:
+                        event_manager.broadcast_trailing_stop_updated(
+                            symbol=symbol,
+                            trade_id=trade_id,
+                            old_sl=old_sl,
+                            new_sl=result.new_sl,
+                            current_price=current_price
+                        )
+                except Exception as _e:
+                    logger.debug(f"WS partial close trailing stop broadcast error: {_e}")
 
         logger.info(
             "[Execution] Partial close: #%s %s @ %.4f  reason=%s  qty=%.4f  pnl=%.4f",
@@ -462,13 +497,18 @@ class ExecutionEngine:
             meta_raw = trade.get("metadata", "")
             if meta_raw and meta_raw.strip().startswith("{"):
                 meta = json.loads(meta_raw)
-                return TradeExitState.from_dict(meta)
+                state = TradeExitState.from_dict(meta)
+                if state.initial_sl == 0.0:
+                    state.initial_sl = float(trade.get("sl") or trade.get("stop_loss", 0) or 0)
+                return state
         except Exception as exc:
             logger.debug("Exit state yüklenemedi: %s", exc)
         # Yeni state oluştur
         return TradeExitState(
             current_sl=float(trade.get("sl") or trade.get("stop_loss", 0) or 0),
             highest_price=float(trade.get("entry") or trade.get("entry_price", 0) or 0),
+            initial_sl=float(trade.get("sl") or trade.get("stop_loss", 0) or 0),
+            is_scalp=not getattr(config, "HUMAN_MODE", False),
         )
 
     def _save_exit_state(self, trade_id: int, state: TradeExitState) -> None:

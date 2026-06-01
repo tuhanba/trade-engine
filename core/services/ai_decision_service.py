@@ -67,6 +67,7 @@ class AIDecisionService:
                 "momentum_3c": trigger_result.get("momentum_3c", 0.0),
                 "prev_result": trigger_result.get("prev_result", "NONE"),
                 "funding_rate": trigger_result.get("funding_rate", 0.0),
+                "funding_rate_8h": trigger_result.get("funding_rate_8h", 0.0),
                 "cvd_value": trigger_result.get("cvd_value", 0.0),
                 "oi_change_pct": trigger_result.get("oi_change_pct", 0.0),
             }

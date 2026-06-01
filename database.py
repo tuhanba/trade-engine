@@ -2200,7 +2200,7 @@ def update_trade_stats(trade_id, mfe=None, mae=None):
             )
         if mae is not None:
             conn.execute(
-                "UPDATE trades SET mae = MIN(mae, ?) WHERE id = ?", (mae, trade_id)
+                "UPDATE trades SET mae = MAX(mae, ?) WHERE id = ?", (mae, trade_id)
             )
 
 

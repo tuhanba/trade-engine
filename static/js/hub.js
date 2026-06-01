@@ -422,6 +422,28 @@ function addConsoleLog(text, level = 'info') {
     terminal.scrollTop = terminal.scrollHeight;
 }
 
+function addExecutionMonitorLog(text, level = 'info') {
+    const terminal = document.getElementById('executionMonitor');
+    if (!terminal) return;
+    const line = document.createElement('div');
+    let cl = 'log-line';
+    if (level === 'error') cl += ' text-error';
+    else if (level === 'warning') cl += ' text-warning';
+    else if (level === 'success') cl += ' text-success';
+    else cl += ' text-info';
+    
+    line.className = cl;
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-US', { hour12: false });
+    line.innerHTML = `<span class="time">[${timeStr}]</span> ${text}`;
+    terminal.appendChild(line);
+    terminal.scrollTop = terminal.scrollHeight;
+    
+    while (terminal.childElementCount > 100) {
+        terminal.removeChild(terminal.firstChild);
+    }
+}
+
 // ----------------------------------------------------
 // ⚡ SOCKET.IO REALTIME EVENTS
 // ----------------------------------------------------
@@ -478,6 +500,41 @@ function connectWebSocket() {
             fetchStatsAndFunnel();
             fetchHistory();
             initEquityChart();
+        });
+
+        socket.on('trailing_stop_updated', (data) => {
+            const pctChange = ((data.new_sl - data.old_sl) / data.old_sl * 100);
+            const directionSign = pctChange >= 0 ? '▲' : '▼';
+            const msg = `🚨 <strong>[SL Update]</strong> ${data.symbol} (#${data.trade_id}): Trailing SL moved from <span class="mono">${data.old_sl.toFixed(4)}</span> to <span class="mono">${data.new_sl.toFixed(4)}</span> (${directionSign} ${pctChange.toFixed(2)}%) | Price: <span class="mono">${data.current_price.toFixed(4)}</span>`;
+            addExecutionMonitorLog(msg, pctChange >= 0 ? 'success' : 'warning');
+        });
+
+        socket.on('limit_chase_progress', (data) => {
+            const pctFilled = data.total_qty > 0 ? (data.filled_qty / data.total_qty * 100) : 0;
+            let level = 'info';
+            let statusEmoji = '⚡';
+            if (data.status === 'COMPLETED') { level = 'success'; statusEmoji = '✓'; }
+            else if (data.status === 'MARKET_FALLBACK') { level = 'warning'; statusEmoji = '🔀'; }
+            else if (data.status === 'FAILED') { level = 'error'; statusEmoji = '✗'; }
+            
+            const msg = `${statusEmoji} <strong>[Limit Chase]</strong> ${data.side} ${data.symbol}: ${data.status} | Filled: <span class="mono">${data.filled_qty.toFixed(4)}/${data.total_qty.toFixed(4)}</span> (${pctFilled.toFixed(1)}%) @ <span class="mono">${data.price.toFixed(4)}</span>`;
+            addExecutionMonitorLog(msg, level);
+        });
+
+        socket.on('agent_votes', (data) => {
+            let level = 'info';
+            if (data.decision === 'VETO') level = 'error';
+            else if (data.decision === 'WATCH') level = 'warning';
+            else if (data.decision === 'ALLOW') level = 'success';
+            
+            let agentDetails = [];
+            for (const [agent, voteInfo] of Object.entries(data.votes)) {
+                const colorClass = voteInfo.vote === 'VETO' ? 'text-error' : (voteInfo.vote === 'WATCH' ? 'text-warning' : 'text-success');
+                agentDetails.push(`${agent}: <span class="${colorClass}">${voteInfo.vote}</span> (${voteInfo.score.toFixed(0)})`);
+            }
+            
+            const msg = `🧠 <strong>[AI Consensus]</strong> ${data.symbol} ${data.direction} → <strong style="text-transform: uppercase;">${data.decision}</strong> (Score: ${data.adjusted_score.toFixed(1)})<br>&nbsp;&nbsp;&nbsp;&nbsp;↳ [${agentDetails.join(' | ')}]`;
+            addExecutionMonitorLog(msg, level);
         });
 
     } catch (e) {

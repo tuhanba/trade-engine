@@ -161,3 +161,22 @@ def filter_usdt_symbols(
         len(filtered), len(tickers), min_volume_usdt, min_move_pct,
     )
     return filtered
+
+
+@with_exponential_backoff(max_retries=2, base_delay=1.0)
+def get_book_ticker(symbol: str) -> Optional[dict]:
+    """
+    Sembolün en iyi bid/ask fiyatını döner (makas hesabı için).
+    Hata durumunda None döner.
+    """
+    try:
+        resp = requests.get(
+            f"{_BASE_URL}/fapi/v1/ticker/bookTicker",
+            params={"symbol": symbol},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        logger.error("Book ticker alınamadı [%s]: %s", symbol, exc)
+        return None

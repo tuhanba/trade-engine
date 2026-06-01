@@ -216,31 +216,44 @@
                         </div>
                     </div>
 
-                    <!-- RECENT TRADES -->
-                    <div class="glass-card history-card" style="flex: 1; display: flex; flex-direction: column; margin-top: 16px;">
-                        <div class="card-header">
-                            <h3><i class="fa-solid fa-clock-rotate-left"></i> Historic Closed Trades</h3>
+                    <!-- BOTTOM ROW: HISTORIC TRADES & LIVE MONITOR -->
+                    <div class="trades-bottom-row" style="display: flex; gap: 16px; flex: 1; margin-top: 16px; min-height: 0; overflow: hidden;">
+                        <!-- RECENT TRADES -->
+                        <div class="glass-card history-card" style="flex: 3; display: flex; flex-direction: column; overflow: hidden;">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-clock-rotate-left"></i> Historic Closed Trades</h3>
+                            </div>
+                            <div class="table-container" style="flex: 1; max-height: none; overflow-y: auto;">
+                                <table class="premium-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Symbol</th>
+                                            <th>Direction</th>
+                                            <th>Entry Price</th>
+                                            <th>Exit Price</th>
+                                            <th>Realized PnL</th>
+                                            <th>Duration</th>
+                                            <th>Close Reason</th>
+                                            <th>Closed At</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="closedTradesBody">
+                                        <tr>
+                                            <td colspan="8" class="empty-row">No trade history found.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
-                        <div class="table-container" style="flex: 1; max-height: none;">
-                            <table class="premium-table">
-                                <thead>
-                                    <tr>
-                                        <th>Symbol</th>
-                                        <th>Direction</th>
-                                        <th>Entry Price</th>
-                                        <th>Exit Price</th>
-                                        <th>Realized PnL</th>
-                                        <th>Duration</th>
-                                        <th>Close Reason</th>
-                                        <th>Closed At</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="closedTradesBody">
-                                    <tr>
-                                        <td colspan="8" class="empty-row">No trade history found.</td>
-                                    </tr>
-                                </tbody>
-                            </table>
+
+                        <!-- LIVE EXECUTION MONITOR -->
+                        <div class="glass-card execution-monitor-card" style="flex: 2; display: flex; flex-direction: column; overflow: hidden;">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-tower-broadcast"></i> Live Execution & AI Votes</h3>
+                            </div>
+                            <div class="logs-container" id="executionMonitor" style="flex: 1; padding: 16px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 10px; line-height: 1.5; background: rgba(0, 0, 0, 0.2); border-radius: 0 0 16px 16px; display: flex; flex-direction: column; gap: 6px;">
+                                <div class="log-line text-muted">[System] Ready. Waiting for trailing updates, order chases, and AI votes...</div>
+                            </div>
                         </div>
                     </div>
                 </div>
