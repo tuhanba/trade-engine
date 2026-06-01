@@ -348,7 +348,7 @@ class LiveExecutionEngine:
             balance = live_balance
             logger.info(f"[Auto-Compound] Bakiye: {balance} USDT")
         else:
-            balance = getattr(config, 'BASE_ACCOUNT_SIZE', 1000.0)
+            balance = min(getattr(config, 'BASE_ACCOUNT_SIZE', 1000.0), live_balance)
             logger.info(f"[Fixed-Size] Bakiye: {balance} USDT (Live: {live_balance})")
             
         if live_balance < 10.0:
@@ -388,6 +388,18 @@ class LiveExecutionEngine:
             leverage = 10
             
         margin_used = (qty_float * current_price) / leverage
+
+        # Binance Live Available Margin check
+        try:
+            account = self.client.futures_account()
+            free_margin_val = account.get('availableBalance')
+            if free_margin_val is not None:
+                free_margin = float(free_margin_val)
+                if margin_used > free_margin:
+                    logger.error(f"[Live] Yetersiz kullanılabilir bakiye (Free Margin): Gerekli={margin_used:.2f} USDT, Mevcut={free_margin:.2f} USDT")
+                    return None
+        except Exception as _e:
+            logger.warning(f"[Live] Binance kullanılabilir bakiye kontrolü yapılamadı: {_e}")
 
         # 3. Kaldirac ve Margin Modu Ayarlama
         try:

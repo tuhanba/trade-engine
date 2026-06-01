@@ -287,8 +287,8 @@ class TelegramManager:
             "🔹 <code>/ghost</code> — Yapay zekanın (Ghost Learning) arka planda ne kadar öğrendiğini gösterir.\n\n"
             "⚙️ <b>Strateji ve Mod Değişimi</b>\n"
             "🔹 <code>/mode</code> — Şu an hangi stratejide çalıştığımızı söyler.\n"
-            "🔹 <code>/set &lt;key&gt; &lt;val&gt;</code> — Dinamik parametre değiştirir (Örn: <code>/set trade_threshold 55.0</code>).\n"
-            "🔹 <code>/close &lt;id&gt;</code> — Belirtilen ID'ye sahip açık pozisyonu anında kapatır.\n"
+            "🔹 <code>/set [key] [val]</code> — Dinamik parametre değiştirir (Örn: <code>/set trade_threshold 55.0</code>).\n"
+            "🔹 <code>/close [id]</code> — Belirtilen ID'ye sahip açık pozisyonu anında kapatır.\n"
             "🔹 <code>/human</code> — İnsan Modu: Az ama öz, sadece en kaliteli sinyallere girer (A+/S).\n"
             "🔹 <code>/scalp</code> — Scalp Modu: Piyasayı agresif tarar, çok işleme girer ve hızlı çıkar.\n"
             "🔹 <code>/paper</code> — Sanal Para Modu: Kendi sanal kasasıyla risksiz işlem açar.\n"
@@ -558,7 +558,7 @@ class TelegramManager:
         if not args or len(args) < 2:
             self.send_fn(
                 "🛠 <b>Dinamik Parametre Değiştir</b>\n"
-                "Kullanım: <code>/set &lt;parametre&gt; &lt;değer&gt;</code>\n\n"
+                "Kullanım: <code>/set [parametre] [değer]</code>\n\n"
                 "Desteklenen parametreler:\n"
                 "• <code>trade_threshold</code> (Örn: 55.0)\n"
                 "• <code>telegram_threshold</code> (Örn: 35.0)\n"

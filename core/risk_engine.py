@@ -417,6 +417,17 @@ class RiskEngine:
             if pos.get("qty", 0) <= 0:
                 return {"valid": False, "score": 0, "risk_reject_reason": "position_size_invalid"}
 
+            # Portfolio Exposure & Available Balance checks
+            used_margin = sum(float(t.get("margin_used") or t.get("margin") or 0.0) for t in open_trades)
+            max_allowed_margin = balance * (float(getattr(config, "MAX_PORTFOLIO_EXPOSURE_PCT", 95.0)) / 100.0)
+            req_margin = pos.get("margin", 0)
+            
+            if used_margin + req_margin > max_allowed_margin:
+                return {"valid": False, "score": 0, "risk_reject_reason": "portfolio_margin_exposure_exceeded"}
+                
+            if req_margin > (balance - used_margin):
+                return {"valid": False, "score": 0, "risk_reject_reason": "insufficient_available_balance"}
+
             # Fee hesabı: open + close (notional × fee_rate × 2)
             notional_val   = pos.get("notional", 0)
             estimated_fee  = round(notional_val * fee_rate * 2, 6)

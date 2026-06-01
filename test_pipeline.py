@@ -9,6 +9,16 @@ sys.path.insert(0, '.')
 async def run_pipeline_test():
     print("=== Pipeline Entegrasyon Testi ===\n")
     errors = []
+    
+    # Reset trades table to ensure clean margin calculations
+    try:
+        from database import init_db, get_conn
+        init_db()
+        with get_conn() as conn:
+            conn.execute("DELETE FROM trades")
+            conn.commit()
+    except Exception as _e:
+        print(f"Warning: Failed to clean trades table: {_e}")
 
     d = {
         'symbol': 'ETHUSDT', 'direction': 'LONG',
@@ -91,4 +101,5 @@ async def run_pipeline_test():
     else:
         print("[ALL PASSED] TUM TESTLER GECTI -- Sistem trade acmaya hazir")
 
-asyncio.run(run_pipeline_test())
+if __name__ == "__main__":
+    asyncio.run(run_pipeline_test())

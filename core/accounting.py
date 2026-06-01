@@ -462,6 +462,33 @@ def build_trade_from_signal(
         logger.error("Position size hesaplanamadı [%s]: %s", signal.symbol, pos["reason"])
         return None
 
+    # ── Check Portfolio Exposure & Available Balance limits ──
+    try:
+        import database
+        open_trades = database.get_open_trades()
+        used_margin = sum(float(t.get("margin_used") or t.get("margin") or 0.0) for t in open_trades)
+        
+        # Max portfolio exposure check
+        max_allowed_margin = balance * (float(getattr(config, "MAX_PORTFOLIO_EXPOSURE_PCT", 95.0)) / 100.0)
+        req_margin = pos["margin"]
+        
+        if used_margin + req_margin > max_allowed_margin:
+            logger.warning(
+                "[Accounting] %s rejected: margin exposure exceeded. Used=%.2f, Req=%.2f, MaxAllowed=%.2f",
+                signal.symbol, used_margin, req_margin, max_allowed_margin
+            )
+            return None
+            
+        # Available balance check
+        if req_margin > (balance - used_margin):
+            logger.warning(
+                "[Accounting] %s rejected: insufficient available balance. Balance=%.2f, Used=%.2f, Req=%.2f",
+                signal.symbol, balance, used_margin, req_margin
+            )
+            return None
+    except Exception as _e:
+        logger.debug(f"[Accounting] Margin exposure check skipped or failed: {_e}")
+
     quantity = pos["qty"]
     notional = pos["notional"]
     margin_used = pos["margin"]
