@@ -241,6 +241,25 @@ def generate_threshold_suggestions(ghost_stats: list | None = None) -> list:
                 }
                 save_ghost_suggestion(sug)
                 suggestions.append(sug)
+            elif (wr < 40 or avg < 0.0) and cnt >= 5:
+                # Eşik Yükseltme (Cooling Down)
+                suggested = min(_current_threshold + 5.0, 85.0)
+                confidence = "HIGH" if cnt > 15 else "MEDIUM"
+                sug = {
+                    "coin":           stat.get("coin", "ALL"),
+                    "symbol":         stat.get("coin", "ALL"),
+                    "trigger_type":   stat.get("trigger_type", "unknown"),
+                    "action":         "RAISE_THRESHOLD",
+                    "current_val":    _current_threshold,
+                    "suggested_val":  suggested,
+                    "expected_trades": round(cnt / 4, 1),
+                    "confidence":     confidence,
+                    "virtual_wr":     wr,
+                    "avg_virtual_r":  avg,
+                    "sample_count":   cnt,
+                }
+                save_ghost_suggestion(sug)
+                suggestions.append(sug)
     except Exception as e:
         logger.error("[Ghost2] generate_threshold_suggestions hatası: %s", e)
 
@@ -769,14 +788,23 @@ def apply_ghost_suggestions_v2(min_confidence: str = "MEDIUM") -> list:
             old_thr = overrides.get(trigger, s.get("current_threshold") or global_thr)
             new_thr = s["suggested_threshold"]
 
-            # Güvenlik: Tek seferde maksimum 5 puan düşür
-            if old_thr - new_thr > 5.0:
-                new_thr = round(old_thr - 5.0, 1)
+            # Eylem yönünü belirle
+            is_raise = new_thr > old_thr
 
-            # Yeni eşik eski eşikten büyükse veya eşitse atla (sadece düşürmek için)
-            if new_thr >= old_thr:
-                mark_ghost_suggestion_applied(s["id"])
-                continue
+            # Güvenlik: Tek seferde maksimum 5 puan değiştir
+            if abs(old_thr - new_thr) > 5.0:
+                change = 5.0 if is_raise else -5.0
+                new_thr = round(old_thr + change, 1)
+
+            # Eylem yönüne göre kontrol
+            if is_raise:
+                if new_thr <= old_thr:
+                    mark_ghost_suggestion_applied(s["id"])
+                    continue
+            else:
+                if new_thr >= old_thr:
+                    mark_ghost_suggestion_applied(s["id"])
+                    continue
 
             overrides[trigger] = new_thr
             current_cfg["ghost_applied_at"]  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

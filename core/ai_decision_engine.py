@@ -1049,7 +1049,25 @@ def classify_signal(
     sent_vote, sent_score, sent_reason = sent_agent.evaluate(signal, ctx)
     flow_vote, flow_score, flow_reason = flow_agent.evaluate(signal, ctx)
 
-    adjusted_score = tech_score * 0.4 + flow_score * 0.4 + sent_score * 0.2
+    # ── Piyasa Rejimine Göre Dinamik Ajan Ağırlıklandırma ─────────────────
+    try:
+        from database import get_market_regime as _get_regime
+        regime = _get_regime()
+    except Exception:
+        regime = ctx.get("market_regime", "NEUTRAL")
+
+    if regime in ("BULLISH", "BEARISH"):
+        # Trending market: Technical dominates
+        w_tech, w_flow, w_sent = 0.6, 0.2, 0.2
+    elif regime in ("CHOPPY", "SIDEWAYS"):
+        # Ranging market: Order flow and sentiment dominate
+        w_tech, w_flow, w_sent = 0.2, 0.5, 0.3
+    else:
+        # Neutral/Default weights
+        w_tech, w_flow, w_sent = 0.4, 0.4, 0.2
+
+    adjusted_score = tech_score * w_tech + flow_score * w_flow + sent_score * w_sent
+    logger.info(f"[AI Consensus] Market regime: {regime} -> Applied weights: Tech={w_tech}, Flow={w_flow}, Sent={w_sent} | Score={adjusted_score:.1f}")
 
     votes_to_broadcast.update({
         "Technical": {"vote": tech_vote, "score": tech_score, "reason": tech_reason},

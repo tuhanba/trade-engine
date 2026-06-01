@@ -118,3 +118,17 @@ def exists(key: str) -> bool:
 def invalidate_open_trades() -> None:
     """Açık trade cache'ini geçersiz kılar — trade açılınca/kapanınca çağrılır."""
     delete("open_trades_cache")
+
+
+def flush_db() -> bool:
+    """Redis veritabanındaki tüm anahtarları temizler."""
+    global _client, _available
+    if not _available or _client is None:
+        return False
+    try:
+        _client.flushdb()
+        logger.info("[Redis] Veritabanı başarıyla temizlendi (flushdb)")
+        return True
+    except Exception as exc:
+        logger.error("[Redis] flushdb hatası: %s", exc)
+        return False

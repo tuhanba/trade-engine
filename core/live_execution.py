@@ -193,13 +193,20 @@ class LiveExecutionEngine:
                 best_bid = entry_price
                 best_ask = entry_price
 
-            # Determine limit price to place
+            # Determine limit price to place (Spread-Adaptive)
+            spread_pct = (best_ask - best_bid) / best_bid * 100.0 if best_bid > 0 else 0.0
             if side == "BUY":
                 # For buy, we place at best_bid to try to be maker, capped at limit_bound
-                target_price = min(best_bid, limit_bound)
+                if spread_pct > 0.05:
+                    target_price = min((best_bid + best_ask) / 2.0, limit_bound)
+                else:
+                    target_price = min(best_bid, limit_bound)
             else:
                 # For sell, we place at best_ask or capped at limit_bound
-                target_price = max(best_ask, limit_bound)
+                if spread_pct > 0.05:
+                    target_price = max((best_bid + best_ask) / 2.0, limit_bound)
+                else:
+                    target_price = max(best_ask, limit_bound)
 
             # Check if price has already crossed the limit bound
             if side == "BUY" and best_ask > limit_bound:

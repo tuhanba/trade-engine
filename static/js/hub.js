@@ -185,6 +185,35 @@ function bindControlElements() {
     document.getElementById('btnHumanFalse').addEventListener('click', () => postConfigUpdate('tg_human_mode', false));
     document.getElementById('btnHumanTrue').addEventListener('click', () => postConfigUpdate('tg_human_mode', true));
 
+    // System Maintenance
+    const btnMaint = document.getElementById('btnMaintenance');
+    if (btnMaint) {
+        btnMaint.addEventListener('click', async () => {
+            if (!confirm("Sistem bakımı çalıştırılsın mı? (Veritabanı optimize edilecek ve Redis temizlenecek)")) {
+                return;
+            }
+            btnMaint.disabled = true;
+            btnMaint.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Running Maintenance...`;
+            try {
+                const resp = await fetch('/api/system/maintenance', { method: 'POST' });
+                const res = await resp.json();
+                if (res.ok) {
+                    addConsoleLog(res.message, 'success');
+                    alert(res.message);
+                } else {
+                    addConsoleLog(`[Error] Maintenance failed: ${res.error}`, 'error');
+                    alert(`Bakım hatası: ${res.error}`);
+                }
+            } catch(e) {
+                console.error("Maintenance error:", e);
+                addConsoleLog(`[Error] Network error during maintenance`, 'error');
+            } finally {
+                btnMaint.disabled = false;
+                btnMaint.innerHTML = `<i class="fa-solid fa-screwdriver-wrench"></i> Run System Maintenance`;
+            }
+        });
+    }
+
     // Sliders
     const sliders = [
         { id: 'sliderTradeThreshold', key: 'trade_threshold', valId: 'valTradeThreshold' },

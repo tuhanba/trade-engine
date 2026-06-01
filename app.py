@@ -1024,6 +1024,38 @@ def api_diagnostics():
         return _error(str(e))
 
 
+# ── /api/system/maintenance ──────────────────────────────────────────────────
+@app.route("/api/system/maintenance", methods=["POST"])
+def api_system_maintenance():
+    """Veritabanını optimize eder ve Redis önbelleğini temizler."""
+    try:
+        from core import redis_state
+        # 1. SQLite Vacuum & Reindex
+        with get_conn() as conn:
+            conn.execute("VACUUM")
+            conn.execute("REINDEX")
+            logger.info("[Maintenance] SQLite veritabanı optimize edildi (VACUUM & REINDEX)")
+            
+        # 2. Redis Flush
+        redis_ok = False
+        try:
+            if redis_state.available():
+                redis_state.flush_db()
+                redis_ok = True
+                logger.info("[Maintenance] Redis veritabanı temizlendi (flush_db)")
+        except Exception as re:
+            logger.warning(f"[Maintenance] Redis temizleme hatası: {re}")
+            
+        return jsonify({
+            "ok": True,
+            "message": "Sistem bakımı başarıyla tamamlandı. Veritabanı sıkıştırıldı ve Redis temizlendi.",
+            "redis_cleared": redis_ok
+        })
+    except Exception as exc:
+        logger.error(f"[Maintenance] Hata: {exc}")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 # ── /api/ghost-stats ────────────────────────────────────────────────────────
 @app.route("/api/ghost-stats")
 def api_ghost_stats():
