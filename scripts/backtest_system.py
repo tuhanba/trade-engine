@@ -354,6 +354,8 @@ class DataManager:
                     logger.info(f"Downloaded and cached {len(deduped_klines)} candles for {symbol} {interval}.")
 
     def load_dfs(self):
+        self.candles_list = {}
+        self.candles_times = {}
         for (symbol, interval), klines in self.candles.items():
             df = pd.DataFrame(klines, columns=[
                 "time", "open", "high", "low", "close", "volume",
@@ -363,10 +365,12 @@ class DataManager:
                 df[col] = df[col].astype(float)
             df["time"] = df["time"].astype(int)
             self.df_candles[(symbol, interval)] = df
+            self.candles_list[(symbol, interval)] = df.values.tolist()
+            self.candles_times[(symbol, interval)] = df["time"].values.tolist()
 
     def get_candles(self, symbol, interval, limit):
-        df = self.df_candles.get((symbol, interval))
-        if df is None or df.empty:
+        times = self.candles_times.get((symbol, interval))
+        if not times:
             return []
         
         t_ms = int(current_sim_time.timestamp() * 1000)
@@ -380,36 +384,37 @@ class DataManager:
         dur = dur_map.get(interval, 5 * 60 * 1000)
         max_open_time = t_ms - dur
         
-        df_sub = df[df["time"] <= max_open_time].tail(limit)
-        return df_sub.values.tolist()
+        from bisect import bisect_right
+        idx = bisect_right(times, max_open_time)
+        return self.candles_list[(symbol, interval)][max(0, idx - limit):idx]
 
     def get_current_price(self, symbol):
-        df = self.df_candles.get((symbol, "1m"))
-        if df is None or df.empty:
+        times = self.candles_times.get((symbol, "1m"))
+        if not times:
             return 0.0
         
         t_ms = int(current_sim_time.timestamp() * 1000)
-        df_sub = df[df["time"] <= t_ms - 60000]
-        if df_sub.empty:
+        from bisect import bisect_right
+        idx = bisect_right(times, t_ms - 60000)
+        if idx == 0:
             return 0.0
-        return float(df_sub.iloc[-1]["close"])
+        return float(self.candles_list[(symbol, "1m")][idx - 1][4])
 
     def get_current_1m_candle(self, symbol):
-        df = self.df_candles.get((symbol, "1m"))
-        if df is None or df.empty:
+        times = self.candles_times.get((symbol, "1m"))
+        if not times:
             return None
         
         t_ms = int(current_sim_time.timestamp() * 1000)
-        df_sub = df[df["time"] == t_ms - 60000]
-        if df_sub.empty:
-            df_sub = df[df["time"] <= t_ms - 60000]
-            if df_sub.empty:
-                return None
-        row = df_sub.iloc[-1]
+        from bisect import bisect_right
+        idx = bisect_right(times, t_ms - 60000)
+        if idx == 0:
+            return None
+        row = self.candles_list[(symbol, "1m")][idx - 1]
         return {
-            "high": float(row["high"]),
-            "low": float(row["low"]),
-            "close": float(row["close"])
+            "high": float(row[2]),
+            "low": float(row[3]),
+            "close": float(row[4])
         }
 
 # ── Mock Client ───────────────────────────────────────────────────────────────
