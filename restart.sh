@@ -61,6 +61,10 @@ if [ -f "docker-compose.yml" ]; then
     echo -e "   Docker konteynerleri durduruluyor..."
     docker-compose down || docker compose down || true
     
+    echo -e "   Eski çakışan konteynerler temizleniyor..."
+    docker stop aurvex_redis aurvex_engine aurvex_dashboard 2>/dev/null || true
+    docker rm aurvex_redis aurvex_engine aurvex_dashboard 2>/dev/null || true
+    
     echo -e "   Docker konteynerleri yeniden inşa ediliyor ve başlatılıyor..."
     if docker-compose up -d --build || docker compose up -d --build; then
         echo -e "${GREEN}✅ Docker servisleri başarıyla başlatıldı!${NC}"
