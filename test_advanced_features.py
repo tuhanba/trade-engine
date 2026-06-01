@@ -213,6 +213,7 @@ class TestAdvancedFeatures(unittest.TestCase):
     def test_model_gating_mechanism(self):
         from core.ml_signal_scorer import MLSignalScorer
         scorer = MLSignalScorer()
+        scorer.bypass_gating = False
         
         # Setup mock training data to bypass real DB
         scorer._load_training_data = MagicMock(return_value=[

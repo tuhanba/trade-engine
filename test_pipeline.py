@@ -6,7 +6,7 @@ import asyncio
 import sys
 sys.path.insert(0, '.')
 
-async def test_pipeline():
+async def run_pipeline_test():
     print("=== Pipeline Entegrasyon Testi ===\n")
     errors = []
 
@@ -91,4 +91,4 @@ async def test_pipeline():
     else:
         print("[ALL PASSED] TUM TESTLER GECTI -- Sistem trade acmaya hazir")
 
-asyncio.run(test_pipeline())
+asyncio.run(run_pipeline_test())

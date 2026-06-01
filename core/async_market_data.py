@@ -95,7 +95,13 @@ class AsyncMarketDataService:
                         'askVolume': data.get('askVolume'),
                     }
                     for cb in self.ticker_callbacks:
-                        asyncio.create_task(self._safe_call(cb, event_data))
+                        if asyncio.iscoroutinefunction(cb):
+                            asyncio.create_task(self._safe_call(cb, event_data))
+                        else:
+                            try:
+                                cb(event_data)
+                            except Exception as e:
+                                logger.error(f"Error in market data callback: {e}")
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -123,7 +129,13 @@ class AsyncMarketDataService:
                         'askVolume': data.get('askVolume'),
                     }
                     for cb in self.ticker_callbacks:
-                        asyncio.create_task(self._safe_call(cb, event_data))
+                        if asyncio.iscoroutinefunction(cb):
+                            asyncio.create_task(self._safe_call(cb, event_data))
+                        else:
+                            try:
+                                cb(event_data)
+                            except Exception as e:
+                                logger.error(f"Error in market data callback: {e}")
             except asyncio.CancelledError:
                 break
             except Exception as e:

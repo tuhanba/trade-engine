@@ -186,7 +186,7 @@ class AsyncScalpEngine:
         await self.market_data.initialize()
         
         # Sinyal geldiğinde event bus'a bas (örnek - devre dışı bırakıldı)
-        async def on_ticker_update(data):
+        def on_ticker_update(data):
             try:
                 from core.market_data import set_cached_price, set_cached_ticker
                 sym = data.get('s')
@@ -471,6 +471,27 @@ class AsyncScalpEngine:
             logger.info("[Maintenance] Starting daily SQLite maintenance...")
             try:
                 with get_conn() as conn:
+                    # 1. Prune signal_events older than 30 days
+                    c1 = conn.execute("DELETE FROM signal_events WHERE created_at < datetime('now', '-30 days')").rowcount
+                    # 2. Prune signal_candidates older than 30 days
+                    c2 = conn.execute("DELETE FROM signal_candidates WHERE created_at < datetime('now', '-30 days')").rowcount
+                    # 3. Prune telegram_messages older than 30 days
+                    c3 = conn.execute("DELETE FROM telegram_messages WHERE created_at < datetime('now', '-30 days')").rowcount
+                    # 4. Prune scanned_coins older than 30 days
+                    c4 = conn.execute("DELETE FROM scanned_coins WHERE scanned_at < datetime('now', '-30 days')").rowcount
+                    # 5. Prune ghost_results and ghost_signals older than 60 days
+                    c5 = conn.execute("""
+                        DELETE FROM ghost_results 
+                        WHERE ghost_id IN (SELECT id FROM ghost_signals WHERE created_at < datetime('now', '-60 days'))
+                    """).rowcount
+                    c6 = conn.execute("DELETE FROM ghost_signals WHERE created_at < datetime('now', '-60 days')").rowcount
+                    
+                    logger.info(
+                        f"[Maintenance] Pruned database records: signal_events={c1}, "
+                        f"signal_candidates={c2}, telegram_messages={c3}, scanned_coins={c4}, "
+                        f"ghost_results={c5}, ghost_signals={c6}"
+                    )
+                    
                     conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
                     conn.execute("VACUUM;")
                 logger.info("[Maintenance] SQLite maintenance completed.")

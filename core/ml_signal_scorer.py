@@ -48,6 +48,7 @@ class MLSignalScorer:
         self.cv_accuracy = 0.0
         self.feature_imp = {}
         self.coin_stats  = {}   # {symbol: {wins, total}}
+        self.bypass_gating = None
         self._try_load_model()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -272,7 +273,11 @@ class MLSignalScorer:
         # Model Gating Check
         import sys as _sys
         is_testing = "unittest" in _sys.modules or "pytest" in _sys.modules
-        if not is_testing and self.trained and self.model is not None and self.cv_accuracy > 0.0:
+        bypass_gating = self.bypass_gating
+        if bypass_gating is None:
+            bypass_gating = is_testing
+
+        if not bypass_gating and self.trained and self.model is not None and self.cv_accuracy > 0.0:
             # We compare new_cv_accuracy with existing cv_accuracy
             # Standard gate: new ROC-AUC should not degrade by more than 3%
             degradation_threshold = self.cv_accuracy * 0.97
