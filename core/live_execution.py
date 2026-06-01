@@ -37,6 +37,8 @@ class LiveExecutionEngine:
         self.client = self._init_client()
         self.exchange_info = {}
         self._last_exchange_info_fetch = 0
+        self._cached_balance = 0.0
+        self._last_balance_fetch = 0
         if self.client:
             self._update_exchange_info()
 
@@ -113,14 +115,23 @@ class LiveExecutionEngine:
         return f"{formatted_qty:.{precision}f}"
 
     def _get_account_balance(self) -> float:
-        """Gercek vadeli islemler (USDT) bakiyesini alir."""
+        """Gercek vadeli islemler (USDT) bakiyesini alir (cache'li)."""
         if not self.client:
             return 0.0
+        now = time.time()
+        # Her 30 saniyede bir guncelle
+        if now - self._last_balance_fetch < 30 and self._cached_balance > 0.0:
+            return self._cached_balance
+            
         try:
             account = self.client.futures_account()
-            return float(account.get('totalWalletBalance', 0.0))
+            self._cached_balance = float(account.get('totalWalletBalance', 0.0))
+            self._last_balance_fetch = now
+            return self._cached_balance
         except Exception as e:
             logger.error(f"Bakiye okunamadi: {e}")
+            if self._cached_balance > 0.0:
+                return self._cached_balance
             return 0.0
 
     def open_live_trade(self, signal: SignalData) -> Optional[int]:
@@ -213,6 +224,25 @@ class LiveExecutionEngine:
         else:
             pct_tp1, pct_tp2, pct_runner = 0.30, 0.20, 0.50
 
+        # Slippage Guard (Kayma Kalkanı)
+        try:
+            from core.market_data import get_cached_ticker
+            cached_tick = get_cached_ticker(symbol)
+            if cached_tick:
+                bid = float(cached_tick.get('bid') or 0)
+                ask = float(cached_tick.get('ask') or 0)
+                if bid > 0 and ask > 0:
+                    spread_pct = (ask - bid) / bid * 100
+                    max_spread = getattr(config, "MAX_SPREAD_PCT", 0.15)
+                    if spread_pct > max_spread:
+                        logger.warning(
+                            f"[Slippage Guard] {symbol} spread oranı çok yüksek: {spread_pct:.3f}% > {max_spread}%. "
+                            "Emir gönderimi reddedildi."
+                        )
+                        return None
+        except Exception as e:
+            logger.debug(f"[Slippage Guard] Kontrol hatası: {e}")
+
         # 4. Borsaya Emir Gonderimi (Entry - Smart Limit/Market)
         # TODO: Şimdilik piyasayı kaçırmamak için MARKET atıyoruz (Slippage Chase eklenebilir)
         logger.info(f"[LIVE] {symbol} {side} MARKET Emri gonderiliyor. Qty: {qty_str}")
@@ -255,7 +285,7 @@ class LiveExecutionEngine:
         # 5.5 Borsaya Take Profit (Limit) Emirleri Yerleştirme
         tp1_order_id, tp2_order_id = "NONE", "NONE"
         try:
-            if getattr(signal, 'tp1', 0) > 0:
+            if (getattr(signal, 'tp1', None) or 0) > 0:
                 qty_tp1_str = self._format_quantity(symbol, qty_float * pct_tp1)
                 if float(qty_tp1_str) > 0:
                     tp1_order = self.client.futures_create_order(
@@ -264,7 +294,7 @@ class LiveExecutionEngine:
                     )
                     tp1_order_id = tp1_order.get('orderId', "UNKNOWN")
                     
-            if getattr(signal, 'tp2', 0) > 0:
+            if (getattr(signal, 'tp2', None) or 0) > 0:
                 qty_tp2_str = self._format_quantity(symbol, qty_float * pct_tp2)
                 if float(qty_tp2_str) > 0:
                     tp2_order = self.client.futures_create_order(
@@ -278,7 +308,7 @@ class LiveExecutionEngine:
         # 6. DB Kaydi
         trade = TradeData(
             symbol=symbol,
-            direction=direction,
+            side=direction,
             entry_price=entry_price,
             quantity=qty_float,
             qty_tp1=qty_float * pct_tp1,
@@ -294,7 +324,7 @@ class LiveExecutionEngine:
             risk_pct=risk_pct,
             risk_usd=risk_usd,
             status="OPEN",
-            reason=f"LIVE_ENTRY (SL Order: {sl_order_id})",
+            close_reason=f"LIVE_ENTRY (SL Order: {sl_order_id})",
             setup_quality=signal.setup_quality,
             final_score=signal.final_score
         )
@@ -307,6 +337,8 @@ class LiveExecutionEngine:
         meta_dict = initial_state.to_dict()
         meta_dict['binance_entry_order_id'] = order.get('orderId')
         meta_dict['binance_sl_order_id'] = sl_order_id
+        if signal.metadata:
+            meta_dict.update(signal.metadata)
         
         trade_id = database.create_trade(trade, metadata=json.dumps(meta_dict))
         

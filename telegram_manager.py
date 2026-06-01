@@ -109,6 +109,10 @@ class TelegramManager:
             self._handle_update(update)
 
     def _handle_update(self, update: dict):
+        if "callback_query" in update:
+            self._handle_callback_query(update["callback_query"])
+            return
+
         msg       = update.get("message") or update.get("channel_post") or {}
         text      = (msg.get("text") or "").strip()
         from_chat = str(msg.get("chat", {}).get("id", ""))
@@ -116,8 +120,13 @@ class TelegramManager:
             return
         if from_chat and from_chat != self.chat_id:
             return
-        cmd = text.lower().split()[0].split("@")[0]
-        logger.info("Komut: %s", cmd)
+        parts = text.split()
+        if not parts:
+            return
+        cmd = parts[0].lower().split("@")[0]
+        args = parts[1:]
+        logger.info("Komut: %s, Args: %s", cmd, args)
+
         handlers = {
             "/start":   self._cmd_help,
             "/help":    self._cmd_help,
@@ -139,15 +148,129 @@ class TelegramManager:
             "/insan":   self._cmd_human_on,
             "/paper":   self._cmd_paper,
             "/live":    self._cmd_live,
+            "/close":   self._cmd_close,
+            "/set":     self._cmd_set,
         }
         handler = handlers.get(cmd)
         if handler:
             try:
-                handler()
+                if cmd in ("/close", "/set"):
+                    handler(args)
+                else:
+                    handler()
             except Exception as e:
                 self.send_fn(f"Komut hatasi ({cmd}): {e}")
         else:
             self.send_fn(f"Bilinmeyen komut: {cmd}\n/help yazin.")
+
+    def _handle_callback_query(self, cb_query: dict):
+        cb_id = cb_query.get("id")
+        data = cb_query.get("data", "")
+        msg = cb_query.get("message", {})
+        msg_id = msg.get("message_id")
+        from_chat = str(msg.get("chat", {}).get("id", ""))
+        
+        if from_chat != self.chat_id:
+            self._answer_callback_query(cb_id, "Yetkisiz sohbet.")
+            return
+            
+        logger.info("Callback query: %s", data)
+        
+        if not data.startswith("cmd:"):
+            self._answer_callback_query(cb_id, "Bilinmeyen işlem.")
+            return
+            
+        action = data[4:]
+        self._answer_callback_query(cb_id, "İşlem alınıyor...")
+        
+        if action == "status":
+            self._cmd_status()
+        elif action == "refresh_status":
+            status_text, reply_markup = self._generate_status_data()
+            self._edit_message_text(status_text, msg_id, reply_markup)
+        elif action == "open":
+            open_text, reply_markup = self._generate_open_data()
+            self._edit_message_text(open_text, msg_id, reply_markup)
+        elif action == "pause":
+            self._cmd_pause()
+        elif action == "resume":
+            self._cmd_resume()
+        elif action == "human":
+            self._cmd_human_on()
+        elif action == "scalp":
+            self._cmd_human_off()
+        elif action.startswith("close:"):
+            trade_id_str = action[6:]
+            self._cmd_close([trade_id_str])
+
+    def _answer_callback_query(self, callback_query_id: str, text: Optional[str] = None):
+        url = f"https://api.telegram.org/bot{self.token}/answerCallbackQuery"
+        payload = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        try:
+            requests.post(url, json=payload, timeout=_TIMEOUT)
+        except Exception as e:
+            logger.warning(f"answerCallbackQuery hatası: {e}")
+
+    def _edit_message_text(self, text: str, message_id: int, reply_markup: Optional[dict] = None) -> bool:
+        url = f"https://api.telegram.org/bot{self.token}/editMessageText"
+        payload = {
+            "chat_id": self.chat_id,
+            "message_id": message_id,
+            "text": text[:4096],
+            "parse_mode": "HTML"
+        }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            resp = requests.post(url, json=payload, timeout=_TIMEOUT)
+            return resp.status_code == 200
+        except Exception as e:
+            logger.warning(f"editMessageText hatası: {e}")
+            return False
+
+    def _get_status_markup(self) -> dict:
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "🔄 Yenile", "callback_data": "cmd:refresh_status"},
+                    {"text": "📈 Açık İşlemler", "callback_data": "cmd:open"}
+                ],
+                [
+                    {"text": "⏸ Duraklat", "callback_data": "cmd:pause"},
+                    {"text": "▶️ Başlat", "callback_data": "cmd:resume"}
+                ]
+            ]
+        }
+
+    def _get_help_markup(self) -> dict:
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "📊 Durum", "callback_data": "cmd:status"},
+                    {"text": "📈 Açık İşlemler", "callback_data": "cmd:open"}
+                ],
+                [
+                    {"text": "🧠 İnsan Modu", "callback_data": "cmd:human"},
+                    {"text": "⚡ Scalp Modu", "callback_data": "cmd:scalp"}
+                ]
+            ]
+        }
+
+    def _get_open_markup(self, open_trades: list) -> Optional[dict]:
+        if not open_trades:
+            return None
+        buttons = []
+        for t in open_trades:
+            tid = t.get("id")
+            sym = t.get("symbol", "?")
+            side = (t.get("side") or t.get("direction", "?"))[:1]
+            buttons.append([
+                {"text": f"❌ Kapat #{tid} {sym} ({side})", "callback_data": f"cmd:close:{tid}"}
+            ])
+        buttons.append([{"text": "🔄 Yenile", "callback_data": "cmd:open"}])
+        return {"inline_keyboard": buttons}
 
     def _cmd_help(self):
         self.send_fn(
@@ -156,7 +279,7 @@ class TelegramManager:
             "📊 **Gözlem ve Raporlama**\n"
             "🔹 `/health` — Sistem sağlığını, RAM ve veritabanı durumunu kontrol eder.\n"
             "🔹 `/status` — Sistemin genel sağlığını, aktif modunu ve kârını özetler.\n"
-            "🔹 `/open` — Şu an Binance'te açık olan işlemlerini (giriş, stop, kâr) gösterir.\n"
+            "🔹 `/open` — Şu an açık olan işlemlerini (giriş, stop, kâr) gösterir ve kapatma butonu sunar.\n"
             "🔹 `/stats` — Tüm zamanların performans özetini (Win Rate vb.) çıkarır.\n"
             "🔹 `/daily` — Bugüne özel kaç işlem açıldığını ve güncel kâr/zararı listeler.\n"
             "🔹 `/balance` — Kasanın büyüme oranını detaylıca gösterir.\n"
@@ -164,6 +287,8 @@ class TelegramManager:
             "🔹 `/ghost` — Yapay zekanın (Ghost Learning) arka planda ne kadar öğrendiğini gösterir.\n\n"
             "⚙️ **Strateji ve Mod Değişimi**\n"
             "🔹 `/mode` — Şu an hangi stratejide çalıştığımızı söyler.\n"
+            "🔹 `/set <key> <val>` — Dinamik parametre değiştirir (Örn: `/set trade_threshold 55.0`).\n"
+            "🔹 `/close <id>` — Belirtilen ID'ye sahip açık pozisyonu anında kapatır.\n"
             "🔹 `/human` — İnsan Modu: Az ama öz, sadece en kaliteli sinyallere girer (A+/S).\n"
             "🔹 `/scalp` — Scalp Modu: Piyasayı agresif tarar, çok işleme girer ve hızlı çıkar.\n"
             "🔹 `/paper` — Sanal Para Modu: Kendi sanal kasasıyla risksiz işlem açar.\n"
@@ -172,7 +297,8 @@ class TelegramManager:
             "🔹 `/pause` — Piyasalar çok riskliyse botu duraklat. (Açık işlemler takip edilir, yeni işleme girilmez).\n"
             "🔹 `/resume` — Her şey yolundaysa botu tekrar ava çıkar.\n"
             "🔹 `/finish` — Mevcut işlemler kapandığı an botu tamamen uykuya al.\n\n"
-            "💡 *İpucu: Herhangi bir komuta tıklayarak anında çalıştırabilirsin!*"
+            "💡 *İpucu: Komutlara tıklayarak veya aşağıdaki butonları kullanarak işlem yapabilirsin!*",
+            reply_markup=self._get_help_markup()
         )
 
     def _cmd_health(self):
@@ -220,6 +346,10 @@ class TelegramManager:
         )
 
     def _cmd_status(self):
+        text, markup = self._generate_status_data()
+        self.send_fn(text, reply_markup=markup)
+
+    def _generate_status_data(self) -> tuple[str, dict]:
         import database
         bal     = database.get_active_balance() or 0
         exec_mode = getattr(config, "EXECUTION_MODE", "paper")
@@ -259,7 +389,7 @@ class TelegramManager:
             tp_marker = " 🎯" if "tp1" in status else ""
             open_lines += f"\n  {sym} {side} @{entry:.4f} {upnl:+.2f}${tp_marker}"
 
-        self.send_fn(
+        text = (
             f"📈 **Sistem Durum Raporu**\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"🔍 **Motor Durumu:** {paused}\n"
@@ -275,6 +405,7 @@ class TelegramManager:
             f"🟢 **Açık İşlemler ({len(open_t)} adet):**{open_lines}\n\n"
             f"💡 *Detaylar için /stats veya /open yazabilirsin.*"
         )
+        return text, self._get_status_markup()
 
 
     def _cmd_stats(self):
@@ -349,11 +480,14 @@ class TelegramManager:
 
 
     def _cmd_open(self):
+        text, markup = self._generate_open_data()
+        self.send_fn(text, reply_markup=markup)
+
+    def _generate_open_data(self) -> tuple[str, dict]:
         import database
         trades = database.get_open_trades()
         if not trades:
-            self.send_fn("Acik trade yok.")
-            return
+            return "Açık trade yok.", {"inline_keyboard": [[{"text": "🔄 Yenile", "callback_data": "cmd:open"}]]}
         lines = []
         now = datetime.now(timezone.utc)
         for t in trades:
@@ -379,7 +513,88 @@ class TelegramManager:
                 f"   ├ Hedef TP1: ${tp1:.4f}\n"
                 f"   └ **Anlık Durum (PnL):** {upnl:+.2f}$"
             )
-        self.send_fn(f"🟢 **Aktif Açık İşlemler ({len(trades)} adet)**\n\n" + "\n\n".join(lines) + "\n\n💡 *Bot bunları canlı takip ediyor. Kârda olanları Trailing Stop ile koruyacaktır.*")
+        text = f"🟢 **Aktif Açık İşlemler ({len(trades)} adet)**\n\n" + "\n\n".join(lines)
+        return text, self._get_open_markup(trades)
+
+    def _cmd_close(self, args: list):
+        if not args:
+            self.send_fn("Kapatılacak işlem ID'sini belirtin. Örnek: `/close 15`")
+            return
+        try:
+            trade_id = int(args[0])
+        except ValueError:
+            self.send_fn("Geçersiz işlem ID. ID sayı olmalıdır.")
+            return
+
+        import database
+        from execution_engine import _get_price, ExecutionEngine
+
+        trade = database.get_trade_by_id(trade_id)
+        if not trade:
+            self.send_fn(f"İşlem #{trade_id} bulunamadı.")
+            return
+
+        if str(trade.get("status", "")).lower() == "closed":
+            self.send_fn(f"İşlem #{trade_id} zaten kapatılmış.")
+            return
+
+        symbol = trade.get("symbol", "")
+        self.send_fn(f"⏳ #{trade_id} {symbol} işlemi kapatılıyor...")
+
+        try:
+            exit_price = _get_price(None, symbol)
+            if exit_price <= 0:
+                from core.market_data import get_current_price
+                exit_price = get_current_price(symbol) or float(trade.get("entry_price") or trade.get("entry") or 0)
+
+            engine = ExecutionEngine()
+            engine.close_trade(trade, exit_price, reason="manual")
+            self.send_fn(f"✅ #{trade_id} {symbol} işlemi başarıyla kapatıldı! Çıkış fiyatı: ${exit_price:.4f}")
+        except Exception as e:
+            logger.exception("Manual close error:")
+            self.send_fn(f"❌ Kapatma hatası: {e}")
+
+    def _cmd_set(self, args: list):
+        if not args or len(args) < 2:
+            self.send_fn(
+                "🛠 **Dinamik Parametre Değiştir**\n"
+                "Kullanım: `/set <parametre> <değer>`\n\n"
+                "Desteklenen parametreler:\n"
+                "• `trade_threshold` (Örn: 55.0)\n"
+                "• `telegram_threshold` (Örn: 35.0)\n"
+                "• `max_spread_pct` (Örn: 0.15)\n"
+                "• `max_open_trades` (Örn: 5)\n"
+                "• `human_mode` (true/false)\n"
+                "• `execution_mode` (live/paper)"
+            )
+            return
+
+        param_name = args[0].strip().lower()
+        raw_val = args[1].strip()
+
+        param_mapping = {
+            "trade_threshold": ("trade_threshold", float),
+            "telegram_threshold": ("telegram_threshold", float),
+            "watchlist_threshold": ("watchlist_threshold", float),
+            "data_threshold": ("data_threshold", float),
+            "max_spread_pct": ("max_spread_pct", float),
+            "max_open_trades": ("max_open_trades", int),
+            "human_mode": ("tg_human_mode", lambda v: "True" if v.lower() in ("true", "1", "yes") else "False"),
+            "execution_mode": ("tg_execution_mode", lambda v: "live" if v.lower() == "live" else "paper"),
+        }
+
+        if param_name not in param_mapping:
+            self.send_fn(f"❌ Bilinmeyen parametre: {param_name}")
+            return
+
+        db_key, cast_fn = param_mapping[param_name]
+        try:
+            casted_val = cast_fn(raw_val)
+            import database
+            database.set_state(db_key, str(casted_val))
+            self.send_fn(f"✅ Başarılı! **{param_name}** değeri **{casted_val}** olarak güncellendi.")
+        except Exception as e:
+            self.send_fn(f"❌ Değer dönüştürme/yazma hatası: {e}")
 
     def _cmd_signal(self):
         """Son 5 sinyal adayının özeti."""

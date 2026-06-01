@@ -142,9 +142,13 @@ class AsyncScalpEngine:
         # Sinyal geldiğinde event bus'a bas (örnek - devre dışı bırakıldı)
         async def on_ticker_update(data):
             try:
-                from core.market_data import set_cached_price
-                if 'symbol' in data and 'last' in data:
-                    set_cached_price(data['symbol'], float(data['last']))
+                from core.market_data import set_cached_price, set_cached_ticker
+                sym = data.get('s')
+                if sym:
+                    price_str = data.get('c')
+                    if price_str:
+                        set_cached_price(sym, float(price_str))
+                    set_cached_ticker(sym, data)
             except Exception:
                 pass
         self.market_data.on_ticker(on_ticker_update)
@@ -231,13 +235,24 @@ class AsyncScalpEngine:
         await event_bus.stop()
 
     async def _ghost_learning_loop(self):
-        """Ghost sinyallerini 30 dakikada bir simüle eder ve AI'ya geri besler."""
-        from core.ghost_learning import process_pending_results
+        """Ghost sinyallerini 30 dakikada bir simüle eder, analiz eder ve otonom eşik değerlerini uygular."""
+        from core.ghost_learning import (
+            process_pending_results,
+            generate_threshold_suggestions,
+            apply_ghost_suggestions_v2,
+        )
         await asyncio.sleep(300)
         while True:
             try:
                 processed = await asyncio.to_thread(process_pending_results, self.client)
                 logger.info(f"[Ghost] process_pending_results tamamlandı: {processed} sinyal")
+                
+                # Otonom optimizasyon döngüsünü tetikle
+                logger.info("[Ghost] Otonom optimizasyon analizi tetikleniyor...")
+                await asyncio.to_thread(generate_threshold_suggestions)
+                applied = await asyncio.to_thread(apply_ghost_suggestions_v2)
+                if applied:
+                    logger.info(f"[Ghost] Otonom optimizasyon uygulandı: {len(applied)} kural")
             except Exception as e:
                 logger.error(f"[Ghost] Loop hatası: {e}")
             await asyncio.sleep(1800)

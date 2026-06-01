@@ -203,6 +203,8 @@ _DYNAMIC_PARAMS_MAP = {
     "DATA_THRESHOLD":       ("data_threshold", float),
     "HUMAN_MODE":           ("tg_human_mode", lambda v: v.strip().lower() in ("true", "1", "yes")),
     "EXECUTION_MODE":       ("tg_execution_mode", str),
+    "MAX_SPREAD_PCT":       ("max_spread_pct", float),
+    "MAX_OPEN_TRADES":      ("max_open_trades", int),
 }
 
 _AI_PARAMS_MAP = {

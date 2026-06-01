@@ -88,7 +88,11 @@ class AsyncMarketDataService:
                     event_data = {
                         'e': '24hrTicker',
                         's': symbol.replace('/', '').replace(':USDT', ''), # e.g. BTC/USDT:USDT -> BTCUSDT
-                        'c': str(data.get('last', 0))
+                        'c': str(data.get('last', 0)),
+                        'bid': data.get('bid'),
+                        'ask': data.get('ask'),
+                        'bidVolume': data.get('bidVolume'),
+                        'askVolume': data.get('askVolume'),
                     }
                     for cb in self.ticker_callbacks:
                         asyncio.create_task(self._safe_call(cb, event_data))
@@ -112,7 +116,11 @@ class AsyncMarketDataService:
                     event_data = {
                         'e': '24hrTicker',
                         's': clean_sym,
-                        'c': str(data.get('last', 0))
+                        'c': str(data.get('last', 0)),
+                        'bid': data.get('bid'),
+                        'ask': data.get('ask'),
+                        'bidVolume': data.get('bidVolume'),
+                        'askVolume': data.get('askVolume'),
                     }
                     for cb in self.ticker_callbacks:
                         asyncio.create_task(self._safe_call(cb, event_data))

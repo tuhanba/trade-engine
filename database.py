@@ -505,6 +505,9 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("bb_width_chg",      "REAL DEFAULT 0"),
         ("momentum_3c",       "REAL DEFAULT 0"),
         ("prev_result",       "TEXT DEFAULT 'NONE'"),
+        ("funding_rate",      "REAL DEFAULT 0"),
+        ("cvd_value",         "REAL DEFAULT 0"),
+        ("oi_change_pct",     "REAL DEFAULT 0"),
     ],
 }
 
@@ -907,8 +910,8 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
                  risk_pct, status, open_time, current_price,
                  unrealized_pnl, realized_pnl, net_pnl,
                  remaining_qty, original_qty, close_price, close_reason,
-                 total_fee, fee_rate, ax_mode, metadata)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 total_fee, fee_rate, ax_mode, setup_quality, final_score, metadata)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 trade.symbol,
@@ -940,6 +943,8 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
                 getattr(trade, 'total_fee', 0) or 0,
                 getattr(trade, 'fee_rate', 0.0004) or 0.0004,
                 getattr(trade, 'ax_mode', None),
+                getattr(trade, 'setup_quality', ''),
+                getattr(trade, 'final_score', 0.0),
                 metadata or "{}",
             ),
         )
@@ -2025,22 +2030,33 @@ def get_ghost_pattern_stats(min_count: int = 5, days: int = 30) -> list:
 
 
 def save_ghost_suggestion(data: dict) -> None:
-    """ghost_threshold_suggestions tablosuna öneri kaydeder."""
+    """ghost_threshold_suggestions ve ghost_suggestions tablolarına öneri kaydeder."""
+    coin = data.get("coin") or data.get("symbol") or ""
+    trigger_type = data.get("trigger_type", "")
+    current_val = float(data.get("current_val") or data.get("current_threshold") or 0)
+    suggested_val = float(data.get("suggested_val") or data.get("suggested_threshold") or 0)
+    expected_trades = float(data.get("expected_trades", 0))
+    confidence = data.get("confidence", "MEDIUM")
+    virtual_wr = float(data.get("virtual_wr", 0))
+    avg_virtual_r = float(data.get("avg_virtual_r", 0))
+    sample_count = int(data.get("sample_count", 0))
+
     with get_conn() as conn:
+        # 1. ghost_threshold_suggestions'a yaz
         conn.execute(
             """INSERT INTO ghost_threshold_suggestions
                (coin, trigger_type, action, current_val, suggested_val,
                 expected_trades, confidence)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                data.get("coin", ""),
-                data.get("trigger_type", ""),
-                data.get("action", "LOWER_THRESHOLD"),
-                float(data.get("current_val", 0)),
-                float(data.get("suggested_val", 0)),
-                float(data.get("expected_trades", 0)),
-                data.get("confidence", "MEDIUM"),
-            )
+            (coin, trigger_type, data.get("action", "LOWER_THRESHOLD"), current_val, suggested_val, expected_trades, confidence)
+        )
+        # 2. ghost_suggestions'a yaz (Dashboard ve Telegram için)
+        conn.execute(
+            """INSERT INTO ghost_suggestions
+               (symbol, trigger_type, current_threshold, suggested_threshold,
+                virtual_wr, avg_virtual_r, sample_count, confidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (coin, trigger_type, current_val, suggested_val, virtual_wr, avg_virtual_r, sample_count, confidence)
         )
 
 
@@ -2110,7 +2126,8 @@ def upsert_pattern_memory(
                            hold_minutes=?, symbol=?, result=?, created_at=?,
                            funding_favorable=?, bb_width_pct=?, ob_ratio=?,
                            volume_m=?, btc_trend=?, partial_exit=?,
-                           bb_width_chg=?, momentum_3c=?, prev_result=?
+                           bb_width_chg=?, momentum_3c=?, prev_result=?,
+                           funding_rate=?, cvd_value=?, oi_change_pct=?
                        WHERE pattern_hash=?""",
                     (new_wr, new_occ, now,
                      float(f.get("adx", 0) or 0),
@@ -2131,6 +2148,9 @@ def upsert_pattern_memory(
                      float(f.get("bb_width_chg", 0) or 0),
                      float(f.get("momentum_3c", 0) or 0),
                      str(f.get("prev_result", "NONE") or "NONE"),
+                     float(f.get("funding_rate", 0) or 0),
+                     float(f.get("cvd_value", 0) or 0),
+                     float(f.get("oi_change_pct", 0) or 0),
                      pattern_hash)
                 )
             else:
@@ -2140,8 +2160,9 @@ def upsert_pattern_memory(
                         adx, rv, rsi5, rsi1, funding_favorable, bb_width_pct,
                         ob_ratio, volume_m, btc_trend, direction, session,
                         hold_minutes, partial_exit, symbol, result, created_at,
-                        bb_width_chg, momentum_3c, prev_result)
-                       VALUES (?,?,?,?, ?,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?,?)""",
+                        bb_width_chg, momentum_3c, prev_result,
+                        funding_rate, cvd_value, oi_change_pct)
+                       VALUES (?,?,?,?, ?,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?)""",
                     (pattern_hash, float(outcome), 1, now,
                      float(f.get("adx", 0) or 0),
                      float(f.get("rv", 1.0) or 1.0),
@@ -2162,6 +2183,9 @@ def upsert_pattern_memory(
                      float(f.get("bb_width_chg", 0) or 0),
                      float(f.get("momentum_3c", 0) or 0),
                      str(f.get("prev_result", "NONE") or "NONE"),
+                     float(f.get("funding_rate", 0) or 0),
+                     float(f.get("cvd_value", 0) or 0),
+                     float(f.get("oi_change_pct", 0) or 0),
                     )
                 )
     except Exception as exc:

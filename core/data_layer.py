@@ -119,6 +119,7 @@ class SignalData:
         sig.leverage_suggestion = d.get("leverage_suggestion")
         sig.max_loss      = float(d.get("max_loss") or 0)
         sig.market_regime = d.get("market_regime", "NEUTRAL")
+        sig.metadata      = d.get("metadata", {})
         return sig
 
     def __post_init__(self):
@@ -174,6 +175,8 @@ class TradeData:
     realized_pnl: float = 0.0
     exit_price: float = 0.0
     close_reason: str = ""
+    setup_quality: str = ""
+    final_score: float = 0.0
     metadata: Optional[dict[str, Any]] = None
 
 
@@ -271,6 +274,7 @@ class _SignalRecord:
         self.direction: str = ""
         self.coin_score: float = 0.0
         self.trend_score: float = 0.0
+        self.metadata: dict = {}
         self.trigger_score: float = 0.0
         self.risk_score: float = 0.0
         self.setup_quality: str = ""
@@ -354,6 +358,7 @@ class _SignalRecord:
             "telegram_status": self.telegram_status,
             "reject_reason": self.reject_reason,
             "created_at": self.created_at,
+            "metadata": self.metadata,
         }
 
 

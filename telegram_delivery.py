@@ -115,16 +115,19 @@ class TelegramDelivery:
         return send_message(f"⚠️ <b>{title}</b>\n{str(error)[:500]}")
 
 
-def _send_raw_detailed(text: str, parse_mode: str = "HTML") -> tuple[bool, int]:
+def _send_raw_detailed(text: str, parse_mode: str = "HTML", reply_markup: Optional[dict] = None) -> tuple[bool, int]:
     token = config.TELEGRAM_BOT_TOKEN
     chat_id = config.TELEGRAM_CHAT_ID
     if not token or not chat_id:
         logger.debug("[Telegram] Token/chat_id boş — mesaj atlandı.")
         return False, 0
     try:
+        payload = {"chat_id": chat_id, "text": text[:4096], "parse_mode": parse_mode}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         resp = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text[:4096], "parse_mode": parse_mode},
+            json=payload,
             timeout=_TIMEOUT,
         )
         if resp.status_code == 200:
@@ -157,7 +160,7 @@ class _Queue:
 
     def push(self, text: str, parse_mode: str = "HTML",
              dedupe_key: str = None, sig_id=None, symbol: str = None,
-             attempts: int = 0):
+             attempts: int = 0, reply_markup: Optional[dict] = None):
         if not dedupe_key:
             import uuid
             dedupe_key = f"msg:{uuid.uuid4()}"
@@ -167,7 +170,7 @@ class _Queue:
             except Exception as e:
                 logger.debug("[Telegram] save_telegram_message: %s", e)
         with self._lock:
-            self._q.append((text, parse_mode, dedupe_key, attempts))
+            self._q.append((text, parse_mode, dedupe_key, attempts, reply_markup))
         self._event.set()
 
     def _worker(self):
@@ -180,8 +183,8 @@ class _Queue:
                         if not self._q:
                             break
                         item = self._q.popleft()
-                    text, pm, dk, attempts = item[0], item[1], item[2], item[3]
-                    ok, status_code = _send_raw_detailed(text, pm)
+                    text, pm, dk, attempts, reply_markup = item[0], item[1], item[2], item[3], item[4]
+                    ok, status_code = _send_raw_detailed(text, pm, reply_markup)
                     if ok:
                         if dk:
                             try:
@@ -541,10 +544,10 @@ def deliver_signal(sig) -> bool:
         return False
 
 
-def send_message(text: str, parse_mode: str = "HTML") -> bool:
+def send_message(text: str, parse_mode: str = "HTML", reply_markup: Optional[dict] = None) -> bool:
     """Genel sistem mesajı — piyasa rejimi, uyarı, bilgi."""
     try:
-        _queue.push(text, parse_mode=parse_mode)
+        _queue.push(text, parse_mode=parse_mode, reply_markup=reply_markup)
         return True
     except Exception as e:
         logger.error("[Telegram] send_message: %s", e)

@@ -86,11 +86,18 @@ def get_klines(
         return []
 
 
-# ── Güncel fiyat ────────────────────────────────────────────────────
+# ── Güncel fiyat ve ticker önbelleği ────────────────────────────────
 _PRICE_CACHE = {}
+_TICKER_CACHE = {}
 
 def set_cached_price(symbol: str, price: float):
     _PRICE_CACHE[symbol] = price
+
+def set_cached_ticker(symbol: str, ticker_data: dict):
+    _TICKER_CACHE[symbol] = ticker_data
+
+def get_cached_ticker(symbol: str) -> Optional[dict]:
+    return _TICKER_CACHE.get(symbol)
 
 @with_exponential_backoff(max_retries=2, base_delay=1.0)
 def get_current_price(symbol: str) -> Optional[float]:

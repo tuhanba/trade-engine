@@ -48,6 +48,29 @@ class AIDecisionService:
             sig.max_loss = risk_result["max_loss"]
             sig.status = "ready"
             
+            sig.metadata = {
+                "adx": trigger_result.get("adx", 0.0),
+                "rv": trigger_result.get("rv", 1.0),
+                "rsi5": trigger_result.get("rsi5", 50.0),
+                "rsi1": trigger_result.get("rsi1", 50.0),
+                "ml_score": trigger_result.get("ml_score", 50.0),
+                "direction": trend_result.get("direction", "LONG"),
+                "session": trigger_result.get("session", "OFF"),
+                "hold_minutes": 0.0,
+                "partial_exit": 0,
+                "funding_favorable": trigger_result.get("funding_favorable", 0),
+                "bb_width_pct": trigger_result.get("bb_width", 0.0),
+                "ob_ratio": trigger_result.get("ob_ratio", 1.0),
+                "volume_m": trigger_result.get("volume_m", 0.0),
+                "btc_trend": trend_result.get("btc_trend", "NEUTRAL"),
+                "bb_width_chg": trigger_result.get("bb_width_chg", 0.0),
+                "momentum_3c": trigger_result.get("momentum_3c", 0.0),
+                "prev_result": trigger_result.get("prev_result", "NONE"),
+                "funding_rate": trigger_result.get("funding_rate", 0.0),
+                "cvd_value": trigger_result.get("cvd_value", 0.0),
+                "oi_change_pct": trigger_result.get("oi_change_pct", 0.0),
+            }
+            
             decision = await asyncio.to_thread(self.ai_engine.evaluate, sig)
             
             sig.final_score = decision["final_score"]

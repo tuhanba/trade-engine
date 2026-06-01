@@ -154,6 +154,8 @@ class TriggerEngine:
         e50_5 = self._ema(df5["close"], 50)
         rsi5 = self._rsi(df5["close"], 14)
 
+        bb_width_val = 0.0
+        bb_width_chg_val = 0.0
         try:
             high = df5["high"]
             low  = df5["low"]
@@ -167,6 +169,14 @@ class TriggerEngine:
             minus_di = 100 * (minus_dm.rolling(14).mean() / (atr14 + 1e-10))
             dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10)
             adx_val  = float(dx.rolling(14).mean().iloc[-1])
+            
+            ma20 = close.rolling(20).mean()
+            std20 = close.rolling(20).std()
+            upper = ma20 + 2 * std20
+            lower = ma20 - 2 * std20
+            bb_w_series = (upper - lower) / (ma20 + 1e-10)
+            bb_width_val = float(bb_w_series.iloc[-1])
+            bb_width_chg_val = bb_width_val - float(bb_w_series.iloc[-6])
         except Exception:
             adx_val = 20
             atr_val = c5 * 0.02 # Fallback ATR %2
@@ -364,6 +374,41 @@ class TriggerEngine:
             logger.debug(f"[OI] skip: {_oi_err}")
         # ──────────────────────────────────────────────────────────────────────
 
+        # Volume in Millions from cache/ticker
+        volume_m = 0.0
+        try:
+            from core.market_data import get_cached_ticker
+            cached_tick = get_cached_ticker(symbol)
+            if cached_tick:
+                quote_vol = float(cached_tick.get('Q') or cached_tick.get('quoteVolume') or 0.0)
+                volume_m = quote_vol / 1_000_000.0
+            else:
+                tick = self.client.futures_ticker(symbol=symbol)
+                quote_vol = float(tick.get("quoteVolume") or 0.0)
+                volume_m = quote_vol / 1_000_000.0
+        except Exception:
+            pass
+
+        # Session name
+        if 1 <= current_hour < 4:     session_name = "ASIA"
+        elif 7 <= current_hour < 10:  session_name = "LONDON"
+        elif 13 <= current_hour < 17: session_name = "NEWYORK"
+        else:                         session_name = "OFF"
+
+        # Previous trade result from DB
+        prev_result = "NONE"
+        try:
+            import database as _db
+            recent = _db.get_recent_trades(limit=1)
+            if recent:
+                pnl = float(recent[0].get("net_pnl", 0.0))
+                prev_result = "WIN" if pnl > 0 else "LOSS"
+        except Exception:
+            pass
+
+        funding_fav = 1 if (direction == "LONG" and funding < 0) or (direction == "SHORT" and funding > 0) else 0
+        ob_ratio_val = bid_depth / (ask_depth + 1e-10) if 'bid_depth' in locals() else 1.0
+
         # ── ML Puanlaması (Yapay Zeka Beyni) ──────────────────────────────────
         try:
             from core.ml_signal_scorer import score_signal
@@ -373,11 +418,19 @@ class TriggerEngine:
                 "rv": rv,
                 "rsi5": rsi5,
                 "rsi1": rsi1,
-                "funding_favorable": 1 if (direction == "LONG" and funding < 0) or (direction == "SHORT" and funding > 0) else 0,
+                "funding_favorable": funding_fav,
                 "btc_trend": btc_trend,
                 "direction": direction,
                 "momentum_3c": mom3c,
-                "ob_ratio": bid_depth / (ask_depth + 1e-10) if 'bid_depth' in locals() else 1.0,
+                "ob_ratio": ob_ratio_val,
+                "bb_width": bb_width_val,
+                "bb_width_chg": bb_width_chg_val,
+                "session": session_name,
+                "prev_result": prev_result,
+                "volume_m": volume_m,
+                "funding_rate": funding,
+                "cvd_value": cvd_data.get("cvd_value", 0.0),
+                "oi_change_pct": oi_data.get("oi_change_pct", 0.0),
             }
             ml_score = score_signal(ml_signal)
             
@@ -430,4 +483,15 @@ class TriggerEngine:
             "oi_signal":     oi_data.get("oi_signal", "NEUTRAL"),
             "oi_bonus":      round(oi_bonus, 2),
             "oi_change_pct": oi_data.get("oi_change_pct", 0.0),
+            
+            # Eklenen özelliklerin propagation için geri döndürülmesi
+            "bb_width":      round(bb_width_val, 6),
+            "bb_width_chg":  round(bb_width_chg_val, 6),
+            "session":       session_name,
+            "prev_result":   prev_result,
+            "volume_m":      round(volume_m, 4),
+            "funding_rate":  funding,
+            "cvd_value":     cvd_data.get("cvd_value", 0.0),
+            "funding_favorable": funding_fav,
+            "ob_ratio":      ob_ratio_val,
         }

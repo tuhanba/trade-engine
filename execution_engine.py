@@ -97,7 +97,10 @@ class ExecutionEngine:
             current_sl=trade.stop_loss,
             highest_price=trade.entry_price,
         )
-        state_json = json.dumps(initial_state.to_dict())
+        meta_dict = initial_state.to_dict()
+        if signal.metadata:
+            meta_dict.update(signal.metadata)
+        state_json = json.dumps(meta_dict)
 
         trade_id = database.create_trade(trade, metadata=state_json)
         if trade_id is None:
@@ -371,16 +374,21 @@ class ExecutionEngine:
             _hash = _hl.md5(
                 f"{_adx_band}:{_rsi_band}:{_side}:{_quality}".encode()
             ).hexdigest()[:16]
+            features     = {
+                "adx": _adx, "rsi5": _rsi5, "rsi1": _rsi1,
+                "ml_score": _ml_score, "rv": _rv,
+                "side": _side, "quality": _quality,
+                "symbol": trade["symbol"],
+            }
+            if isinstance(_meta, dict):
+                for k, v in _meta.items():
+                    if k not in features:
+                        features[k] = v
             database.upsert_pattern_memory(
                 pattern_hash = _hash,
                 outcome      = _outcome,
                 r_multiple   = _r_mult,
-                features     = {
-                    "adx": _adx, "rsi5": _rsi5, "rsi1": _rsi1,
-                    "ml_score": _ml_score, "rv": _rv,
-                    "side": _side, "quality": _quality,
-                    "symbol": trade["symbol"],
-                },
+                features     = features,
             )
             logger.debug(
                 "[ML] pattern_memory güncellendi: %s hash=%s outcome=%d r=%.2f",
@@ -514,19 +522,44 @@ def monitor_trades(client) -> list:
     return closed
 
 
+_ccxt_exchange_cached = None
+
+def _get_ccxt_exchange_cached():
+    global _ccxt_exchange_cached
+    if _ccxt_exchange_cached is None:
+        try:
+            import ccxt
+            _ccxt_exchange_cached = ccxt.binance({
+                'enableRateLimit': True,
+                'options': {'defaultType': 'future'}
+            })
+        except Exception as exc:
+            logger.error("CCXT Exchange nesnesi baslatilamadi: %s", exc)
+    return _ccxt_exchange_cached
+
+
 def _get_price(client, symbol: str) -> float:
-    # 1. CCXT yardimiyla fiyati almayı dene
+    # 1. RAM (WebSocket) fiyat önbelleğini kontrol et
     try:
-        import ccxt
-        exchange = ccxt.binance({'options': {'defaultType': 'future'}})
-        # CCXT symbol format: BTC/USDT:USDT (Futures)
-        ccxt_symbol = symbol.replace("USDT", "/USDT:USDT")
-        ticker = exchange.fetch_ticker(ccxt_symbol)
-        return float(ticker['last'])
+        from core.market_data import get_current_price
+        cached_price = get_current_price(symbol)
+        if cached_price is not None and cached_price > 0:
+            return cached_price
+    except Exception as e:
+        logger.debug(f"[Execution] Fiyat önbelleği hatası: {e}")
+
+    # 2. CCXT yardimiyla fiyati almayı dene (fallback)
+    try:
+        exchange = _get_ccxt_exchange_cached()
+        if exchange:
+            # CCXT symbol format: BTC/USDT:USDT (Futures)
+            ccxt_symbol = symbol.replace("USDT", "/USDT:USDT")
+            ticker = exchange.fetch_ticker(ccxt_symbol)
+            return float(ticker['last'])
     except Exception as e:
         logger.warning(f"[Execution] ccxt fetch_ticker failed for {symbol}: {e}. Trying public API fallback...")
 
-    # 2. Hata durumunda public API fallback
+    # 3. Hata durumunda public API fallback
     try:
         import requests
         r = requests.get("https://fapi.binance.com/fapi/v1/ticker/price", params={"symbol": symbol}, timeout=5)
@@ -825,8 +858,9 @@ def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> flo
     """Trailing stop için anlık ATR (CCXT ile)."""
     try:
         import pandas as pd
-        import ccxt
-        exchange = ccxt.binance({'options': {'defaultType': 'future'}})
+        exchange = _get_ccxt_exchange_cached()
+        if not exchange:
+            raise Exception("CCXT exchange nesnesi bulunamadi")
         ccxt_symbol = symbol.replace("USDT", "/USDT:USDT")
         
         # CCXT OHLCV format: [timestamp, open, high, low, close, volume]

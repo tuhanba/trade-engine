@@ -75,7 +75,10 @@ class MLSignalScorer:
                     created_at,
                     COALESCE(bb_width_chg, 0) as bb_width_chg,
                     COALESCE(momentum_3c, 0) as momentum_3c,
-                    COALESCE(prev_result, 'NONE') as prev_result
+                    COALESCE(prev_result, 'NONE') as prev_result,
+                    COALESCE(funding_rate, 0) as funding_rate,
+                    COALESCE(cvd_value, 0) as cvd_value,
+                    COALESCE(oi_change_pct, 0) as oi_change_pct
                 FROM pattern_memory
                 WHERE result IN ('WIN','LOSS')
                   AND rsi5 IS NOT NULL
@@ -117,12 +120,21 @@ class MLSignalScorer:
 
     def _row_to_features(self, row):
         """Tek satırı feature vektörüne dönüştürür."""
-        # 19 kolon: eski 16 + 3 yeni (bb_width_chg, momentum_3c, prev_result)
-        if len(row) >= 19:
+        # 22 kolon: eski 19 + 3 yeni (funding_rate, cvd_value, oi_change_pct)
+        if len(row) >= 22:
+            (adx, rv, rsi5, rsi1, fund_fav, bb_w, ob_r, vol_m,
+             btc_trend, direction, session, hold_min, partial_ex,
+             symbol, result, created_at,
+             bb_width_chg, momentum_3c, prev_result,
+             funding_rate, cvd_value, oi_change_pct) = row[:22]
+        elif len(row) >= 19:
             (adx, rv, rsi5, rsi1, fund_fav, bb_w, ob_r, vol_m,
              btc_trend, direction, session, hold_min, partial_ex,
              symbol, result, created_at,
              bb_width_chg, momentum_3c, prev_result) = row[:19]
+            funding_rate = 0.0
+            cvd_value = 0.0
+            oi_change_pct = 0.0
         else:
             # Eski veri uyumluluğu: yeni kolonlar yoksa varsayılan
             (adx, rv, rsi5, rsi1, fund_fav, bb_w, ob_r, vol_m,
@@ -131,6 +143,9 @@ class MLSignalScorer:
             bb_width_chg = 0
             momentum_3c  = 0
             prev_result  = "NONE"
+            funding_rate = 0.0
+            cvd_value = 0.0
+            oi_change_pct = 0.0
 
         # Kategorik → sayısal
         btc_num  = 1 if btc_trend == "BULLISH" else (-1 if btc_trend == "BEARISH" else 0)
@@ -168,6 +183,9 @@ class MLSignalScorer:
             float(bb_width_chg  or 0),   # Band Growth
             float(momentum_3c   or 0),   # Predictive Momentum
             float(prev_num),             # Markov
+            float(funding_rate  or 0),
+            float(cvd_value     or 0),
+            float(oi_change_pct or 0),
         ]
         return features
 
@@ -263,7 +281,8 @@ class MLSignalScorer:
                 "BBWidth","OBRatio","Volume",
                 "BTC_Trend","Direction","Session",
                 "HoldMin","PartialExit","CoinWR",
-                "BBWidthChg","Momentum3C","PrevResult"
+                "BBWidthChg","Momentum3C","PrevResult",
+                "FundingRate","CVDValue","OIChangePct"
             ]
             importances = ensemble.estimators_[0].feature_importances_
             self.feature_imp = dict(zip(feature_names, importances))

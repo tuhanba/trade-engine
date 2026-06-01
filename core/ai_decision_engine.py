@@ -897,6 +897,20 @@ def classify_signal(
         trade_threshold = 55.0
         watchlist_threshold = 28.0
 
+    # Otonom Ghost Learning Eşik Kontrolü (Per-Coin / Per-Pattern override)
+    try:
+        from database import get_coin_config
+        coin_cfg = get_coin_config(signal.symbol)
+        if coin_cfg and "threshold_overrides" in coin_cfg:
+            trigger_type = getattr(signal, "trigger_type", None) or getattr(signal, "setup_quality", None) or "UNKNOWN"
+            overrides = coin_cfg["threshold_overrides"]
+            override_val = overrides.get(trigger_type)
+            if override_val is not None:
+                trade_threshold = float(override_val)
+                logger.info(f"[AI Override] {signal.symbol} ({trigger_type}) için YZ otonom eşiği uygulandı: {trade_threshold:.1f}")
+    except Exception as exc:
+        logger.debug(f"[AI Override] Ghost threshold override okunamadı: {exc}")
+
     # ── Karar ────────────────────────────────────────────────────
     decision = SignalDecision.WATCH.value
     reason = f"Adjusted score: {adjusted_score}"

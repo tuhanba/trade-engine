@@ -202,7 +202,7 @@ def get_pattern_analysis(min_count: int = 5, days: int = 30) -> list:
 def generate_threshold_suggestions(ghost_stats: list | None = None) -> list:
     """
     Ghost pattern analizine göre threshold düşürme önerileri üretir.
-    Önerileri ghost_threshold_suggestions tablosuna kaydeder.
+    Önerileri ghost_suggestions ve ghost_threshold_suggestions tablolarına kaydeder.
     Returns: önerilerin listesi.
     """
     if ghost_stats is None:
@@ -228,12 +228,16 @@ def generate_threshold_suggestions(ghost_stats: list | None = None) -> list:
                 confidence = "HIGH" if cnt > 30 else "MEDIUM"
                 sug = {
                     "coin":           stat.get("coin", "ALL"),
+                    "symbol":         stat.get("coin", "ALL"),
                     "trigger_type":   stat.get("trigger_type", "unknown"),
                     "action":         "LOWER_THRESHOLD",
                     "current_val":    _current_threshold,
                     "suggested_val":  suggested,
                     "expected_trades": round(cnt / 4, 1),
                     "confidence":     confidence,
+                    "virtual_wr":     wr,
+                    "avg_virtual_r":  avg,
+                    "sample_count":   cnt,
                 }
                 save_ghost_suggestion(sug)
                 suggestions.append(sug)
@@ -716,3 +720,86 @@ def get_ghost_learning_stats() -> dict:
     except Exception as e:
         logger.error("[Ghost] get_ghost_learning_stats hatası: %s", e)
         return {}
+
+
+def apply_ghost_suggestions_v2(min_confidence: str = "MEDIUM") -> list:
+    """
+    ghost_suggestions tablosundaki uygulanmamış önerileri okur,
+    ilgili coin'in coin_configs tablosundaki JSON parametrelerine 'threshold_overrides'
+    olarak ekler ve öneriyi 'applied' olarak işaretler.
+    Ayrıca Telegram üzerinden bildirim gönderir.
+
+    Returns: uygulanan değişikliklerin string listesi.
+    """
+    from database import get_pending_ghost_suggestions, get_coin_config, save_coin_config, mark_ghost_suggestion_applied
+    from telegram_delivery import send_message
+
+    applied_changes = []
+    try:
+        suggestions = get_pending_ghost_suggestions(min_confidence=min_confidence)
+        if not suggestions:
+            logger.info("[Ghost2] Uygulanacak yeni otonom öneri yok.")
+            return []
+
+        # Aynı coin + trigger_type için en yüksek avg_virtual_r getiren öneriyi seç
+        best_per_combo = {}
+        for s in suggestions:
+            sym = s["symbol"]
+            trigger = s["trigger_type"]
+            combo_key = (sym, trigger)
+            if combo_key not in best_per_combo or s["avg_virtual_r"] > best_per_combo[combo_key]["avg_virtual_r"]:
+                best_per_combo[combo_key] = s
+
+        for (sym, trigger), s in best_per_combo.items():
+            current_cfg = get_coin_config(sym)
+            
+            # config_json içinde overrides dictionary'sini al veya oluştur
+            overrides = current_cfg.setdefault("threshold_overrides", {})
+            
+            import config
+            global_thr = config.HUMAN_TRADE_THRESHOLD if getattr(config, "HUMAN_MODE", False) else getattr(config, "TRADE_THRESHOLD", 72.0)
+            old_thr = overrides.get(trigger, s.get("current_threshold") or global_thr)
+            new_thr = s["suggested_threshold"]
+
+            # Güvenlik: Tek seferde maksimum 5 puan düşür
+            if old_thr - new_thr > 5.0:
+                new_thr = round(old_thr - 5.0, 1)
+
+            # Yeni eşik eski eşikten büyükse veya eşitse atla (sadece düşürmek için)
+            if new_thr >= old_thr:
+                mark_ghost_suggestion_applied(s["id"])
+                continue
+
+            overrides[trigger] = new_thr
+            current_cfg["ghost_applied_at"]  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            current_cfg["ghost_virtual_wr"]  = s["virtual_wr"]
+            current_cfg["ghost_avg_r"]       = s["avg_virtual_r"]
+            current_cfg["ghost_sample"]      = s["sample_count"]
+
+            save_coin_config(sym, current_cfg)
+            mark_ghost_suggestion_applied(s["id"])
+
+            msg = (
+                f"👻 {sym} ({trigger}): eşik {old_thr:.1f} → {new_thr:.1f} "
+                f"[Sanal WR: {s['virtual_wr']:.1f}% | Ort. R: {s['avg_virtual_r']:.2f} | n: {s['sample_count']}]"
+            )
+            applied_changes.append(msg)
+            logger.info("[GhostApply] %s", msg)
+
+        if applied_changes:
+            report = (
+                "🤖 <b>Otonom Ghost Learning Optimizasyonu</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "Aşağıdaki coin/pattern parametre eşikleri arka plan simülasyon başarısına göre otonom olarak düşürüldü:\n\n"
+                + "\n".join(applied_changes)
+            )
+            try:
+                send_message(report)
+            except Exception as e:
+                logger.warning(f"Otonom Telegram bildirimi gönderilemedi: {e}")
+
+        return applied_changes
+
+    except Exception as exc:
+        logger.error("[GhostApply] Hata: %s", exc)
+        return []
