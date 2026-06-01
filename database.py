@@ -1313,6 +1313,17 @@ def get_dashboard_stats() -> dict:
             "SELECT COUNT(*) FROM signal_candidates WHERE status='SL_HIT'"
         ).fetchone()[0]
 
+        # Profit factor hesaplama
+        profit_row = conn.execute("""
+            SELECT 
+                COALESCE(SUM(CASE WHEN net_pnl > 0 THEN net_pnl ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN net_pnl < 0 THEN ABS(net_pnl) ELSE 0 END), 0)
+            FROM trades WHERE LOWER(status)='closed' AND is_valid_for_stats = 1
+        """).fetchone()
+        gross_profit = float(profit_row[0]) if profit_row else 0.0
+        gross_loss = float(profit_row[1]) if profit_row else 0.0
+        profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0.0 else (0.0 if gross_profit == 0.0 else 99.99)
+
         result = {
             "total_trades": total,
             "open_trades": open_count,
@@ -1328,6 +1339,7 @@ def get_dashboard_stats() -> dict:
             "loss_trades": loss_count,    # BUG FIX: frontend için eksikti
             "balance": round(balance, 4),
             "initial_balance": getattr(config, 'INITIAL_PAPER_BALANCE', 2000.0),
+            "profit_factor": profit_factor,
             "ghost_tp_hits": ghost_tp,
             "ghost_sl_hits": ghost_sl,
             "ghost_winrate": round(
