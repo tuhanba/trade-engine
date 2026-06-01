@@ -318,12 +318,16 @@ class MLSignalScorer:
             btc_num   = 1 if btc_trend == "BULLISH" else (-1 if btc_trend == "BEARISH" else 0)
             dir_num   = 1 if signal.get("direction", "LONG") == "LONG" else -1
 
-            # Seans tahmini (UTC saatine göre)
-            hour = datetime.now(timezone.utc).hour
-            if 1 <= hour < 4:     sess_num = 0   # ASIA
-            elif 7 <= hour < 10:  sess_num = 1   # LONDON
-            elif 13 <= hour < 17: sess_num = 2   # NEWYORK
-            else:                 sess_num = 3   # OFF
+            sess_name = signal.get("session")
+            if sess_name:
+                sess_num = {"ASIA": 0, "LONDON": 1, "NEWYORK": 2, "OFF": 3}.get(sess_name, 3)
+            else:
+                # Seans tahmini (UTC saatine göre)
+                hour = datetime.now(timezone.utc).hour
+                if 1 <= hour < 4:     sess_num = 0   # ASIA
+                elif 7 <= hour < 10:  sess_num = 1   # LONDON
+                elif 13 <= hour < 17: sess_num = 2   # NEWYORK
+                else:                 sess_num = 3   # OFF
 
             # Markov: prev_result → sayısal
             prev_result = signal.get("prev_result", "NONE")
@@ -347,6 +351,9 @@ class MLSignalScorer:
                 float(signal.get("bb_width_chg", 0)),   # Band Growth
                 float(signal.get("momentum_3c",  0)),   # Predictive Momentum
                 float(prev_num),                         # Markov
+                float(signal.get("funding_rate", 0)),
+                float(signal.get("cvd_value",    0)),
+                float(signal.get("oi_change_pct", 0)),
             ]])
 
             X_scaled = self.scaler.transform(features)
