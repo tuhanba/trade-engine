@@ -251,6 +251,14 @@ def __getattr__(name: str) -> Any:
             
     val = _read_dynamic_param_from_db(name)
     
+    # DB lock/hata durumunda önbellekteki son başarılı değeri kullan
+    if val is None and name in _CONFIG_CACHE:
+        val = _CONFIG_CACHE[name][0]
+        
+    # Eğer önbellekte de yoksa statik varsayılana dön
+    if val is None:
+        val = _STATIC_DEFAULTS.get(name)
+        
     if not is_testing:
         _CONFIG_CACHE[name] = (val, now + _CONFIG_CACHE_TTL)
         
