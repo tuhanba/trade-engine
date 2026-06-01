@@ -238,6 +238,16 @@ class _Queue:
                         if is_client_err:
                             logger.error("[TGQueue] Kalıcı hata HTTP %d key=%s", status_code, dk)
                             attempts = 99
+                            if dk:
+                                try:
+                                    from database import get_conn
+                                    with get_conn() as conn:
+                                        conn.execute(
+                                            "UPDATE telegram_messages SET status='failed' WHERE dedupe_key=?",
+                                            (dk,)
+                                        )
+                                except Exception:
+                                    pass
                         elif is_read_timeout:
                             logger.warning("[TGQueue] Read timeout — muhtemelen gitti key=%s", dk)
                             attempts = 99
