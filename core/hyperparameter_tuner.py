@@ -1,0 +1,142 @@
+"""
+core/hyperparameter_tuner.py — Automated Parameter Optimizer using Optuna
+========================================================================
+
+Runs an optimization study over the closed trade history to adaptively tune:
+1. `sl_atr_mult`
+2. `tp_atr_mult`
+3. `trade_threshold`
+"""
+
+import logging
+import sqlite3
+import optuna
+import config
+from database import update_system_state
+
+logger = logging.getLogger("ax.tuner")
+
+def get_closed_trades() -> list:
+    """Fetch closed trades from the database for simulation."""
+    trades = []
+    try:
+        conn = sqlite3.connect(config.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("""
+            SELECT symbol, direction, entry, sl, realized_pnl, net_pnl, qty, final_score, mfe, mae
+            FROM trades
+            WHERE status = 'closed' AND entry > 0
+        """)
+        trades = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+    except Exception as e:
+        logger.error(f"[Tuner] Error fetching closed trades: {e}")
+    return trades
+
+def optimize_parameters():
+    """Run Optuna study on closed trade history and save optimized parameters."""
+    logger.info("[Tuner] Starting parameter tuning optimization...")
+    trades = get_closed_trades()
+    
+    if len(trades) < 5:
+        logger.warning(f"[Tuner] Not enough closed trades to optimize parameters safely (found {len(trades)}/5). Skipping.")
+        return
+
+    # Turn off Optuna logs to prevent cluttering stdout
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    # Reconstruct current SL ATR MULT from config
+    current_sl_mult = getattr(config, "SL_ATR_MULT", 1.2) or 1.2
+
+    def objective(trial):
+        # 1. Define Search Space
+        sl_atr_mult = trial.suggest_float("sl_atr_mult", 0.5, 3.0, step=0.1)
+        tp_atr_mult = trial.suggest_float("tp_atr_mult", 1.0, 5.0, step=0.1)
+        trade_threshold = trial.suggest_float("trade_threshold", 45.0, 75.0, step=1.0)
+
+        simulated_pnl = 0.0
+
+        for t in trades:
+            score = float(t.get("final_score") or 50.0)
+            if score < trade_threshold:
+                # Signal would have been filtered out by the threshold; no trade taken
+                continue
+
+            entry = float(t.get("entry") or 0)
+            sl = float(t.get("sl") or 0)
+            qty = float(t.get("qty") or 0)
+            net_pnl = float(t.get("net_pnl") or t.get("realized_pnl") or 0)
+            mae = float(t.get("mae") or 0)
+            mfe = float(t.get("mfe") or 0)
+
+            # Reconstruct entry ATR percentage
+            sl_dist = abs(entry - sl)
+            sl_pct = sl_dist / entry if entry > 0 else 0
+            if sl_pct == 0:
+                sl_pct = 0.015 # default 1.5% SL fallback
+
+            # Reconstruct ATR pct based on current mult
+            atr_pct = sl_pct / current_sl_mult
+
+            # Target SL & TP percentages for this trial
+            sim_sl_pct = atr_pct * sl_atr_mult
+            sim_tp_pct = atr_pct * tp_atr_mult
+
+            # Trade Outcome Simulation
+            if mae >= sim_sl_pct:
+                # Hit stop loss first
+                simulated_pnl -= sim_sl_pct * entry * qty
+            elif mfe >= sim_tp_pct:
+                # Hit take profit
+                simulated_pnl += sim_tp_pct * entry * qty
+            else:
+                # Neither hit, count as actual closed PnL
+                simulated_pnl += net_pnl
+
+        return simulated_pnl
+
+    try:
+        study = optuna.create_study(direction="maximize")
+        study.optimize(objective, n_trials=50)
+
+        best_params = study.best_params
+        best_value = study.best_value
+        logger.info(f"[Tuner] Optimization finished. Best simulated PnL: {best_value:.4f} USD. Parameters: {best_params}")
+
+        # Update in database
+        conn = sqlite3.connect(config.DB_PATH)
+        try:
+            # Update params table (ID = 1)
+            conn.execute("""
+                UPDATE params SET
+                    sl_atr_mult = ?,
+                    tp_atr_mult = ?,
+                    updated_at = datetime('now')
+                WHERE id = 1
+            """, (best_params["sl_atr_mult"], best_params["tp_atr_mult"]))
+            conn.commit()
+            
+            # Update system_state for trade_threshold
+            update_system_state("trade_threshold", str(round(best_params["trade_threshold"], 1)))
+            
+            logger.info("[Tuner] Successfully saved optimized parameters to the database.")
+
+            # Emit WebSocket broadcast to refresh the dashboard
+            try:
+                from websocket_events import event_manager
+                if event_manager:
+                    event_manager.broadcast_dashboard_refresh()
+                    logger.debug("[Tuner] Emitted dashboard refresh event after optimization.")
+            except Exception as _ws_err:
+                logger.debug(f"[Tuner] WebSocket emit skipped: {_ws_err}")
+
+        except Exception as db_err:
+            logger.error(f"[Tuner] Database write error: {db_err}")
+        finally:
+            conn.close()
+
+    except Exception as opt_err:
+        logger.error(f"[Tuner] Optuna optimization failed: {opt_err}")
+
+if __name__ == "__main__":
+    optimize_parameters()

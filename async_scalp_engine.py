@@ -39,6 +39,7 @@ class AsyncScalpEngine:
     def __init__(self):
         self.market_data = AsyncMarketDataService(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
         self.client = Client(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
+        self._last_trade_opened_at = time.time()
 
     async def start(self):
         logger.info("Starting Event-Driven Async Scalp Engine...")
@@ -84,6 +85,41 @@ class AsyncScalpEngine:
         NotificationService()
         self.scanner_service = ScannerService()
         asyncio.create_task(self.scanner_service.start())
+
+        # Initialize last trade opened time from DB if possible
+        try:
+            from database import get_conn
+            from execution_engine import parse_utc_datetime
+            with get_conn() as conn:
+                row = conn.execute("SELECT open_time FROM trades ORDER BY id DESC LIMIT 1").fetchone()
+                if row and row[0]:
+                    dt = parse_utc_datetime(row[0])
+                    self._last_trade_opened_at = dt.timestamp()
+                    logger.info(f"[Engine] Last trade opened time loaded from DB: {row[0]}")
+        except Exception as _e:
+            logger.debug(f"[Engine] Could not load last trade time from DB: {_e}")
+
+        # Subscribe to TRADE_OPENED event
+        async def on_trade_opened(event):
+            self._last_trade_opened_at = time.time()
+            logger.info("[ThresholdDecay] Trade opened event received. Resetting inactivity decay tracker.")
+            try:
+                from database import get_conn
+                import config
+                base_thr = getattr(config, "_STATIC_DEFAULTS", {}).get("TRADE_THRESHOLD", 55.0)
+                with get_conn() as conn:
+                    conn.execute("""
+                        INSERT INTO system_state (key, value, updated_at)
+                        VALUES ('trade_threshold', ?, datetime('now'))
+                        ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
+                    """, (str(base_thr), str(base_thr)))
+                    conn.commit()
+                logger.info(f"[ThresholdDecay] Reset trade_threshold in system_state to baseline: {base_thr:.1f}")
+            except Exception as _e:
+                logger.debug(f"[ThresholdDecay] Failed to reset threshold in DB: {_e}")
+
+        from core.event_types import Event, EventType
+        event_bus.subscribe(EventType.TRADE_OPENED, on_trade_opened)
 
         # Start ML Background Training Loop
         asyncio.create_task(self._ml_training_loop())
@@ -262,28 +298,78 @@ class AsyncScalpEngine:
         
         await event_bus.stop()
 
+    def _update_trade_threshold_in_db(self, new_val: float):
+        try:
+            from database import get_conn
+            with get_conn() as conn:
+                conn.execute("""
+                    INSERT INTO system_state (key, value, updated_at)
+                    VALUES ('trade_threshold', ?, datetime('now'))
+                    ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
+                """, (str(new_val), str(new_val)))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"[ThresholdDecay] DB update error: {e}")
+
     async def _ghost_learning_loop(self):
-        """Ghost sinyallerini 30 dakikada bir simüle eder, analiz eder ve otonom eşik değerlerini uygular."""
+        """Ghost sinyallerini sık aralıklarla (12s) simüle eder, periyodik olarak otonom eşikleri analiz eder ve uygular."""
         from core.ghost_learning import (
             process_pending_results,
             generate_threshold_suggestions,
             apply_ghost_suggestions_v2,
         )
+        from core.market_data import _PRICE_CACHE
+        
+        # 5 dk bekleme başlangıçta stabilizasyon için
         await asyncio.sleep(300)
+        
+        last_suggestion_time = 0.0
+        SUGGESTION_INTERVAL = 600.0  # 10 dakika (600 saniye)
+        
         while True:
             try:
-                processed = await asyncio.to_thread(process_pending_results, self.client)
-                logger.info(f"[Ghost] process_pending_results tamamlandı: {processed} sinyal")
+                # 1. Bekleyen ghost/paper sinyallerini mevcut önbellek fiyatlarıyla simüle et
+                cached_prices = dict(_PRICE_CACHE)
                 
-                # Otonom optimizasyon döngüsünü tetikle
-                logger.info("[Ghost] Otonom optimizasyon analizi tetikleniyor...")
-                await asyncio.to_thread(generate_threshold_suggestions)
-                applied = await asyncio.to_thread(apply_ghost_suggestions_v2)
-                if applied:
-                    logger.info(f"[Ghost] Otonom optimizasyon uygulandı: {len(applied)} kural")
+                processed = await asyncio.to_thread(process_pending_results, self.client, cached_prices)
+                if processed > 0:
+                    logger.debug(f"[Ghost] process_pending_results (cached): {processed} sinyal işlendi")
+                
+                # 2. Periyodik optimizasyon analizi ve eşik güncellemesi (10 dakikada bir)
+                now = time.time()
+                if now - last_suggestion_time >= SUGGESTION_INTERVAL:
+                    logger.info("[Ghost] Otonom optimizasyon analizi tetikleniyor...")
+                    await asyncio.to_thread(generate_threshold_suggestions)
+                    applied = await asyncio.to_thread(apply_ghost_suggestions_v2)
+                    if applied:
+                        logger.info(f"[Ghost] Otonom optimizasyon uygulandı: {len(applied)} kural")
+                    last_suggestion_time = now
+
+                # 3. İnaktivite Eşik Çürümesi (Threshold Decay)
+                # Son trade'den bu yana geçen süreyi kontrol et
+                # 6 saat = 21600 saniye. 2 saat = 7200 saniye.
+                elapsed_since_trade = now - self._last_trade_opened_at
+                if elapsed_since_trade >= 21600:
+                    decay_steps = int((elapsed_since_trade - 21600) / 7200)
+                    decay_amount = float(decay_steps + 1)
+                    
+                    import config
+                    current_thr = getattr(config, "TRADE_THRESHOLD", 55.0)
+                    base_thr = getattr(config, "_STATIC_DEFAULTS", {}).get("TRADE_THRESHOLD", 55.0)
+                    
+                    target_thr = max(base_thr - decay_amount, 50.0)
+                    
+                    if current_thr > target_thr:
+                        logger.info(
+                            f"[ThresholdDecay] Inactivity detected ({elapsed_since_trade/3600:.1f} hours). "
+                            f"Decaying trade_threshold: {current_thr:.1f} -> {target_thr:.1f}"
+                        )
+                        await asyncio.to_thread(self._update_trade_threshold_in_db, target_thr)
+
             except Exception as e:
                 logger.error(f"[Ghost] Loop hatası: {e}")
-            await asyncio.sleep(1800)
+                
+            await asyncio.sleep(12)  # Yüksek çözünürlüklü simülasyon (12 saniye)
 
     async def _ai_brain_loop(self):
         """Nightly parametre optimizasyonu — 24 saatte bir çalışır."""

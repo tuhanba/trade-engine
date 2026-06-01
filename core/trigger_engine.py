@@ -300,7 +300,10 @@ class TriggerEngine:
 
         # ── L2 Orderbook (Balina Duvarı) Kalkanı ─────────────────────────────
         try:
-            ob = self.client.futures_order_book(symbol=symbol, limit=20)
+            import config
+            is_scalp = not getattr(config, "HUMAN_MODE", False)
+            ob_limit = 50 if is_scalp else 20
+            ob = self.client.futures_order_book(symbol=symbol, limit=ob_limit)
             bids = ob.get("bids", [])
             asks = ob.get("asks", [])
             
@@ -311,6 +314,41 @@ class TriggerEngine:
                 return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_ask_wall_detected"}
             if direction == "SHORT" and bid_depth > ask_depth * 4.0:
                 return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_bid_wall_detected"}
+                
+            # Scalp Passive Wall Filter
+            if is_scalp and bids and asks:
+                wall_multiplier = getattr(config, "SCALP_OB_WALL_MULTIPLIER", 5.0)
+                wall_pct = getattr(config, "SCALP_OB_WALL_PCT", 0.002)
+                
+                if direction == "LONG":
+                    avg_ask_notional = sum(float(a[0]) * float(a[1]) for a in asks) / len(asks)
+                    limit_price = c1 * (1.0 + wall_pct)
+                    for a in asks:
+                        price_level = float(a[0])
+                        qty_level = float(a[1])
+                        notional_level = price_level * qty_level
+                        if price_level <= limit_price:
+                            if notional_level >= avg_ask_notional * wall_multiplier:
+                                logger.info(
+                                    "[TriggerEngine] LONG Vetoed: Passive Ask Wall of %.2f USDT detected at %.4f (limit: %.4f, avg: %.2f)",
+                                    notional_level, price_level, limit_price, avg_ask_notional
+                                )
+                                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "passive_sell_wall_within_threshold"}
+                                
+                elif direction == "SHORT":
+                    avg_bid_notional = sum(float(b[0]) * float(b[1]) for b in bids) / len(bids)
+                    limit_price = c1 * (1.0 - wall_pct)
+                    for b in bids:
+                        price_level = float(b[0])
+                        qty_level = float(b[1])
+                        notional_level = price_level * qty_level
+                        if price_level >= limit_price:
+                            if notional_level >= avg_bid_notional * wall_multiplier:
+                                logger.info(
+                                    "[TriggerEngine] SHORT Vetoed: Passive Bid Wall of %.2f USDT detected at %.4f (limit: %.4f, avg: %.2f)",
+                                    notional_level, price_level, limit_price, avg_bid_notional
+                                )
+                                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "passive_buy_wall_within_threshold"}
         except Exception as e:
             logger.debug(f"[Orderbook] skip: {e}")
             bid_depth, ask_depth = 1.0, 1.0
@@ -353,6 +391,19 @@ class TriggerEngine:
             if self._cvd_engine is None:
                 self._cvd_engine = _CVDEngine(self.client)
             cvd_data = self._cvd_engine.analyze(symbol, direction)
+            
+            # CVD Divergence hard filter for scalp signals
+            import config
+            is_scalp = not getattr(config, "HUMAN_MODE", False)
+            if is_scalp and getattr(config, "SCALP_CVD_DIVERGENCE_FILTER_ENABLED", True):
+                cvd_sig = cvd_data.get("cvd_signal", "NEUTRAL")
+                if direction == "LONG" and cvd_sig == "BEARISH":
+                    logger.info("[TriggerEngine] LONG Vetoed: Bearish CVD Divergence detected for %s", symbol)
+                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "bearish_cvd_divergence"}
+                if direction == "SHORT" and cvd_sig == "BULLISH":
+                    logger.info("[TriggerEngine] SHORT Vetoed: Bullish CVD Divergence detected for %s", symbol)
+                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "bullish_cvd_divergence"}
+            
             cvd_bonus = cvd_data.get("cvd_score_bonus", 0.0)
             score = min(10.0, max(0.0, score + cvd_bonus))
             logger.debug(

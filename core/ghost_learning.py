@@ -450,7 +450,7 @@ def track_skipped_signal(signal: dict, decision: str, client=None):
         logger.warning("[Ghost] track_skipped_signal hatası: %s", e)
 
 
-def process_pending_results(client):
+def process_pending_results(client, prices=None):
     """
     Bekleyen paper_results kayıtlarını mevcut fiyatla işle (v1 pipeline).
     Ghost 2.0 simülasyonu da çalıştırılır.
@@ -461,7 +461,8 @@ def process_pending_results(client):
         from database import get_pending_paper_results
 
         pending = get_pending_paper_results(limit=50)
-        prices = _get_all_prices(client)
+        if prices is None:
+            prices = _get_all_prices(client)
         
         if pending:
             now = datetime.now(timezone.utc)
@@ -634,6 +635,13 @@ def _get_price(client, symbol: str) -> float:
 
 def _get_all_prices(client) -> dict:
     """Fetch all symbol prices at once to avoid blocking network calls."""
+    try:
+        from core.market_data import _PRICE_CACHE
+        if _PRICE_CACHE:
+            return dict(_PRICE_CACHE)
+    except Exception:
+        pass
+
     prices = {}
     try:
         if client:
