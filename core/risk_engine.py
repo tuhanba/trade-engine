@@ -311,7 +311,8 @@ class RiskEngine:
             if symbol in {t.get("symbol") for t in open_trades}:
                 return {"valid": False, "score": 0, "risk_reject_reason": "duplicate_symbol"}
 
-            if not check_daily_loss_limit(balance):
+            is_paper = getattr(config, "EXECUTION_MODE", "paper") == "paper"
+            if not is_paper and not check_daily_loss_limit(balance):
                 return {"valid": False, "score": 0, "risk_reject_reason": "daily_loss_limit"}
 
             if not check_coin_cooldown(symbol):
