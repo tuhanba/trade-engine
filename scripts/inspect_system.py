@@ -82,10 +82,10 @@ def check_redis():
     except Exception as e:
         return f"Connection failed: {e}"
 
-def check_services():
+def check_systemd_services():
     system = platform.system()
     if system != "Linux":
-        return f"Not a Linux system (OS: {system}). Cannot query systemd."
+        return f"Not Linux system (OS: {system}). Bypassing systemd check."
         
     services = ["ax-bot", "ax-dashboard"]
     status = {}
@@ -98,33 +98,82 @@ def check_services():
             sub = res_sub.stdout.strip().replace("\n", ", ")
             
             status[s] = f"{active} ({sub})"
-        except Exception as e:
-            status[s] = f"Error: {e}"
+        except Exception:
+            status[s] = "Not found / Error"
     return status
+
+def get_docker_status():
+    status = {"active": False, "containers": [], "stats": "", "space": ""}
+    try:
+        # Check if docker command is available
+        res = subprocess.run(["docker", "ps", "--format", "table {{.Names}}\t{{.Status}}\t{{.Ports}}"], capture_output=True, text=True, timeout=5)
+        if res.returncode == 0:
+            status["active"] = True
+            status["containers"] = [line for line in res.stdout.strip().split("\n") if line]
+            
+            # Get resource stats (CPU/RAM flow)
+            res_stats = subprocess.run(["docker", "stats", "--no-stream", "--format", "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}"], capture_output=True, text=True, timeout=5)
+            status["stats"] = res_stats.stdout.strip()
+            
+            # Get docker disk space
+            res_df = subprocess.run(["docker", "system", "df", "--format", "{{.Type}} total: {{.Total}}, active: {{.Active}}, size: {{.Size}}"], capture_output=True, text=True, timeout=5)
+            status["space"] = res_df.stdout.strip()
+    except Exception as e:
+        status["error"] = str(e)
+    return status
+
+def get_docker_logs():
+    logs = {}
+    containers = ["aurvex_engine", "aurvex_dashboard", "aurvex_redis"]
+    for c in containers:
+        try:
+            res = subprocess.run(["docker", "logs", "--tail", "20", c], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                logs[c] = res.stdout.strip() or "(No logs / empty)"
+            else:
+                # Try fallback mapping for stack/compose auto-generated names
+                res_fallback = subprocess.run(["docker", "ps", "--filter", f"name={c}", "--format", "{{.Names}}"], capture_output=True, text=True)
+                actual_name = res_fallback.stdout.strip().split("\n")[0] if res_fallback.stdout.strip() else None
+                if actual_name:
+                    res_logs = subprocess.run(["docker", "logs", "--tail", "20", actual_name], capture_output=True, text=True)
+                    logs[c] = res_logs.stdout.strip()
+                else:
+                    logs[c] = f"Container {c} not found or stopped."
+        except Exception as e:
+            logs[c] = f"Error reading logs: {e}"
+    return logs
 
 def get_system_resources():
     res = {}
     
-    # Memory
+    # Memory RAM Flow
     if platform.system() == "Linux":
         try:
             with open("/proc/meminfo", "r") as f:
                 lines = f.readlines()
-            mem_total = 0
-            mem_free = 0
-            mem_avail = 0
+            mem_info = {}
             for line in lines:
-                if "MemTotal" in line:
-                    mem_total = int(line.split()[1]) / 1024 # MB
-                elif "MemFree" in line:
-                    mem_free = int(line.split()[1]) / 1024 # MB
-                elif "MemAvailable" in line:
-                    mem_avail = int(line.split()[1]) / 1024 # MB
-            res["memory"] = f"Total: {mem_total:.1f} MB, Available: {mem_avail:.1f} MB (Free: {mem_free:.1f} MB)"
+                parts = line.split()
+                if len(parts) >= 2:
+                    mem_info[parts[0].replace(":", "")] = int(parts[1]) / 1024 # MB
+            
+            total = mem_info.get("MemTotal", 0)
+            free = mem_info.get("MemFree", 0)
+            avail = mem_info.get("MemAvailable", 0)
+            cached = mem_info.get("Cached", 0)
+            buffers = mem_info.get("Buffers", 0)
+            sreclaim = mem_info.get("SReclaimable", 0)
+            
+            # RAM in active use by applications
+            used = total - avail
+            
+            res["memory"] = (
+                f"Total: {total:.1f} MB | Used (Apps): {used:.1f} MB | "
+                f"Available: {avail:.1f} MB | Buffers/Cache: {buffers + cached + sreclaim:.1f} MB (Free: {free:.1f} MB)"
+            )
         except Exception:
             res["memory"] = "N/A"
     else:
-        # Windows/Mac basic memory fallback using psutil if available or shutil for disk
         res["memory"] = "N/A (psutil not installed)"
         try:
             import psutil
@@ -145,47 +194,90 @@ def get_system_resources():
         import psutil
         res["cpu"] = f"Logical Cores: {psutil.cpu_count()}, Usage: {psutil.cpu_percent(interval=0.5)}%"
     except ImportError:
-        res["cpu"] = "N/A (psutil not installed)"
+        res["cpu"] = "N/A"
+        # Linux raw cpu calculation fallback
+        if platform.system() == "Linux":
+            try:
+                res_cpu = subprocess.run(["lscpu"], capture_output=True, text=True)
+                cores = 1
+                for line in res_cpu.stdout.split("\n"):
+                    if "CPU(s):" in line and not "NUMA" in line:
+                        cores = line.split()[-1]
+                        break
+                res_load = subprocess.run(["uptime"], capture_output=True, text=True)
+                res["cpu"] = f"Cores: {cores} | Load Avg: {res_load.stdout.strip().split('load average:')[-1].strip()}"
+            except Exception:
+                pass
         
     return res
 
 def run_diagnostics():
-    print("=" * 60)
-    print("           AURVEX SYSTEM DIAGNOSTICS & AUDIT            ")
-    print("=" * 60)
+    print("=" * 70)
+    print("           AURVEX SYSTEM & DOCKER CONSOLE AUDIT            ")
+    print("=" * 70)
     
-    # 1. System Resources
-    print("\n[1] System Resources:")
+    # 1. System Resources & RAM Flow
+    print("\n[1] Host Resources & RAM Flow:")
     resources = get_system_resources()
     for k, v in resources.items():
-        print(f"  {k.capitalize()}: {v}")
+        print(f"  {k.capitalize():8s}: {v}")
         
-    # 2. Services
-    print("\n[2] Systemd Services:")
-    services = check_services()
+    # 2. Docker Containers CPU/RAM Flow
+    print("\n[2] Docker Container Statuses:")
+    docker = get_docker_status()
+    if docker.get("active"):
+        print("  Active Containers:")
+        for c in docker["containers"]:
+            print(f"    {c}")
+        if docker["stats"]:
+            print("\n  Containers CPU/RAM Flow (docker stats):")
+            for line in docker["stats"].split("\n"):
+                print(f"    {line}")
+        if docker["space"]:
+            print("\n  Docker Disk Footprint:")
+            for line in docker["space"].split("\n"):
+                print(f"    {line}")
+    else:
+        print("  Docker CLI not active or not running on host system.")
+        
+    # 3. Host Systemd Services (Legacy)
+    print("\n[3] Host Systemd Services (Legacy check):")
+    services = check_systemd_services()
     if isinstance(services, dict):
         for k, v in services.items():
             print(f"  {k}: {v}")
     else:
         print(f"  {services}")
         
-    # 3. Redis
-    print("\n[3] Redis State:")
+    # 4. Redis connection status
+    print("\n[4] Redis State (Host context):")
     print(f"  Status: {check_redis()}")
     
-    # 4. Database Info
-    print("\n[4] Database Metrics:")
+    # 5. Database Info
+    print("\n[5] Database Sizing:")
     db_size_str, _ = get_db_size()
     print(f"  DB Path: {config.DB_PATH}")
     print(f"  DB Size: {db_size_str}")
     
-    # 5. Row Counts
-    print("\n[5] Database Table Counts:")
+    # 6. Row Counts
+    print("\n[6] Database Record Counts:")
     counts = get_row_counts()
     for table, count in counts.items():
         print(f"  {table:20s} : {count}")
         
-    print("\n" + "=" * 60)
+    # 7. Recent Docker Logs
+    if docker.get("active"):
+        print("\n" + "=" * 70)
+        print("                 RECENT CONTAINER LOG TAILS                  ")
+        print("=" * 70)
+        logs = get_docker_logs()
+        for name, log_content in logs.items():
+            print(f"\n>>> Container: {name} (Last 20 lines) >>>")
+            print("-" * 50)
+            print(log_content)
+            print("-" * 50)
+            
+    print("\n" + "=" * 70)
 
 if __name__ == "__main__":
     run_diagnostics()
