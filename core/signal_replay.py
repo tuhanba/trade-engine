@@ -103,7 +103,7 @@ class SignalReplay:
             with self._get_conn() as conn:
                 rows = conn.execute("""
                     SELECT uuid FROM signal_candidates 
-                    WHERE uuid IN (SELECT signal_id FROM paper_results WHERE status='finalized')
+                    WHERE uuid IN (SELECT signal_id FROM paper_results WHERE status IN ('finalized', 'completed'))
                     ORDER BY id DESC LIMIT ?
                 """, (sample_size,)).fetchall()
                 sids = [r[0] for r in rows]

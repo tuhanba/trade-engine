@@ -279,8 +279,8 @@ def get_learning_metrics(days: int = 14) -> dict:
             ghost_tp  = q("SELECT COUNT(*) FROM signal_candidates WHERE status='TP_HIT' AND created_at>=?", cutoff)
             ghost_sl  = q("SELECT COUNT(*) FROM signal_candidates WHERE status='SL_HIT' AND created_at>=?", cutoff)
             ghost_pnl = q("SELECT COALESCE(SUM(ghost_pnl),0) FROM signal_candidates WHERE status IN ('TP_HIT','SL_HIT') AND created_at>=?", cutoff)
-            p_done    = q("SELECT COUNT(*) FROM paper_results WHERE status='finalized' AND created_at>=?", cutoff)
-            p_wins    = q("SELECT COUNT(*) FROM paper_results WHERE would_have_won=1 AND created_at>=?", cutoff)
+            p_done    = q("SELECT COUNT(*) FROM paper_results WHERE status IN ('finalized', 'completed') AND created_at>=?", cutoff)
+            p_wins    = q("SELECT COUNT(*) FROM paper_results WHERE would_have_won=1 AND status IN ('finalized', 'completed') AND created_at>=?", cutoff)
 
         res = ghost_tp + ghost_sl
         return {

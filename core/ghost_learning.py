@@ -300,7 +300,7 @@ def summarize_ghost_results() -> dict:
                     SUM(CASE WHEN hit_stop_first=1 THEN 1 ELSE 0 END) as losses,
                     SUM(CASE WHEN skip_decision_correct=1 THEN 1 ELSE 0 END) as correct_skips
                 FROM paper_results
-                WHERE status='finalized'
+                WHERE status IN ('finalized', 'completed')
             """).fetchone()
 
         g2_total  = int(g2["total"] or 0)
@@ -707,7 +707,7 @@ def get_ghost_learning_stats() -> dict:
                     AVG(max_favorable_excursion) as avg_mfe,
                     AVG(max_adverse_excursion) as avg_mae
                 FROM paper_results
-                WHERE status='finalized'
+                WHERE status IN ('finalized', 'completed')
             """).fetchone()
 
         if not row:
