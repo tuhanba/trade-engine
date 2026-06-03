@@ -80,3 +80,100 @@ def generate_chart_bytes(symbol: str, entry: float, sl: float,
     except Exception as e:
         logger.error(f"[Visualizer] {symbol} grafiği oluşturulurken hata: {e}")
         return None
+
+
+def generate_heatmap_image_bytes(days: int = 30) -> Optional[bytes]:
+    """
+    Kapatılan işlemlerin PnL dağılımını saat bazında gruplayıp
+    görsel bir ısı haritası grafiği (PNG bytes) üretir.
+    """
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import database
+    except ImportError:
+        return None
+
+    try:
+        # 1. Veriyi çek
+        with database.get_conn() as conn:
+            rows = conn.execute("""
+                SELECT symbol,
+                       strftime('%H', close_time) AS hour,
+                       SUM(net_pnl) AS total_pnl
+                FROM trades
+                WHERE status = 'closed' AND close_time >= datetime('now', ?)
+                GROUP BY symbol, hour
+            """, (f"-{days} days",)).fetchall()
+            
+        if not rows:
+            return None
+            
+        # 2. Matris yapısını oluştur
+        symbols = sorted(list(set(row[0] for row in rows)))
+        hours = [f"{h:02d}" for h in range(24)]
+        symbol_idx = {sym: idx for idx, sym in enumerate(symbols)}
+        
+        grid = np.zeros((len(symbols), 24))
+        for row in rows:
+            sym, hr_str, pnl = row[0], row[1], float(row[2] or 0)
+            try:
+                hr = int(hr_str)
+                grid[symbol_idx[sym], hr] = pnl
+            except Exception:
+                pass
+
+        # 3. Matplotlib ile çiz
+        plt.style.use('dark_background')
+        fig_height = max(4.0, len(symbols) * 0.4 + 1.8)
+        fig, ax = plt.subplots(figsize=(10, fig_height), dpi=150)
+        
+        # Özel Red-Black-Green Colormap
+        from matplotlib.colors import LinearSegmentedColormap
+        colors = ["#ff1744", "#181818", "#00e676"]
+        cmap = LinearSegmentedColormap.from_list("pnl_map", colors)
+        
+        vmax = max(1.0, np.max(np.abs(grid)))
+        im = ax.imshow(grid, cmap=cmap, aspect='auto', vmin=-vmax, vmax=vmax)
+        
+        ax.set_xticks(np.arange(24))
+        ax.set_xticklabels(hours, fontsize=8)
+        ax.set_yticks(np.arange(len(symbols)))
+        ax.set_yticklabels(symbols, fontsize=8, fontweight='bold')
+        
+        ax.set_xlabel("Saat (UTC)", fontsize=9, labelpad=8)
+        ax.set_ylabel("Sembol", fontsize=9)
+        ax.set_title(f"Portföy Isı Haritası (Son {days} Gün PnL)", fontsize=11, fontweight='bold', pad=15)
+        
+        # Hücre içi değerleri yaz
+        for i in range(len(symbols)):
+            for j in range(24):
+                val = grid[i, j]
+                if abs(val) > 0.01:
+                    text_color = "black" if abs(val) > vmax * 0.4 else "white"
+                    ax.text(j, i, f"{val:+.1f}", ha="center", va="center", color=text_color, fontsize=6, fontweight='bold')
+
+        # Izgara çizgileri
+        ax.set_xticks(np.arange(24) - 0.5, minor=True)
+        ax.set_yticks(np.arange(len(symbols)) - 0.5, minor=True)
+        ax.grid(which="minor", color="#2c2c2c", linestyle='-', linewidth=0.5)
+        ax.tick_params(which="minor", size=0)
+        
+        cbar = fig.colorbar(im, ax=ax, orientation='horizontal', pad=0.08, shrink=0.5)
+        cbar.ax.tick_params(labelsize=8)
+        cbar.set_label("Toplam Net PnL ($)", fontsize=8)
+
+        fig.patch.set_facecolor('#121212')
+        ax.set_facecolor('#121212')
+        
+        import io
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
+        buf.seek(0)
+        plt.close(fig)
+        return buf.getvalue()
+    except Exception as e:
+        logger.error(f"[Visualizer] Isı haritası grafiği çizilirken hata: {e}")
+        return None

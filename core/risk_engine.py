@@ -148,6 +148,37 @@ def check_correlated_exposure(symbol: str, direction: str, open_trades: list) ->
         return True
 
 
+def calculate_historical_correlation(symbol_a: str, symbol_b: str, client) -> float:
+    """
+    Computes Pearson correlation coefficient between two assets using 15m candle close prices (last 20 candles).
+    Returns 0.0 on failure.
+    """
+    try:
+        if not client:
+            return 0.0
+        if symbol_a == symbol_b:
+            return 1.0
+        import numpy as np
+        klines_a = client.futures_klines(symbol=symbol_a, interval="15m", limit=20)
+        klines_b = client.futures_klines(symbol=symbol_b, interval="15m", limit=20)
+        if not klines_a or not klines_b or len(klines_a) < 10 or len(klines_b) < 10:
+            return 0.0
+        closes_a = np.array([float(k[4]) for k in klines_a[-20:]])
+        closes_b = np.array([float(k[4]) for k in klines_b[-20:]])
+        min_len = min(len(closes_a), len(closes_b))
+        closes_a = closes_a[-min_len:]
+        closes_b = closes_b[-min_len:]
+        if np.std(closes_a) == 0 or np.std(closes_b) == 0:
+            return 0.0
+        corr = np.corrcoef(closes_a, closes_b)[0, 1]
+        if np.isnan(corr):
+            return 0.0
+        return float(corr)
+    except Exception as e:
+        logger.debug(f"[Correlation] Calculation error between {symbol_a} and {symbol_b}: {e}")
+        return 0.0
+
+
 def evaluate_signal_risk(
     signal: SignalData,
     open_trades: list[dict],
@@ -280,6 +311,67 @@ def should_open_trade(
     return can_open, decision, reason
 
 
+def calculate_kelly_risk_pct(symbol: str, setup_rr: float, base_risk_pct: float) -> float:
+    """
+    Dinamik Kelly Kriteri ile pozisyon büyüklüğü hesaplar.
+    Sonuç [0.5, 3.0] aralığında sınırlandırılır.
+    """
+    try:
+        from database import get_conn
+        total, wins, avg_win, avg_loss = 0, 0, 0.0, 0.0
+        
+        with get_conn() as conn:
+            # 1. Coin bazlı istatistikler (en az 5 trade)
+            row = conn.execute("""
+                SELECT 
+                    COUNT(*),
+                    SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END),
+                    COALESCE(AVG(CASE WHEN net_pnl > 0 THEN net_pnl END), 0),
+                    COALESCE(AVG(CASE WHEN net_pnl <= 0 THEN ABS(net_pnl) END), 0)
+                FROM trades 
+                WHERE status = 'closed' AND symbol = ?
+            """, (symbol,)).fetchone()
+            
+            if row and row[0] >= 5:
+                total, wins, avg_win, avg_loss = row
+            else:
+                # 2. Global istatistikler
+                row_global = conn.execute("""
+                    SELECT 
+                        COUNT(*),
+                        SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END),
+                        COALESCE(AVG(CASE WHEN net_pnl > 0 THEN net_pnl END), 0),
+                        COALESCE(AVG(CASE WHEN net_pnl <= 0 THEN ABS(net_pnl) END), 0)
+                    FROM trades 
+                    WHERE status = 'closed'
+                """).fetchone()
+                if row_global and row_global[0] >= 5:
+                    total, wins, avg_win, avg_loss = row_global
+                    
+        if total < 5:
+            return base_risk_pct
+            
+        win_rate = wins / total
+        payoff = avg_win / avg_loss if avg_loss > 0 else setup_rr
+        if payoff <= 0:
+            payoff = setup_rr
+            
+        # Kelly Formülü: K = W - (1 - W) / R
+        kelly_f = win_rate - ((1.0 - win_rate) / payoff)
+        
+        # Quarter-Kelly (K * 0.25)
+        fractional_kelly = kelly_f * 0.25
+        risk_pct = fractional_kelly * 100
+        
+        # Clamp to safety limits
+        clamped = max(0.5, min(3.0, risk_pct))
+        logger.info(f"[Kelly Sizing] {symbol}: W={win_rate:.2f}, R={payoff:.2f}, Kelly={kelly_f:.3f}, Risk%={clamped:.2f}% (Base: {base_risk_pct}%)")
+        return clamped
+    except Exception as e:
+        logger.debug(f"[Kelly Sizing] Hesaplama hatası: {e}")
+        return base_risk_pct
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # RiskEngine CLASS — scalp_bot line 49: from core.risk_engine import RiskEngine
 # ─────────────────────────────────────────────────────────────────────────────
@@ -295,7 +387,7 @@ class RiskEngine:
         except Exception:
             self.db_path = db_path or "trading.db"
 
-    def calculate(self, symbol: str, direction: str, entry: float, quality: str, balance: float) -> dict:
+    def calculate(self, symbol: str, direction: str, entry: float, quality: str, balance: float, score: float = 0.0) -> dict:
         try:
             from core.accounting import calculate_position_size, calculate_rr as _calc_rr
             import database
@@ -342,15 +434,75 @@ class RiskEngine:
                 min_rr = 1.0        # Tolerans
                 logger.info(f"[Micro-Scalp] {symbol} parametreler M moduna geçirildi.")
 
-            # Dinamik TP Ölçekleme (Dynamic TP Scaling)
+            # Dinamik Kâr Kilitleme Kalkanı (Dynamic Profit Lock)
+            daily_pnl = 0.0
+            weekly_pnl = 0.0
+            environment = getattr(config, "EXECUTION_MODE", "paper")
+            try:
+                import sqlite3
+                from datetime import datetime, timezone, timedelta
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                last_7_days = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+                
+                conn = sqlite3.connect(self.db_path, timeout=5)
+                try:
+                    row_daily = conn.execute(
+                        "SELECT COALESCE(SUM(net_pnl), 0) FROM trades "
+                        "WHERE DATE(close_time) = ? AND status = 'closed' AND environment = ?",
+                        (today, environment)
+                    ).fetchone()
+                    daily_pnl = float(row_daily[0] or 0.0)
+                    
+                    row_weekly = conn.execute(
+                        "SELECT COALESCE(SUM(net_pnl), 0) FROM trades "
+                        "WHERE DATE(close_time) >= ? AND status = 'closed' AND environment = ?",
+                        (last_7_days, environment)
+                    ).fetchone()
+                    weekly_pnl = float(row_weekly[0] or 0.0)
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.warning(f"[Risk-Profit-Check] Error checking PnL: {e}")
+
+            daily_profit_lock_pct = float(getattr(config, "DAILY_PROFIT_LOCK_PCT", 3.0))
+            weekly_profit_lock_pct = float(getattr(config, "WEEKLY_PROFIT_LOCK_PCT", 10.0))
+            
+            daily_profit_target = balance * (daily_profit_lock_pct / 100.0)
+            weekly_profit_target = balance * (weekly_profit_lock_pct / 100.0)
+            
+            profit_lock_mult = 1.0
+            
+            if daily_pnl >= daily_profit_target and daily_profit_target > 0:
+                if quality not in ("S", "A+"):
+                    return {"valid": False, "score": 0, "risk_reject_reason": "daily_profit_target_reached_quality_gate"}
+                profit_lock_mult = min(profit_lock_mult, 0.5)
+                logger.info(f"[Profit Lock] Daily profit target reached (${daily_pnl:.2f} >= ${daily_profit_target:.2f}). Scaling risk by 0.5x.")
+                
+            if weekly_pnl >= weekly_profit_target and weekly_profit_target > 0:
+                if quality not in ("S", "A+"):
+                    return {"valid": False, "score": 0, "risk_reject_reason": "weekly_profit_target_reached_quality_gate"}
+                profit_lock_mult = min(profit_lock_mult, 0.5)
+                logger.info(f"[Profit Lock] Weekly profit target reached (${weekly_pnl:.2f} >= ${weekly_profit_target:.2f}). Scaling risk by 0.5x.")
+
+            # Dinamik TP / Parametre Ölçekleme ve Otonom Rejim
+            is_choppy = False
             try:
                 from database import get_market_regime
                 regime = get_market_regime()
                 if regime == "CHOPPY":
+                    is_choppy = True
                     # Kötü piyasada kârı erken al (Scalp TP)
                     tp1_r = max(1.0, tp1_r * 0.8)
                     tp2_r = max(1.5, tp2_r * 0.8)
                     tp3_r = max(2.5, tp3_r * 0.8)
+                    
+                    # OTONOM KALİTE GATING: CHOPPY piyasada sadece en iyi kalitedeki işlemlere izin ver
+                    if quality not in ("S", "A+"):
+                        return {"valid": False, "score": 0, "risk_reject_reason": "choppy_market_quality_gate"}
+                    # OTONOM SKOR GATING: CHOPPY piyasada eşiği 5 puan artır
+                    required_score = float(getattr(config, "TRADE_THRESHOLD", 55.0)) + 5.0
+                    if score > 0.0 and score < required_score:
+                        return {"valid": False, "score": 0, "risk_reject_reason": "choppy_market_score_gate"}
                 elif regime in ("BULLISH", "BEARISH"):
                     # Trend piyasasında runner'ı uzat
                     if (regime == "BULLISH" and direction == "LONG") or (regime == "BEARISH" and direction == "SHORT"):
@@ -364,6 +516,16 @@ class RiskEngine:
             if atr_val <= 0 or atr_val < entry * 0.005:
                 atr_val = entry * 0.02
                 logger.warning(f"ATR fallback kullanıldı: {symbol} atr={atr_val:.6f}")
+
+            # Volatility-Adaptive Risk Adjustments
+            atr_pct = atr_val / entry if entry > 0 else 0.02
+            if atr_pct > 0.018:
+                sl_atr_mult *= 1.25
+                logger.info(f"[Volatility-Adaptive] High volatility ({atr_pct:.4f}) on {symbol}. sl_atr_mult scaled by 1.25x to {sl_atr_mult:.2f}")
+            elif atr_pct < 0.008:
+                sl_atr_mult *= 0.85
+                logger.info(f"[Volatility-Adaptive] Low volatility ({atr_pct:.4f}) on {symbol}. sl_atr_mult scaled by 0.85x to {sl_atr_mult:.2f}")
+
             is_long = direction == "LONG"
             sl_dist = atr_val * sl_atr_mult
             sl = (entry - sl_dist) if is_long else (entry + sl_dist)
@@ -391,6 +553,9 @@ class RiskEngine:
                 max_lev = 10
             stop_dist_pct = abs(entry - sl) / entry if entry > 0 else 0.02
             base_leverage = min(max_lev, max(2, int(0.50 / stop_dist_pct))) if stop_dist_pct > 0 else max_lev
+            if atr_pct > 0.018:
+                base_leverage = max(2, int(base_leverage * 0.80))
+                logger.info(f"[Volatility-Adaptive] Scaling leverage down by 0.80x due to high volatility. New base leverage: {base_leverage}")
 
             # Dinamik Kaldıraç Çarpanı (AI Coin Profiles'dan)
             lev_multiplier = 1.0
@@ -408,7 +573,131 @@ class RiskEngine:
                 logger.debug(f"[Risk] Dinamik kaldıraç hatası: {e}")
 
             leverage = max(2, min(max_lev, int(base_leverage * lev_multiplier)))
-            risk_pct = risk_pct_base * quality_mult
+            if is_choppy:
+                leverage = max(2, int(leverage * 0.5))
+                logger.info(f"[Regime-Auto-Switch] CHOPPY regime detected. Scaling leverage down to {leverage}.")
+            
+            # Apply Dynamic Kelly position sizing
+            kelly_base = calculate_kelly_risk_pct(symbol, rr, risk_pct_base)
+            risk_pct = kelly_base * quality_mult * profit_lock_mult
+
+            # Apply Drawdown, Equity Curve and MTF Trend Alignment protections
+            # 1. Fetch balance ledger history to compute Drawdown and Equity SMA
+            try:
+                import sqlite3
+                conn = sqlite3.connect(self.db_path, timeout=5)
+                try:
+                    conn.row_factory = sqlite3.Row
+                    ledger_rows = conn.execute(
+                        "SELECT balance_after FROM balance_ledger ORDER BY id DESC LIMIT 50"
+                    ).fetchall()
+                    balances = [float(row["balance_after"]) for row in ledger_rows]
+                    balances.reverse() # chronological order
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.debug(f"[Risk-Balance-Check] Ledger query failed: {e}")
+                balances = []
+
+            current_bal = balance
+            if balances:
+                ath_balance = max(balances + [current_bal])
+                drawdown_pct = ((ath_balance - current_bal) / ath_balance) * 100.0 if ath_balance > 0 else 0.0
+                
+                # Hard Drawdown Lock check
+                drawdown_lock_pct = float(getattr(config, "DRAWDOWN_LOCK_PCT", 10.0))
+                if drawdown_pct >= drawdown_lock_pct:
+                    logger.warning(f"[Risk-Drawdown-Lock] HARD LOCKOUT! Drawdown {drawdown_pct:.2f}% >= limit {drawdown_lock_pct}%. ATH={ath_balance:.2f}, Current={current_bal:.2f}")
+                    return {"valid": False, "score": 0, "risk_reject_reason": "drawdown_hard_lock"}
+                
+                # Defensive Drawdown mode check
+                drawdown_defensive_pct = float(getattr(config, "DRAWDOWN_DEFENSIVE_PCT", 5.0))
+                if drawdown_pct >= drawdown_defensive_pct:
+                    risk_pct *= 0.5
+                    logger.info(f"[Risk-Drawdown-Defensive] Defensive mode: Drawdown {drawdown_pct:.2f}% >= limit {drawdown_defensive_pct}%. Risk scaled by 0.5x to {risk_pct:.2f}%")
+                
+                # Equity Curve SMA check
+                if bool(getattr(config, "EQUITY_CURVE_FILTER_ENABLED", True)):
+                    period = int(getattr(config, "EQUITY_CURVE_EMA_PERIOD", 10))
+                    recent_balances = balances[-period:]
+                    if len(recent_balances) >= 3:
+                        sma_balance = sum(recent_balances) / len(recent_balances)
+                        if current_bal < sma_balance:
+                            reduction = float(getattr(config, "EQUITY_CURVE_RISK_REDUCTION", 0.5))
+                            risk_pct *= reduction
+                            logger.info(f"[Risk-Equity-Curve] Current balance {current_bal:.2f} < SMA {sma_balance:.2f} (n={len(recent_balances)}). Risk scaled by {reduction}x to {risk_pct:.2f}%")
+
+            # 2. MTF Trend Alignment check
+            mtf_align_enabled = bool(getattr(config, "MTF_TREND_ALIGN_ENABLED", True))
+            if mtf_align_enabled and self.client:
+                try:
+                    from core.trend_engine import TrendEngine
+                    trend_engine = TrendEngine(self.client)
+                    trend_1h = trend_engine.get_1h_trend(symbol)
+                    trend_4h = trend_engine.get_4h_trend(symbol)
+                    
+                    opposite_trend = False
+                    if direction == "LONG":
+                        if trend_1h == "BEARISH" or trend_4h == "BEARISH":
+                            opposite_trend = True
+                    elif direction == "SHORT":
+                        if trend_1h == "BULLISH" or trend_4h == "BULLISH":
+                            opposite_trend = True
+                            
+                    if opposite_trend:
+                        mtf_reduction = float(getattr(config, "MTF_TREND_ALIGN_RISK_REDUCTION", 0.4))
+                        risk_pct *= mtf_reduction
+                        logger.info(f"[Risk-MTF-Align] {symbol} {direction} opposite to 1H={trend_1h}/4H={trend_4h}. Risk scaled by {mtf_reduction}x to {risk_pct:.2f}%")
+                except Exception as e:
+                    logger.debug(f"[Risk-MTF-Align] MTF Trend check skipped: {e}")
+
+            # 3. Dynamic Pearson Correlation Risk Clustering Shield
+            correlation_risk_mult = 1.0
+            for t in open_trades:
+                t_sym = t.get("symbol")
+                if t_sym == symbol:
+                    continue
+                # Calculate correlation
+                corr = calculate_historical_correlation(symbol, t_sym, self.client)
+                logger.info(f"[Correlation Check] {symbol} vs {t_sym}: {corr:.3f}")
+                if corr > 0.90:
+                    logger.warning(f"[Correlation Block] {symbol} blocked due to high correlation with {t_sym} ({corr:.3f} > 0.90)")
+                    return {"valid": False, "score": 0, "risk_reject_reason": "high_correlation_block"}
+                elif corr > 0.75:
+                    correlation_risk_mult = min(correlation_risk_mult, 0.5)
+                    logger.info(f"[Correlation Warning] {symbol} risk scaled down due to correlation with {t_sym} ({corr:.3f} > 0.75)")
+            risk_pct *= correlation_risk_mult
+
+            # 4. Adaptive Slippage & Latency Guard
+            try:
+                from database import get_conn
+                with get_conn() as conn:
+                    recent_perf = conn.execute("""
+                        SELECT COALESCE(slippage, 0.0) as slippage, COALESCE(latency_ms, 0) as latency_ms
+                        FROM trades
+                        WHERE status = 'closed'
+                        ORDER BY id DESC LIMIT 3
+                    """).fetchall()
+                if recent_perf:
+                    avg_slippage = sum(float(r["slippage"]) for r in recent_perf) / len(recent_perf)
+                    avg_latency = sum(int(r["latency_ms"]) for r in recent_perf) / len(recent_perf)
+                    
+                    slippage_mult = 1.0
+                    if avg_slippage > 0.15:
+                        slippage_mult = 0.70
+                        logger.info(f"[Slippage Guard] Avg slippage of last {len(recent_perf)} trades is {avg_slippage:.3f}% > 0.15%. Risk scaled by 0.7x (30% reduction)")
+                    
+                    latency_mult = 1.0
+                    if avg_latency > 500:
+                        latency_mult = 0.80
+                        logger.info(f"[Latency Guard] Avg latency of last {len(recent_perf)} trades is {avg_latency:.1f}ms > 500ms. Risk scaled by 0.8x (20% reduction)")
+                    
+                    risk_pct *= (slippage_mult * latency_mult)
+            except Exception as e:
+                logger.debug(f"[Risk-Slippage-Latency-Check] Query failed: {e}")
+
+            # Safety Limits (minimum 0.5%, maximum 3.0%)
+            risk_pct = max(0.5, min(3.0, risk_pct))
 
             pos = calculate_position_size(
                 balance=balance, risk_pct=risk_pct, entry_price=entry,
@@ -466,6 +755,14 @@ class RiskEngine:
             if atr_val <= 0 or atr_val < entry * 0.005:
                 atr_val = entry * 0.02
                 logger.warning(f"ATR fallback (preview): {symbol} atr={atr_val:.6f}")
+
+            # Volatility-Adaptive Risk Adjustments
+            atr_pct = atr_val / entry if entry > 0 else 0.02
+            if atr_pct > 0.018:
+                sl_atr_mult *= 1.25
+            elif atr_pct < 0.008:
+                sl_atr_mult *= 0.85
+
             is_long = direction == "LONG"
             sl_dist = atr_val * sl_atr_mult
             sl = (entry - sl_dist) if is_long else (entry + sl_dist)
@@ -488,6 +785,8 @@ class RiskEngine:
                 max_lev = 10
             stop_dist_pct = abs(entry - sl) / entry if entry > 0 else 0.02
             leverage = min(max_lev, max(2, int(0.50 / stop_dist_pct))) if stop_dist_pct > 0 else max_lev
+            if atr_pct > 0.018:
+                leverage = max(2, int(leverage * 0.80))
             pos = calculate_position_size(
                 balance=balance, risk_pct=risk_pct, entry_price=entry,
                 stop_loss=sl, leverage=leverage, fee_rate=fee_rate,

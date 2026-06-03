@@ -23,7 +23,7 @@ import logging
 import pickle
 from datetime import datetime, timezone
 
-from config import DB_PATH
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ class MLSignalScorer:
         self.n_samples   = 0
         self.last_train  = None
         self.cv_accuracy = 0.0
+        self.precision_at_70 = 0.0
         self.feature_imp = {}
         self.coin_stats  = {}   # {symbol: {wins, total}}
         self.bypass_gating = None
@@ -58,7 +59,7 @@ class MLSignalScorer:
     def _load_training_data(self):
         """Pattern memory tablosundan genişletilmiş eğitim verisi çeker."""
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = sqlite3.connect(config.DB_PATH)
             c = conn.cursor()
             
             # Veri kalitesi güvencesi: Sadece sağlıklı verileri al
@@ -261,11 +262,35 @@ class MLSignalScorer:
 
         # Cross-validation
         new_cv_accuracy = 0.0
+        new_precision_at_70 = 0.70
         try:
             cv = StratifiedKFold(n_splits=min(5, max(2, len(rows)//15)), shuffle=True, random_state=42)
             cv_scores = cross_val_score(ensemble, X_scaled, y, cv=cv, scoring="roc_auc")
             new_cv_accuracy = float(cv_scores.mean())
             logger.info(f"ML CV ROC-AUC: {new_cv_accuracy:.3f} ± {cv_scores.std():.3f}")
+
+            # Manual split validation to check precision in top decile (proba >= 0.70)
+            precisions = []
+            for train_idx, val_idx in cv.split(X_scaled, y):
+                X_train, X_val = X_scaled[train_idx], X_scaled[val_idx]
+                y_train, y_val = y[train_idx], y[val_idx]
+                
+                from sklearn.base import clone
+                fold_model = clone(ensemble)
+                fold_model.fit(X_train, y_train)
+                
+                probas = fold_model.predict_proba(X_val)
+                if probas.shape[1] > 1:
+                    win_probas = probas[:, 1]
+                    high_score_mask = win_probas >= 0.70
+                    if np.sum(high_score_mask) > 0:
+                        correct = y_val[high_score_mask] == 1
+                        precisions.append(np.mean(correct))
+            if precisions:
+                new_precision_at_70 = float(np.mean(precisions))
+                logger.info(f"ML CV Precision @ 70: {new_precision_at_70:.3f}")
+            else:
+                logger.info("ML CV Precision @ 70: N/A (no validation samples with proba >= 0.70)")
         except Exception as e:
             logger.debug(f"CV hatası: {e}")
             new_cv_accuracy = 0.0
@@ -277,20 +302,29 @@ class MLSignalScorer:
         if bypass_gating is None:
             bypass_gating = is_testing
 
-        if not bypass_gating and self.trained and self.model is not None and self.cv_accuracy > 0.0:
-            # We compare new_cv_accuracy with existing cv_accuracy
-            # Standard gate: new ROC-AUC should not degrade by more than 3%
-            degradation_threshold = self.cv_accuracy * 0.97
-            if new_cv_accuracy < degradation_threshold:
-                logger.warning(
-                    f"[ML Gating] Yeni model performansı yetersiz. Değişim reddedildi. "
-                    f"Yeni CV ROC-AUC: {new_cv_accuracy:.3f} < Eşik: {degradation_threshold:.3f} (Mevcut: {self.cv_accuracy:.3f})"
-                )
-                return False
+        if not bypass_gating and self.trained and self.model is not None:
+            if self.cv_accuracy > 0.0:
+                degradation_threshold = self.cv_accuracy * 0.97
+                if new_cv_accuracy < degradation_threshold:
+                    logger.warning(
+                        f"[ML Gating] Yeni model performansı yetersiz (ROC-AUC). Değişim reddedildi. "
+                        f"Yeni CV ROC-AUC: {new_cv_accuracy:.3f} < Eşik: {degradation_threshold:.3f} (Mevcut: {self.cv_accuracy:.3f})"
+                    )
+                    return False
+
+            if self.precision_at_70 > 0.0:
+                precision_threshold = self.precision_at_70 - 0.05
+                if new_precision_at_70 < precision_threshold:
+                    logger.warning(
+                        f"[ML Gating] Yeni model performansı yetersiz (Precision @ 70). Değişim reddedildi. "
+                        f"Yeni Precision @ 70: {new_precision_at_70:.3f} < Eşik: {precision_threshold:.3f} (Mevcut: {self.precision_at_70:.3f})"
+                    )
+                    return False
 
         self.model      = ensemble
         self.scaler     = scaler
         self.cv_accuracy = new_cv_accuracy
+        self.precision_at_70 = new_precision_at_70
         self.trained    = True
         self.n_samples  = len(rows)
         self.last_train = datetime.now(timezone.utc)
@@ -415,6 +449,7 @@ class MLSignalScorer:
                     "n_samples":   self.n_samples,
                     "trained_at":  self.last_train,
                     "cv_accuracy": self.cv_accuracy,
+                    "precision_at_70": getattr(self, "precision_at_70", 0.0),
                     "feature_imp": self.feature_imp,
                     "coin_stats":  self.coin_stats,
                 }, f)
@@ -433,11 +468,12 @@ class MLSignalScorer:
             self.n_samples   = data.get("n_samples", 0)
             self.last_train  = data.get("trained_at")
             self.cv_accuracy = data.get("cv_accuracy", 0.0)
+            self.precision_at_70 = data.get("precision_at_70", 0.0)
             self.feature_imp = data.get("feature_imp", {})
             self.coin_stats  = data.get("coin_stats", {})
             self.trained     = True
             logger.info(f"ML model v2.0 yüklendi: {self.n_samples} örnek | "
-                        f"CV AUC: {self.cv_accuracy:.3f}")
+                        f"CV AUC: {self.cv_accuracy:.3f} | Precision @ 70: {self.precision_at_70:.3f}")
         except Exception as e:
             logger.debug(f"ML model yüklenemedi (ilk çalıştırma): {e}")
 
@@ -448,6 +484,7 @@ class MLSignalScorer:
             "last_train":  str(self.last_train) if self.last_train else None,
             "threshold":   SCORE_THRESHOLD,
             "cv_accuracy": round(self.cv_accuracy, 3),
+            "precision_at_70": round(getattr(self, "precision_at_70", 0.0), 3),
             "top_features": sorted(self.feature_imp.items(), key=lambda x: -x[1])[:5] if self.feature_imp else [],
         }
 

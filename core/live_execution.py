@@ -451,6 +451,7 @@ class LiveExecutionEngine:
 
         # 4. Borsaya Emir Gonderimi (Entry - Smart Limit/Market Chase)
         max_chase_pct = getattr(signal, "max_chase_pct", None) or getattr(config, "MAX_CHASE_PCT", 0.15)
+        start_time = time.time()
         chase_result = self._execute_chase_limit_order(
             symbol=symbol,
             side=side,
@@ -458,6 +459,8 @@ class LiveExecutionEngine:
             entry_price=current_price,
             max_chase_pct=max_chase_pct
         )
+        end_time = time.time()
+        latency_ms = int((end_time - start_time) * 1000)
 
         if not chase_result:
             logger.error(f"[LIVE REJECTED] Limit chase entry basarisiz veya reddedildi {symbol}")
@@ -466,6 +469,17 @@ class LiveExecutionEngine:
         entry_price = chase_result['avgPrice']
         qty_float = chase_result['executedQty']
         qty_str = self._format_quantity(symbol, qty_float)
+
+        # Calculate slippage against target signal entry price
+        slippage_val = 0.0
+        if current_price > 0:
+            if direction == "LONG":
+                slippage_val = (entry_price - current_price) / current_price * 100.0
+            else:
+                slippage_val = (current_price - entry_price) / current_price * 100.0
+        
+        # Ensure slippage is positive/realistic or 0
+        slippage_val = max(0.0, slippage_val)
 
         # 5. Borsaya Stop Loss (Hard Stop) Yerlestirme
         sl_side = "SELL" if direction == "LONG" else "BUY"
@@ -529,7 +543,9 @@ class LiveExecutionEngine:
             status="OPEN",
             close_reason=f"LIVE_ENTRY (SL Order: {sl_order_id})",
             setup_quality=signal.setup_quality,
-            final_score=signal.final_score
+            final_score=signal.final_score,
+            slippage=slippage_val,
+            latency_ms=latency_ms
         )
         
         # State'i paper engine ile uyumlu kaydet
@@ -550,7 +566,9 @@ class LiveExecutionEngine:
             logger.error(f"[LIVE] Islem borsada acildi ama DB'ye yazilamadi: {symbol}")
             return None
             
-        logger.info(f"[LIVE SUCCESS] Trade basariyla acildi: #{trade_id} {symbol} @ {entry_price}")
+        logger.info(f"[LIVE SUCCESS] Trade basariyla acildi: #{trade_id} {symbol} @ {entry_price} (Slippage={slippage_val:.3f}%, Latency={latency_ms}ms)")
+        
+        return trade_id
         
         return trade_id
 

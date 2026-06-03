@@ -308,5 +308,100 @@ class TestIntegrationFlow(unittest.TestCase):
         self.assertEqual(received_events[0].payload["symbol"], "SOLUSDT")
         self.assertEqual(received_events[0].payload["net_pnl"], -10.0)
 
+    def test_kelly_criterion_position_sizing(self):
+        """6. Test Dynamic Kelly Criterion position sizing calculation and boundaries."""
+        from core.risk_engine import calculate_kelly_risk_pct
+        
+        # Test Case A: No sufficient trades -> returns fallback base_risk_pct (e.g. 1.0)
+        risk = calculate_kelly_risk_pct("BTCUSDT", setup_rr=2.0, base_risk_pct=1.0)
+        self.assertEqual(risk, 1.0)
+        
+        # Test Case B: Coin has 5 trades with 4 wins and average PnL stats.
+        # W = 0.8 (80% Win Rate), payoff = avg_win / avg_loss = 20.0 / 10.0 = 2.0.
+        # Kelly: K = 0.8 - (0.2 / 2.0) = 0.8 - 0.1 = 0.70.
+        # Quarter-Kelly: K * 0.25 = 0.175 (17.5% fractional size? clamped to max 3.0%).
+        with database.get_conn() as conn:
+            # Insert 5 closed trades for "DOGEUSDT"
+            # 4 wins (PnL = +20) and 1 loss (PnL = -10)
+            for i in range(4):
+                conn.execute("""
+                    INSERT INTO trades (id, symbol, direction, status, entry, sl, qty, open_time, close_time, net_pnl, environment)
+                    VALUES (?, 'DOGEUSDT', 'LONG', 'closed', 1.0, 0.9, 1.0, '2026-06-01 00:00:00', '2026-06-01 01:00:00', 20.0, 'paper')
+                """, (200 + i,))
+            conn.execute("""
+                INSERT INTO trades (id, symbol, direction, status, entry, sl, qty, open_time, close_time, net_pnl, environment)
+                VALUES (204, 'DOGEUSDT', 'LONG', 'closed', 1.0, 0.9, 1.0, '2026-06-01 00:00:00', '2026-06-01 01:00:00', -10.0, 'paper')
+            """)
+            
+        risk = calculate_kelly_risk_pct("DOGEUSDT", setup_rr=2.0, base_risk_pct=1.0)
+        # Expected Win Rate = 80%, Payoff = 20 / 10 = 2.0.
+        # Kelly fraction = 0.8 - 0.2/2 = 0.7.
+        # Quarter Kelly = 0.7 * 0.25 = 0.175 -> 17.5% -> Clamped to 3.0%
+        self.assertEqual(risk, 3.0)
+        
+        # Test Case C: Low win rate -> Kelly fraction negative -> clamped to 0.5% min risk
+        with database.get_conn() as conn:
+            # 1 win (PnL = +10) and 4 losses (PnL = -10) for "LTCUSDT"
+            conn.execute("""
+                INSERT INTO trades (id, symbol, direction, status, entry, sl, qty, open_time, close_time, net_pnl, environment)
+                VALUES (210, 'LTCUSDT', 'LONG', 'closed', 1.0, 0.9, 1.0, '2026-06-01 00:00:00', '2026-06-01 01:00:00', 10.0, 'paper')
+            """)
+            for i in range(4):
+                conn.execute("""
+                    INSERT INTO trades (id, symbol, direction, status, entry, sl, qty, open_time, close_time, net_pnl, environment)
+                    VALUES (?, 'LTCUSDT', 'LONG', 'closed', 1.0, 0.9, 1.0, '2026-06-01 00:00:00', '2026-06-01 01:00:00', -10.0, 'paper')
+                """, (211 + i,))
+                
+        risk_low = calculate_kelly_risk_pct("LTCUSDT", setup_rr=1.5, base_risk_pct=1.0)
+        # expected Kelly fraction <= 0 -> risk_pct <= 0 -> Clamped to 0.5%
+        self.assertEqual(risk_low, 0.5)
+
+    def test_market_regime_setup_quality_filter(self):
+        """7. Test setup quality filter based on market regime (min A+ setups in CHOPPY market)."""
+        from core.services.trigger_service import TriggerService
+        
+        # Setup regime as CHOPPY
+        update_system_state("market_regime", "CHOPPY")
+        
+        # TriggerService mocks
+        client_mock = MagicMock()
+        svc = TriggerService(client_mock)
+        
+        # A quality B setup in CHOPPY market should be rejected (only S or A+ allowed)
+        svc.trigger_engine.analyze = MagicMock(return_value={
+            "entry_price": 100.0, "stop_loss": 98.0, "tp1": 103.0, 
+            "quality": "B", "score": 70.0
+        })
+        
+        # Mock event publishing
+        with patch.object(event_bus, 'publish') as mock_publish:
+            event = Event(type=EventType.TREND_CHECKED, payload={
+                "symbol": "BTCUSDT", "signal_id": 999, "tradeability_score": 80.0,
+                "trend_result": {"direction": "LONG", "btc_trend": "BULLISH", "confluence_raw": 1}
+            })
+            asyncio.run(svc.handle_trend_checked(event))
+            
+            # Since quality B setup is rejected, TREND_CHECKED shouldn't propagate to TRIGGER_CHECKED event
+            mock_publish.assert_not_called()
+            
+        # A quality A+ setup in CHOPPY market should pass
+        svc.trigger_engine.analyze = MagicMock(return_value={
+            "entry_price": 100.0, "stop_loss": 98.0, "tp1": 103.0, 
+            "quality": "A+", "score": 85.0
+        })
+        
+        with patch.object(event_bus, 'publish') as mock_publish:
+            event = Event(type=EventType.TREND_CHECKED, payload={
+                "symbol": "BTCUSDT", "signal_id": 1000, "tradeability_score": 80.0,
+                "trend_result": {"direction": "LONG", "btc_trend": "BULLISH", "confluence_raw": 1}
+            })
+            asyncio.run(svc.handle_trend_checked(event))
+            
+            # Assert event was published
+            mock_publish.assert_called_once()
+            pub_event = mock_publish.call_args[0][0]
+            self.assertEqual(pub_event.type, EventType.TRIGGER_CHECKED)
+            self.assertEqual(pub_event.payload["symbol"], "BTCUSDT")
+
 if __name__ == '__main__':
     unittest.main()

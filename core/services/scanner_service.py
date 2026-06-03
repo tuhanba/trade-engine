@@ -42,11 +42,16 @@ class ScannerService:
                 candidates = await self.scanner.scan()
                 self._scan_count += 1
 
-                eligible = [
-                    c for c in candidates
-                    if c.get("status") in ("Eligible", "Watch")
-                    and c.get("symbol") not in open_symbols
-                ]
+                from database import is_coin_muted
+                eligible = []
+                for c in candidates:
+                    sym = c.get("symbol")
+                    if c.get("status") in ("Eligible", "Watch") and sym not in open_symbols:
+                        is_muted = await asyncio.to_thread(is_coin_muted, sym)
+                        if is_muted:
+                            logger.info(f"[ScannerService] Skipping muted symbol: {sym}")
+                            continue
+                        eligible.append(c)
 
                 for c in eligible:
                     await event_bus.publish(Event(type=EventType.SCANNED, payload=c))

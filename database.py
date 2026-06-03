@@ -128,7 +128,9 @@ CREATE TABLE IF NOT EXISTS trades (
     environment         TEXT,
     session             TEXT,
     metadata            TEXT DEFAULT '{}',
-    trail_stop          REAL DEFAULT 0
+    trail_stop          REAL DEFAULT 0,
+    slippage            REAL DEFAULT 0,
+    latency_ms          INTEGER DEFAULT 0
 )
 """
 
@@ -393,6 +395,8 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("trail_stop",        "REAL DEFAULT 0"),
         ("breakeven_set",     "INTEGER DEFAULT 0"),  # BUG FIX: eksik kolon
         ("trailing_active",   "INTEGER DEFAULT 0"),  # BUG FIX: eksik kolon
+        ("slippage",          "REAL DEFAULT 0"),
+        ("latency_ms",        "INTEGER DEFAULT 0"),
     ],
     "signal_candidates": [
         ("tp2", "REAL DEFAULT 0"),
@@ -930,8 +934,9 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
                  risk_pct, status, open_time, current_price,
                  unrealized_pnl, realized_pnl, net_pnl,
                  remaining_qty, original_qty, close_price, close_reason,
-                 total_fee, fee_rate, ax_mode, setup_quality, final_score, metadata, environment)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 total_fee, fee_rate, ax_mode, setup_quality, final_score, metadata, environment,
+                 slippage, latency_ms)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 trade.symbol,
@@ -967,6 +972,8 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
                 getattr(trade, 'final_score', 0.0),
                 metadata or "{}",
                 env,
+                getattr(trade, 'slippage', 0.0) or 0.0,
+                getattr(trade, 'latency_ms', 0) or 0,
             ),
         )
         conn.commit()
@@ -1017,6 +1024,11 @@ def update_trade_sl(trade_id: int, new_sl: float) -> None:
             (new_sl, trade_id),
         )
         conn.commit()
+        try:
+            from core import redis_state
+            redis_state.invalidate_open_trades()
+        except Exception:
+            pass
     except Exception as exc:
         logger.error("Trade SL güncellenemedi [%s]: %s", trade_id, exc)
     finally:
@@ -1032,6 +1044,11 @@ def update_trade_metadata(trade_id: int, metadata_json: str) -> None:
             (metadata_json, trade_id),
         )
         conn.commit()
+        try:
+            from core import redis_state
+            redis_state.invalidate_open_trades()
+        except Exception:
+            pass
     except Exception as exc:
         logger.error("Trade metadata güncellenemedi [%s]: %s", trade_id, exc)
     finally:
@@ -2095,6 +2112,7 @@ def save_ghost_suggestion(data: dict) -> None:
 
 
 def update_coin_profile(symbol: str, updates: dict):
+    needs_update = False
     with get_conn() as conn:
         existing = conn.execute(
             "SELECT symbol FROM coin_profiles WHERE symbol = ?", (symbol,)
@@ -2122,8 +2140,10 @@ def update_coin_profile(symbol: str, updates: dict):
                 "INSERT INTO coin_profiles (symbol, updated_at, last_updated) VALUES (?, ?, ?)",
                 (symbol, now, now)
             )
-            if updates:
-                update_coin_profile(symbol, updates)
+            needs_update = True
+            
+    if needs_update and updates:
+        update_coin_profile(symbol, updates)
 
 
 def upsert_pattern_memory(
@@ -2891,3 +2911,42 @@ def mark_ghost_suggestion_applied(suggestion_id: int) -> None:
             )
     except Exception as exc:
         logger.warning("[DB] mark_ghost_suggestion_applied(%s): %s", suggestion_id, exc)
+
+
+def get_candidate_by_id(candidate_id: int) -> dict | None:
+    """id'ye göre signal_candidates tablosundan bir aday kaydını çeker."""
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM signal_candidates WHERE id = ?", (candidate_id,)
+            ).fetchone()
+            if row:
+                return dict(row)
+    except Exception as e:
+        logger.debug(f"get_candidate_by_id hatası: {e}")
+    return None
+
+
+def mute_coin(symbol: str, duration_hours: float = 4.0):
+    """symbol coin'ini duration_hours saat boyunca mute eder."""
+    try:
+        from datetime import datetime, timezone, timedelta
+        until = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).isoformat()
+        set_state(f"muted:{symbol}", until)
+        logger.info(f"[Mute] {symbol} is muted until {until}")
+    except Exception as e:
+        logger.warning(f"mute_coin hatası: {e}")
+
+
+def is_coin_muted(symbol: str) -> bool:
+    """symbol coin'inin mute edilip edilmediğini kontrol eder."""
+    try:
+        from datetime import datetime, timezone
+        val = get_state(f"muted:{symbol}")
+        if val:
+            until = datetime.fromisoformat(val)
+            if datetime.now(timezone.utc) < until:
+                return True
+    except Exception as e:
+        logger.debug(f"is_coin_muted hatası: {e}")
+    return False

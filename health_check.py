@@ -172,3 +172,5 @@ if fail_list:
 print('=== BASARILI ===')
 for _, name, detail in ok_list:
     print(f'  [OK]  {name}: {detail}')
+
+sys.exit(1 if fail_list else 0)

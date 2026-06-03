@@ -22,16 +22,20 @@ import numpy as np
 # Set DB Path and Redis settings before importing other modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import random
 import config
-config.DB_PATH = "backtest_temp.db"
+config.DB_PATH = f"backtest_temp_{random.randint(1000, 9999)}.db"
 config.REDIS_ENABLED = False
 config.EXECUTION_MODE = "paper"
 
 import database
+import core
+import execution_engine
 from core.data_layer import SignalData, TradeStatus
 from core.trend_engine import TrendEngine
 from core.trigger_engine import TriggerEngine
 from core.ai_decision_engine import AIDecisionEngine
+from core.risk_engine import RiskEngine
 from execution_engine import ExecutionEngine
 
 # ── Patch Datetime ────────────────────────────────────────────────────────────
@@ -70,6 +74,11 @@ def mock_check_daily_loss_limit(balance):
         return True
 
 if __name__ == "__main__":
+    # Monkey patch time.time to use simulated time
+    import time
+    real_time = time.time
+    time.time = lambda: current_sim_time.timestamp() if current_sim_time is not None else real_time()
+
     # Monkey patch modules to use simulated datetime
     database.datetime = SimulatedDatetime
     import core.data_layer
@@ -85,11 +94,6 @@ if __name__ == "__main__":
     import core.trigger_engine
     core.trigger_engine.datetime = SimulatedDatetime
 
-    # Disable caching in trend and trigger engines to prevent lookahead / time lag
-    import core.trend_engine
-    core.trend_engine._GLOBAL_KLINE_TTL = {k: -1 for k in core.trend_engine._GLOBAL_KLINE_TTL}
-    core.trigger_engine._GLOBAL_KLINE_TTL = {k: -1 for k in core.trigger_engine._GLOBAL_KLINE_TTL}
-
     # Silence real Telegram delivery
     import telegram_delivery
     telegram_delivery.TelegramDelivery.send_message = lambda self, text, *args, **kwargs: None
@@ -104,6 +108,11 @@ if __name__ == "__main__":
         macro_service.get_market_sentiment = lambda: {"fng_value": 50, "bias": "NEUTRAL"}
     except Exception:
         pass
+
+    # Mock ML signal scorer to return neutral scores (50) during backtesting
+    import core.ml_signal_scorer
+    core.ml_signal_scorer.score_signal = lambda signal: 50
+    core.ml_signal_scorer.should_trade = lambda signal: (True, 50)
 
     core.risk_engine.check_daily_loss_limit = mock_check_daily_loss_limit
 
@@ -127,7 +136,7 @@ class DataManager:
     def _generate_all_synthetic_candles(self, symbol, start_ms, end_ms):
         import random
         # Seed by symbol to make it deterministic
-        seed_str = f"{symbol}_synth_v2"
+        seed_str = f"{symbol}_synth_v3"
         seed_val = sum(ord(c) for c in seed_str)
         rng = random.Random(seed_val)
         
@@ -141,22 +150,37 @@ class DataManager:
         
         while current < end_ms:
             t_min = current / (60 * 1000)
-            # Stronger trend cycles to ensure ADX exceeds trigger thresholds
+            # Moderated trend cycles to keep RSI from pinning at extremes while generating ADX
             trend = (
-                math.sin(t_min / 120.0) * 0.0018 +   # 2-hour strong trend cycle
-                math.sin(t_min / 480.0) * 0.0008 +   # 8-hour cycle
-                math.cos(t_min / 2880.0) * 0.0003    # 48-hour cycle
+                math.sin(t_min / 150.0) * 0.0006 +   # Milder 2.5-hour trend cycle
+                math.sin(t_min / 600.0) * 0.0002     # Milder 10-hour cycle
             )
             
-            vol = 0.0004  # 0.04% per minute standard dev
-            change = rng.normalvariate(trend, vol)
+            # 2.5% chance of volume/price breakout spike to trigger scalp setup
+            is_spike = rng.random() < 0.025
+            if is_spike:
+                vol = 0.0022  # High volatility during spike
+                v = rng.uniform(150, 300)  # High volume spike (relative volume > 2.5)
+                # Directional bias of spike matches the trend direction
+                spike_direction = 1 if trend >= 0 else -1
+                change = (trend * 1.5) + (spike_direction * abs(rng.normalvariate(0, vol)))
+            else:
+                vol = 0.0011  # Normal organic volatility (0.11%) to create pullbacks for healthy RSI
+                v = rng.uniform(5, 50)  # Normal volume
+                change = rng.normalvariate(trend, vol)
             
             o = price
             c = price * (1 + change)
             
-            h = max(o, c) * (1 + abs(rng.normalvariate(0, 0.0002)))
-            l = min(o, c) * (1 - abs(rng.normalvariate(0, 0.0002)))
-            v = rng.uniform(5, 100)
+            h = max(o, c) * (1 + abs(rng.normalvariate(0, 0.0004)))
+            l = min(o, c) * (1 - abs(rng.normalvariate(0, 0.0004)))
+            
+            # Taker buy volume ratio (higher on up candles, lower on down candles)
+            buy_ratio = 0.51 + (change / (vol + 1e-10)) * 0.06
+            buy_ratio = max(0.35, min(0.65, buy_ratio))
+            
+            tbbav = v * buy_ratio
+            tbqav = tbbav * price
             
             klines_1m.append([
                 current,
@@ -168,8 +192,8 @@ class DataManager:
                 current + step - 1,
                 str(round(v * price, 2)),
                 int(v * 2),
-                str(round(v * 0.5, 2)),
-                str(round(v * 0.5 * price, 2)),
+                str(round(tbbav, 2)),
+                str(round(tbqav, 2)),
                 "0"
             ])
             price = c
@@ -493,18 +517,19 @@ class MockBinanceClient:
 # ── Simulation Runner ─────────────────────────────────────────────────────────
 
 class BacktestRunner:
-    def __init__(self, symbols, start_time, end_time, initial_balance=2000.0, proxy=None, offline=False):
+    def __init__(self, symbols, start_time, end_time, initial_balance=2000.0, proxy=None, offline=False, progress_cb=None):
         self.symbols = symbols
         self.start_time = start_time
         self.end_time = end_time
         self.initial_balance = initial_balance
+        self.progress_cb = progress_cb
         
         # Setup Database
-        if os.path.exists("backtest_temp.db"):
+        if os.path.exists(config.DB_PATH):
             try:
-                os.remove("backtest_temp.db")
+                os.remove(config.DB_PATH)
             except Exception as e:
-                logger.warning(f"Could not delete backtest_temp.db: {e}")
+                logger.warning(f"Could not delete {config.DB_PATH}: {e}")
         
         database.init_db()
         database.init_paper_account()
@@ -526,9 +551,25 @@ class BacktestRunner:
         # Engines
         self.trend_engine = TrendEngine(self.mock_client)
         self.trigger_engine = TriggerEngine(self.mock_client)
-        self.risk_engine = core.risk_engine.RiskEngine(self.mock_client)
+        self.risk_engine = RiskEngine(self.mock_client)
         self.ai_decision_engine = AIDecisionEngine()
         self.execution_engine = ExecutionEngine()
+        
+        self.funnel_stats = {
+            "scanned": 0,
+            "trend_ok": 0,
+            "trend_fail": 0,
+            "trigger_ok": 0,
+            "trigger_fail": 0,
+            "risk_ok": 0,
+            "risk_fail": 0,
+            "ai_ok": 0,
+            "ai_veto": 0,
+            "ai_watch": 0,
+            "exec_ok": 0,
+            "exec_fail_score": 0,
+            "exec_fail_quality": 0,
+        }
         
         # Override price dynamic mock functions
         self.current_sim_prices = {}
@@ -551,6 +592,7 @@ class BacktestRunner:
         
         # Step through in 1-minute increments
         step_minutes = 0
+        total_steps = int((self.end_time - self.start_time).total_seconds() / 60) + 1
         while current_sim_time <= self.end_time:
             # 1. Update prices of open trades and check exits using 1m high/low candles
             open_trades = database.get_open_trades()
@@ -632,11 +674,15 @@ class BacktestRunner:
                     if price <= 0:
                         continue
                     
+                    self.funnel_stats["scanned"] += 1
+                    
                     # 1. Trend check
                     trend_res = self.trend_engine.analyze(symbol)
                     direction = trend_res["direction"]
                     if direction == "NO TRADE":
+                        self.funnel_stats["trend_fail"] += 1
                         continue
+                    self.funnel_stats["trend_ok"] += 1
                     
                     logger.info(f"[DEBUG] {symbol} trend check passed: {direction} (ADX15={trend_res.get('adx15', 0)})")
 
@@ -648,8 +694,18 @@ class BacktestRunner:
                         trend_confluence=trend_res.get("confluence_raw", 1)
                     )
                     if trigger_res["quality"] == "D":
+                        self.funnel_stats["trigger_fail"] += 1
                         logger.info(f"[DEBUG] {symbol} trigger check failed: quality={trigger_res['quality']} (adx={trigger_res.get('adx', 0)}, rsi5={trigger_res.get('rsi5', 0)}, reject_reason={trigger_res.get('reject_reason', 'none')})")
                         continue
+                        
+                    # Regime-Switching Filter: CHOPPY market requires quality S or A+
+                    quality = trigger_res.get("quality", "C")
+                    if regime == "CHOPPY" and quality not in ("S", "A+"):
+                        self.funnel_stats["trigger_fail"] += 1
+                        logger.info(f"[DEBUG] {symbol} trigger check failed by Regime Filter: quality={quality} is insufficient for CHOPPY market.")
+                        continue
+                        
+                    self.funnel_stats["trigger_ok"] += 1
                     
                     logger.info(f"[DEBUG] {symbol} trigger check passed: quality={trigger_res['quality']}, score={trigger_res['score']}")
 
@@ -663,8 +719,10 @@ class BacktestRunner:
                         balance
                     )
                     if not risk_res.get("valid"):
-                        logger.info(f"[DEBUG] {symbol} risk check failed: invalid risk params")
+                        self.funnel_stats["risk_fail"] += 1
+                        logger.info(f"[DEBUG] {symbol} risk check failed: {risk_res.get('risk_reject_reason', 'invalid risk params')}")
                         continue
+                    self.funnel_stats["risk_ok"] += 1
                     
                     logger.info(f"[DEBUG] {symbol} risk check passed: sl={risk_res['sl']}, tp1={risk_res['tp1']}")
 
@@ -702,6 +760,17 @@ class BacktestRunner:
                     decision_res = self.ai_decision_engine.evaluate(sig)
                     sig.final_score = decision_res["final_score"]
                     
+                    if decision_res["decision"] == "VETO":
+                        self.funnel_stats["ai_veto"] += 1
+                        logger.info(f"[DEBUG] {symbol} AI Decision evaluate: decision=VETO")
+                        continue
+                    elif decision_res["decision"] == "WATCH":
+                        self.funnel_stats["ai_watch"] += 1
+                        logger.info(f"[DEBUG] {symbol} AI Decision evaluate: decision=WATCH")
+                        continue
+                    
+                    self.funnel_stats["ai_ok"] += 1
+                    
                     # Criteria check
                     is_scalp = not getattr(config, "HUMAN_MODE", False)
                     trade_thr = (
@@ -717,16 +786,92 @@ class BacktestRunner:
                     
                     logger.info(f"[DEBUG] {symbol} AI Decision evaluate: decision={decision_res['decision']}, score={sig.final_score:.1f} (threshold={trade_thr:.1f}, quality={sig.setup_quality})")
                     
-                    if decision_res["decision"] == "ALLOW" and sig.final_score >= trade_thr and sig.setup_quality in qualities:
-                        trade_id = self.execution_engine.open_paper_trade(sig)
-                        if trade_id:
-                            logger.info(f"[{current_sim_time.strftime('%Y-%m-%d %H:%M')}] Trade Opened: #{trade_id} {symbol} {sig.side} at {sig.entry_price:.4f} (Qual={sig.setup_quality}, Score={sig.final_score:.1f})")
+                    if sig.final_score < trade_thr:
+                        self.funnel_stats["exec_fail_score"] += 1
+                        continue
+                    
+                    if sig.setup_quality not in qualities:
+                        self.funnel_stats["exec_fail_quality"] += 1
+                        continue
+                    
+                    trade_id = self.execution_engine.open_paper_trade(sig)
+                    if trade_id:
+                        self.funnel_stats["exec_ok"] += 1
+                        logger.info(f"[{current_sim_time.strftime('%Y-%m-%d %H:%M')}] Trade Opened: #{trade_id} {symbol} {sig.side} at {sig.entry_price:.4f} (Qual={sig.setup_quality}, Score={sig.final_score:.1f})")
             
             # Step Time
             current_sim_time += timedelta(minutes=1)
             step_minutes += 1
+            if step_minutes % 10 == 0:
+                if self.progress_cb:
+                    self.progress_cb(min(99.0, (step_minutes / total_steps) * 100), self.funnel_stats, None)
             
         logger.info("Simulation completed successfully.")
+        if self.progress_cb:
+            self.progress_cb(100.0, self.funnel_stats, "completed")
+
+    def run_monte_carlo(self, trade_list, initial_balance, runs=1000):
+        import random
+        if not trade_list:
+            return {
+                "prob_ruin_pct": 0.0,
+                "avg_ending_balance": initial_balance,
+                "worst_case_balance": initial_balance,
+                "ninety_five_var_dd_pct": 0.0,
+                "worst_case_dd_pct": 0.0
+            }
+        
+        # Seed for 100% determinism
+        rng = random.Random(42)
+        
+        ruin_count = 0
+        ruin_threshold = initial_balance * 0.20  # 80% loss
+        ending_balances = []
+        max_drawdowns = []
+        
+        pnls = [float(t.get("realized_pnl") or t.get("net_pnl") or 0.0) for t in trade_list]
+        
+        for _ in range(runs):
+            shuffled = list(pnls)
+            rng.shuffle(shuffled)
+            
+            bal = initial_balance
+            peak = initial_balance
+            max_dd = 0.0
+            ruined = False
+            
+            for pnl in shuffled:
+                bal += pnl
+                if bal < ruin_threshold:
+                    ruined = True
+                if bal > peak:
+                    peak = bal
+                dd = (peak - bal) / peak * 100 if peak > 0 else 0.0
+                if dd > max_dd:
+                    max_dd = dd
+                     
+            if ruined:
+                ruin_count += 1
+            ending_balances.append(bal)
+            max_drawdowns.append(max_dd)
+            
+        ending_balances.sort()
+        max_drawdowns.sort()
+        
+        avg_end = sum(ending_balances) / runs
+        worst_end = ending_balances[0]
+        worst_dd = max_drawdowns[-1]
+        
+        var_index = int(runs * 0.95) - 1
+        ninety_five_var_dd = max_drawdowns[var_index] if var_index >= 0 else worst_dd
+        
+        return {
+            "prob_ruin_pct": (ruin_count / runs) * 100,
+            "avg_ending_balance": avg_end,
+            "worst_case_balance": worst_end,
+            "ninety_five_var_dd_pct": ninety_five_var_dd,
+            "worst_case_dd_pct": worst_dd
+        }
 
     def generate_report(self, output_path="backtest_report.md"):
         # Fetch all trades from database
@@ -798,6 +943,15 @@ class BacktestRunner:
         print(f"Profit Factor:  {profit_factor:.2f}")
         print(f"Max Drawdown:   {max_dd_pct:.1f}%")
         print(f"Final Balance:  ${final_balance:.2f} (Start: ${self.initial_balance:.2f})")
+        print("-" * 60)
+        print("REJECTION FUNNEL")
+        print("-" * 60)
+        print(f"Scanned Candidates:               {self.funnel_stats['scanned']}")
+        print(f"|-- Trend Filter OK:             {self.funnel_stats['trend_ok']} (Failed: {self.funnel_stats['trend_fail']})")
+        print(f"|-- Trigger Filter OK:           {self.funnel_stats['trigger_ok']} (Failed: {self.funnel_stats['trigger_fail']})")
+        print(f"|-- Risk Filter OK:              {self.funnel_stats['risk_ok']} (Failed: {self.funnel_stats['risk_fail']})")
+        print(f"|-- AI Filter OK:                {self.funnel_stats['ai_ok']} (Vetoed: {self.funnel_stats['ai_veto']}, Watched: {self.funnel_stats['ai_watch']})")
+        print(f"+-- Execution Filter OK:         {self.funnel_stats['exec_ok']} (Failed Score: {self.funnel_stats['exec_fail_score']}, Failed Quality: {self.funnel_stats['exec_fail_quality']})")
         print("=" * 60)
         
         # Build premium Markdown Report
@@ -820,6 +974,19 @@ This report presents the backtest metrics of the current trading bot engine runn
 | **Max Portfolio Drawdown** | **{max_dd_pct:.1f}%** |
 | **Average Win** | ${avg_win:.2f} |
 | **Average Loss** | ${avg_loss:.2f} |
+
+---
+
+## 🎯 Rejection Funnel Analysis
+
+| Funnel Step | Passed | Filtered / Failed | Detail / Reason |
+| :--- | :---: | :---: | :--- |
+| **Total Candidates Scanned** | {self.funnel_stats['scanned']} | - | Scanned universe |
+| **Trend Filter** | {self.funnel_stats['trend_ok']} | {self.funnel_stats['trend_fail']} | Direction == NO TRADE |
+| **Trigger Filter** | {self.funnel_stats['trigger_ok']} | {self.funnel_stats['trigger_fail']} | Setup quality == D / Invalid params |
+| **Risk Filter** | {self.funnel_stats['risk_ok']} | {self.funnel_stats['risk_fail']} | Invalid stop-loss, take-profit or leverage |
+| **AI Decision Filter** | {self.funnel_stats['ai_ok']} | {self.funnel_stats['ai_veto'] + self.funnel_stats['ai_watch']} | VETOED ({self.funnel_stats['ai_veto']}) / WATCHED ({self.funnel_stats['ai_watch']}) |
+| **Execution Gate** | {self.funnel_stats['exec_ok']} | {self.funnel_stats['exec_fail_score'] + self.funnel_stats['exec_fail_quality']} | Score below threshold ({self.funnel_stats['exec_fail_score']}) or invalid quality ({self.funnel_stats['exec_fail_quality']}) |
 
 ---
 
@@ -868,11 +1035,46 @@ This report presents the backtest metrics of the current trading bot engine runn
             
         logger.info(f"Saved premium report to {output_path}")
 
+        mc_results = self.run_monte_carlo(trade_list, self.initial_balance)
+
+        results = {
+            "total_trades": total_trades,
+            "win_rate": win_rate,
+            "win_count": win_count,
+            "loss_count": loss_count,
+            "net_profit": net_profit,
+            "roi": net_profit / self.initial_balance * 100 if self.initial_balance > 0 else 0.0,
+            "profit_factor": profit_factor,
+            "max_dd_pct": max_dd_pct,
+            "final_balance": final_balance,
+            "initial_balance": self.initial_balance,
+            "funnel_stats": self.funnel_stats,
+            "exit_reasons": reasons,
+            "coin_perf": coin_perf,
+            "trades": trade_list[:100],
+            "monte_carlo": mc_results
+        }
+        return results
+
 # ── CLI Entrypoint ────────────────────────────────────────────────────────────
 
 def main():
+    default_symbols = (
+        "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,AVAXUSDT,DOTUSDT,TRXUSDT,"
+        "LINKUSDT,NEARUSDT,UNIUSDT,LTCUSDT,APTUSDT,ETCUSDT,FILUSDT,ICPUSDT,HBARUSDT,VETUSDT,"
+        "LDOUSDT,GRTUSDT,OPUSDT,ARBUSDT,MKRUSDT,AAVEUSDT,THETAUSDT,EGLDUSDT,FLOWUSDT,SANDUSDT,"
+        "MANAUSDT,AXSUSDT,ALGOUSDT,FTMUSDT,QNTUSDT,GALAUSDT,DYDXUSDT,CRVUSDT,LRCUSDT,ENJUSDT,"
+        "IMXUSDT,CHZUSDT,MINAUSDT,DGBUSDT,ONEUSDT,ANKRUSDT,ZILUSDT,RENUSDT,KNCUSDT,BANDUSDT,"
+        "RLCUSDT,BELUSDT,ATAUSDT,CTSIUSDT,STMXUSDT,SPELLUSDT,1000SHIBUSDT,1000PEPEUSDT,"
+        "1000FLOKIUSDT,BONKUSDT,WIFUSDT,JTOUSDT,TIAUSDT,SEIUSDT,SUIUSDT,ORDIUSDT,1000LUNCUSDT,"
+        "USTCUSDT,PEOPLEUSDT,STORJUSDT,BLURUSDT,ENSUSDT,LPTUSDT,TRBUSDT,GASUSDT,LOOMUSDT,"
+        "ARKUSDT,CYBERUSDT,YGGUSDT,HIFIUSDT,NMRUSDT,UNFIUSDT,KAVAUSDT,RUNEUSDT,INJUSDT,"
+        "WOOUSDT,GMTUSDT,JASMYUSDT,WAVESUSDT,CFXUSDT,MASKUSDT,FETUSDT,PENDLEUSDT,RDNTUSDT,"
+        "SSVUSDT,LQTYUSDT,HOOKUSDT,LUNA2USDT,ARKMUSDT,PIXELUSDT,STRKUSDT,PORTALUSDT,AXLUSDT,"
+        "METISUSDT,AEVOUSDT,BOMEUSDT"
+    )
     parser = argparse.ArgumentParser(description="AX Trade Engine Backtesting System")
-    parser.add_argument("--symbols", type=str, default="SOLUSDT,BTCUSDT,ETHUSDT,XRPUSDT,BNBUSDT", 
+    parser.add_argument("--symbols", type=str, default=default_symbols, 
                         help="Comma-separated symbols to backtest")
     parser.add_argument("--days", type=int, default=30, help="Number of historical days to backtest")
     parser.add_argument("--balance", type=float, default=2000.0, help="Initial paper balance")
@@ -902,9 +1104,9 @@ def main():
     runner.generate_report(args.output)
     
     # Delete temporary database after use to keep workspace clean
-    if os.path.exists("backtest_temp.db"):
+    if os.path.exists(config.DB_PATH):
         try:
-            os.remove("backtest_temp.db")
+            os.remove(config.DB_PATH)
         except Exception:
             pass
 

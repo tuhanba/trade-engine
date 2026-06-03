@@ -15,6 +15,7 @@ Yenilikler:
 
 from __future__ import annotations
 
+import time
 import json
 import logging
 from datetime import datetime, timezone, timedelta
@@ -82,6 +83,7 @@ class ExecutionEngine:
         Sinyalden paper trade oluşturur ve DB'ye kaydeder.
         Returns: trade_id veya None
         """
+        start_time = time.time()
         stats = database.get_dashboard_stats()
         active_balance = stats.get("balance", config.INITIAL_PAPER_BALANCE if hasattr(config, "INITIAL_PAPER_BALANCE") else 2000.0)
 
@@ -96,6 +98,20 @@ class ExecutionEngine:
         if trade is None:
             logger.warning("Trade oluşturulamadı: %s", signal.symbol)
             return None
+
+        # Simulated price check for slippage (if get_current_price is available and different)
+        current_p = get_current_price(signal.symbol) or signal.entry_price
+        
+        # Calculate slippage against target signal entry price
+        slippage_val = 0.0
+        if signal.entry_price > 0:
+            if signal.side == "LONG":
+                slippage_val = (current_p - signal.entry_price) / signal.entry_price * 100.0
+            else:
+                slippage_val = (signal.entry_price - current_p) / signal.entry_price * 100.0
+        
+        # Ensure slippage is positive/realistic or 0
+        slippage_val = max(0.0, slippage_val)
 
         # Initial exit state metadata'ya gömülür
         initial_state = TradeExitState(
@@ -112,15 +128,21 @@ class ExecutionEngine:
         meta_dict["initial_sl"] = initial_state.initial_sl
         state_json = json.dumps(meta_dict)
 
+        end_time = time.time()
+        latency_ms = int((end_time - start_time) * 1000)
+
+        trade.slippage = slippage_val
+        trade.latency_ms = latency_ms
+
         trade_id = database.create_trade(trade, metadata=state_json)
         if trade_id is None:
             logger.error("Trade DB'ye yazılamadı: %s", signal.symbol)
             return None
 
         logger.info(
-            "Paper trade açıldı: #%s %s %s @ %.4f  TP1=%.4f  SL=%.4f",
+            "Paper trade açıldı: #%s %s %s @ %.4f (Slippage=%.3f%%, Latency=%dms) TP1=%.4f  SL=%.4f",
             trade_id, signal.symbol, signal.side,
-            signal.entry_price, signal.tp1 or 0, signal.stop_loss,
+            signal.entry_price, slippage_val, latency_ms, signal.tp1 or 0, signal.stop_loss,
         )
 
         return trade_id
@@ -465,6 +487,9 @@ class ExecutionEngine:
             logger.debug(f"[AI Learn] {trade['symbol']} PnL={_net:.4f} reason={reason}")
         except Exception as _ale:
             logger.debug(f"[AI Learn] skip: {_ale}")
+
+        # Apply dynamic cooldown after close
+        set_dynamic_cooldown(trade, total_pnl)
         # ─────────────────────────────────────────────────────────────
 
     # ── Sinyal işleme ────────────────────────────────────────────
@@ -925,7 +950,75 @@ def _get_atr(client, symbol: str, interval: str = "5m", period: int = 14) -> flo
         return 0.01
 
 
+def set_dynamic_cooldown(trade: dict, total_pnl: float) -> float:
+    """Calculates and stores dynamic coin cooldown based on PnL and ATR volatility."""
+    try:
+        # Volatility percentage from metadata
+        _meta = {}
+        try:
+            _meta_raw = trade.get("metadata", "{}")
+            if _meta_raw and isinstance(_meta_raw, str) and "{" in _meta_raw:
+                import json as _json
+                _meta = _json.loads(_meta_raw)
+        except Exception:
+            pass
+
+        _atr_pct = float(_meta.get("atr_pct") or 0.0)
+        if _atr_pct <= 0:
+            # Fallback to coin profile or default 2%
+            try:
+                with database.get_conn() as conn:
+                    row = conn.execute("SELECT avg_mae FROM coin_profiles WHERE symbol = ?", (trade["symbol"],)).fetchone()
+                    if row and row[0]:
+                        _atr_pct = float(row[0]) / 100.0
+            except Exception:
+                pass
+        if _atr_pct <= 0:
+            _atr_pct = 0.02
+
+        # Fetch configurations
+        win_base = float(getattr(config, "COOLDOWN_WIN_BASE_MINUTES", 15.0))
+        loss_base = float(getattr(config, "COOLDOWN_LOSS_BASE_MINUTES", 60.0))
+
+        if total_pnl <= 0:
+            cooldown_mins = loss_base * (1.0 + _atr_pct * 10.0)
+            cooldown_mins = max(45.0, min(120.0, cooldown_mins))
+            reason_str = f"loss stop (PnL={total_pnl:.2f}, Vol={_atr_pct*100:.1f}%)"
+        else:
+            cooldown_mins = win_base * (1.0 + _atr_pct * 5.0)
+            cooldown_mins = max(10.0, min(30.0, cooldown_mins))
+            reason_str = f"win take-profit (PnL={total_pnl:.2f}, Vol={_atr_pct*100:.1f}%)"
+
+        cooldown_mins = round(cooldown_mins, 1)
+        
+        # Apply to database
+        # Use module-level datetime, timezone, and timedelta to support backtest simulation patching
+        now_dt = datetime.now(timezone.utc)
+        until_dt = now_dt + timedelta(minutes=cooldown_mins)
+        until_str = until_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        with database.get_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO coin_cooldown (symbol, until) VALUES (?, ?)",
+                (trade["symbol"], until_str)
+            )
+
+        # Sync to Redis if active
+        try:
+            from core import redis_state
+            redis_state.set(f"cooldown:{trade['symbol']}", 1, ttl=int(cooldown_mins * 60))
+        except Exception:
+            pass
+
+        logger.info(f"[AI-Cooldown] {trade['symbol']} set to cooldown for {cooldown_mins} minutes due to {reason_str}. Until {until_str}")
+        return cooldown_mins
+    except Exception as e:
+        logger.warning(f"[AI-Cooldown] Dynamic cooldown failed for {trade.get('symbol')}: {e}")
+        return 30.0
+
+
 def _finalize(trade_id: int, close_price: float, net_pnl: float,
+
               reason: str, t: dict):
     """Trade'i kapat, bakiyeyi güncelle."""
     import database
@@ -962,6 +1055,9 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
     if event_manager: event_manager.broadcast_trade_closed(t["symbol"], _dir, net_pnl, reason)
     if event_manager: event_manager.broadcast_pnl_update(database.get_active_balance(), 0, net_pnl)
     save_trade_event(trade_id, "CLOSE", f"reason={reason} close_price={close_price} net_pnl={net_pnl:.4f}")
+
+    # Apply dynamic cooldown
+    set_dynamic_cooldown(t, net_pnl)
 
     result = "WIN" if net_pnl > 0 else "LOSS"
 

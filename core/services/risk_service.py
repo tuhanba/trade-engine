@@ -52,6 +52,7 @@ class RiskService:
                 _entry,
                 trigger_result.get("quality", "C"),
                 balance,
+                tradeability_score or 0.0,
             )
 
             if not risk_result.get("valid"):

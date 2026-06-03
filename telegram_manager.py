@@ -17,8 +17,9 @@ _TIMEOUT  = 10
 
 
 class TelegramManager:
-    def __init__(self, send_fn: Callable[[str], bool]):
+    def __init__(self, send_fn: Callable[[str], bool], spectra_ceo=None):
         self.send_fn        = send_fn
+        self.spectra_ceo    = spectra_ceo
         self.token          = config.TELEGRAM_BOT_TOKEN
         self.chat_id        = str(config.TELEGRAM_CHAT_ID)
         self.is_paused      = False
@@ -136,6 +137,10 @@ class TelegramManager:
             "/help":    self._cmd_help,
             "/health":  self._cmd_health,
             "/status":  self._cmd_status,
+            "/settings": self._cmd_settings,
+            "/heatmap": self._cmd_heatmap,
+            "/weekly":  self._cmd_weekly,
+            "/weekly_summary": self._cmd_weekly,
             "/stats":   self._cmd_stats,
             "/trades":  self._cmd_trades,
             "/balance": self._cmd_balance,
@@ -154,11 +159,15 @@ class TelegramManager:
             "/live":    self._cmd_live,
             "/close":   self._cmd_close,
             "/set":     self._cmd_set,
+            "/export":  self._cmd_export,
+            "/ml":      self._cmd_ml,
+            "/retrain": self._cmd_retrain,
+            "/spectra": self._cmd_spectra,
         }
         handler = handlers.get(cmd)
         if handler:
             try:
-                if cmd in ("/close", "/set"):
+                if cmd in ("/close", "/set", "/spectra"):
                     handler(args)
                 else:
                     handler()
@@ -187,10 +196,92 @@ class TelegramManager:
         action = data[4:]
         self._answer_callback_query(cb_id, "İşlem alınıyor...")
         
+        if action == "clean_server":
+            if self.spectra_ceo:
+                try:
+                    deleted_count, saved_space = self.spectra_ceo.execute_cleanup()
+                    msg_text = f"✅ <b>Sunucu Temizliği Başarılı!</b>\n\nToplam <code>{deleted_count}</code> adet gereksiz dosya silindi ve yaklaşık <code>{saved_space:.2f} MB</code> alan boşaltıldı."
+                    self._edit_message_text(msg_text, msg_id, None)
+                except Exception as e:
+                    self._edit_message_text(f"❌ <b>Temizlik sırasında hata oluştu:</b> {e}", msg_id, None)
+            else:
+                self._edit_message_text("❌ <b>Spektra CEO modülü aktif değil.</b>", msg_id, None)
+            return
+        elif action == "cancel_clean":
+            self._edit_message_text("❌ <b>Temizlik işlemi boss tarafından iptal edildi.</b>", msg_id, None)
+            return
+            
         if action == "status":
             self._cmd_status()
         elif action == "refresh_status":
             status_text, reply_markup = self._generate_status_data()
+            self._edit_message_text(status_text, msg_id, reply_markup)
+        elif action == "refresh_settings":
+            for name in ["AUTO_COMPOUNDING", "MTF_TREND_ALIGN_ENABLED", "EQUITY_CURVE_FILTER_ENABLED", "TRADE_THRESHOLD", "TELEGRAM_THRESHOLD", "CONFIRMATION_MODE", "TRAILING_STOP_TYPE"]:
+                if name in config._CONFIG_CACHE:
+                    del config._CONFIG_CACHE[name]
+            status_text, reply_markup = self._generate_settings_data()
+            self._edit_message_text(status_text, msg_id, reply_markup)
+        elif action == "toggle_comp":
+            import database as _db
+            new_val = not config.AUTO_COMPOUNDING
+            _db.set_state("auto_compounding", "True" if new_val else "False")
+            if "AUTO_COMPOUNDING" in config._CONFIG_CACHE:
+                del config._CONFIG_CACHE["AUTO_COMPOUNDING"]
+            status_text, reply_markup = self._generate_settings_data()
+            self._edit_message_text(status_text, msg_id, reply_markup)
+        elif action == "toggle_mtf":
+            import database as _db
+            new_val = not config.MTF_TREND_ALIGN_ENABLED
+            _db.set_state("mtf_trend_align_enabled", "True" if new_val else "False")
+            if "MTF_TREND_ALIGN_ENABLED" in config._CONFIG_CACHE:
+                del config._CONFIG_CACHE["MTF_TREND_ALIGN_ENABLED"]
+            status_text, reply_markup = self._generate_settings_data()
+            self._edit_message_text(status_text, msg_id, reply_markup)
+        elif action == "toggle_eq":
+            import database as _db
+            new_val = not config.EQUITY_CURVE_FILTER_ENABLED
+            _db.set_state("equity_curve_filter_enabled", "True" if new_val else "False")
+            if "EQUITY_CURVE_FILTER_ENABLED" in config._CONFIG_CACHE:
+                del config._CONFIG_CACHE["EQUITY_CURVE_FILTER_ENABLED"]
+            status_text, reply_markup = self._generate_settings_data()
+            self._edit_message_text(status_text, msg_id, reply_markup)
+        elif action == "toggle_conf":
+            import database as _db
+            new_val = not getattr(config, "CONFIRMATION_MODE", False)
+            _db.set_state("confirmation_mode", "true" if new_val else "false")
+            if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
+                del config._CONFIG_CACHE["CONFIRMATION_MODE"]
+            status_text, reply_markup = self._generate_settings_data()
+            self._edit_message_text(status_text, msg_id, reply_markup)
+        elif action == "retrain_ml":
+            self._cmd_retrain()
+        elif action == "toggle_trail_type":
+            import database as _db
+            curr_type = getattr(config, "TRAILING_STOP_TYPE", "atr")
+            new_type = "step" if curr_type == "atr" else "atr"
+            _db.set_state("trailing_stop_type", new_type)
+            if "TRAILING_STOP_TYPE" in config._CONFIG_CACHE:
+                del config._CONFIG_CACHE["TRAILING_STOP_TYPE"]
+            status_text, reply_markup = self._generate_settings_data()
+            self._edit_message_text(status_text, msg_id, reply_markup)
+        elif action.startswith("inc_trade:"):
+            delta = float(action[10:])
+            import database as _db
+            new_val = config.TRADE_THRESHOLD + delta
+            _db.set_state("trade_threshold", str(new_val))
+            if "TRADE_THRESHOLD" in config._CONFIG_CACHE:
+                del config._CONFIG_CACHE["TRADE_THRESHOLD"]
+            status_text, reply_markup = self._generate_settings_data()
+            self._edit_message_text(status_text, msg_id, reply_markup)
+        elif action.startswith("inc_tg:"):
+            delta = float(action[7:])
+            import database as _db
+            new_val = config.TELEGRAM_THRESHOLD + delta
+            _db.set_state("telegram_threshold", str(new_val))
+            if "TELEGRAM_THRESHOLD" in config._CONFIG_CACHE:
+                del config._CONFIG_CACHE["TELEGRAM_THRESHOLD"]
+            status_text, reply_markup = self._generate_settings_data()
             self._edit_message_text(status_text, msg_id, reply_markup)
         elif action == "open":
             open_text, reply_markup = self._generate_open_data()
@@ -206,6 +297,241 @@ class TelegramManager:
         elif action.startswith("close:"):
             trade_id_str = action[6:]
             self._cmd_close([trade_id_str])
+        elif action.startswith("close_trade_"):
+            trade_id_str = action[12:]
+            self._cmd_close([trade_id_str])
+        elif action.startswith("be_trade_"):
+            trade_id_str = action[9:]
+            try:
+                trade_id = int(trade_id_str)
+            except ValueError:
+                self.send_fn("❌ Geçersiz işlem ID.")
+                return
+            
+            import database as _db
+            trade = _db.get_trade_by_id(trade_id)
+            if not trade:
+                self.send_fn(f"❌ İşlem #{trade_id} bulunamadı.")
+                return
+            if trade.get("status") == "closed":
+                self.send_fn(f"⚠️ İşlem #{trade_id} zaten kapatılmış.")
+                return
+                
+            entry = float(trade.get("entry_price") or trade.get("entry") or 0.0)
+            if entry <= 0:
+                self.send_fn("❌ Giriş fiyatı geçersiz, stop loss güncellenemedi.")
+                return
+                
+            try:
+                with _db.get_conn() as conn:
+                    conn.execute("UPDATE trades SET stop_loss = ? WHERE id = ?", (entry, trade_id))
+                    conn.commit()
+                self.send_fn(f"🔒 #{trade_id} {trade.get('symbol')} stop loss değeri giriş fiyatı olan ${entry:.4f} seviyesine çekildi (Breakeven).")
+            except Exception as e:
+                self.send_fn(f"❌ Breakeven güncelleme hatası: {e}")
+        elif action.startswith("force:"):
+            candidate_id_str = action[6:]
+            try:
+                candidate_id = int(candidate_id_str)
+            except ValueError:
+                self.send_fn("❌ Geçersiz aday ID.")
+                return
+            
+            import json
+            import database as _db
+            from core.data_layer import SignalData
+            
+            cand = _db.get_candidate_by_id(candidate_id)
+            if not cand:
+                self.send_fn(f"❌ Aday #{candidate_id} bulunamadı.")
+                return
+                
+            if cand.get("decision") == "EXECUTED":
+                self.send_fn(f"⚠️ Aday #{candidate_id} zaten işleme sokulmuş.")
+                return
+                
+            self.send_fn(f"⏳ Aday #{candidate_id} ({cand.get('symbol')}) için zorla trade açılıyor...")
+            
+            try:
+                sig = SignalData()
+                sig.symbol = cand.get("symbol")
+                sig.side = cand.get("side") or cand.get("direction") or "LONG"
+                sig.direction = cand.get("direction") or cand.get("side") or "LONG"
+                sig.entry_price = cand.get("entry_price") or cand.get("entry") or 0.0
+                sig.stop_loss = cand.get("stop_loss") or cand.get("sl") or 0.0
+                sig.tp1 = cand.get("tp1") or 0.0
+                sig.tp2 = cand.get("tp2") or 0.0
+                sig.tp3 = cand.get("tp3") or 0.0
+                sig.setup_quality = cand.get("setup_quality") or "B"
+                sig.final_score = cand.get("final_score") or cand.get("score") or 0.0
+                sig.confidence = 0.8
+                sig.reason = "Manual Force Trade"
+                sig.source = "telegram_force"
+                sig.leverage_suggestion = cand.get("leverage_suggestion") or cand.get("leverage") or 10
+                sig.max_loss = cand.get("max_loss") or cand.get("risk_amount") or 0.0
+                sig.risk_percent = cand.get("risk_pct") or 1.0
+                
+                meta_str = cand.get("metadata", "{}")
+                if isinstance(meta_str, str):
+                    try:
+                        sig.metadata = json.loads(meta_str)
+                    except Exception:
+                        sig.metadata = {}
+                else:
+                    sig.metadata = meta_str or {}
+                    
+                # Open Trade
+                trade_id = None
+                if config.EXECUTION_MODE == "live":
+                    from core.live_execution import LiveExecutionEngine
+                    engine = LiveExecutionEngine()
+                    trade_id = engine.open_live_trade(sig)
+                else:
+                    from execution_engine import ExecutionEngine
+                    engine = ExecutionEngine()
+                    trade_id = engine.process_signal(sig)
+                    
+                if trade_id:
+                    _db.update_candidate_status(candidate_id, decision="EXECUTED", linked_trade_id=trade_id)
+                    
+                    # Notify
+                    trade_dict = _db.get_trade_by_id(trade_id)
+                    if trade_dict:
+                        from telegram_delivery import format_trade_open
+                        msg_text = format_trade_open(dict(trade_dict))
+                        self.send_fn(msg_text)
+                    else:
+                        self.send_fn(f"✅ Trade #{trade_id} başarıyla açıldı!")
+                else:
+                    self.send_fn("❌ Trade açılamadı (Engine trade_id dönmedi).")
+            except Exception as e:
+                logger.exception("Force open error:")
+                self.send_fn(f"❌ Force open hatası: {e}")
+        elif action.startswith("mute:"):
+            symbol = action[5:].strip()
+            try:
+                import database as _db
+                _db.mute_coin(symbol, 4.0)
+                self.send_fn(f"🔕 {symbol} coini 4 saat boyunca sessize alındı.")
+            except Exception as e:
+                self.send_fn(f"❌ Sessize alma hatası: {e}")
+        elif action.startswith("appr_cand_"):
+            candidate_id_str = action[10:]
+            try:
+                candidate_id = int(candidate_id_str)
+            except ValueError:
+                self.send_fn("❌ Geçersiz aday ID.")
+                return
+            
+            import json
+            import database as _db
+            from core.data_layer import SignalData
+            
+            cand = _db.get_candidate_by_id(candidate_id)
+            if not cand:
+                self.send_fn(f"❌ Aday #{candidate_id} bulunamadı.")
+                return
+                
+            if cand.get("decision") == "EXECUTED":
+                self.send_fn(f"⚠️ Aday #{candidate_id} zaten işleme sokulmuş.")
+                return
+                
+            self.send_fn(f"⏳ Aday #{candidate_id} ({cand.get('symbol')}) onaylandı! İşlem açılıyor...")
+            
+            try:
+                sig = SignalData()
+                sig.symbol = cand.get("symbol")
+                sig.side = cand.get("side") or cand.get("direction") or "LONG"
+                sig.direction = cand.get("direction") or cand.get("side") or "LONG"
+                sig.entry_price = cand.get("entry_price") or cand.get("entry") or 0.0
+                sig.stop_loss = cand.get("stop_loss") or cand.get("sl") or 0.0
+                sig.tp1 = cand.get("tp1") or 0.0
+                sig.tp2 = cand.get("tp2") or 0.0
+                sig.tp3 = cand.get("tp3") or 0.0
+                sig.setup_quality = cand.get("setup_quality") or "B"
+                sig.final_score = cand.get("final_score") or cand.get("score") or 0.0
+                sig.confidence = 0.8
+                sig.reason = "Manual Approval via Telegram"
+                sig.source = "telegram_approval"
+                sig.leverage_suggestion = cand.get("leverage_suggestion") or cand.get("leverage") or 10
+                sig.max_loss = cand.get("max_loss") or cand.get("risk_amount") or 0.0
+                sig.risk_percent = cand.get("risk_pct") or 1.0
+                
+                meta_str = cand.get("metadata", "{}")
+                if isinstance(meta_str, str):
+                    try:
+                        sig.metadata = json.loads(meta_str)
+                    except Exception:
+                        sig.metadata = {}
+                else:
+                    sig.metadata = meta_str or {}
+                    
+                # Open Trade
+                trade_id = None
+                if config.EXECUTION_MODE == "live":
+                    from core.live_execution import LiveExecutionEngine
+                    engine = LiveExecutionEngine()
+                    trade_id = engine.open_live_trade(sig)
+                else:
+                    from execution_engine import ExecutionEngine
+                    engine = ExecutionEngine()
+                    trade_id = engine.process_signal(sig)
+                    
+                if trade_id:
+                    _db.update_candidate_status(candidate_id, decision="EXECUTED", linked_trade_id=trade_id)
+                    
+                    # Save signal event as EXECUTED
+                    try:
+                        _db.save_signal_event(candidate_id, "EXECUTED", symbol=sig.symbol, reject_reason=f"Approved manual trade_id={trade_id}")
+                    except Exception:
+                        pass
+                    
+                    # Edit message text to indicate approval
+                    orig_text = msg.get("text", "")
+                    updated_text = f"✅ <b>MANÜEL OLARAK ONAYLANDI VE AÇILDI</b>\n\n{orig_text}"
+                    self._edit_message_text(updated_text, msg_id, reply_markup=None)
+                    
+                    # Notify open
+                    trade_dict = _db.get_trade_by_id(trade_id)
+                    if trade_dict:
+                        from telegram_delivery import format_trade_open
+                        msg_text = format_trade_open(dict(trade_dict))
+                        self.send_fn(msg_text)
+                    else:
+                        self.send_fn(f"✅ Trade #{trade_id} başarıyla açıldı!")
+                else:
+                    self.send_fn("❌ Trade açılamadı (Engine trade_id dönmedi).")
+            except Exception as e:
+                logger.exception("Confirmation approval error:")
+                self.send_fn(f"❌ Onaylama hatası: {e}")
+        elif action.startswith("veto_cand_"):
+            candidate_id_str = action[10:]
+            try:
+                candidate_id = int(candidate_id_str)
+            except ValueError:
+                self.send_fn("❌ Geçersiz aday ID.")
+                return
+            
+            import database as _db
+            cand = _db.get_candidate_by_id(candidate_id)
+            if not cand:
+                self.send_fn(f"❌ Aday #{candidate_id} bulunamadı.")
+                return
+                
+            try:
+                _db.update_candidate_status(candidate_id, decision="VETOED", reject_reason="Manually vetoed on confirmation gate")
+                try:
+                    _db.save_signal_event(candidate_id, "VETOED", symbol=cand.get("symbol"), reject_reason="Manually vetoed on confirmation gate")
+                except Exception:
+                    pass
+                    
+                # Edit message text to indicate veto
+                orig_text = msg.get("text", "")
+                updated_text = f"❌ <b>İŞLEM MANÜEL VETO EDİLDİ (İPTAL)</b>\n\n{orig_text}"
+                self._edit_message_text(updated_text, msg_id, reply_markup=None)
+                self.send_fn(f"🚫 Aday #{candidate_id} ({cand.get('symbol')}) manüel olarak iptal edildi (veto).")
+            except Exception as e:
+                self.send_fn(f"❌ Veto etme hatası: {e}")
 
     def _answer_callback_query(self, callback_query_id: str, text: Optional[str] = None):
         url = f"https://api.telegram.org/bot{self.token}/answerCallbackQuery"
@@ -254,6 +580,8 @@ class TelegramManager:
             "commands": [
                 {"command": "help", "description": "Yardım menüsü ve komut listesi"},
                 {"command": "status", "description": "Botun genel durumunu ve kârını özetler"},
+                {"command": "settings", "description": "İnteraktif ayarlar panelini açar"},
+                {"command": "heatmap", "description": "Son 30 günlük kâr/zarar ısı haritasını gönderir"},
                 {"command": "open", "description": "Açık işlemleri listeler ve kapatma imkanı sunar"},
                 {"command": "health", "description": "Sistem sağlığı ve kaynak durumunu kontrol eder"},
                 {"command": "stats", "description": "Tüm zamanların performans özetini çıkarır"},
@@ -266,7 +594,9 @@ class TelegramManager:
                 {"command": "human", "description": "İnsan Modu: Kaliteli ve az işlemler"},
                 {"command": "scalp", "description": "Scalp Modu: Agresif tarama ve sık işlemler"},
                 {"command": "paper", "description": "Sanal Para Modu (Paper Trading)"},
-                {"command": "live", "description": "Gerçek Para Modu (Live Trading)"}
+                {"command": "live", "description": "Gerçek Para Modu (Live Trading)"},
+                {"command": "ml", "description": "Yapay Zeka (ML) durum ve istatistiklerini gösterir"},
+                {"command": "retrain", "description": "ML modelini arka planda sıfırdan eğitir"}
             ]
         }
         try:
@@ -286,6 +616,7 @@ class TelegramManager:
                     {"text": "📈 Açık İşlemler", "callback_data": "cmd:open"}
                 ],
                 [
+                    {"text": "⚙️ Ayarlar", "callback_data": "cmd:refresh_settings"},
                     {"text": "🧠 İnsan Modu", "callback_data": "cmd:human"},
                     {"text": "⚡ Scalp Modu", "callback_data": "cmd:scalp"}
                 ]
@@ -318,9 +649,12 @@ class TelegramManager:
             "🔹 <code>/daily</code> — Bugüne özel kaç işlem açıldığını ve güncel kâr/zararı listeler.\n"
             "🔹 <code>/balance</code> — Kasanın büyüme oranını detaylıca gösterir.\n"
             "🔹 <code>/trades</code> — Kapanan son 5 işlemi (Neden kapandığıyla birlikte) listeler.\n"
-            "🔹 <code>/ghost</code> — Yapay zekanın (Ghost Learning) arka planda ne kadar öğrendiğini gösterir.\n\n"
+            "🔹 <code>/ghost</code> — Yapay zekanın (Ghost Learning) arka planda ne kadar öğrendiğini gösterir.\n"
+            "🔹 <code>/ml</code> — Yapay Zeka (ML) durum ve tahmin parametrelerini listeler.\n"
+            "🔹 <code>/retrain</code> — ML modelini veritabanındaki son işlemlerle manuel olarak yeniden eğitir.\n\n"
             "⚙️ <b>Strateji ve Mod Değişimi</b>\n"
             "🔹 <code>/mode</code> — Şu an hangi stratejide çalıştığımızı söyler.\n"
+            "🔹 <code>/settings</code> — İnteraktif ayarlar panelini açar.\n"
             "🔹 <code>/set [key] [val]</code> — Dinamik parametre değiştirir (Örn: <code>/set trade_threshold 55.0</code>).\n"
             "🔹 <code>/close [id]</code> — Belirtilen ID'ye sahip açık pozisyonu anında kapatır.\n"
             "🔹 <code>/human</code> — İnsan Modu: Az ama öz, sadece en kaliteli sinyallere girer (A+/S).\n"
@@ -615,6 +949,8 @@ class TelegramManager:
             "max_open_trades": ("max_open_trades", int),
             "human_mode": ("tg_human_mode", lambda v: "True" if v.lower() in ("true", "1", "yes") else "False"),
             "execution_mode": ("tg_execution_mode", lambda v: "live" if v.lower() == "live" else "paper"),
+            "confirmation_mode": ("confirmation_mode", lambda v: "true" if v.lower() in ("true", "1", "yes") else "false"),
+            "trailing_stop_type": ("trailing_stop_type", lambda v: "step" if v.lower() == "step" else "atr"),
         }
 
         if param_name not in param_mapping:
@@ -681,6 +1017,74 @@ class TelegramManager:
         except Exception as e:
             self.send_fn(f"Ghost bilgisi alinamadi: {e}")
 
+    def _cmd_ml(self):
+        try:
+            from core.ml_signal_scorer import get_scorer
+            scorer = get_scorer()
+            status = scorer.get_status()
+            
+            trained_str = "✅ Eğitildi & Aktif" if status["trained"] else "❌ Eğitilmedi (Cold Start)"
+            last_train = status["last_train"] or "N/A"
+            if last_train != "N/A":
+                try:
+                    last_train = last_train.split(".")[0].replace("T", " ")
+                except Exception:
+                    pass
+
+            top_feats = status["top_features"]
+            top_feats_str = ""
+            if top_feats:
+                for idx, (name, val) in enumerate(top_feats, 1):
+                    top_feats_str += f"  {idx}. <b>{name}</b>: <code>{val:.3f}</code>\n"
+            else:
+                top_feats_str = "  <i>Veri yok</i>\n"
+
+            text = (
+                f"🧠 <b>Yapay Zeka (ML) Model İstatistikleri</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📊 <b>Model Durumu:</b> {trained_str}\n"
+                f"📈 <b>Örnek Boyutu:</b> {status['n_samples']} trade sonucu\n"
+                f"⏱ <b>Son Eğitim:</b> <code>{last_train}</code>\n"
+                f"🎯 <b>Model Gating Eşiği:</b> <code>{status['threshold']}</code>\n"
+                f"🛡 <b>ROC-AUC Skoru:</b> <code>{status['cv_accuracy']:.3f}</code>\n"
+                f"🔥 <b>Precision @ 70+:</b> <code>{status['precision_at_70']:.3f}</code>\n\n"
+                f"🔑 <b>En Önemli Karar Kriterleri (Top 5):</b>\n"
+                f"{top_feats_str}"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"<i>Not: Model her 24 saatte bir veya 50 yeni trade kapandığında otomatik olarak arka planda eğitilir.</i>"
+            )
+
+            reply_markup = {
+                "inline_keyboard": [
+                    [{"text": "🔄 Modeli Şimdi Eğit", "callback_data": "cmd:retrain_ml"}]
+                ]
+            }
+            self.send_fn(text, reply_markup=reply_markup)
+        except Exception as e:
+            self.send_fn(f"ML bilgisi alınamadı: {e}")
+
+    def _cmd_retrain(self):
+        try:
+            self.send_fn("🔄 Yapay Zeka modeli veritabanındaki son işlemlerle yeniden eğitiliyor, lütfen bekleyin...")
+            from core.ml_signal_scorer import train_model
+            success = train_model()
+            if success:
+                from core.ml_signal_scorer import get_scorer
+                status = get_scorer().get_status()
+                text = (
+                    f"✅ <b>Yapay Zeka Modeli Başarıyla Eğitildi!</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📈 <b>Yeni Örnek Sayısı:</b> {status['n_samples']}\n"
+                    f"🛡 <b>Yeni ROC-AUC:</b> <code>{status['cv_accuracy']:.3f}</code>\n"
+                    f"🔥 <b>Yeni Precision @ 70:</b> <code>{status['precision_at_70']:.3f}</code>\n"
+                    f"💡 Model güncellendi ve yeni sinyallerde kullanılmaya başlandı."
+                )
+                self.send_fn(text)
+            else:
+                self.send_fn("❌ <b>Model Eğitilemedi!</b>\nYetersiz veri (en az 30 WIN/LOSS işlem gerekli) veya yeni modelin performansı eskisine göre yetersiz kaldığı için model koruma kapısı (ML gating) eğitimi engelledi.")
+        except Exception as e:
+            self.send_fn(f"Model eğitilirken hata oluştu: {e}")
+
     def _cmd_daily(self):
         import database
         try:
@@ -712,6 +1116,69 @@ class TelegramManager:
         except Exception as e:
             self.send_fn(f"Günlük özet alınamadı: {e}")
 
+
+    def _cmd_settings(self):
+        # Invalidate cache on manual query to show fresh data
+        for name in ["AUTO_COMPOUNDING", "MTF_TREND_ALIGN_ENABLED", "EQUITY_CURVE_FILTER_ENABLED", "TRADE_THRESHOLD", "TELEGRAM_THRESHOLD", "CONFIRMATION_MODE", "TRAILING_STOP_TYPE"]:
+            if name in config._CONFIG_CACHE:
+                del config._CONFIG_CACHE[name]
+        text, markup = self._generate_settings_data()
+        self.send_fn(text, reply_markup=markup)
+
+    def _generate_settings_data(self) -> tuple[str, dict]:
+        import database
+        comp = config.AUTO_COMPOUNDING
+        mtf = config.MTF_TREND_ALIGN_ENABLED
+        eq = config.EQUITY_CURVE_FILTER_ENABLED
+        trade_thr = config.TRADE_THRESHOLD
+        tg_thr = config.TELEGRAM_THRESHOLD
+        conf = getattr(config, "CONFIRMATION_MODE", False)
+        trail_type = getattr(config, "TRAILING_STOP_TYPE", "atr").upper()
+
+        comp_status = "✅ Eklemli (Compounding)" if comp else "❌ Sabit (Fixed-Size)"
+        mtf_status = "✅ Etkin" if mtf else "❌ Devre Dışı"
+        eq_status = "✅ Etkin" if eq else "❌ Devre Dışı"
+        conf_status = "⏳ Manuel Onay (Confirmation)" if conf else "⚡ Otomatik Giriş"
+
+        text = (
+            f"⚙️ <b>AurvexAI İnteraktif Ayarlar Paneli</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔑 <b>Cüzdan Ekleme (Compounding):</b> {comp_status}\n"
+            f"📈 <b>MTF Trend Hizalaması:</b> {mtf_status}\n"
+            f"🛡 <b>Bakiye Eğrisi Filtresi (Equity):</b> {eq_status}\n"
+            f"🛑 <b>İşlem Giriş Modu:</b> {conf_status}\n"
+            f"🔄 <b>Trailing Stop Tipi:</b> <b>{trail_type}</b>\n"
+            f"🎯 <b>İşlem Eşik Puanı (Trade):</b> <code>{trade_thr:.1f}</code>\n"
+            f"📡 <b>Telegram Eşik Puanı (TG):</b> <code>{tg_thr:.1f}</code>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👇 Ayarları değiştirmek için aşağıdaki butonları kullanabilirsiniz."
+        )
+
+        markup = {
+            "inline_keyboard": [
+                [
+                    {"text": f"💵 Cüzdan: {'Kapat' if comp else 'Aç'}", "callback_data": "cmd:toggle_comp"},
+                    {"text": f"📈 MTF: {'Kapat' if mtf else 'Aç'}", "callback_data": "cmd:toggle_mtf"},
+                ],
+                [
+                    {"text": f"🛡 Equity: {'Kapat' if eq else 'Aç'}", "callback_data": "cmd:toggle_eq"},
+                    {"text": f"🛑 Onay Modu: {'Kapat' if conf else 'Aç'}", "callback_data": "cmd:toggle_conf"},
+                ],
+                [
+                    {"text": f"🔄 Trailing Tipi: {'ATR' if trail_type == 'STEP' else 'STEP'}", "callback_data": "cmd:toggle_trail_type"},
+                    {"text": "🔄 Yenile", "callback_data": "cmd:refresh_settings"}
+                ],
+                [
+                    {"text": "🎯 Trade -0.5", "callback_data": "cmd:inc_trade:-0.5"},
+                    {"text": "🎯 Trade +0.5", "callback_data": "cmd:inc_trade:0.5"},
+                ],
+                [
+                    {"text": "📡 TG -0.5", "callback_data": "cmd:inc_tg:-0.5"},
+                    {"text": "📡 TG +0.5", "callback_data": "cmd:inc_tg:0.5"},
+                ]
+            ]
+        }
+        return text, markup
 
     def _cmd_mode(self):
         is_human = config.HUMAN_MODE
@@ -831,3 +1298,81 @@ class TelegramManager:
             self.send_fn("🔥 <b>LIVE TRADING AKTİF</b>\n\n⚠️ <b>DİKKAT:</b> Sistem şu andan itibaren GERÇEK Binance bakiyenizle işlem açacaktır. Kemerlerinizi bağlayın!")
         except Exception as e:
             self.send_fn(f"Hata: {e}")
+
+    def _cmd_heatmap(self):
+        try:
+            import telegram_delivery
+            self.send_fn("⏳ Isı haritası çiziliyor, lütfen bekleyin...")
+            telegram_delivery.send_heatmap(30)
+        except Exception as e:
+            self.send_fn(f"Hata: {e}")
+
+    def _cmd_weekly(self):
+        try:
+            from telegram_delivery import generate_weekly_digest
+            self.send_fn("⏳ Haftalık rapor hazırlanıyor, lütfen bekleyin...")
+            msg = generate_weekly_digest()
+            self.send_fn(msg)
+        except Exception as e:
+            self.send_fn(f"Hata: {e}")
+
+    def _cmd_export(self):
+        import database
+        import csv
+        import os
+        
+        self.send_fn("⏳ İşlem geçmişi toplanıyor ve CSV dosyası oluşturuluyor...")
+        
+        temp_csv = "aurvex_trade_history.csv"
+        try:
+            conn = database.get_connection()
+            cursor = conn.execute("SELECT * FROM trades ORDER BY id DESC")
+            rows = cursor.fetchall()
+            conn.close()
+            
+            if not rows:
+                self.send_fn("❌ Dışa aktarılacak işlem geçmişi bulunmuyor.")
+                return
+                
+            with open(temp_csv, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                # write headers
+                writer.writerow(rows[0].keys())
+                for row in rows:
+                    writer.writerow(list(row))
+            
+            url = f"https://api.telegram.org/bot{self.token}/sendDocument"
+            with open(temp_csv, "rb") as f:
+                files = {"document": f}
+                data = {"chat_id": self.chat_id, "caption": "📊 Aurvex AI Trade History Telemetry (CSV)"}
+                resp = requests.post(url, data=data, files=files, timeout=30)
+                
+            if resp.status_code == 200:
+                logger.info("CSV document sent successfully to Telegram.")
+            else:
+                self.send_fn(f"❌ Dosya gönderilemedi. Hata kodu: {resp.status_code}")
+        except Exception as e:
+            logger.error("Export telemetry command failed: %s", e)
+            self.send_fn(f"❌ Dışa aktarma hatası: {e}")
+        finally:
+            if os.path.exists(temp_csv):
+                try:
+                    os.remove(temp_csv)
+                except Exception:
+                    pass
+
+    def _cmd_spectra(self, args: list):
+        if not self.spectra_ceo:
+            self.send_fn("⚠️ <b>Spektra CEO Aktif Değil</b>\n\nBoss'um, Spektra CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin ol!")
+            return
+            
+        user_msg = None
+        if args:
+            user_msg = " ".join(args).strip()
+            
+        import threading
+        threading.Thread(
+            target=self.spectra_ceo.evaluate_and_decide,
+            args=(user_msg,),
+            daemon=True
+        ).start()

@@ -424,6 +424,22 @@ class TriggerEngine:
             oi_data = self._oi_tracker.analyze(symbol, c1, direction)
             oi_bonus = oi_data.get("oi_score_bonus", 0.0)
             score = min(10.0, max(0.0, score + oi_bonus))
+            
+            # OI Spike Filter (Phase C2 Upgrades)
+            oi_chg = oi_data.get("oi_change_pct", 0.0)
+            oi_sig = oi_data.get("oi_signal", "NEUTRAL")
+            oi_spike_limit = getattr(config, "OI_SPIKE_LIMIT", 5.0)
+            
+            if abs(oi_chg) >= oi_spike_limit:
+                if direction == "LONG" and oi_sig == "STRONG_BEAR":
+                    logger.info("[TriggerEngine] %s LONG Vetoed: Extreme OI Spike with bearish price movement (%.1f%%, %s)",
+                                symbol, oi_chg, oi_sig)
+                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"extreme_oi_bear_spike_trap_{oi_chg:.1f}%"}
+                if direction == "SHORT" and oi_sig == "STRONG_BULL":
+                    logger.info("[TriggerEngine] %s SHORT Vetoed: Extreme OI Spike with bullish price movement (%.1f%%, %s)",
+                                symbol, oi_chg, oi_sig)
+                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"extreme_oi_bull_spike_trap_{oi_chg:.1f}%"}
+
             logger.debug(
                 f"[OI] {symbol}: {oi_data.get('oi_signal')} "
                 f"bonus={oi_bonus:+.1f} oi_chg={oi_data.get('oi_change_pct', 0):+.1f}%"

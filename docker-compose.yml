@@ -23,6 +23,11 @@ services:
       - TZ=UTC
     depends_on:
       - redis
+    healthcheck:
+      test: ["CMD", "python", "health_check.py"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
 
   # 2. Web Dashboard (Flask Arayüzü)
   dashboard:
@@ -39,4 +44,9 @@ services:
     depends_on:
       - engine
       - redis
+    healthcheck:
+      test: ["CMD", "python", "health_check.py"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
 

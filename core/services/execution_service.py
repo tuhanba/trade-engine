@@ -129,6 +129,90 @@ class ExecutionService:
             qualities = getattr(config, "EXECUTABLE_QUALITIES", ("S", "A+", "A", "B", "C"))
 
             if sig.final_score >= trade_thr and sig.setup_quality in qualities:
+                is_high_quality = sig.setup_quality in ("S", "A+") or sig.final_score >= 75.0
+                auto_exec_high  = getattr(config, "CONFIRMATION_AUTO_EXECUTE_HIGH_QUALITY", True)
+                
+                if getattr(config, "CONFIRMATION_MODE", False) and not (is_high_quality and auto_exec_high):
+                    if not candidate_id:
+                        try:
+                            from database import get_conn
+                            with get_conn() as conn:
+                                row = conn.execute(
+                                    "SELECT id FROM signal_candidates WHERE symbol = ? ORDER BY id DESC LIMIT 1",
+                                    (symbol,)
+                                ).fetchone()
+                                if row:
+                                    candidate_id = row[0]
+                        except Exception:
+                            pass
+
+                    logger.info("[ExecutionService] %s confirmation gate active. Awaiting manual confirmation for candidate %s.", symbol, candidate_id)
+                    
+                    if candidate_id:
+                        try:
+                            from database import update_candidate_status
+                            await asyncio.to_thread(
+                                update_candidate_status,
+                                candidate_id,
+                                decision="PENDING_APPROVAL",
+                                reject_reason="Awaiting manual confirmation",
+                            )
+                        except Exception as _e:
+                            logger.error("[ExecutionService] update_candidate_status error: %s", _e)
+                            
+                    try:
+                        from database import save_signal_event
+                        await asyncio.to_thread(
+                            save_signal_event, signal_id, "PENDING_APPROVAL",
+                            symbol=symbol, reject_reason="Awaiting manual confirmation",
+                        )
+                    except Exception as _e:
+                        logger.error("[ExecutionService] save_signal_event error: %s", _e)
+
+                    try:
+                        import telegram_delivery
+                        quality_emoji = {"S": "⭐", "A+": "🔥", "A": "⚡", "B": "🔶", "C": "⚪"}.get(sig.setup_quality, "⚪")
+                        dir_icon = "▲" if sig.direction == "LONG" else "▼"
+                        
+                        alert_text = (
+                            f"⏳ <b>İŞLEM ONAY BEKLİYOR</b>\n"
+                            f"──────────────────────\n"
+                            f"{quality_emoji} <b>{sig.setup_quality} Sinyal Adayı: {symbol} ({sig.direction})</b>\n"
+                            f"──────────────────────\n"
+                            f"📍 Giriş  <code>{sig.entry_price:.4f}</code>\n"
+                            f"🛑 Stop   <code>{sig.stop_loss:.4f}</code>\n"
+                            f"🎯 TP1    <code>{sig.tp1:.4f}</code>\n"
+                            f"🎯 TP2    <code>{sig.tp2:.4f}</code>\n"
+                            f"🚀 TP3    <code>{sig.tp3:.4f}</code>\n"
+                            f"──────────────────────\n"
+                            f"📊 Skor   <b>{sig.final_score:.1f}p</b>  ·  RR  <b>{sig.rr:.2f}R</b>\n"
+                            f"💡 Sebep  <i>{sig.reason}</i>\n"
+                            f"──────────────────────\n"
+                            f"<i>Lütfen bu işlemi onaylayın veya iptal edin:</i>"
+                        )
+                        
+                        reply_markup = {
+                            "inline_keyboard": [
+                                [
+                                    {"text": "✅ İŞLEME AL", "callback_data": f"cmd:appr_cand_{candidate_id}"},
+                                    {"text": "❌ İPTAL ET (VETO)", "callback_data": f"cmd:veto_cand_{candidate_id}"}
+                                ]
+                            ]
+                        }
+                        
+                        await asyncio.to_thread(
+                            telegram_delivery.send_message,
+                            alert_text,
+                            reply_markup=reply_markup
+                        )
+                    except Exception as tg_e:
+                        logger.error("[ExecutionService] Telegram confirmation send error: %s", tg_e)
+                    return  # Intercepted! Do not open trade yet.
+                        
+                if getattr(config, "CONFIRMATION_MODE", False) and is_high_quality and auto_exec_high:
+                    logger.info("[ExecutionService] %s confirmation gate bypassed due to high quality/score (%s, %.1fp).",
+                                symbol, sig.setup_quality, sig.final_score)
+
                 # ── Trade Aç ─────────────────────────────────────────────────
                 if config.EXECUTION_MODE == "live":
                     if not hasattr(self, "live_execution_engine"):

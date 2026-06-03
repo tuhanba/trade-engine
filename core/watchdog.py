@@ -184,11 +184,29 @@ class SystemWatchdog:
             return False
         return True
 
+    def _sd_notify(self, state: str) -> bool:
+        """Sends a status notification to systemd UNIX socket if present."""
+        import socket
+        notify_socket = os.getenv("NOTIFY_SOCKET")
+        if not notify_socket:
+            return False
+        try:
+            if notify_socket.startswith("@"):
+                notify_socket = "\0" + notify_socket[1:]
+            with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+                sock.connect(notify_socket)
+                sock.sendall(state.encode())
+            return True
+        except Exception:
+            return False
+
     def _loop(self):
         """Ana watchdog döngüsü."""
         logger.info("[Watchdog] Başlatıldı.")
+        self._sd_notify("READY=1")
         while self._running:
             try:
+                self._sd_notify("WATCHDOG=1")
                 # DB sağlık kontrolü
                 self._check_db_health()
 

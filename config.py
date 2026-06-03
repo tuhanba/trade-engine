@@ -63,11 +63,23 @@ MAX_CHASE_PCT              = _env_float("MAX_CHASE_PCT", 0.15)
 DEFAULT_FEE_RATE           = _env_float("DEFAULT_FEE_RATE", 0.0004)
 MAX_CONSECUTIVE_LOSSES     = _env_int("MAX_CONSECUTIVE_LOSSES", 5)
 COIN_COOLDOWN_MINUTES      = _env_int("COIN_COOLDOWN_MINUTES", 30)
+COOLDOWN_WIN_BASE_MINUTES  = _env_float("COOLDOWN_WIN_BASE_MINUTES", 15.0)
+COOLDOWN_LOSS_BASE_MINUTES = _env_float("COOLDOWN_LOSS_BASE_MINUTES", 60.0)
 MAX_CORRELATED_TRADES      = _env_int("MAX_CORRELATED_TRADES", 3)
 MAX_MARGIN_LOSS_PCT        = _env_float("MAX_MARGIN_LOSS_PCT", 0.40)
 MAX_PORTFOLIO_EXPOSURE_PCT = _env_float("MAX_PORTFOLIO_EXPOSURE_PCT", 95.0)
 MIN_RR                     = _env_float("MIN_RR", 1.5)   # v6.1 düzeltildi: 1.2→1.5
 MIN_EXPECTED_MFE_R         = _env_float("MIN_EXPECTED_MFE_R", 1.2)
+
+# Unified Capital & Risk Protection Package Settings
+DRAWDOWN_DEFENSIVE_PCT         = _env_float("DRAWDOWN_DEFENSIVE_PCT", 5.0)
+DRAWDOWN_LOCK_PCT              = _env_float("DRAWDOWN_LOCK_PCT", 10.0)
+EQUITY_CURVE_EMA_PERIOD        = _env_int("EQUITY_CURVE_EMA_PERIOD", 10)
+EQUITY_CURVE_RISK_REDUCTION    = _env_float("EQUITY_CURVE_RISK_REDUCTION", 0.5)
+EQUITY_CURVE_FILTER_ENABLED    = _env_bool("EQUITY_CURVE_FILTER_ENABLED", True)
+MTF_TREND_ALIGN_RISK_REDUCTION = _env_float("MTF_TREND_ALIGN_RISK_REDUCTION", 0.4)
+MTF_TREND_ALIGN_ENABLED        = _env_bool("MTF_TREND_ALIGN_ENABLED", True)
+
 
 # TP / SL ATR multipliers  (fix-tp-sl-ratios: TP1=1.5R TP2=2.5R SL min %1.5)
 SL_ATR_MULT  = _env_float("SL_ATR_MULT", 1.8)   # v6.1 düzeltildi: 1.2→1.8 (gürültü koruması)
@@ -92,6 +104,13 @@ RUNNER_CLOSE_PCT = _env_float("RUNNER_CLOSE_PCT", 30) # 25→30: toplam=100
 TRAIL_ATR_MULT       = _env_float("TRAIL_ATR_MULT", 1.5)
 BREAKEVEN_ENABLED    = _env_bool("BREAKEVEN_ENABLED", True)
 BREAKEVEN_OFFSET_PCT = _env_float("BREAKEVEN_OFFSET_PCT", 0.1)
+TRAILING_STOP_TYPE   = _env("TRAILING_STOP_TYPE", "atr")
+CONFIRMATION_MODE    = _env_bool("CONFIRMATION_MODE", False)
+CONFIRMATION_AUTO_EXECUTE_HIGH_QUALITY = _env_bool("CONFIRMATION_AUTO_EXECUTE_HIGH_QUALITY", True)
+
+# Otonom Kâr Kilitleme Kalkanı (Dynamic Profit Lock Settings)
+DAILY_PROFIT_LOCK_PCT  = _env_float("DAILY_PROFIT_LOCK_PCT", 3.0)
+WEEKLY_PROFIT_LOCK_PCT = _env_float("WEEKLY_PROFIT_LOCK_PCT", 10.0)
 
 # Time Decay Stop Loss Settings
 TIME_DECAY_ENABLED                 = _env_bool("TIME_DECAY_ENABLED", True)
@@ -197,6 +216,7 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "") or None
 CVD_ENABLED         = _env_bool("CVD_ENABLED", True)
 OI_TRACKER_ENABLED  = _env_bool("OI_TRACKER_ENABLED", True)
 OI_MIN_CHANGE_PCT   = _env_float("OI_MIN_CHANGE_PCT", 2.0)    # Anlamlı OI değişim eşiği
+OI_SPIKE_LIMIT      = _env_float("OI_SPIKE_LIMIT", 5.0)       # OI aşırı yükseliş eşiği
 CVD_DIVERGENCE_BONUS= _env_float("CVD_DIVERGENCE_BONUS", 1.5) # CVD divergence bonusu
 CVD_CONFIRM_BONUS   = _env_float("CVD_CONFIRM_BONUS", 1.0)    # CVD confirm bonusu
 
@@ -225,6 +245,20 @@ _DYNAMIC_PARAMS_MAP = {
     "MAX_SPREAD_PCT":       ("max_spread_pct", float),
     "MAX_OPEN_TRADES":      ("max_open_trades", int),
     "MAX_CHASE_PCT":        ("max_chase_pct", float),
+    "AUTO_COMPOUNDING":     ("auto_compounding", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "DRAWDOWN_DEFENSIVE_PCT":         ("drawdown_defensive_pct", float),
+    "DRAWDOWN_LOCK_PCT":              ("drawdown_lock_pct", float),
+    "EQUITY_CURVE_EMA_PERIOD":        ("equity_curve_ema_period", int),
+    "EQUITY_CURVE_RISK_REDUCTION":    ("equity_curve_risk_reduction", float),
+    "EQUITY_CURVE_FILTER_ENABLED":    ("equity_curve_filter_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "MTF_TREND_ALIGN_RISK_REDUCTION": ("mtf_trend_align_risk_reduction", float),
+    "MTF_TREND_ALIGN_ENABLED":        ("mtf_trend_align_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "TRAILING_STOP_TYPE":             ("trailing_stop_type", str),
+    "CONFIRMATION_MODE":              ("confirmation_mode", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "CONFIRMATION_AUTO_EXECUTE_HIGH_QUALITY": ("confirmation_auto_execute_high_quality", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "OI_SPIKE_LIMIT":                 ("oi_spike_limit", float),
+    "DAILY_PROFIT_LOCK_PCT":          ("daily_profit_lock_pct", float),
+    "WEEKLY_PROFIT_LOCK_PCT":         ("weekly_profit_lock_pct", float),
 }
 
 _AI_PARAMS_MAP = {

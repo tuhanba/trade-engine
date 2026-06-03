@@ -26,3 +26,6 @@ prometheus-client>=0.19.0
 # AI Brain gece optimizasyon döngüsü (P2 #9)
 anthropic>=0.25.0
 matplotlib>=3.7.0
+# TTS Voice Engine for Spectra (Phase E)
+gTTS>=2.3.0
+

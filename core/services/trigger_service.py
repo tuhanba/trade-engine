@@ -29,6 +29,25 @@ class TriggerService:
                 trend_confluence=trend_result.get("confluence_raw", 1)
             )
 
+            # Regime-Switching Filter: Choppy piyasada min A+ kalitesi şartı
+            try:
+                from database import get_market_regime
+                regime = await asyncio.to_thread(get_market_regime)
+                quality = trigger_result.get("quality", "C")
+                if regime == "CHOPPY" and quality not in ("S", "A+"):
+                    logger.info(f"[TriggerService] {symbol} rejected by Regime Filter: quality {quality} in CHOPPY market.")
+                    try:
+                        from database import save_signal_event
+                        await asyncio.to_thread(
+                            save_signal_event, signal_id, "REGIME_REJECTED",
+                            symbol=symbol, reject_reason=f"choppy_market_quality_{quality}"
+                        )
+                    except Exception:
+                        pass
+                    return
+            except Exception as rex:
+                logger.debug(f"[TriggerService] Regime check failed: {rex}")
+
             if trigger_result["quality"] == "D":
                 logger.debug(f"[TriggerService] {symbol} rejected: quality D")
                 try:

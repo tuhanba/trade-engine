@@ -139,8 +139,20 @@ class AsyncScalpEngine:
         # Start Market Regime Loop
         asyncio.create_task(self._market_regime_loop())
 
+        # Start Weekly Telegram Performance Digest Loop
+        asyncio.create_task(self._weekly_digest_loop())
+
         # Start Optuna Hyperparameter Tuner Loop
         asyncio.create_task(self._optuna_tuning_loop())
+
+        # Start Spectra CEO Agent Loop
+        self.spectra_ceo = None
+        try:
+            from core.spectra_ceo import SpectraCeo
+            self.spectra_ceo = SpectraCeo(self.client)
+            asyncio.create_task(self._spectra_ceo_loop())
+        except Exception as e:
+            logger.error(f"Spectra CEO başlatılamadı: {e}")
 
         # Start Watchdog
         try:
@@ -152,7 +164,7 @@ class AsyncScalpEngine:
             logger.error(f"Watchdog başlatılamadı: {e}")
 
         # Start Telegram Command Manager
-        self.telegram_manager = TelegramManager(telegram_delivery.send_message)
+        self.telegram_manager = TelegramManager(telegram_delivery.send_message, spectra_ceo=self.spectra_ceo)
         self.telegram_manager.start()
 
         # Recover queued Telegram messages on startup
@@ -266,6 +278,17 @@ class AsyncScalpEngine:
             except Exception as e:
                 logger.error(f"Heartbeat failed: {e}")
             await asyncio.sleep(10)
+
+    async def _spectra_ceo_loop(self):
+        """Run Spectra CEO Agent loop every 12 hours."""
+        # Initial startup delay (e.g. 5 minutes) to let bot collect statistics
+        await asyncio.sleep(300)
+        while True:
+            try:
+                await asyncio.to_thread(self.spectra_ceo.evaluate_and_decide)
+            except Exception as e:
+                logger.error(f"[Spectra CEO Loop] Task failed: {e}")
+            await asyncio.sleep(43200) # 12 hours
 
     async def stop(self):
         logger.info("Stopping engine...")
@@ -502,9 +525,44 @@ class AsyncScalpEngine:
             await asyncio.sleep(86400) # 24h
             await asyncio.to_thread(_run_vacuum)
 
+    async def _weekly_digest_loop(self):
+        """Haftalık özet raporunu Pazar günleri saat 21:00 UTC'de otomatik gönderir."""
+        from database import get_system_state, update_system_state
+        from datetime import datetime, timezone
+        import telegram_delivery
+        
+        while True:
+            try:
+                now = datetime.now(timezone.utc)
+                # Sunday (weekday=6) and 21:00 UTC
+                if now.weekday() == 6 and now.hour == 21:
+                    last_sent = get_system_state("last_weekly_digest_date", default="")
+                    today_str = now.strftime("%Y-%m-%d")
+                    
+                    if last_sent != today_str:
+                        logger.info("[WeeklyDigest] Haftalık rapor otomatik oluşturuluyor ve gönderiliyor...")
+                        # Send to Telegram
+                        await asyncio.to_thread(telegram_delivery.send_weekly_digest)
+                        # Update state to avoid duplicate sending
+                        await asyncio.to_thread(update_system_state, "last_weekly_digest_date", today_str)
+            except Exception as e:
+                logger.error(f"[WeeklyDigest] Hata oluştu: {e}")
+                
+            await asyncio.sleep(600)  # 10 dakikada bir kontrol et
+
 def handle_exception(loop, context):
     msg = context.get("exception", context["message"])
     logger.error(f"Caught exception: {msg}")
+    try:
+        from telegram_delivery import send_message
+        import traceback
+        exc = context.get("exception")
+        tb_str = ""
+        if exc:
+            tb_str = "\n<code>" + "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))[:1500] + "</code>"
+        send_message(f"⚠️ <b>KRİTİK HATA (Asyncio):</b>\n{str(msg)[:500]}{tb_str}")
+    except Exception:
+        pass
 
 async def main():
     loop = asyncio.get_running_loop()
@@ -535,6 +593,13 @@ async def main():
         await engine.start()
     except Exception as e:
         logger.error(f"Engine başlatılırken kritik hata oluştu: {e}")
+        try:
+            from telegram_delivery import send_message
+            import traceback
+            tb_str = "\n<code>" + "".join(traceback.format_exception(type(e), e, e.__traceback__))[:1500] + "</code>"
+            send_message(f"🚨 <b>KRİTİK ENGINE BAŞLATMA HATASI:</b>\n{str(e)[:500]}{tb_str}")
+        except Exception:
+            pass
         return
 
     # Sadece shutdown sinyalini bekle

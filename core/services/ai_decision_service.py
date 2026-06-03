@@ -92,6 +92,16 @@ class AIDecisionService:
                 except Exception as db_e:
                     logger.error(f"[AIDecisionService] DB Update Error: {db_e}")
 
+            dec = decision["decision"]
+            final_score = decision["final_score"]
+            quality = trigger_result.get("quality", "B")
+            if candidate_id and (dec in ("VETO", "WATCH")) and (final_score >= 60.0 or quality in ("S", "A+", "A")):
+                try:
+                    from telegram_delivery import send_veto_alert
+                    await asyncio.to_thread(send_veto_alert, sig, candidate_id)
+                except Exception as tg_e:
+                    logger.error(f"[AIDecisionService] Veto alert send error: {tg_e}")
+
             if decision["decision"] == "VETO":
                 logger.debug(f"[AIDecisionService] {symbol} vetoed by AI: {decision['reason']}")
                 try:
@@ -110,6 +120,7 @@ class AIDecisionService:
             next_payload = {
                 "symbol": symbol,
                 "signal_id": signal_id,
+                "candidate_id": candidate_id,
                 "signal_data": sig.to_dict(),
                 "ai_decision": decision
             }

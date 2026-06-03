@@ -126,6 +126,9 @@ class TelegramDelivery:
     def send_error(self, title: str, error: Any) -> bool:
         return send_message(f"⚠️ <b>{title}</b>\n{str(error)[:500]}")
 
+    def send_voice(self, voice_bytes: bytes, caption: Optional[str] = None) -> bool:
+        return send_voice(voice_bytes, caption)
+
 
 def _send_raw_detailed(text: str, parse_mode: str = "HTML", reply_markup: Optional[dict] = None) -> tuple[bool, int]:
     token = config.TELEGRAM_BOT_TOKEN
@@ -308,7 +311,8 @@ def recover_queued_messages():
 
 def _push_with_dedupe(text: str, dedupe_key: str,
                       symbol: str = "", sig_id: str = "",
-                      photo_bytes: Optional[bytes] = None) -> bool:
+                      photo_bytes: Optional[bytes] = None,
+                      reply_markup: Optional[dict] = None) -> bool:
     """DB'ye kaydet (duplicate kontrolü), kuyruğa ekle."""
     try:
         saved = save_telegram_message(sig_id, symbol, dedupe_key, text, status="queued")
@@ -317,7 +321,7 @@ def _push_with_dedupe(text: str, dedupe_key: str,
             return False
     except Exception as e:
         logger.warning("[Telegram] save_telegram_message: %s", e)
-    _queue.push(text, dedupe_key=dedupe_key, symbol=symbol, photo_bytes=photo_bytes)
+    _queue.push(text, dedupe_key=dedupe_key, symbol=symbol, photo_bytes=photo_bytes, reply_markup=reply_markup)
     return True
 
 
@@ -429,8 +433,20 @@ def send_trade_open(data: dict) -> bool:
             f"⏰ {_now_utc()}\n"
         )
 
+        reply_markup = None
+        trade_id = data.get("trade_id") or data.get("id")
+        if trade_id:
+            reply_markup = {
+                "inline_keyboard": [
+                    [
+                        {"text": "🔒 Breakeven'a Çek", "callback_data": f"cmd:be_trade_{trade_id}"},
+                        {"text": "🚨 İşlemi Kapat", "callback_data": f"cmd:close_trade_{trade_id}"}
+                    ]
+                ]
+            }
+
         dk = f"open:{symbol}:{direction}:{_fmt(entry)}:{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}"
-        return _push_with_dedupe(text, dk, symbol=symbol)
+        return _push_with_dedupe(text, dk, symbol=symbol, reply_markup=reply_markup)
     except Exception as e:
         logger.error("[Telegram] send_trade_open: %s", e)
         return False
@@ -625,6 +641,99 @@ def send_message(text: str, parse_mode: str = "HTML", reply_markup: Optional[dic
         return False
 
 
+def send_voice(voice_bytes: bytes, caption: Optional[str] = None) -> bool:
+    """Sends a voice message to Telegram."""
+    token = config.TELEGRAM_BOT_TOKEN
+    chat_id = config.TELEGRAM_CHAT_ID
+    if not token or not chat_id:
+        logger.debug("[Telegram] Token/chat_id boş — sesli mesaj atlandı.")
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendVoice"
+        files = {"voice": ("voice.ogg", voice_bytes, "audio/ogg")}
+        payload = {"chat_id": chat_id}
+        if caption:
+            payload["caption"] = caption[:1024]
+            payload["parse_mode"] = "HTML"
+        resp = requests.post(url, data=payload, files=files, timeout=30)
+        if resp.status_code == 200:
+            return True
+        logger.warning("[Telegram] sendVoice HTTP %d — %s", resp.status_code, resp.text[:100])
+        return False
+    except Exception as e:
+        logger.error("[Telegram] send_voice hatası: %s", e)
+        return False
+
+
+def send_veto_alert(sig_data: dict | Any, candidate_id: int) -> bool:
+    """
+    AI tarafından veto edilen veya watchlist'e alınan yüksek skorlu sinyal
+    için Telegram'a interaktif butonlar içeren bir veto bildirimi gönderir.
+    """
+    try:
+        def get_val(keys, default=None):
+            if isinstance(sig_data, dict):
+                for k in keys:
+                    if k in sig_data:
+                        return sig_data[k]
+            else:
+                for k in keys:
+                    if hasattr(sig_data, k):
+                        return getattr(sig_data, k)
+            return default
+
+        symbol = get_val(["symbol"], "?")
+        direction = get_val(["direction", "side"], "LONG")
+        quality = get_val(["setup_quality", "quality"], "B")
+        entry = get_val(["entry_price", "entry"], 0.0)
+        sl = get_val(["stop_loss", "sl", "stop"], 0.0)
+        tp1 = get_val(["tp1"], 0.0)
+        tp2 = get_val(["tp2"], 0.0)
+        tp3 = get_val(["tp3"], 0.0)
+        score = get_val(["final_score", "score", "ai_score"], 0.0)
+        reason = get_val(["veto_reason", "reason", "reject_reason"], "AI Veto")
+        lev = get_val(["leverage_suggestion", "leverage"], 10)
+        risk = get_val(["risk_amount", "max_loss", "risk_usd"], 0.0)
+
+        dir_icon = "▲" if direction == "LONG" else "▼"
+        
+        text = (
+            f"🚫 <b>AI VETO / WATCHLIST UYARISI</b>\n"
+            f"{LINE}\n"
+            f"{dir_icon} <b>{symbol}</b> {direction} (Aday ID: {candidate_id})\n"
+            f"{LINE}\n"
+            f"📍 Giriş  <code>{_fmt(entry)}</code>\n"
+            f"🛑 Stop   <code>{_fmt(sl)}</code>\n"
+            f"🎯 TP1    <code>{_fmt(tp1)}</code>\n"
+            f"🎯 TP2    <code>{_fmt(tp2)}</code>\n"
+            f"🚀 TP3    <code>{_fmt(tp3)}</code>\n"
+            f"{LINE}\n"
+            f"📊 Skor   <b>{score:.1f}</b> · Kalite <b>{quality}</b>\n"
+            f"💡 Sebep  <i>{reason}</i>\n"
+            f"{LINE}\n"
+            f"⏰ {_now_utc()}\n"
+            f"\n<i>Bu sinyali manuel olarak açabilir veya coini sessize alabilirsiniz:</i>"
+        )
+
+        reply_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "🚀 Force Trade", "callback_data": f"cmd:force:{candidate_id}"},
+                    {"text": "🔕 Mute Coin (4h)", "callback_data": f"cmd:mute:{symbol}"}
+                ]
+            ]
+        }
+
+        # _queue'ya push et
+        dk = f"veto:{symbol}:{candidate_id}:{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}"
+        _queue.push(text, parse_mode="HTML", reply_markup=reply_markup, dedupe_key=dk, symbol=symbol)
+        logger.info(f"[Telegram] Veto alert queued for candidate {candidate_id} ({symbol})")
+        return True
+    except Exception as e:
+        logger.error(f"[Telegram] send_veto_alert hatası: {e}")
+        return False
+
+
 # ── Geriye dönük compat ───────────────────────────────────────────────────────
 # Eski kod bu fonksiyonları import ediyor — imzaları korunuyor.
 
@@ -661,3 +770,294 @@ def format_trade_close(trade: dict, pnl: float, reason: str) -> str:
         f"📋 Sebep  {reason_map.get(reason, reason.upper() if reason else '?')}\n"
         f"⏰ {_now_utc()}"
     )
+
+
+def send_heatmap(days: int = 30) -> bool:
+    """Son 30 gündeki PnL dağılımını gösteren ısı haritasını çizip Telegram'a gönderir."""
+    try:
+        from core.signal_visualizer import generate_heatmap_image_bytes
+        photo_bytes = generate_heatmap_image_bytes(days)
+        if photo_bytes:
+            _queue.push(f"📊 <b>Portföy Isı Haritası (Son {days} Gün)</b>", photo_bytes=photo_bytes)
+            return True
+        else:
+            send_message(f"⚠️ Son {days} günde kapatılmış işlem bulunmadığından ısı haritası çizilemedi.")
+            return False
+    except Exception as e:
+        logger.error(f"[Telegram] send_heatmap hatası: {e}")
+        return False
+
+
+def generate_weekly_report_card(stats: dict) -> bytes:
+    """
+    Pillow kullanarak premium, karanlık temalı haftalık özet kartı (800x450) üretir.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+    import io
+    import os
+
+    # Canvas boyutları
+    width, height = 800, 450
+    image = Image.new("RGBA", (width, height))
+    draw = ImageDraw.Draw(image)
+
+    # 1. Premium gradyan arka plan (Derin mor -> Derin mavi)
+    for y in range(height):
+        r = int(18 + (10 - 18) * (y / height))
+        g = int(10 + (22 - 10) * (y / height))
+        b = int(35 + (55 - 35) * (y / height))
+        draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
+
+    # Altın rengi dış çerçeve
+    draw.rectangle([10, 10, width - 10, height - 10], outline=(212, 168, 67, 80), width=2)
+    # İç ince sınır çizgisi
+    draw.rectangle([15, 15, width - 15, height - 15], outline=(255, 255, 255, 15), width=1)
+
+    # Yazı tiplerini yükle
+    font_large = None
+    font_medium = None
+    font_small = None
+    font_title = None
+
+    # Windows ve Linux ortak font yolları
+    font_paths = [
+        "C:\\Windows\\Fonts\\Outfit-Bold.ttf",
+        "C:\\Windows\\Fonts\\Outfit-Regular.ttf",
+        "C:\\Windows\\Fonts\\Inter-Bold.ttf",
+        "C:\\Windows\\Fonts\\Inter-Regular.ttf",
+        "C:\\Windows\\Fonts\\arialbd.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+
+    for path in font_paths:
+        try:
+            if os.path.exists(path):
+                font_title = ImageFont.truetype(path, 32)
+                font_large = ImageFont.truetype(path, 26)
+                font_medium = ImageFont.truetype(path, 18)
+                font_small = ImageFont.truetype(path, 12)
+                break
+        except Exception:
+            continue
+
+    if not font_large:
+        font_title = ImageFont.load_default()
+        font_large = ImageFont.load_default()
+        font_medium = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+
+    # Başlık Alanı
+    draw.text((45, 45), "AURVEX AI", fill=(212, 168, 67, 255), font=font_title)
+    draw.text((45, 85), "WEEKLY PERFORMANCE DIGEST", fill=(255, 255, 255, 220), font=font_medium)
+
+    # Yatay çizgi ayırıcı
+    draw.line([(45, 120), (width - 45, 120)], fill=(255, 255, 255, 30), width=1)
+
+    # Değerleri al
+    total_trades = stats.get("total_trades", 0)
+    win_rate = stats.get("win_rate", 0.0)
+    wins = stats.get("wins_count", 0)
+    losses = stats.get("losses_count", 0)
+    net_pnl = stats.get("net_pnl", 0.0)
+
+    # Sol Sütun: Temel Özet
+    draw.text((50, 145), "SUMMARY STATISTICS", fill=(212, 168, 67, 180), font=font_small)
+    draw.text((50, 180), f"Executed Trades:  {total_trades}", fill=(255, 255, 255, 220), font=font_medium)
+    draw.text((50, 215), f"Success Ratio:   %{win_rate:.1f} ({wins}W / {losses}L)", fill=(255, 255, 255, 220), font=font_medium)
+
+    # Net PnL renklendirmesi (Kazanılınca Yeşil, kaybedilince Kırmızı)
+    pnl_color = (0, 230, 118, 255) if net_pnl >= 0 else (239, 68, 68, 255)
+    pnl_sign = "+" if net_pnl >= 0 else ""
+    draw.text((50, 255), f"Net PnL:  {pnl_sign}${net_pnl:.2f}", fill=pnl_color, font=font_large)
+
+    # Sağ Sütun: Varlık Detayları
+    draw.text((450, 145), "ASSET PERFORMANCE", fill=(212, 168, 67, 180), font=font_small)
+
+    best_coin = stats.get("best_coin", "Yok").replace("USDT", "")
+    best_pnl = stats.get("best_pnl", 0.0)
+    worst_coin = stats.get("worst_coin", "Yok").replace("USDT", "")
+    worst_pnl = stats.get("worst_pnl", 0.0)
+
+    best_sign = "+" if best_pnl >= 0 else ""
+
+    draw.text((450, 180), f"🏆 Best Coin: {best_coin} ({best_sign}${best_pnl:.2f})", fill=(0, 230, 118, 220), font=font_medium)
+    draw.text((450, 215), f"💀 Worst Coin: {worst_coin} (${worst_pnl:.2f})", fill=(239, 68, 68, 220), font=font_medium)
+
+    # Alt Ayırıcı
+    draw.line([(45, 315), (width - 45, 315)], fill=(255, 255, 255, 30), width=1)
+
+    # Yapay Zeka Teşhis Değerleri
+    avg_win_score = stats.get("avg_win_score", 0.0)
+    avg_loss_score = stats.get("avg_loss_score", 0.0)
+
+    draw.text((50, 335), "AI BRAIN DIAGNOSTICS", fill=(212, 168, 67, 180), font=font_small)
+    draw.text((50, 365), f"Avg Score on Winners: {avg_win_score:.1f}p", fill=(255, 255, 255, 180), font=font_medium)
+    draw.text((450, 365), f"Avg Score on Losers: {avg_loss_score:.1f}p", fill=(255, 255, 255, 180), font=font_medium)
+
+    # Rapor alt bilgi (footer)
+    draw.text((50, 410), "AurvexAI Intelligent Trading System - Automated Weekly Analytics", fill=(255, 255, 255, 100), font=font_small)
+
+    # Byte stream olarak kaydet
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def generate_weekly_digest() -> str:
+    """Haftalık kâr/zarar performans raporunu oluşturur (Yazı sürümü)."""
+    try:
+        from database import get_conn
+        from datetime import datetime, timezone, timedelta
+        
+        # Son 7 günde kapatılan işlemleri UTC zamanına göre çek
+        seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT symbol, net_pnl, result, final_score 
+                FROM trades 
+                WHERE status = 'closed' AND close_time >= ?
+            """, (seven_days_ago,)).fetchall()
+            
+        if not rows:
+            return (
+                "📊 <b>AurvexAI Haftalık Özet Raporu</b>\n"
+                "──────────────────────\n"
+                "Son 7 günde kapatılan herhangi bir işlem bulunmuyor."
+            )
+            
+        total_trades = len(rows)
+        wins = [t for t in rows if (t[1] or 0.0) > 0]
+        losses = [t for t in rows if (t[1] or 0.0) <= 0]
+        win_rate = (len(wins) / total_trades * 100) if total_trades > 0 else 0.0
+        net_pnl = sum(float(t[1] or 0.0) for t in rows)
+        
+        # Coin bazlı performans
+        coin_pnls = {}
+        for t in rows:
+            sym = t[0]
+            coin_pnls[sym] = coin_pnls.get(sym, 0.0) + float(t[1] or 0.0)
+            
+        sorted_coins = sorted(coin_pnls.items(), key=lambda x: x[1])
+        best_coin, best_pnl = sorted_coins[-1] if sorted_coins else ("Yok", 0.0)
+        worst_coin, worst_pnl = sorted_coins[0] if sorted_coins else ("Yok", 0.0)
+        
+        # Yapay Zekâ ortalama skorları
+        win_scores = [t[3] for t in wins if t[3] is not None]
+        loss_scores = [t[3] for t in losses if t[3] is not None]
+        avg_win_score = sum(win_scores) / len(win_scores) if win_scores else 0.0
+        avg_loss_score = sum(loss_scores) / len(loss_scores) if loss_scores else 0.0
+        
+        emoji_pnl = "📈" if net_pnl >= 0 else "📉"
+        pnl_sign = "+" if net_pnl >= 0 else ""
+        
+        msg = (
+            f"📊 <b>AurvexAI Haftalık Performans Raporu</b>\n"
+            f"<i>Son 7 günlük karne</i>\n"
+            f"──────────────────────\n"
+            f"🔄 <b>Toplam İşlem</b>: {total_trades}\n"
+            f"🎯 <b>Başarı Oranı (Win Rate)</b>: %{win_rate:.1f} ({len(wins)}W / {len(losses)}L)\n"
+            f"{emoji_pnl} <b>Net Kâr/Zarar (PnL)</b>: {pnl_sign}${net_pnl:.2f}\n"
+            f"──────────────────────\n"
+            f"🏆 <b>En Kârlı Coin</b>: {best_coin.replace('USDT', '')} ({pnl_sign}${best_pnl:.2f})\n"
+            f"💀 <b>En Zararlı Coin</b>: {worst_coin.replace('USDT', '')} (${worst_pnl:.2f})\n"
+            f"──────────────────────\n"
+            f"🧠 <b>Yapay Zekâ Skorer Durumu</b>:\n"
+            f"  • Kazanan Sinyal Ort. Skoru: {avg_win_score:.1f}\n"
+            f"  • Kaybeden Sinyal Ort. Skoru: {avg_loss_score:.1f}\n"
+            f"──────────────────────\n"
+            f"<i>AurvexAI akıllı işlem motoru otomatik özet raporu.</i>"
+        )
+        return msg
+    except Exception as e:
+        logger.error(f"[Telegram] generate_weekly_digest hatası: {e}")
+        return f"⚠️ Haftalık rapor hazırlanırken hata oluştu: {e}"
+
+
+def send_weekly_digest() -> bool:
+    """Haftalık özet raporunu hazırlar ve Telegram grubuna gönderir (PNG kart öncelikli)."""
+    try:
+        from database import get_conn
+        from datetime import datetime, timezone, timedelta
+        
+        seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT symbol, net_pnl, result, final_score 
+                FROM trades 
+                WHERE status = 'closed' AND close_time >= ?
+            """, (seven_days_ago,)).fetchall()
+            
+        if not rows:
+            msg = (
+                "📊 <b>AurvexAI Haftalık Özet Raporu</b>\n"
+                "──────────────────────\n"
+                "Son 7 günde kapatılan herhangi bir işlem bulunmuyor."
+            )
+            send_message(msg)
+            return True
+            
+        total_trades = len(rows)
+        wins = [t for t in rows if (t[1] or 0.0) > 0]
+        losses = [t for t in rows if (t[1] or 0.0) <= 0]
+        win_rate = (len(wins) / total_trades * 100) if total_trades > 0 else 0.0
+        net_pnl = sum(float(t[1] or 0.0) for t in rows)
+        
+        coin_pnls = {}
+        for t in rows:
+            sym = t[0]
+            coin_pnls[sym] = coin_pnls.get(sym, 0.0) + float(t[1] or 0.0)
+            
+        sorted_coins = sorted(coin_pnls.items(), key=lambda x: x[1])
+        best_coin, best_pnl = sorted_coins[-1] if sorted_coins else ("Yok", 0.0)
+        worst_coin, worst_pnl = sorted_coins[0] if sorted_coins else ("Yok", 0.0)
+        
+        win_scores = [t[3] for t in wins if t[3] is not None]
+        loss_scores = [t[3] for t in losses if t[3] is not None]
+        avg_win_score = sum(win_scores) / len(win_scores) if win_scores else 0.0
+        avg_loss_score = sum(loss_scores) / len(loss_scores) if loss_scores else 0.0
+        
+        stats = {
+            "total_trades": total_trades,
+            "win_rate": win_rate,
+            "wins_count": len(wins),
+            "losses_count": len(losses),
+            "net_pnl": net_pnl,
+            "best_coin": best_coin,
+            "best_pnl": best_pnl,
+            "worst_coin": worst_coin,
+            "worst_pnl": worst_pnl,
+            "avg_win_score": avg_win_score,
+            "avg_loss_score": avg_loss_score,
+        }
+        
+        # PNG Görsel Rapor Oluşturmayı Dene
+        photo_bytes = None
+        try:
+            photo_bytes = generate_weekly_report_card(stats)
+        except Exception as e:
+            logger.warning("[Telegram] Görsel özet oluşturulamadı: %s", e)
+            
+        caption = (
+            "📊 <b>AurvexAI Haftalık Performans Raporu</b>\n"
+            f"<i>Son 7 günlük karne</i>\n"
+            "──────────────────────\n"
+            f"🔄 <b>Toplam İşlem</b>: {total_trades}\n"
+            f"🎯 <b>Başarı Oranı (Win Rate)</b>: %{win_rate:.1f} ({len(wins)}W / {len(losses)}L)\n"
+            f"📈 <b>Net Kâr/Zarar (PnL)</b>: {'+' if net_pnl >= 0 else ''}${net_pnl:.2f}\n"
+            "──────────────────────\n"
+            "<i>AurvexAI akıllı işlem motoru otomatik özet raporu.</i>"
+        )
+        
+        if photo_bytes:
+            _push_with_dedupe(caption, f"weekly_photo:{datetime.now().strftime('%Y%m%d%H%M')}", photo_bytes=photo_bytes)
+        else:
+            msg = generate_weekly_digest()
+            send_message(msg)
+        return True
+    except Exception as e:
+        logger.error(f"[Telegram] send_weekly_digest hatası: {e}")
+        return False

@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime, timezone
 
+import config
+
 logger = logging.getLogger("ax.trailing_engine")
 
 
@@ -302,15 +304,24 @@ class TrailingEngine:
             state.tp2_hit = True
             state.trailing_active = True  # TP2 sonrası trailing başlar
 
-            # ATR-bazlı trailing stop
-            if atr and atr > 0:
-                trail_distance = atr * self.trail_atr_mult
-                if side == "LONG":
-                    new_sl = max(state.current_sl, current_price - trail_distance)
-                else:
-                    new_sl = min(state.current_sl, current_price + trail_distance) if state.current_sl > 0 else current_price + trail_distance
+            from database import get_market_regime
+            trailing_type = "step" if get_market_regime() == "CHOPPY" else getattr(config, "TRAILING_STOP_TYPE", "atr")
+            if trailing_type == "step" and tp1 > 0:
+                new_sl = tp1
+                logger.info(
+                    "[Trailing] TP2 hit → Step-wise SL to TP1: #%s %s  SL=%.4f → %.4f",
+                    trade_id, symbol, state.current_sl, new_sl,
+                )
             else:
-                new_sl = state.current_sl
+                # ATR-bazlı trailing stop
+                if atr and atr > 0:
+                    trail_distance = atr * self.trail_atr_mult
+                    if side == "LONG":
+                        new_sl = max(state.current_sl, current_price - trail_distance)
+                    else:
+                        new_sl = min(state.current_sl, current_price + trail_distance) if state.current_sl > 0 else current_price + trail_distance
+                else:
+                    new_sl = state.current_sl
 
             state.current_sl = new_sl
             state.qty_remaining_pct -= self.tp2_close_pct
@@ -345,18 +356,44 @@ class TrailingEngine:
         # ── 6. Aktif Trailing Stop güncellemesi ──────────────────────
         if state.trailing_active and atr and atr > 0:
             trail_distance = atr * self.trail_atr_mult
-            if side == "LONG":
-                new_trail_sl = current_price - trail_distance
-                if new_trail_sl > state.current_sl:
-                    state.current_sl = new_trail_sl
-                    logger.debug(
-                        "[Trailing] SL güncellendi: #%s %.4f → %.4f",
-                        trade_id, active_sl, new_trail_sl,
-                    )
-            else:
-                new_trail_sl = current_price + trail_distance
-                if state.current_sl == 0 or new_trail_sl < state.current_sl:
-                    state.current_sl = new_trail_sl
+            from database import get_market_regime
+            trailing_type = "step" if get_market_regime() == "CHOPPY" else getattr(config, "TRAILING_STOP_TYPE", "atr")
+
+            if trailing_type == "step":
+                step_size = atr * 0.5
+                if side == "LONG":
+                    steps = int((current_price - state.current_sl - trail_distance) / step_size)
+                    if steps > 0:
+                        new_trail_sl = state.current_sl + steps * step_size
+                        if new_trail_sl > state.current_sl:
+                            state.current_sl = new_trail_sl
+                            logger.info(
+                                "[Trailing] Step-wise SL (LONG) updated: #%s %.4f → %.4f (steps=%d)",
+                                trade_id, active_sl, new_trail_sl, steps,
+                            )
+                else:  # SHORT
+                    steps = int((state.current_sl - current_price - trail_distance) / step_size)
+                    if steps > 0:
+                        new_trail_sl = state.current_sl - steps * step_size
+                        if state.current_sl == 0 or new_trail_sl < state.current_sl:
+                            state.current_sl = new_trail_sl
+                            logger.info(
+                                "[Trailing] Step-wise SL (SHORT) updated: #%s %.4f → %.4f (steps=%d)",
+                                trade_id, active_sl, new_trail_sl, steps,
+                            )
+            else:  # ATR-based trailing
+                if side == "LONG":
+                    new_trail_sl = current_price - trail_distance
+                    if new_trail_sl > state.current_sl:
+                        state.current_sl = new_trail_sl
+                        logger.debug(
+                            "[Trailing] SL güncellendi: #%s %.4f → %.4f",
+                            trade_id, active_sl, new_trail_sl,
+                        )
+                else:
+                    new_trail_sl = current_price + trail_distance
+                    if state.current_sl == 0 or new_trail_sl < state.current_sl:
+                        state.current_sl = new_trail_sl
 
         # ── 7. Runner SL vuruldu mu? (trailing devredeyken) ─────────
         if state.trailing_active and state.current_sl > 0:

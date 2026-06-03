@@ -178,6 +178,8 @@ class TradeData:
     setup_quality: str = ""
     final_score: float = 0.0
     metadata: Optional[dict[str, Any]] = None
+    slippage: float = 0.0
+    latency_ms: int = 0
 
 
 # ── Serialization helpers ──────────────────────────────────────────

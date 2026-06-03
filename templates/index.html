@@ -13,6 +13,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <!-- Custom Style Sheet -->
     <link rel="stylesheet" href="/static/css/hub.css">
+    <link rel="stylesheet" href="/static/css/spectra_chat.css">
 </head>
 <body>
     <div class="glass-bg-radial"></div>
@@ -55,6 +56,9 @@
             </button>
             <button class="tab-btn" onclick="switchTab('aibrain')">
                 <i class="fa-solid fa-brain"></i> AI Brain & Funnel
+            </button>
+            <button class="tab-btn" onclick="switchTab('backtest')">
+                <i class="fa-solid fa-flask"></i> Historical Backtest
             </button>
         </div>
 
@@ -110,6 +114,19 @@
                             </div>
                             <div class="chart-container">
                                 <canvas id="equityChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- PORTFOLIO HEATMAP -->
+                        <div class="glass-card heatmap-card" style="margin-top: 16px;">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-fire"></i> Portfolio Profitability Heatmap (Coin x UTC Hour)</h3>
+                                <div class="header-actions">
+                                    <span class="badge-flat" id="heatmapDaysText">30 Days</span>
+                                </div>
+                            </div>
+                            <div class="heatmap-wrapper" style="overflow-x: auto; padding: 16px 0;">
+                                <div id="pnlHeatmap" class="pnl-heatmap-grid"></div>
                             </div>
                         </div>
                     </div>
@@ -175,6 +192,48 @@
                                         <span class="slider-val" id="valDataThreshold">20.0</span>
                                     </div>
                                     <input type="range" min="10" max="100" value="20" step="0.5" class="premium-slider" id="sliderDataThreshold">
+                                </div>
+
+                                <!-- Capital & Risk Protection Controls -->
+                                <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 16px;">
+                                    <h4 style="color: #d4a843; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; font-weight: 700;">
+                                        <i class="fa-solid fa-shield-halved"></i> Capital & Risk Protection
+                                    </h4>
+                                    
+                                    <div class="control-group" style="margin-bottom: 12px;">
+                                        <label style="font-size: 11px; color: #9ca3af;">MTF Trend Alignment</label>
+                                        <div class="toggle-switch">
+                                            <button type="button" class="toggle-btn active" id="btnMtfFalse">Disabled</button>
+                                            <button type="button" class="toggle-btn" id="btnMtfTrue">Enabled</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="control-group" style="margin-bottom: 12px;">
+                                        <label style="font-size: 11px; color: #9ca3af;">Equity Curve Filter</label>
+                                        <div class="toggle-switch">
+                                            <button type="button" class="toggle-btn" id="btnEquityCurveFalse">Disabled</button>
+                                            <button type="button" class="toggle-btn active" id="btnEquityCurveTrue">Enabled</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="control-group" style="margin-bottom: 12px;">
+                                        <label style="font-size: 11px; color: #9ca3af;">Auto Compounding</label>
+                                        <div class="toggle-switch">
+                                            <button type="button" class="toggle-btn" id="btnCompoundingFalse">Disabled</button>
+                                            <button type="button" class="toggle-btn active" id="btnCompoundingTrue">Enabled</button>
+                                        </div>
+                                    </div>
+
+                                    <div style="display: flex; gap: 10px; margin-top: 12px;">
+                                        <div style="flex: 1;">
+                                            <label style="font-size: 10px; color: #9ca3af; display: block; margin-bottom: 4px;">Defensive DD%</label>
+                                            <input type="number" min="1" max="20" step="0.5" value="5.0" id="inputDrawdownDefensive" style="width: 100%; height: 32px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: #fff; border-radius: 6px; padding: 0 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px;">
+                                        </div>
+                                        <div style="flex: 1;">
+                                            <label style="font-size: 10px; color: #9ca3af; display: block; margin-bottom: 4px;">Lockout DD%</label>
+                                            <input type="number" min="1" max="25" step="0.5" value="10.0" id="inputDrawdownLock" style="width: 100%; height: 32px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: #fff; border-radius: 6px; padding: 0 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px;">
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -327,6 +386,47 @@
                         </div>
                     </div>
 
+                    <!-- Center: AI Scorer & Explainability -->
+                    <div class="aibrain-center" style="display: flex; flex-direction: column; gap: 16px; height: 100%;">
+                        <div class="glass-card ml-status-card" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-brain"></i> AI Scorer & Feature Weights</h3>
+                            </div>
+                            <div style="flex: 1; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; padding: 16px;">
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                    <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-glass); border-radius: 8px; padding: 8px; text-align: center;">
+                                        <div style="font-size: 8px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 2px;">CV ROC-AUC</div>
+                                        <div id="mlAccuracy" style="font-size: 14px; font-weight: bold; color: var(--color-green);" class="font-mono">N/A</div>
+                                    </div>
+                                    <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-glass); border-radius: 8px; padding: 8px; text-align: center;">
+                                        <div style="font-size: 8px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 2px;">Precision @ >=70</div>
+                                        <div id="mlPrecision" style="font-size: 14px; font-weight: bold; color: var(--color-blue);" class="font-mono">N/A</div>
+                                    </div>
+                                </div>
+                                <div style="font-size: 10px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 6px; background: rgba(255,255,255,0.01); border: 1px solid var(--border-glass); border-radius: 8px; padding: 10px;">
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span>Model Status:</span>
+                                        <strong id="mlStatusText" style="color: var(--color-gold);">Untrained</strong>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span>Dataset Size:</span>
+                                        <strong id="mlSamples" class="font-mono">0 trades</strong>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span>Last Training:</span>
+                                        <strong id="mlLastTrain" class="font-mono">N/A</strong>
+                                    </div>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 8px; flex-grow: 1;">
+                                    <h4 style="font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em;">Feature Weight Distribution</h4>
+                                    <div id="mlFeatureImportance" style="display: flex; flex-direction: column; gap: 6px; flex-grow: 1;">
+                                        <span style="font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 10px;">No weights loaded yet.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Right: Ghost Learning Insights -->
                     <div class="aibrain-right">
                         <div class="glass-card ghost-stats-card" style="height: 100%; display: flex; flex-direction: column;">
@@ -360,11 +460,128 @@
                 </div>
             </div>
 
+            <!-- TAB 4: HISTORICAL BACKTEST -->
+            <div id="tab-backtest" class="tab-content">
+                <div class="backtest-layout" style="display: flex; gap: 16px; height: 100%;">
+                    <!-- Left: Control Panel -->
+                    <div class="backtest-left" style="flex: 1; display: flex; flex-direction: column; gap: 16px;">
+                        <div class="glass-card">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-sliders"></i> Backtest Parameters</h3>
+                            </div>
+                            <div class="control-form" style="padding: 16px;">
+                                <div class="control-group" style="margin-bottom: 12px;">
+                                    <label>Symbols (USDT perps, comma separated)</label>
+                                    <input type="text" id="btSymbols" class="premium-input" style="width: 100%; height: 36px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #ffffff; padding: 0 12px; font-family: sans-serif; font-size: 12px; margin-top: 4px;" value="BTCUSDT,ETHUSDT,SOLUSDT">
+                                </div>
+                                <div class="control-group" style="margin-bottom: 12px; display: flex; gap: 12px;">
+                                    <div style="flex: 1;">
+                                        <label>Simulated Days</label>
+                                        <input type="number" id="btDays" class="premium-input" style="width: 100%; height: 36px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #ffffff; padding: 0 12px; font-family: sans-serif; font-size: 12px; margin-top: 4px;" value="3" min="1" max="90">
+                                    </div>
+                                    <div style="flex: 1;">
+                                        <label>Initial Balance ($)</label>
+                                        <input type="number" id="btBalance" class="premium-input" style="width: 100%; height: 36px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #ffffff; padding: 0 12px; font-family: sans-serif; font-size: 12px; margin-top: 4px;" value="2000" min="100">
+                                    </div>
+                                </div>
+                                <div class="control-group" style="margin-bottom: 16px;">
+                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                        <input type="checkbox" id="btOffline" checked style="accent-color: #ffd600;"> Use Offline Synthetic Data (Instant)
+                                    </label>
+                                </div>
+                                <button type="button" id="btnRunBacktest" style="width: 100%; height: 40px; background: linear-gradient(135deg, #00e676, #00b0ff); border: none; color: #121212; border-radius: 8px; font-family: sans-serif; font-size: 12px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s;">
+                                    <i class="fa-solid fa-play"></i> Run Historical Backtest
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Progress Card -->
+                        <div class="glass-card" id="btProgressCard" style="display: none; padding: 16px;">
+                            <div class="card-header" style="padding: 0 0 12px 0;">
+                                <h3><i class="fa-solid fa-spinner fa-spin"></i> Simulation Progress</h3>
+                            </div>
+                            <div style="width: 100%; background: rgba(255,255,255,0.05); height: 12px; border-radius: 6px; overflow: hidden; position: relative;">
+                                <div id="btProgressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #ffd600, #00e676); transition: width 0.1s;"></div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; font-size: 10px; color: #888888; margin-top: 6px;">
+                                <span id="btProgressPct">0%</span>
+                                <span id="btProgressStatus">Preparing environment...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Results Card -->
+                    <div class="backtest-right" style="flex: 2; display: flex; flex-direction: column; overflow: hidden;" id="btResultsCard">
+                        <div class="glass-card" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                            <div class="card-header">
+                                <h3><i class="fa-solid fa-chart-line"></i> Simulation Results</h3>
+                            </div>
+                            <div style="flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px;" id="btResultsContainer">
+                                <div style="display: flex; justify-content: center; align-items: center; height: 100%; color: #888888; flex-direction: column; gap: 12px;">
+                                    <i class="fa-solid fa-flask" style="font-size: 40px; color: rgba(255,255,255,0.05);"></i>
+                                    <span>No simulation run loaded. Click "Run Historical Backtest" on the left to start.</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </main>
         
     </div>
 
     <!-- JS Source -->
     <script src="/static/js/hub.js"></script>
+    <script src="/static/js/spectra_chat.js"></script>
+
+    <!-- Spektra AI CEO Live Chat Widget -->
+    <div class="spectra-chat-btn" id="spectraChatBtn">
+        <i class="fa-solid fa-robot"></i>
+    </div>
+
+    <div class="spectra-chat-container" id="spectraChatContainer">
+        <div class="spectra-chat-header">
+            <div class="spectra-chat-title-group">
+                <div class="spectra-chat-avatar">
+                    <i class="fa-solid fa-user-tie"></i>
+                </div>
+                <div class="spectra-chat-info">
+                    <span class="spectra-chat-name">Spektra</span>
+                    <div class="spectra-chat-status">
+                        <span class="spectra-chat-status-dot"></span>
+                        <span>AI CEO // ONLINE</span>
+                    </div>
+                </div>
+            </div>
+            <button class="spectra-chat-close" id="spectraChatClose">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <div class="spectra-chat-messages" id="spectraChatMessages">
+            <div class="spectra-msg-row spectra">
+                <div class="spectra-msg-bubble">
+                    Merhaba Boss! Aurvex AI Trade Engine sistemini yakından izliyorum. Bir isteğiniz veya analiz etmemi istediğiniz bir durum var mı?
+                </div>
+                <div class="spectra-msg-meta">Spektra</div>
+            </div>
+        </div>
+
+        <div class="spectra-chat-input-area">
+            <div class="spectra-chat-input-row">
+                <input type="text" class="spectra-chat-input" id="spectraChatInput" placeholder="Mesajınızı yazın, boss..." autocomplete="off">
+                <button class="spectra-chat-send" id="spectraChatSend">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+            <div class="spectra-chat-controls">
+                <label class="spectra-autoplay-toggle">
+                    <input type="checkbox" id="spectraAutoplay" checked>
+                    <span>Sesli yanıtları otomatik oynat</span>
+                </label>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

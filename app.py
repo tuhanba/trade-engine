@@ -358,8 +358,83 @@ def api_balance():
             "usdt_available": round(details.get("available", paper_balance), 4),
             "execution_mode": details.get("execution_mode", "paper"),
         }})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    except Exception as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/balance_ledger")
+def api_balance_ledger():
+    """Retrieve chronological balance ledger entries."""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, trade_id, symbol, event_type, amount, balance_before, balance_after, created_at "
+                "FROM balance_ledger ORDER BY id ASC"
+            ).fetchall()
+            ledger_data = [dict(row) for row in rows]
+        return _ok(ledger_data)
+    except Exception as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/settings/update", methods=["POST"])
+def api_settings_update():
+    """Dynamically updates system settings in system_state or params table."""
+    try:
+        from flask import request
+        req = request.get_json()
+        if not req:
+            return _error("JSON gövdesi boş")
+        
+        key = req.get("key")
+        val = req.get("value")
+        
+        if not key:
+            return _error("key eksik")
+            
+        from config import _DYNAMIC_PARAMS_MAP, _AI_PARAMS_MAP
+        db_updated = False
+        
+        if key in _DYNAMIC_PARAMS_MAP:
+            db_key, cast_fn = _DYNAMIC_PARAMS_MAP[key]
+            with get_conn() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO system_state (key, value) VALUES (?, ?)",
+                    (db_key, str(val))
+                )
+                conn.commit()
+            db_updated = True
+            
+        elif key in _AI_PARAMS_MAP:
+            db_col, cast_fn = _AI_PARAMS_MAP[key]
+            with get_conn() as conn:
+                row = conn.execute("SELECT id FROM params ORDER BY id DESC LIMIT 1").fetchone()
+                if row:
+                    param_id = row[0]
+                    conn.execute(
+                        f"UPDATE params SET {db_col} = ? WHERE id = ?",
+                        (val, param_id)
+                    )
+                    conn.commit()
+                    db_updated = True
+        else:
+            with get_conn() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO system_state (key, value) VALUES (?, ?)",
+                    (key, str(val))
+                )
+                conn.commit()
+            db_updated = True
+            
+        if db_updated:
+            logger.info(f"[API Settings] Successfully updated config {key} to {val}")
+            return _ok({"key": key, "value": val, "status": "updated"})
+        else:
+            return _error(f"Ayar güncellenemedi: {key}")
+            
+    except Exception as exc:
+        logger.error(f"[API Settings] Update error: {exc}", exc_info=True)
+        return _error(str(exc))
 
 
 # ── /api/config/update ────────────────────────────────────────────────────────
@@ -432,6 +507,11 @@ def api_params():
             "execution_mode":     getattr(config, "EXECUTION_MODE", "paper"),
             "human_mode":         getattr(config, "HUMAN_MODE", False),
             "adx_min":            getattr(config, "ADX_MIN_THRESHOLD", 18),
+            "drawdown_defensive_pct":      getattr(config, "DRAWDOWN_DEFENSIVE_PCT", 5.0),
+            "drawdown_lock_pct":           getattr(config, "DRAWDOWN_LOCK_PCT", 10.0),
+            "equity_curve_filter_enabled": getattr(config, "EQUITY_CURVE_FILTER_ENABLED", True),
+            "mtf_trend_align_enabled":     getattr(config, "MTF_TREND_ALIGN_ENABLED", True),
+            "auto_compounding":            getattr(config, "AUTO_COMPOUNDING", True),
             "version":            "v6.0",
         }})
     except Exception as e:
@@ -652,6 +732,29 @@ def api_weekly():
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── /api/pnl_heatmap ─────────────────────────────────────────────────────────
+@app.route("/api/pnl_heatmap")
+def api_pnl_heatmap():
+    try:
+        days = int(request.args.get("days", 30))
+        with get_conn() as conn:
+            rows = conn.execute("""
+                SELECT symbol,
+                       strftime('%H', close_time) AS hour,
+                       SUM(net_pnl) AS total_pnl,
+                       COUNT(*) AS trade_count
+                FROM trades
+                WHERE LOWER(status) = 'closed' AND close_time >= datetime('now', ?)
+                GROUP BY symbol, hour
+            """, (f"-{days} days",)).fetchall()
+        
+        data = [dict(r) for r in rows]
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 # ── /api/ax_status ────────────────────────────────────────────────────────────
@@ -1208,13 +1311,18 @@ def api_equity_curve():
 
         cum_pnl = 0.0
         points = []
+        peak = initial_balance
         for row in daily:
             cum_pnl += float(row[1] or 0)
+            current_bal = initial_balance + cum_pnl
+            peak = max(peak, current_bal)
+            drawdown = ((peak - current_bal) / peak) * 100.0 if peak > 0 else 0.0
             points.append({
                 "day":     row[0],
                 "pnl":     round(float(row[1] or 0), 4),
                 "cum_pnl": round(cum_pnl, 4),
-                "balance": round(initial_balance + cum_pnl, 4),
+                "balance": round(current_bal, 4),
+                "drawdown": round(drawdown, 2),
             })
 
         return jsonify({
@@ -1228,6 +1336,362 @@ def api_equity_curve():
     except Exception as e:
         logger.error(f"[API] /api/equity-curve hatasi: {e}")
         return jsonify({"ok": True, "points": [], "total_pnl": 0, "error": str(e)})
+
+
+# ── Backtest Manager ────────────────────────────────────────────────────────
+import threading
+from scripts.backtest_system import BacktestRunner
+
+# Global state for backtester
+backtest_state = {
+    "status": "idle",       # idle, running, completed, failed
+    "progress": 0.0,
+    "funnel_stats": {},
+    "error": None,
+    "results": None
+}
+backtest_thread = None
+
+def _run_backtest_thread(symbols_list, days, balance, offline):
+    global backtest_state
+    try:
+        from datetime import datetime, timezone, timedelta
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=days)
+        start_time = start_time.replace(second=0, microsecond=0)
+        end_time = end_time.replace(second=0, microsecond=0)
+        
+        def progress_callback(progress, funnel_stats, status):
+            global backtest_state
+            backtest_state["progress"] = progress
+            backtest_state["funnel_stats"] = funnel_stats
+            if status:
+                backtest_state["status"] = "completed" if status == "completed" else "running"
+
+        # Create runner
+        runner = BacktestRunner(
+            symbols=symbols_list,
+            start_time=start_time,
+            end_time=end_time,
+            initial_balance=balance,
+            offline=offline,
+            progress_cb=progress_callback
+        )
+        
+        backtest_state["status"] = "running"
+        backtest_state["progress"] = 0.0
+        backtest_state["funnel_stats"] = {}
+        backtest_state["error"] = None
+        backtest_state["results"] = None
+        
+        # Execute run
+        runner.run()
+        
+        # Generate report & get results
+        import uuid
+        temp_report = f"backtest_report_{uuid.uuid4().hex[:8]}.md"
+        results = runner.generate_report(temp_report)
+        
+        # Cleanup temp report file
+        if os.path.exists(temp_report):
+            try:
+                os.remove(temp_report)
+            except Exception:
+                pass
+                
+        backtest_state["results"] = results
+        backtest_state["status"] = "completed"
+        backtest_state["progress"] = 100.0
+    except Exception as e:
+        logger.exception("Backtest background thread crash:")
+        backtest_state["status"] = "failed"
+        backtest_state["error"] = str(e)
+
+@app.route("/api/backtest/run", methods=["POST"])
+def api_backtest_run():
+    global backtest_thread, backtest_state
+    if backtest_state["status"] == "running":
+        return jsonify({"ok": False, "error": "A backtest is already running."}), 400
+        
+    try:
+        req = request.json or {}
+        symbols_str = req.get("symbols", "BTCUSDT,ETHUSDT,SOLUSDT")
+        days = int(req.get("days", 3))
+        balance = float(req.get("balance", 2000.0))
+        offline = bool(req.get("offline", True))
+        
+        symbols_list = [s.strip().upper() for s in symbols_str.split(",") if s.strip()]
+        if not symbols_list:
+            return jsonify({"ok": False, "error": "No symbols provided."}), 400
+            
+        # Reset state and start thread
+        backtest_state = {
+            "status": "running",
+            "progress": 0.0,
+            "funnel_stats": {},
+            "error": None,
+            "results": None
+        }
+        
+        backtest_thread = threading.Thread(
+            target=_run_backtest_thread,
+            args=(symbols_list, days, balance, offline),
+            daemon=True
+        )
+        backtest_thread.start()
+        
+        return jsonify({"ok": True, "message": "Backtest started successfully."})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/backtest/status")
+def api_backtest_status():
+    global backtest_state
+    return jsonify({"ok": True, "state": backtest_state})
+
+
+# ── Telemetry & Export Endpoints ────────────────────────────────────
+@app.route("/api/telemetry/export")
+def api_telemetry_export():
+    """Download historical trade data as CSV."""
+    try:
+        check_access()
+        import csv
+        import io
+        
+        conn = get_conn()
+        cursor = conn.execute("SELECT * FROM trades ORDER BY id DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        dest = io.StringIO()
+        writer = csv.writer(dest)
+        if rows:
+            writer.writerow(rows[0].keys())
+            for row in rows:
+                writer.writerow(list(row))
+                
+        response = Response(dest.getvalue(), mimetype="text/csv")
+        response.headers["Content-Disposition"] = "attachment; filename=aurvex_trade_telemetry.csv"
+        return response
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/telemetry/report")
+def api_telemetry_report():
+    """Print-friendly premium HTML performance report card."""
+    try:
+        check_access()
+        stats = dashboard_service.get_stats()
+        closed_trades = get_closed_trades(limit=50, valid_only=False)
+        
+        # HTML Template string for the report card
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Aurvex AI Telemetry Performance Report</title>
+    <style>
+        body {{
+            background-color: #0c0b11;
+            color: #e2e8f0;
+            font-family: 'Outfit', 'Inter', -apple-system, sans-serif;
+            margin: 0;
+            padding: 40px;
+        }}
+        .container {{
+            max-width: 1000px;
+            margin: 0 auto;
+            border: 1px solid rgba(212, 168, 67, 0.3);
+            border-radius: 12px;
+            padding: 40px;
+            background: linear-gradient(135deg, #120a23 0%, #0a1637 100%);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }}
+        h1 {{
+            color: #d4a843;
+            margin-top: 0;
+            font-size: 32px;
+            letter-spacing: 1px;
+        }}
+        h2 {{
+            color: rgba(255,255,255,0.85);
+            font-size: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 10px;
+            margin-top: 30px;
+        }}
+        .metrics-grid {{
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-top: 20px;
+        }}
+        .metric-card {{
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }}
+        .metric-title {{
+            font-size: 12px;
+            color: rgba(212, 168, 67, 0.7);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        .metric-value {{
+            font-size: 28px;
+            font-weight: bold;
+            margin-top: 8px;
+        }}
+        .text-green {{ color: #00e676; }}
+        .text-red {{ color: #ef4444; }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }}
+        th, td {{
+            text-align: left;
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }}
+        th {{
+            background-color: rgba(255,255,255,0.05);
+            color: rgba(212, 168, 67, 0.9);
+            font-size: 13px;
+            text-transform: uppercase;
+        }}
+        tr:hover {{
+            background-color: rgba(255,255,255,0.02);
+        }}
+        .print-btn {{
+            background-color: #d4a843;
+            color: #0c0b11;
+            border: none;
+            padding: 10px 20px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            float: right;
+        }}
+        @media print {{
+            body {{ background: white; color: black; padding: 0; }}
+            .container {{ border: none; box-shadow: none; background: none; padding: 0; }}
+            .print-btn {{ display: none; }}
+            th {{ background: #eee; color: black; }}
+            td {{ border-bottom: 1px solid #ddd; }}
+            .metric-card {{ border: 1px solid #ccc; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <button class="print-btn" onclick="window.print()">Print Report</button>
+        <h1>AURVEX AI</h1>
+        <p>Intelligent Trading System · Weekly & Historical Digest Report</p>
+        
+        <h2>Performance Summary</h2>
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-title">Total Trades</div>
+                <div class="metric-value">{stats.get('total_trades', 0)}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Win Rate</div>
+                <div class="metric-value text-green">{stats.get('win_rate', 0.0):.1f}%</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Net Cumulative PnL</div>
+                <div class="metric-value { 'text-green' if stats.get('total_pnl', 0.0) >= 0 else 'text-red' }">
+                    { '+' if stats.get('total_pnl', 0.0) >= 0 else '' }{stats.get('total_pnl', 0.0):.2f}$
+                </div>
+            </div>
+        </div>
+
+        <h2>Recent Closed Positions</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Direction</th>
+                    <th>Entry Price</th>
+                    <th>Exit Price</th>
+                    <th>Net PnL ($)</th>
+                    <th>Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        for t in closed_trades:
+            pnl = float(t.get("net_pnl") or 0.0)
+            pnl_class = "text-green" if pnl >= 0 else "text-red"
+            pnl_sign = "+" if pnl >= 0 else ""
+            
+            html += f"""
+                <tr>
+                    <td><b>{t.get('symbol')}</b></td>
+                    <td>{t.get('direction')}</td>
+                    <td>{t.get('entry_price', 0.0):.4f}</td>
+                    <td>{t.get('close_price', 0.0):.4f}</td>
+                    <td class="{pnl_class}">{pnl_sign}{pnl:.2f}$</td>
+                    <td>{t.get('close_reason')}</td>
+                </tr>
+            """
+            
+        html += """
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
+        """
+        return Response(html, mimetype="text/html")
+    except Exception as e:
+        return Response(f"Error rendering report: {str(e)}", status=500)
+
+
+@app.route("/api/spectra/chat", methods=["POST"])
+def api_spectra_chat():
+    """Endpoint to chat with Spectra CEO from Web dashboard."""
+    try:
+        body = request.json or {}
+        user_message = body.get("message", "").strip()
+        if not user_message:
+            return jsonify({"ok": False, "error": "Mesaj bos olamaz."}), 400
+
+        from core.spectra_ceo import SpectraCeo
+        import base64
+        import re
+        
+        ceo = SpectraCeo()
+        reply = ceo.evaluate_and_decide(user_message, send_telegram=False)
+        
+        # Strip json block to get clean text for voice
+        clean_reply = re.sub(r"```json\s*\{.*?\}\s*```", "", reply, flags=re.DOTALL).strip()
+        clean_reply = re.sub(r"\{[\s\S]*?\}", "", clean_reply).strip()
+        
+        voice_base64 = None
+        try:
+            # Only voice the main textual reply part, split before configurations list if any
+            voice_text = clean_reply
+            if "⚙️" in voice_text:
+                voice_text = voice_text.split("⚙️")[0].strip()
+            voice_bytes = ceo.generate_voice_from_text(voice_text)
+            if voice_bytes:
+                voice_base64 = base64.b64encode(voice_bytes).decode("utf-8")
+        except Exception as ve:
+            logger.error(f"Failed to generate UI voice: {ve}")
+
+        return jsonify({
+            "ok": True,
+            "reply": reply,
+            "voice": voice_base64
+        })
+    except Exception as exc:
+        logger.error(f"Spectra UI Chat error: {exc}")
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 # ── Server başlatma ─────────────────────────────────────────────────

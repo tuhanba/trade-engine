@@ -1,0 +1,346 @@
+/* static/css/spectra_chat.css — Spectra Live Chat Widget Styles */
+
+/* Floating chat button */
+.spectra-chat-btn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #a855f7 0%, #3b82f6 100%);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.spectra-chat-btn:hover {
+    transform: scale(1.1) rotate(5deg);
+    box-shadow: 0 0 30px rgba(168, 85, 247, 0.6);
+}
+
+.spectra-chat-btn i {
+    color: #ffffff;
+    font-size: 26px;
+}
+
+/* Chat container drawer */
+.spectra-chat-container {
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
+    width: 380px;
+    height: 520px;
+    background: rgba(15, 10, 30, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: translateY(20px) scale(0.95);
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.spectra-chat-container.active {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    pointer-events: all;
+}
+
+/* Header styling */
+.spectra-chat-header {
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.spectra-chat-title-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.spectra-chat-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #a855f7 0%, #3b82f6 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.spectra-chat-avatar i {
+    color: #ffffff;
+    font-size: 18px;
+}
+
+.spectra-chat-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.spectra-chat-name {
+    font-weight: 600;
+    font-size: 15px;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+.spectra-chat-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #a855f7;
+    font-weight: 500;
+}
+
+.spectra-chat-status-dot {
+    width: 6px;
+    height: 6px;
+    background-color: #10b981;
+    border-radius: 50%;
+    box-shadow: 0 0 8px #10b981;
+    animation: spectra-pulse 2s infinite;
+}
+
+.spectra-chat-close {
+    background: transparent;
+    border: none;
+    color: #888888;
+    cursor: pointer;
+    font-size: 16px;
+    transition: color 0.2s;
+    padding: 4px;
+}
+
+.spectra-chat-close:hover {
+    color: #ffffff;
+}
+
+/* Chat body / messages list */
+.spectra-chat-messages {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Custom scrollbar for message list */
+.spectra-chat-messages::-webkit-scrollbar {
+    width: 5px;
+}
+.spectra-chat-messages::-webkit-scrollbar-track {
+    background: transparent;
+}
+.spectra-chat-messages::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+
+/* Message bubbles */
+.spectra-msg-row {
+    display: flex;
+    flex-direction: column;
+    max-width: 85%;
+}
+
+.spectra-msg-row.user {
+    align-self: flex-end;
+}
+
+.spectra-msg-row.spectra {
+    align-self: flex-start;
+}
+
+.spectra-msg-bubble {
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.spectra-msg-row.user .spectra-msg-bubble {
+    background: rgba(255, 255, 255, 0.08);
+    color: #f1f5f9;
+    border-bottom-right-radius: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.spectra-msg-row.spectra .spectra-msg-bubble {
+    background: rgba(168, 85, 247, 0.15);
+    color: #f3e8ff;
+    border-bottom-left-radius: 2px;
+    border: 1px solid rgba(168, 85, 247, 0.2);
+}
+
+.spectra-msg-meta {
+    font-size: 10px;
+    color: #64748b;
+    margin-top: 4px;
+    padding: 0 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.spectra-msg-row.user .spectra-msg-meta {
+    align-self: flex-end;
+}
+
+.spectra-msg-row.spectra .spectra-msg-meta {
+    align-self: flex-start;
+}
+
+/* Voice play button in Spectra bubble */
+.spectra-voice-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    color: #e9d5ff;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 10px;
+    transition: all 0.2s;
+    margin-left: 2px;
+}
+
+.spectra-voice-btn:hover {
+    background: rgba(168, 85, 247, 0.4);
+    transform: scale(1.1);
+}
+
+/* Typing indicator */
+.spectra-typing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 12px;
+}
+
+.spectra-typing span {
+    width: 6px;
+    height: 6px;
+    background-color: #a855f7;
+    border-radius: 50%;
+    animation: spectra-typing-bounce 1.4s infinite ease-in-out both;
+}
+
+.spectra-typing span:nth-child(1) { animation-delay: -0.32s; }
+.spectra-typing span:nth-child(2) { animation-delay: -0.16s; }
+
+/* Input area styling */
+.spectra-chat-input-area {
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.spectra-chat-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.spectra-chat-input {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    padding: 8px 16px;
+    color: #ffffff;
+    font-size: 13.5px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.spectra-chat-input:focus {
+    border-color: rgba(168, 85, 247, 0.5);
+}
+
+.spectra-chat-send {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #a855f7 0%, #3b82f6 100%);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.spectra-chat-send:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+}
+
+.spectra-chat-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 4px;
+    font-size: 11px;
+    color: #64748b;
+}
+
+.spectra-autoplay-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.spectra-autoplay-toggle input {
+    cursor: pointer;
+    accent-color: #a855f7;
+}
+
+/* Animations */
+@keyframes spectra-pulse {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+@keyframes spectra-typing-bounce {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1.0); }
+}
+
+@keyframes spectra-fade-in {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.spectra-animate-msg {
+    animation: spectra-fade-in 0.3s ease forwards;
+}
