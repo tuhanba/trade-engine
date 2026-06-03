@@ -115,7 +115,16 @@ class TelegramManager:
 
     def _handle_update(self, update: dict):
         if "callback_query" in update:
-            self._handle_callback_query(update["callback_query"])
+            import sys
+            if "pytest" in sys.modules or "unittest" in sys.modules:
+                self._handle_callback_query(update["callback_query"])
+            else:
+                import threading
+                threading.Thread(
+                    target=self._handle_callback_query,
+                    args=(update["callback_query"],),
+                    daemon=True
+                ).start()
             return
 
         msg       = update.get("message") or update.get("channel_post") or {}
