@@ -372,6 +372,25 @@ def calculate_kelly_risk_pct(symbol: str, setup_rr: float, base_risk_pct: float)
         return base_risk_pct
 
 
+def get_coin_sector(symbol: str) -> str:
+    """Helper to map a symbol's base asset to its coin sector/narrative category."""
+    base_asset = symbol.upper().replace("USDT", "").replace("BUSD", "")
+    sectors = {
+        # Layer 1
+        "BTC": "L1", "ETH": "L1", "SOL": "L1", "BNB": "L1", "ADA": "L1", "DOT": "L1", "AVAX": "L1", 
+        "NEAR": "L1", "ATOM": "L1", "LINK": "L1", "FTM": "L1", "MATIC": "L1", "TRX": "L1", "SUI": "L1", "SEI": "L1",
+        # Memes
+        "DOGE": "MEME", "SHIB": "MEME", "PEPE": "MEME", "FLOKI": "MEME", "BONK": "MEME", "WIF": "MEME", "BOME": "MEME",
+        # AI
+        "FET": "AI", "AGIX": "AI", "OCEAN": "AI", "RNDR": "AI", "WLD": "AI", "GRT": "AI", "LPT": "AI", "TAO": "AI", "AKT": "AI",
+        # DeFi
+        "UNI": "DEFI", "CAKE": "DEFI", "AAVE": "DEFI", "MKR": "DEFI", "COMP": "DEFI", "CRV": "DEFI", "DYDX": "DEFI", "RUNE": "DEFI", "JUP": "DEFI",
+        # Layer 2
+        "ARB": "L2", "OP": "L2", "METIS": "L2", "MNT": "L2",
+    }
+    return sectors.get(base_asset, "OTHER")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # RiskEngine CLASS — scalp_bot line 49: from core.risk_engine import RiskEngine
 # ─────────────────────────────────────────────────────────────────────────────
@@ -406,6 +425,27 @@ class RiskEngine:
 
             if symbol in {t.get("symbol") for t in open_trades}:
                 return {"valid": False, "score": 0, "risk_reject_reason": "duplicate_symbol"}
+
+            # Boss Cooldown Gate
+            cooldown_until_str = database.get_system_state("spectra_boss_cooldown_until")
+            if cooldown_until_str and cooldown_until_str != "-":
+                try:
+                    from datetime import datetime, timezone
+                    cooldown_dt = datetime.fromisoformat(cooldown_until_str)
+                    if datetime.now(timezone.utc) < cooldown_dt:
+                        return {"valid": False, "score": 0, "risk_reject_reason": "spectra_boss_cooldown"}
+                except Exception:
+                    pass
+
+            # Sector Guard (Maximum 2 open trades per sector)
+            current_sector = get_coin_sector(symbol)
+            if current_sector != "OTHER":
+                same_sector_count = 0
+                for t in open_trades:
+                    if get_coin_sector(t.get("symbol", "")) == current_sector:
+                        same_sector_count += 1
+                if same_sector_count >= 2:
+                    return {"valid": False, "score": 0, "risk_reject_reason": f"sector_limit_reached_{current_sector}"}
 
             is_paper = getattr(config, "EXECUTION_MODE", "paper") == "paper"
             if not is_paper and not check_daily_loss_limit(balance, "live"):

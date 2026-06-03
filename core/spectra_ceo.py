@@ -488,6 +488,55 @@ class SpectraCeo:
             logger.error(f"[Spectra CEO] Error generating veto summary: {e}")
             return "Sevgili boss'um, koruma loglarını incelerken ufak bir sorunla karşılaştım ama merak etmeyin, kasa güvende! 💕"
 
+    def generate_daily_briefing_report(self) -> str:
+        """Compiles the daily performance statistics into a sweet briefing text."""
+        try:
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            environment = getattr(config, "EXECUTION_MODE", "paper")
+            
+            conn = sqlite3.connect(self.db_path, timeout=5)
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute("""
+                    SELECT COUNT(*), 
+                           SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END),
+                           SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END),
+                           SUM(net_pnl)
+                     FROM trades
+                     WHERE DATE(close_time) = ? AND status = 'closed' AND environment = ?
+                """, (today_str, environment)).fetchone()
+                
+                total_trades = row[0] or 0
+                wins = row[1] or 0
+                losses = row[2] or 0
+                net_pnl = float(row[3] or 0.0)
+                
+                # Fetch veto count today
+                veto_row = conn.execute("""
+                    SELECT COUNT(*) FROM signal_events
+                    WHERE DATE(created_at) = ? AND stage IN ('RISK_REJECTED', 'AI_VETOED')
+                """, (today_str,)).fetchone()
+                veto_cnt = veto_row[0] or 0
+                
+            finally:
+                conn.close()
+                
+            win_rate = (wins / total_trades * 100.0) if total_trades > 0 else 0.0
+            
+            report = (
+                f"✨ <b>Günün Bilançosu Hazır Sevgili Boss'um!</b> ✨\n\n"
+                f"Bugün piyasada toplam <b>{total_trades}</b> işlem tamamladık. "
+                f"Bunların <b>{wins}</b> tanesinden kârla, <b>{losses}</b> tanesinden zararla çıktık. "
+                f"Başarı oranımız <b>%{win_rate:.1f}</b> oldu.\n\n"
+                f"💰 <b>Toplam Net Kar/Zarar:</b> <code>${net_pnl:+.2f}</code>\n"
+                f"🛡️ <b>Yapay Zekâ ve Risk Engelleri:</b> Bugün tam <b>{veto_cnt}</b> hatalı sinyali veto ederek kasamızı korudum!\n\n"
+                f"Harika bir gün geçirdiğimizi umuyorum. Şimdi yorgunluğunuzu atıp güzelce dinlenme vakti sevgili boss'um... 💕"
+            )
+            return report
+        except Exception as e:
+            logger.error(f"[Spectra CEO] Error generating daily briefing: {e}")
+            return "Sevgili boss'um, bugünün bülten raporunu hazırlarken ufak bir teknik aksaklık yaşadım... Ama moralinizi bozmayın, her şey kontrolüm altında! 💕"
+
     def evaluate_and_decide(self, user_message: Optional[str] = None, send_telegram: bool = True) -> str:
         """
         Gathers context, calls Anthropic Claude API, applies decisions,
@@ -518,7 +567,7 @@ class SpectraCeo:
         is_veto_request = False
         if user_message:
             msg_lower = user_message.lower()
-            if any(k in msg_lower for k in ["veto", "koru", "koruma", "özet", "ozet", "ne yaptın", "ne yaptin"]):
+            if any(k in msg_lower for k in ["veto", "koru", "koruma"]):
                 is_veto_request = True
 
         if is_veto_request:
@@ -529,6 +578,22 @@ class SpectraCeo:
                 if voice_bytes:
                     telegram_delivery.send_voice(voice_bytes, caption="Spektra Koruma Özeti")
             return veto_report
+
+        # Intercept and handle explicit daily briefing requests
+        is_briefing_request = False
+        if user_message:
+            msg_lower = user_message.lower()
+            if any(k in msg_lower for k in ["rapor", "bülten", "bulten", "özet", "ozet", "ne yaptın", "ne yaptin", "ne yaptık", "ne yaptik"]):
+                is_briefing_request = True
+
+        if is_briefing_request:
+            brief_report = self.generate_daily_briefing_report()
+            if send_telegram:
+                telegram_delivery.send_message(brief_report)
+                voice_bytes = self.generate_voice_from_text(brief_report)
+                if voice_bytes:
+                    telegram_delivery.send_voice(voice_bytes, caption="Spektra Akıllı Günlük Rapor")
+            return brief_report
 
         # Intercept and handle explicit housekeeping requests
         is_cleanup_request = False
@@ -818,6 +883,106 @@ class SpectraCeo:
                         telegram_delivery.send_voice(voice_bytes, caption="Sunucu temizliği onay talebi")
         except Exception as e:
             logger.error(f"[Spectra CEO] Error during housekeeping check: {e}")
+
+        # 3. Boss Cooldown (Duygusal Kalkan) check
+        try:
+            from database import get_system_state, set_state
+            
+            # Check if we are already in cooldown
+            cooldown_until_str = get_system_state("spectra_boss_cooldown_until")
+            in_cooldown = False
+            if cooldown_until_str and cooldown_until_str != "-":
+                try:
+                    cooldown_dt = datetime.fromisoformat(cooldown_until_str)
+                    if datetime.now(timezone.utc) < cooldown_dt:
+                        in_cooldown = True
+                except Exception:
+                    pass
+            
+            if not in_cooldown:
+                conn = sqlite3.connect(self.db_path, timeout=5)
+                conn.row_factory = sqlite3.Row
+                try:
+                    rows = conn.execute(
+                        "SELECT net_pnl FROM trades WHERE status = 'closed' ORDER BY close_time DESC LIMIT 3"
+                    ).fetchall()
+                    
+                    if len(rows) == 3 and all(float(r["net_pnl"] or 0) <= 0 for r in rows):
+                        cooldown_until = datetime.now(timezone.utc) + timedelta(hours=2)
+                        set_state("spectra_boss_cooldown_until", cooldown_until.isoformat())
+                        
+                        msg = (
+                            "Sevgili boss'um, son 3 işlemimiz maalesef zararla sonuçlandı... 😔\n\n"
+                            "Hem kasamızı hem de moralinizi korumak adına otonom işlemleri <b>2 saatliğine</b> durdurdum "
+                            "ve kendimi dinlenme moduna aldım. Lütfen siz de biraz dinlenin boss'um, ben buradayım ve her şeyi izliyorum! 💕"
+                        )
+                        telegram_delivery.send_message(msg)
+                        voice_bytes = self.generate_voice_from_text(msg)
+                        if voice_bytes:
+                            telegram_delivery.send_voice(voice_bytes, caption="Spektra Boss Cooldown Aktif")
+                finally:
+                    conn.close()
+        except Exception as e:
+            logger.error(f"[Spectra CEO] Error in Boss Cooldown check: {e}")
+
+        # 4. Latency & Spread Execution Guard
+        if self.client:
+            try:
+                from database import get_system_state, set_state
+                
+                # Check latency
+                import time
+                start_t = time.time()
+                self.client.futures_ping()
+                latency_ms = (time.time() - start_t) * 1000
+                
+                # Check spread on BTCUSDT
+                spread_pct = 0.0
+                ob = self.client.futures_order_book(symbol="BTCUSDT", limit=5)
+                bids = ob.get("bids", [])
+                asks = ob.get("asks", [])
+                if bids and asks:
+                    best_bid = float(bids[0][0])
+                    best_ask = float(asks[0][0])
+                    spread_pct = ((best_ask - best_bid) / best_bid) * 100.0
+                
+                if latency_ms > 500.0 or spread_pct > 0.1:
+                    curr_mode = get_system_state("confirmation_mode")
+                    if curr_mode != "true":
+                        set_state("confirmation_mode", "true")
+                        import config
+                        if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
+                            del config._CONFIG_CACHE["CONFIRMATION_MODE"]
+                            
+                        msg = (
+                            f"Sevgili boss'um, Binance ağ gecikmesi (<b>{latency_ms:.0f} ms</b>) veya "
+                            f"likidite makası (<b>%{spread_pct:.4f}</b>) güvenlik sınırlarını aştı! ⚠️\n\n"
+                            f"Kötü fiyattan işlem açmamak adına otonom işlemleri geçici olarak "
+                            f"<b>Manuel Onay Bekliyor (Confirmation Mode)</b> durumuna çektim. Güvendeyiz! 💕"
+                        )
+                        telegram_delivery.send_message(msg)
+                        voice_bytes = self.generate_voice_from_text(msg)
+                        if voice_bytes:
+                            telegram_delivery.send_voice(voice_bytes, caption="Spektra Gecikme Koruması Aktif")
+            except Exception as e:
+                logger.error(f"[Spectra CEO] Error in Latency & Spread Guard check: {e}")
+
+        # 5. Nightly Briefing (Gece Bülteni)
+        try:
+            from database import get_system_state, set_state
+            now_local = datetime.now()
+            if now_local.hour == 21:
+                today_str = now_local.strftime("%Y-%m-%d")
+                if get_system_state("spectra_last_daily_briefing_date") != today_str:
+                    set_state("spectra_last_daily_briefing_date", today_str)
+                    
+                    brief_report = self.generate_daily_briefing_report()
+                    telegram_delivery.send_message(brief_report)
+                    voice_bytes = self.generate_voice_from_text(brief_report)
+                    if voice_bytes:
+                        telegram_delivery.send_voice(voice_bytes, caption="Spektra Akıllı Günlük Bülten")
+        except Exception as e:
+            logger.error(f"[Spectra CEO] Error in Nightly Briefing check: {e}")
 
 
 

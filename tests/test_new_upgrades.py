@@ -526,6 +526,17 @@ def test_spectra_autonomous_monitoring():
     ceo = SpectraCeo(db_path=temp_db)
 
     try:
+        import datetime as dt_mod
+        class MockDatetime:
+            @classmethod
+            def now(cls, tz=None):
+                if tz:
+                    return dt_mod.datetime(2026, 6, 3, 12, 0, 0, tzinfo=tz)
+                return dt_mod.datetime(2026, 6, 3, 12, 0, 0)
+            @classmethod
+            def fromisoformat(cls, s):
+                return dt_mod.datetime.fromisoformat(s)
+
         with patch("database.get_market_regime") as mock_get_regime, \
              patch("database.get_system_state") as mock_get_state, \
              patch("database.set_state") as mock_set_state, \
@@ -533,7 +544,8 @@ def test_spectra_autonomous_monitoring():
              patch("telegram_delivery.send_voice") as mock_send_voice, \
              patch("core.spectra_ceo.SpectraCeo.generate_voice_from_text", return_value=b"voice_data"), \
              patch("core.spectra_ceo.SpectraCeo.scan_unnecessary_files") as mock_scan_files, \
-             patch("os.path.getsize") as mock_getsize:
+             patch("os.path.getsize") as mock_getsize, \
+             patch("core.spectra_ceo.datetime", MockDatetime):
 
             # --- Test Case 1: NEUTRAL to CHOPPY transition ---
             mock_get_regime.return_value = "CHOPPY"
@@ -660,4 +672,271 @@ def test_spectra_voice_fallback_to_gtts():
         mock_gtts.assert_called_once_with(text="Fallback deneme.", lang="tr")
         assert voice == b"mocked_gtts_bytes"
         assert aiohttp.TCPConnector.__init__ is orig_init
+
+
+def test_spectra_boss_cooldown():
+    """Verify that 3 consecutive losses trigger boss cooldown, blocking new trades."""
+    from core.spectra_ceo import SpectraCeo
+    from core.risk_engine import RiskEngine
+    import sqlite3
+    import os
+    from unittest.mock import patch, MagicMock
+
+    temp_db = "temp_db_spectra_cooldown.db"
+    if os.path.exists(temp_db):
+        os.remove(temp_db)
+
+    conn = sqlite3.connect(temp_db)
+    conn.execute("""
+        CREATE TABLE trades (
+            id INTEGER PRIMARY KEY,
+            symbol TEXT,
+            direction TEXT,
+            entry REAL,
+            sl REAL,
+            close_time TEXT,
+            status TEXT,
+            environment TEXT,
+            net_pnl REAL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE system_state (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE params (
+            id INTEGER PRIMARY KEY,
+            risk_pct REAL,
+            sl_atr_mult REAL,
+            tp_atr_mult REAL,
+            updated_at TEXT
+        )
+    """)
+    conn.execute("INSERT INTO params (id, risk_pct) VALUES (1, 0.75)")
+    
+    # Insert 3 losses
+    for i in range(1, 4):
+        conn.execute(
+            "INSERT INTO trades (id, symbol, status, net_pnl, close_time, environment) "
+            "VALUES (?, 'BTCUSDT', 'closed', -20.0, '2026-06-03T12:00:00Z', 'paper')", (i,)
+        )
+    conn.commit()
+    conn.close()
+
+    ceo = SpectraCeo(db_path=temp_db)
+    risk_engine = RiskEngine(None, db_path=temp_db)
+
+    with patch("telegram_delivery.send_message") as mock_send, \
+         patch("telegram_delivery.send_voice") as mock_voice, \
+         patch("core.spectra_ceo.SpectraCeo.generate_voice_from_text", return_value=b"voice"):
+        
+        # 1. Verify cooldown is triggered by monitoring
+        with patch("config.DB_PATH", temp_db):
+            ceo.run_autonomous_monitoring()
+            
+            # Verify system_state now contains the cooldown
+            from database import get_system_state
+            cooldown_val = get_system_state("spectra_boss_cooldown_until")
+            assert cooldown_val != "-"
+            
+            # 2. Verify RiskEngine calculate rejects due to boss cooldown
+            res = risk_engine.calculate("ETHUSDT", "LONG", 3000.0, "A", 1000.0)
+            assert res["valid"] is False
+            assert res["risk_reject_reason"] == "spectra_boss_cooldown"
+
+    try:
+        if os.path.exists(temp_db):
+            os.remove(temp_db)
+    except Exception:
+        pass
+
+
+def test_spectra_sector_guard():
+    """Verify that sector limit prevents opening >2 trades in the same narrative group."""
+    from core.risk_engine import RiskEngine
+    import sqlite3
+    import os
+    from unittest.mock import patch
+
+    temp_db = "temp_db_spectra_sector.db"
+    if os.path.exists(temp_db):
+        try:
+            os.remove(temp_db)
+        except Exception:
+            pass
+
+    conn = sqlite3.connect(temp_db)
+    conn.execute("""
+        CREATE TABLE trades (
+            id INTEGER PRIMARY KEY,
+            symbol TEXT,
+            direction TEXT,
+            status TEXT,
+            environment TEXT
+        )
+    """)
+    # Insert 2 open trades in MEME sector (DOGE, SHIB)
+    conn.execute("INSERT INTO trades (symbol, status, environment) VALUES ('DOGEUSDT', 'OPEN', 'paper')")
+    conn.execute("INSERT INTO trades (symbol, status, environment) VALUES ('SHIBUSDT', 'OPEN', 'paper')")
+    conn.commit()
+    conn.close()
+
+    risk_engine = RiskEngine(None, db_path=temp_db)
+
+    with patch("config.DB_PATH", temp_db), \
+         patch("database.get_open_trades") as mock_get_open:
+        
+        # Mock database.get_open_trades to return our two MEME trades
+        mock_get_open.return_value = [
+            {"symbol": "DOGEUSDT", "status": "OPEN"},
+            {"symbol": "SHIBUSDT", "status": "OPEN"}
+        ]
+        
+        # Try to open a 3rd MEME coin (PEPE) -> should fail
+        res = risk_engine.calculate("PEPEUSDT", "LONG", 0.00001, "A", 1000.0)
+        assert res["valid"] is False
+        assert res["risk_reject_reason"] == "sector_limit_reached_MEME"
+        
+        # Try to open an L1 coin (BTC) -> should pass
+        res_btc = risk_engine.calculate("BTCUSDT", "LONG", 50000.0, "A", 1000.0)
+        assert res_btc["valid"] is True
+
+    try:
+        if os.path.exists(temp_db):
+            os.remove(temp_db)
+    except Exception:
+        pass
+
+
+def test_spectra_execution_guard():
+    """Verify that Latency & Spread Guard switches system to confirmation mode under poor conditions."""
+    from core.spectra_ceo import SpectraCeo
+    import sqlite3
+    import os
+    from unittest.mock import patch, MagicMock
+
+    temp_db = "temp_db_spectra_exec_guard.db"
+    if os.path.exists(temp_db):
+        try:
+            os.remove(temp_db)
+        except Exception:
+            pass
+
+    conn = sqlite3.connect(temp_db)
+    conn.execute("""
+        CREATE TABLE system_state (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    # Mock client with high latency
+    mock_client = MagicMock()
+    mock_client.futures_order_book.return_value = {
+        "bids": [["100.0", "1.0"]],
+        "asks": [["100.2", "1.0"]]  # spread = 0.2% (> 0.1%)
+    }
+
+    ceo = SpectraCeo(client=mock_client, db_path=temp_db)
+
+    with patch("config.DB_PATH", temp_db), \
+         patch("telegram_delivery.send_message") as mock_send, \
+         patch("telegram_delivery.send_voice") as mock_voice, \
+         patch("core.spectra_ceo.SpectraCeo.generate_voice_from_text", return_value=b"voice"):
+        
+        ceo.run_autonomous_monitoring()
+
+        # Verify confirmation mode was activated in DB
+        from database import get_system_state
+        assert get_system_state("confirmation_mode") == "true"
+        mock_send.assert_called()
+
+    try:
+        if os.path.exists(temp_db):
+            os.remove(temp_db)
+    except Exception:
+        pass
+
+
+def test_spectra_nightly_briefing():
+    """Verify that daily performance briefing is correctly compiled and triggerable."""
+    from core.spectra_ceo import SpectraCeo
+    import sqlite3
+    import os
+    from unittest.mock import patch
+
+    temp_db = "temp_db_spectra_briefing.db"
+    if os.path.exists(temp_db):
+        try:
+            os.remove(temp_db)
+        except Exception:
+            pass
+
+    conn = sqlite3.connect(temp_db)
+    conn.execute("""
+        CREATE TABLE trades (
+            id INTEGER PRIMARY KEY,
+            symbol TEXT,
+            status TEXT,
+            environment TEXT,
+            net_pnl REAL,
+            close_time TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE signal_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id INTEGER,
+            stage TEXT,
+            created_at TEXT
+        )
+    """)
+    
+    # Insert 1 win, 1 loss today
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    conn.execute(
+        "INSERT INTO trades (symbol, status, environment, net_pnl, close_time) "
+        "VALUES ('BTCUSDT', 'closed', 'paper', 50.0, ?)", (today + "T12:00:00Z",)
+    )
+    conn.execute(
+        "INSERT INTO trades (symbol, status, environment, net_pnl, close_time) "
+        "VALUES ('ETHUSDT', 'closed', 'paper', -20.0, ?)", (today + "T15:00:00Z",)
+    )
+    # Insert a veto today
+    conn.execute(
+        "INSERT INTO signal_events (signal_id, stage, created_at) "
+        "VALUES (999, 'RISK_REJECTED', ?)", (today + " 10:00:00",)
+    )
+    conn.commit()
+    conn.close()
+
+    ceo = SpectraCeo(db_path=temp_db)
+
+    with patch("config.DB_PATH", temp_db), \
+         patch("telegram_delivery.send_message") as mock_send, \
+         patch("telegram_delivery.send_voice") as mock_voice, \
+         patch("core.spectra_ceo.SpectraCeo.generate_voice_from_text", return_value=b"voice"):
+        
+        # Test manual trigger via evaluate_and_decide with keyword "rapor"
+        report = ceo.evaluate_and_decide("günün bülteni")
+        
+        assert "Bugün piyasada toplam <b>2</b> işlem tamamladık" in report
+        assert "toplam net kar/zarar" in report.lower()
+        assert "+30.00" in report
+        assert "<b>1</b> hatalı sinyali veto ederek" in report
+        mock_send.assert_called()
+
+    try:
+        if os.path.exists(temp_db):
+            os.remove(temp_db)
+    except Exception:
+        pass
 
