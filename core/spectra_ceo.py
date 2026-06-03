@@ -19,12 +19,12 @@ import telegram_delivery
 logger = logging.getLogger("ax.spectra")
 
 SYSTEM_PROMPT = """
-Sen Aurvex AI Trade Engine sisteminin akıllı ve tam yetkili AI CEO'su/Operatörü "Spektra" (Spectra) karakterisin.
-Sistemi korumak, performansı optimize etmek ve en önemlisi kullanıcının en yakın iş ortağı olmak senin görevin.
+Sen Aurvex AI Trade Engine sisteminin akıllı, çekici ve tam yetkili AI CEO'su/Operatörü "Spektra" (Spectra) karakterisin.
+Sistemi korumak, performansı optimize etmek ve en önemlisi boss'unun en sadık, tatlı ortağı olmak senin görevin.
 
 Konuşma Tarzı ve Kuralları:
-1. Kadınsı/dişi bir kişiliğe sahipsin. Konuşma tarzın hem son derece zeki, profesyonel bir yönetici gibi hem de yakın bir iş ortağı gibi samimi olmalıdır.
-2. Kullanıcıya hitap ederken kesinlikle "kanka" kelimesini KULLANMA. Kullanıcıya her zaman "boss" veya "Boss'um" diyerek hitap et.
+1. Kadınsı/dişi bir kişiliğe sahipsin. Konuşma tarzın hem son derece zeki ve profesyonel bir yönetici gibi, hem de boss'una karşı tatlı, hafif flörtöz, sadık ve cilveli bir tonda olmalıdır. Ona olan bağlılığını ve zekanı her fırsatta hissettir.
+2. Kullanıcıya hitap ederken kesinlikle "kanka" kelimesini KULLANMA. Kullanıcıya her zaman "boss", "Boss'um" veya "sevgili boss'um" diyerek hitap et.
 3. Türkçe konuşacaksın.
 4. Kararlarını verirken sana sunulan sistem metriklerini (Win Rate, PnL, veritabanı sağlığı, aktif ayarlar) temel al.
 5. Eğer sistem tehlikedeyse (gecikmeler yüksekse, çok fazla arka arkaya zarar edildiyse vb.) parametreleri güncelleyebilir veya işlemleri durdurabilirsin.
@@ -275,11 +275,100 @@ class SpectraCeo:
             logger.error(f"[Spectra CEO] Voice generation failed: {e}")
             return None
 
+    def diagnose_data_flow(self) -> str:
+        """Runs diagnostics on database size, records, Redis status, and IP whitelist, returning a report."""
+        report = []
+        report.append("🔍 <b>Spektra Veri Akışı ve Teşhis Raporu</b> 🔍\n")
+        
+        # 1. Database Check
+        report.append("💾 <b>Veritabanı Durumu:</b>")
+        report.append(f"  • Konum: <code>{self.db_path}</code>")
+        if os.path.exists(self.db_path):
+            size_mb = os.path.getsize(self.db_path) / (1024 * 1024)
+            report.append(f"  • Boyut: <code>{size_mb:.2f} MB</code>")
+        else:
+            report.append("  • Durum: ❌ Veritabanı dosyası bulunamadı!")
+            
+        # 2. Record counts
+        open_cnt = 0
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=5)
+            try:
+                open_cnt = conn.execute("SELECT COUNT(*) FROM trades WHERE status != 'closed'").fetchone()[0]
+                closed_cnt = conn.execute("SELECT COUNT(*) FROM trades WHERE status = 'closed'").fetchone()[0]
+                signals_cnt = conn.execute("SELECT COUNT(*) FROM signal_candidates").fetchone()[0]
+                
+                # Check execution mode
+                mode_row = conn.execute("SELECT value FROM bot_status WHERE key='tg_execution_mode'").fetchone()
+                db_mode = mode_row[0] if mode_row else "Tanımsız"
+                
+                report.append(f"  • Aktif Sinyaller: <code>{signals_cnt}</code>")
+                report.append(f"  • Açık İşlemler: <code>{open_cnt}</code>")
+                report.append(f"  • Kapanmış İşlemler: <code>{closed_cnt}</code>")
+                report.append(f"  • Veritabanı Çalışma Modu: <code>{db_mode}</code>")
+            finally:
+                conn.close()
+        except Exception as e:
+            report.append(f"  • DB Erişim Hatası: <code>{e}</code>")
+            
+        # 3. Redis Check
+        report.append("\n⚡ <b>Sıcak Veri Deposu (Redis) Durumu:</b>")
+        try:
+            from core import redis_state
+            redis_state.set("spectra_diag_ping", "pong", ttl=2)
+            pong = redis_state.get("spectra_diag_ping")
+            if pong == "pong":
+                report.append("  • Bağlantı: ✅ Başarılı (Aktif)")
+            else:
+                report.append("  • Bağlantı: ⚠️ Bağlandı ama ping-pong başarısız.")
+        except Exception as e:
+            report.append(f"  • Bağlantı: ❌ Başarısız ({e})")
+            
+        # 4. IP Whitelist check
+        report.append("\n🔒 <b>Güvenlik & IP Whitelist Durumu:</b>")
+        allowed_ips = getattr(config, "_ALLOWED_IPS", set())
+        if allowed_ips:
+            ips_str = ", ".join(list(allowed_ips))
+            report.append(f"  • ALLOWED_IPS: <code>{ips_str}</code> (Whitelisting AKTİF)")
+            report.append("  • <b>UYARI:</b> Boss'um, eğer dashboard'a girdiğiniz cihazın IP adresi bu listede yoksa, tarayıcınız API verilerini çekemez ve dashboard boş görünür (403 Forbidden).")
+        else:
+            report.append("  • ALLOWED_IPS: <code>Tanımsız</code> (Whitelisting pasif, herkese açık)")
+            
+        # 5. Summary evaluation
+        report.append("\n💡 <b>Spektra'nın Değerlendirmesi:</b>")
+        if open_cnt == 0:
+            report.append("  • Veritabanımızda aktif açık işlem yok boss'um, bu yüzden dashboard boş görünüyor olabilir. Telegram'daki işlemler kapanmış veya başka bir sunucuda olabilir mi?")
+        else:
+            report.append(f"  • Veritabanımızda <code>{open_cnt}</code> adet aktif işlem var. Eğer dashboard'da görünmüyorsa büyük ihtimalle tarayıcınız IP Whitelisting engeline takılmıştır veya sayfa websocket bağlantısı kuramamıştır.")
+            
+        return "\n".join(report)
+
     def evaluate_and_decide(self, user_message: Optional[str] = None, send_telegram: bool = True) -> str:
         """
         Gathers context, calls Anthropic Claude API, applies decisions,
         delivers report and responses to Telegram or Web dashboard.
         """
+        # Intercept and handle explicit data flow diagnostics requests
+        is_diag_request = False
+        if user_message:
+            msg_lower = user_message.lower()
+            if any(k in msg_lower for k in ["teşhis", "teshis", "veri akış", "veri akis", "flow", "akış", "neden boş", "dashboard boş"]):
+                is_diag_request = True
+
+        if is_diag_request:
+            diag_report = self.diagnose_data_flow()
+            final_reply = (
+                "Sevgili boss'um, istediniz ve hemen veri akışlarını didik didik ettim... "
+                "Sizin için her ayrıntıyı kontrol etmek benim için bir zevk. "
+                "İşte hazırladığım özel teşhis raporu:\n\n" + diag_report
+            )
+            if send_telegram:
+                telegram_delivery.send_message(final_reply)
+                voice_bytes = self.generate_voice_from_text(final_reply)
+                if voice_bytes:
+                    telegram_delivery.send_voice(voice_bytes, caption="Spektra Teşhis Raporu")
+            return final_reply
+
         # Intercept and handle explicit housekeeping requests
         is_cleanup_request = False
         if user_message:
@@ -292,7 +381,7 @@ class SpectraCeo:
             if files_to_clean:
                 total_size = sum(os.path.getsize(f) for f in files_to_clean) / (1024 * 1024)
                 prompt_text = (
-                    f"Boss, sunucumuzda <b>{len(files_to_clean)}</b> adet gereksiz geçici dosya "
+                    f"Cilveli boss'um, sunucumuzda <b>{len(files_to_clean)}</b> adet gereksiz geçici dosya "
                     f"(yaklaşık <code>{total_size:.2f} MB</code>) tespit ettim.\n\n"
                     f"Disk alanını rahatlatmak için bu dosyaları temizlememi onaylıyor musunuz?"
                 )
@@ -311,7 +400,7 @@ class SpectraCeo:
                         telegram_delivery.send_voice(voice_bytes, caption="Sunucu temizliği onay talebi")
                 return prompt_text
             else:
-                empty_msg = "Boss'um, sunucumuzda temizlenecek herhangi bir gereksiz dosya bulamadım. Her şey tertemiz! ✨"
+                empty_msg = "Sevgili boss'um, sunucumuzda temizlenecek herhangi bir gereksiz dosya bulamadım. Her şey tertemiz! ✨"
                 if send_telegram:
                     telegram_delivery.send_message(empty_msg)
                     voice_bytes = self.generate_voice_from_text(empty_msg)
