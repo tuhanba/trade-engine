@@ -906,7 +906,7 @@ class SpectraCeo:
             
             # Calling Claude Sonnet model
             response = ai_client.messages.create(
-                model="claude-3-5-sonnet-20240620",
+                model="claude-haiku-4-5-20251001",
                 max_tokens=1500,
                 system=SYSTEM_PROMPT,
                 messages=[
