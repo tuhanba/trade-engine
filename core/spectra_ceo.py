@@ -377,13 +377,24 @@ class SpectraCeo:
                 is_cleanup_request = True
 
         files_to_clean = self.scan_unnecessary_files()
-        if is_cleanup_request or (not user_message and files_to_clean):
+        db_files = [f for f in files_to_clean if f.endswith(".db")]
+        log_files = [f for f in files_to_clean if f.endswith(".log")]
+        total_size = sum(os.path.getsize(f) for f in files_to_clean) / (1024 * 1024)
+        
+        # Only prompt automatically if unnecessary files take more than 10MB of space
+        should_prompt_cleanup = is_cleanup_request or (not user_message and total_size > 10.0)
+
+        if should_prompt_cleanup:
             if files_to_clean:
-                total_size = sum(os.path.getsize(f) for f in files_to_clean) / (1024 * 1024)
                 prompt_text = (
-                    f"Cilveli boss'um, sunucumuzda <b>{len(files_to_clean)}</b> adet gereksiz geçici dosya "
-                    f"(yaklaşık <code>{total_size:.2f} MB</code>) tespit ettim.\n\n"
-                    f"Disk alanını rahatlatmak için bu dosyaları temizlememi onaylıyor musunuz?"
+                    f"Sevgili boss'um, sunucumuzda birikmiş atıl dosyalar tespit ettim... 💕\n\n"
+                    f"📁 <b>Silinmek İstenen Gereksiz Dosyalar:</b>\n"
+                    f"  • Geçici Backtest DB Dosyaları (<code>backtest_temp_*.db</code>): <b>{len(db_files)}</b> adet\n"
+                    f"  • Sistem Log Dosyaları (<code>*.log</code>): <b>{len(log_files)}</b> adet\n"
+                    f"  • Toplam Boyut: <code>{total_size:.2f} MB</code>\n\n"
+                    f"⚠️ <b>ÖNEMLİ NOT:</b> Bu dosyalar sadece geçmiş simülasyonlardan kalan atıl dosyalardır. "
+                    f"<b>Geçmiş trade geçmişimize ve verilerimize KESİNLİKLE dokunmuyorum!</b> "
+                    f"Disk alanımızı rahatlatmak için bu atıl dosyaları temizlememe izin veriyor musunuz cilveli boss'um?"
                 )
                 if send_telegram:
                     reply_markup = {
@@ -400,7 +411,7 @@ class SpectraCeo:
                         telegram_delivery.send_voice(voice_bytes, caption="Sunucu temizliği onay talebi")
                 return prompt_text
             else:
-                empty_msg = "Sevgili boss'um, sunucumuzda temizlenecek herhangi bir gereksiz dosya bulamadım. Her şey tertemiz! ✨"
+                empty_msg = "Sevgili boss'um, sunucumuzda temizlenecek herhangi bir atıl dosya bulamadım. Her şey tertemiz! ✨"
                 if send_telegram:
                     telegram_delivery.send_message(empty_msg)
                     voice_bytes = self.generate_voice_from_text(empty_msg)
