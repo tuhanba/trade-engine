@@ -34,7 +34,7 @@ class TriggerService:
                 from database import get_market_regime
                 regime = await asyncio.to_thread(get_market_regime)
                 quality = trigger_result.get("quality", "C")
-                if regime == "CHOPPY" and quality not in ("S", "A+"):
+                if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL") and quality not in ("S", "A+"):
                     logger.info(f"[TriggerService] {symbol} rejected by Regime Filter: quality {quality} in CHOPPY market.")
                     try:
                         from database import save_signal_event

@@ -441,9 +441,9 @@ def build_trade_from_signal(
     elif score <= 55.0:
         dynamic_risk *= 0.6
         
-    if regime == "CHOPPY":
+    if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
         dynamic_risk *= 0.5
-    elif regime in ("BULLISH", "BEARISH"):
+    elif regime in ("BULLISH", "BEARISH", "TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"):
         dynamic_risk *= 1.1
 
     dynamic_risk = max(base_risk * 0.2, min(dynamic_risk, base_risk * 2.0))
@@ -499,7 +499,7 @@ def build_trade_from_signal(
     if signal.metadata and "market_regime" in signal.metadata:
         regime = signal.metadata.get("market_regime", "TRENDING")
     
-    if regime == "CHOPPY":
+    if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
         # Testere piyasada hızlı kâr al, runner bırakma
         pct_tp1, pct_tp2, pct_runner = 0.70, 0.30, 0.0
     else:

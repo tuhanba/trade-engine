@@ -139,6 +139,9 @@ class AsyncScalpEngine:
         # Start Market Regime Loop
         asyncio.create_task(self._market_regime_loop())
 
+        # Start Self-Healing Parameter Optimization Loop
+        asyncio.create_task(self._self_healing_optuna_loop())
+
         # Start Weekly Telegram Performance Digest Loop
         asyncio.create_task(self._weekly_digest_loop())
 
@@ -424,70 +427,38 @@ class AsyncScalpEngine:
             await asyncio.sleep(86400)
 
     async def _market_regime_loop(self):
-        """BTC piyasa rejimini 15 dakikada bir tespit eder ve DB'ye yazar.
-
-        Rejim tespiti:
-          BULLISH  — BTC 1h + 4h her ikisi de bullish
-          BEARISH  — BTC 1h + 4h her ikisi de bearish
-          CHOPPY   — 1h ile 4h ters yönde VEYA BTC 15m ATR% > 1.5%
-          NEUTRAL  — yukarıdakilerin hiçbiri
-        """
-        import pandas as pd
-        from core.trend_engine import TrendEngine
+        """BTC piyasa rejimini 15 dakikada bir ML (KMeans) ile sınıflandırır ve DB'ye yazar."""
+        from core.trend_engine import MLMarketRegimeClassifier
         from database import set_market_regime
 
-        trend_engine = TrendEngine(self.client)
+        classifier = MLMarketRegimeClassifier(self.client)
         prev_regime = "NEUTRAL"
-        await asyncio.sleep(90)  # Startup'ta diğer servisler oturtu
+        await asyncio.sleep(90)  # Startup'ta diğer servisler otursun
         while True:
             try:
-                btc_trend = await asyncio.to_thread(trend_engine.get_btc_trend)
-                regime = "NEUTRAL"
-
-                if btc_trend == "BULLISH":
-                    regime = "BULLISH"
-                elif btc_trend == "BEARISH":
-                    regime = "BEARISH"
-                else:
-                    # NEUTRAL BTC: 1h vs 4h ters yöndeyse CHOPPY
-                    t1h = await asyncio.to_thread(trend_engine.get_1h_trend, "BTCUSDT")
-                    t4h = await asyncio.to_thread(trend_engine.get_4h_trend, "BTCUSDT")
-                    if t1h != "NEUTRAL" and t4h != "NEUTRAL" and t1h != t4h:
-                        regime = "CHOPPY"
-                    else:
-                        # ATR volatility check: 15m ATR% > 1.5% → CHOPPY
-                        try:
-                            df15 = await asyncio.to_thread(
-                                trend_engine.get_candles, "BTCUSDT", "15m", 30
-                            )
-                            if not df15.empty:
-                                h, l, c = df15["high"], df15["low"], df15["close"]
-                                tr = pd.concat(
-                                    [h - l, (h - c.shift()).abs(), (l - c.shift()).abs()],
-                                    axis=1,
-                                ).max(axis=1)
-                                atr_pct = float(tr.rolling(14).mean().iloc[-1]) / float(c.iloc[-1])
-                                if atr_pct > 0.015:
-                                    regime = "CHOPPY"
-                        except Exception:
-                            pass
-
+                regime = await asyncio.to_thread(classifier.classify, "BTCUSDT")
                 await asyncio.to_thread(set_market_regime, regime)
-                logger.info("[Regime] Piyasa rejimi: %s (BTC=%s)", regime, btc_trend)
+                logger.info("[Regime] Piyasa rejimi otonom sınıflandırıldı: %s", regime)
 
                 if regime != prev_regime:
-                    _emoji = {"BULLISH": "📈", "BEARISH": "📉", "CHOPPY": "⚡", "NEUTRAL": "➡️"}.get(regime, "")
+                    _emoji = {
+                        "TRENDING_HIGH_VOL": "📈🔥",
+                        "TRENDING_LOW_VOL": "📈⏳",
+                        "CHOPPY_HIGH_VOL": "⚡🔥",
+                        "CHOPPY_LOW_VOL": "⚡❄️",
+                        "NEUTRAL": "➡️"
+                    }.get(regime, "➡️")
                     _desc = {
-                        "BULLISH": "Trend piyasası — LONG sinyaller öncelikli",
-                        "BEARISH": "Düşüş trendi — SHORT sinyaller öncelikli",
-                        "CHOPPY": "Kaotik piyasa — eşik yükseltildi (min A+)",
-                        "NEUTRAL": "Normal piyasa — standart kurallar geçerli",
-                    }.get(regime, "")
+                        "TRENDING_HIGH_VOL": "Yüksek Volatiliteli Trend Piyasası (Dinamik Risk: 1.2x, Eşik: -2)",
+                        "TRENDING_LOW_VOL": "Düşük Volatiliteli Trend Piyasası (Dinamik Risk: 1.0x, Eşik: 0)",
+                        "CHOPPY_HIGH_VOL": "Yüksek Volatiliteli Dalgalı Piyasa (Dinamik Risk: 0.5x, Eşik: +5)",
+                        "CHOPPY_LOW_VOL": "Düşük Volatiliteli Dalgalı Piyasa (Dinamik Risk: 0.75x, Eşik: +3)",
+                    }.get(regime, "Normal piyasa")
                     try:
                         import telegram_delivery
                         await asyncio.to_thread(
                             telegram_delivery.send_message,
-                            f"{_emoji} <b>Piyasa Rejimi Değişti</b>\n"
+                            f"{_emoji} <b>Piyasa Rejimi Değişti (ML)</b>\n"
                             f"{prev_regime} → <b>{regime}</b>\n"
                             f"{_desc}",
                         )
@@ -498,6 +469,70 @@ class AsyncScalpEngine:
             except Exception as exc:
                 logger.error("[Regime] Loop hatası: %s", exc)
             await asyncio.sleep(900)  # 15 dakika
+
+    async def _self_healing_optuna_loop(self):
+        """
+        Periodically check if the win rate of the last 20 closed trades has dropped below 50%.
+        If so, automatically run Optuna optimization on ghost_signals to tune RSI_LIMIT and CVD_FILTER_VAL.
+        """
+        await asyncio.sleep(300)  # Startup delay
+        while True:
+            try:
+                from core.hyperparameter_tuner import check_win_rate_and_trigger_opt
+                import config
+                
+                triggered = await asyncio.to_thread(check_win_rate_and_trigger_opt, config.DB_PATH)
+                if triggered:
+                    logger.info("[Self-Healing] Win rate of last 20 trades is below 50%. Triggering parameter optimization...")
+                    
+                    from core.hyperparameter_tuner import optimize_ghost_filters
+                    res = await asyncio.to_thread(optimize_ghost_filters, config.DB_PATH)
+                    if res:
+                        best_rsi_limit, best_cvd_filter_val, best_val = res
+                        
+                        # Save to db
+                        from database import update_system_state
+                        await asyncio.to_thread(update_system_state, "rsi_limit", str(round(best_rsi_limit, 1)))
+                        await asyncio.to_thread(update_system_state, "cvd_filter_val", str(round(best_cvd_filter_val, 4)))
+                        
+                        logger.info(f"[Self-Healing] Parameters updated: RSI_LIMIT={best_rsi_limit:.1f}, CVD_FILTER_VAL={best_cvd_filter_val:.4f}")
+                        
+                        # Send voice note
+                        msg = (
+                            f"Canım boss'um, son yirmi işlemimizdeki başarı oranı yüzde ellinin altına düşünce hemen işe koyuldum "
+                            f"ve ghost sinyallerimizi otonom olarak taradım! Piyasaya daha iyi uyum sağlamak için "
+                            f"yeni RSI limitini {best_rsi_limit:.1f} ve yeni CVD filtre değerini {best_cvd_filter_val:.4f} olarak güncelledim. "
+                            f"Artık çok daha güvendeyiz tatlım, işlemlerimiz ışıldasın!"
+                        )
+                        
+                        if self.spectra_ceo:
+                            voice_bytes = await asyncio.to_thread(self.spectra_ceo.generate_voice_from_text, msg)
+                            if voice_bytes:
+                                import telegram_delivery
+                                await asyncio.to_thread(
+                                    telegram_delivery.send_voice, 
+                                    voice_bytes, 
+                                    caption="Spektra Otonom Parametre İyileştirme"
+                                )
+                                logger.info("[Self-Healing] Sent voice note to boss.")
+                            else:
+                                import telegram_delivery
+                                await asyncio.to_thread(
+                                    telegram_delivery.send_message,
+                                    f"👻 <b>Spektra Otonom Parametre İyileştirme</b>\n\n{msg}"
+                                )
+                        else:
+                            import telegram_delivery
+                            await asyncio.to_thread(
+                                telegram_delivery.send_message,
+                                f"👻 <b>Spektra Otonom Parametre İyileştirme</b>\n\n{msg}"
+                            )
+                else:
+                    logger.debug("[Self-Healing] Win rate check passed (>=50% or not enough trades).")
+            except Exception as e:
+                logger.error(f"[Self-Healing] Loop error: {e}")
+                
+            await asyncio.sleep(1800)  # Check every 30 minutes
 
     async def _db_maintenance_loop(self):
         """Perform SQLite VACUUM and WAL checkpoint every 24 hours."""
@@ -531,6 +566,13 @@ class AsyncScalpEngine:
                     conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
                     conn.execute("VACUUM;")
                 logger.info("[Maintenance] SQLite maintenance completed.")
+                
+                # Otonom günlük sıcak yedek oluşturma (hot backup)
+                try:
+                    from database import create_hot_backup
+                    create_hot_backup()
+                except Exception as b_err:
+                    logger.error(f"[Maintenance] Hot backup failed: {b_err}")
             except Exception as e:
                 logger.error(f"[Maintenance] Failed: {e}")
 

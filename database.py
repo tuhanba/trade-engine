@@ -308,6 +308,8 @@ CREATE TABLE IF NOT EXISTS ghost_signals (
     take_profit     REAL DEFAULT 0,
     confidence      REAL DEFAULT 0,
     simulated       INTEGER DEFAULT 0,
+    rsi             REAL DEFAULT 50.0,
+    cvd_slope       REAL DEFAULT 0.0,
     created_at      TEXT DEFAULT (datetime('now'))
 )
 """
@@ -539,8 +541,84 @@ def _verify_schema() -> None:
         logger.warning("Schema doğrulaması başarısız: %s", exc)
 
 
+def check_and_recover_db(db_path: str) -> None:
+    """Checks database integrity and restores from hot backup if corrupted."""
+    import os
+    import shutil
+    if not os.path.exists(db_path):
+        return
+    
+    corrupted = False
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        # WAL checkpoint to flush journal to main database
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        res = conn.execute("PRAGMA integrity_check").fetchone()
+        if res and res[0] != "ok":
+            corrupted = True
+            logger.error(f"[Database Integrity] SQLite integrity check failed: {res[0]}")
+    except Exception as e:
+        corrupted = True
+        logger.error(f"[Database Integrity] Database connection failed or file is corrupted: {e}")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        
+    if corrupted:
+        logger.warning(f"[Database Integrity] DATABASE CORRUPTION DETECTED on {db_path}!")
+        backup_dir = os.path.join(os.path.dirname(db_path), "backups") if os.path.dirname(db_path) else "backups"
+        backup_path = os.path.join(backup_dir, "trading_backup_hot.db")
+        
+        if os.path.exists(backup_path):
+            logger.info(f"[Database Integrity] Restoring database from hot backup: {backup_path}")
+            try:
+                for suffix in ["", "-wal", "-shm"]:
+                    p = db_path + suffix
+                    if os.path.exists(p):
+                        os.remove(p)
+                shutil.copy(backup_path, db_path)
+                logger.info("[Database Integrity] Database restored successfully!")
+            except Exception as backup_err:
+                logger.critical(f"[Database Integrity] Failed to restore database from backup: {backup_err}")
+        else:
+            logger.critical("[Database Integrity] No backup database found! Starting fresh database.")
+            for suffix in ["", "-wal", "-shm"]:
+                p = db_path + suffix
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+
+def create_hot_backup(db_path: str = None) -> None:
+    """Creates a hot backup of the SQLite database using SQLite's online backup API."""
+    import os
+    try:
+        path = db_path or config.DB_PATH
+        if not os.path.exists(path):
+            return
+        backup_dir = os.path.join(os.path.dirname(path), "backups") if os.path.dirname(path) else "backups"
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_path = os.path.join(backup_dir, "trading_backup_hot.db")
+        
+        src_conn = sqlite3.connect(path)
+        dest_conn = sqlite3.connect(backup_path)
+        with dest_conn:
+            src_conn.backup(dest_conn)
+        src_conn.close()
+        dest_conn.close()
+        logger.info(f"[Database Backup] Hot backup successfully created at {backup_path}")
+    except Exception as e:
+        logger.warning(f"[Database Backup] Failed to create hot backup: {e}")
+
+
 def init_db() -> None:
     """Tabloları oluşturur (var olanları silmez)."""
+    check_and_recover_db(config.DB_PATH)
     conn = get_connection()
     try:
         conn.execute("PRAGMA journal_mode=WAL")
@@ -575,6 +653,16 @@ def init_db() -> None:
             )
         """)
         conn.execute(_GHOST_SIGNALS_DDL)
+        try:
+            conn.execute("ALTER TABLE ghost_signals ADD COLUMN rsi REAL DEFAULT 50.0")
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE ghost_signals ADD COLUMN cvd_slope REAL DEFAULT 0.0")
+            conn.commit()
+        except Exception:
+            pass
         conn.execute(_GHOST_RESULTS_DDL)
         conn.execute(_GHOST_THRESHOLD_SUGGESTIONS_DDL)
         conn.execute(_GHOST_SUGGESTIONS_DDL)
@@ -1993,8 +2081,8 @@ def save_ghost_signal(data: dict) -> int:
         cur = conn.execute(
             """INSERT INTO ghost_signals
                (coin, symbol, side, direction, timeframe, entry_price, stop_loss, take_profit, tp1, tp2, tp3, atr, final_score, market_regime,
-                confidence, reject_reason, trigger_type, simulated)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                confidence, reject_reason, trigger_type, simulated, rsi, cvd_slope)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
             (
                 data.get("coin") or data.get("symbol", ""),
                 data.get("symbol", ""),
@@ -2013,6 +2101,8 @@ def save_ghost_signal(data: dict) -> int:
                 float(data.get("confidence", 0)),
                 data.get("reject_reason", ""),
                 data.get("trigger_type", "unknown"),
+                float(data.get("rsi", 50.0)),
+                float(data.get("cvd_slope", 0.0)),
             )
         )
         return cur.lastrowid or 0

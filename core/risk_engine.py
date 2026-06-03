@@ -461,6 +461,11 @@ class RiskEngine:
 
             if not check_correlated_exposure(symbol, direction, open_trades):
                 return {"valid": False, "score": 0, "risk_reject_reason": "directional_correlation_blocked"}
+
+            # L2 Order Book Wall Guard Check
+            is_blocked, wall_reason = self.check_order_book_wall(symbol, direction, entry)
+            if is_blocked:
+                return {"valid": False, "score": 0, "risk_reject_reason": wall_reason}
             sl_atr_mult = float(getattr(config, "HUMAN_SL_ATR_MULT" if _human else "SL_ATR_MULT", 2.0 if _human else 1.8))
             tp1_r = float(getattr(config, "HUMAN_TP1_R" if _human else "TP1_R", 1.5 if _human else 1.5))
             tp2_r = float(getattr(config, "HUMAN_TP2_R" if _human else "TP2_R", 2.5 if _human else 2.5))
@@ -534,7 +539,7 @@ class RiskEngine:
             try:
                 from database import get_market_regime
                 regime = get_market_regime()
-                if regime == "CHOPPY":
+                if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
                     is_choppy = True
                     # Kötü piyasada kârı erken al (Scalp TP)
                     tp1_r = max(1.0, tp1_r * 0.8)
@@ -548,9 +553,14 @@ class RiskEngine:
                     required_score = float(getattr(config, "TRADE_THRESHOLD", 55.0)) + 5.0
                     if score > 0.0 and score < required_score:
                         return {"valid": False, "score": 0, "risk_reject_reason": "choppy_market_score_gate"}
-                elif regime in ("BULLISH", "BEARISH"):
+                elif regime in ("BULLISH", "BEARISH", "TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"):
                     # Trend piyasasında runner'ı uzat
-                    if (regime == "BULLISH" and direction == "LONG") or (regime == "BEARISH" and direction == "SHORT"):
+                    is_trending_dir = (
+                        (regime == "BULLISH" and direction == "LONG")
+                        or (regime == "BEARISH" and direction == "SHORT")
+                        or (regime in ("TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"))
+                    )
+                    if is_trending_dir:
                         tp2_r *= 1.2
                         tp3_r *= 1.5
             except Exception as e:
@@ -727,6 +737,17 @@ class RiskEngine:
                     avg_slippage = sum(float(r["slippage"]) for r in recent_perf) / len(recent_perf)
                     avg_latency = sum(int(r["latency_ms"]) for r in recent_perf) / len(recent_perf)
                     
+                    # Emergency Clutch Check (High latency or slippage protection gate)
+                    if avg_slippage > 0.25 or avg_latency > 800:
+                        try:
+                            from database import update_system_state
+                            update_system_state("tg_execution_mode", "paper")
+                            update_system_state("spectra_emergency_clutch", f"slippage={avg_slippage:.3f},latency={avg_latency}")
+                            logger.critical(f"[Emergency Clutch] CRITICAL latency ({avg_latency}ms) or slippage ({avg_slippage:.3f}%) detected! Autonomously switched engine to paper mode.")
+                            return {"valid": False, "score": 0, "risk_reject_reason": "emergency_clutch_switch_triggered"}
+                        except Exception as cl_err:
+                            logger.error(f"[Emergency Clutch] Failed to trigger paper switch: {cl_err}")
+
                     slippage_mult = 1.0
                     if avg_slippage > 0.15:
                         slippage_mult = 0.70
@@ -867,3 +888,62 @@ class RiskEngine:
             return v if v > 0 else 0.0
         except Exception:
             return 0.0
+
+    def check_order_book_wall(self, symbol: str, direction: str, entry_price: float) -> tuple[bool, str]:
+        """
+        Check Binance L2 order book depth for thick opposite walls or spoofing orders.
+        Returns: (is_blocked, reason)
+        """
+        if not self.client:
+            return False, ""
+        try:
+            # Fetch futures L2 order book
+            book = self.client.futures_order_book(symbol=symbol, limit=100)
+            bids = book.get("bids", [])
+            asks = book.get("asks", [])
+            if not bids or not asks:
+                return False, ""
+                
+            total_bid_qty = sum(float(b[1]) for b in bids)
+            total_ask_qty = sum(float(a[1]) for a in asks)
+            total_qty = total_bid_qty + total_ask_qty
+            if total_qty <= 0:
+                return False, ""
+                
+            # Bid-Ask Imbalance Check (> 75%)
+            if direction.upper() == "LONG":
+                ask_ratio = total_ask_qty / total_qty
+                if ask_ratio > 0.75:
+                    return True, f"order_book_wall_block (ask_imbalance={ask_ratio:.2f})"
+            elif direction.upper() == "SHORT":
+                bid_ratio = total_bid_qty / total_qty
+                if bid_ratio > 0.75:
+                    return True, f"order_book_wall_block (bid_imbalance={bid_ratio:.2f})"
+                    
+            # Spoofing/Thick Wall Check near entry
+            ob_mult = float(getattr(config, "SCALP_OB_WALL_MULTIPLIER", 5.0))
+            ob_pct = float(getattr(config, "SCALP_OB_WALL_PCT", 0.002))
+            
+            if direction.upper() == "LONG":
+                # Opposing side is asks (sellers)
+                avg_ask_qty = total_ask_qty / len(asks)
+                for price_str, qty_str in asks:
+                    price = float(price_str)
+                    qty = float(qty_str)
+                    if price <= entry_price * (1 + ob_pct):
+                        if qty > avg_ask_qty * ob_mult:
+                            return True, f"order_book_wall_block (sell_wall={price:.4f}, qty={qty:.1f})"
+            elif direction.upper() == "SHORT":
+                # Opposing side is bids (buyers)
+                avg_bid_qty = total_bid_qty / len(bids)
+                for price_str, qty_str in bids:
+                    price = float(price_str)
+                    qty = float(qty_str)
+                    if price >= entry_price * (1 - ob_pct):
+                        if qty > avg_bid_qty * ob_mult:
+                            return True, f"order_book_wall_block (buy_wall={price:.4f}, qty={qty:.1f})"
+                            
+            return False, ""
+        except Exception as e:
+            logger.warning(f"[Risk Book Guard] Error checking order book for {symbol}: {e}")
+            return False, ""

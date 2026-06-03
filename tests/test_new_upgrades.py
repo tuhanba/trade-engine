@@ -1049,7 +1049,8 @@ def test_liquidity_sweep_detector():
          patch("core.trigger_engine._btc_allows", return_value=(True, 1.0)), \
          patch("core.ml_signal_scorer.score_signal", return_value=80.0), \
          patch("config.HUMAN_MODE", False), \
-         patch("config.SCALP_CVD_DIVERGENCE_FILTER_ENABLED", False):
+         patch("config.SCALP_CVD_DIVERGENCE_FILTER_ENABLED", False), \
+         patch("core.cvd_engine.CVDEngine.analyze", return_value={"cvd_signal": "BULLISH", "cvd_score_bonus": 1.0, "cvd_divergence": False, "cvd_slope": 1.0}):
          
         # Analyze LONG signal
         res = engine.analyze("BTCUSDT", "LONG")

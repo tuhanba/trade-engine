@@ -1056,10 +1056,10 @@ def classify_signal(
     except Exception:
         regime = ctx.get("market_regime", "NEUTRAL")
 
-    if regime in ("BULLISH", "BEARISH"):
+    if regime in ("BULLISH", "BEARISH", "TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"):
         # Trending market: Technical dominates
         w_tech, w_flow, w_sent = 0.6, 0.2, 0.2
-    elif regime in ("CHOPPY", "SIDEWAYS"):
+    elif regime in ("CHOPPY", "SIDEWAYS", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
         # Ranging market: Order flow and sentiment dominate
         w_tech, w_flow, w_sent = 0.2, 0.5, 0.3
     else:
@@ -1158,7 +1158,7 @@ def classify_signal(
 
     side_upper = str(getattr(signal, "side", "") or getattr(signal, "direction", "")).upper()
 
-    if regime == "CHOPPY":
+    if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
         setup_quality = str(getattr(signal, "setup_quality", "") or "").upper()
         
         import config
@@ -1174,12 +1174,12 @@ def classify_signal(
                 confidence=0.85,
                 score_adjusted=adjusted_score,
             ))
-    elif regime == "BULLISH" and side_upper == "SHORT":
+    elif (regime == "BULLISH" or (regime in ("TRENDING_HIGH_VOL", "TRENDING_LOW_VOL") and ctx.get("market_trend") == "bullish")) and side_upper == "SHORT":
         adjusted_score = round(adjusted_score * 0.88, 1)
-        logger.debug("[Regime] BULLISH + SHORT → score *0.88 → %.1f", adjusted_score)
-    elif regime == "BEARISH" and side_upper == "LONG":
+        logger.debug("[Regime] BULLISH/TRENDING_UP + SHORT → score *0.88 → %.1f", adjusted_score)
+    elif (regime == "BEARISH" or (regime in ("TRENDING_HIGH_VOL", "TRENDING_LOW_VOL") and ctx.get("market_trend") == "bearish")) and side_upper == "LONG":
         adjusted_score = round(adjusted_score * 0.88, 1)
-        logger.debug("[Regime] BEARISH + LONG → score *0.88 → %.1f", adjusted_score)
+        logger.debug("[Regime] BEARISH/TRENDING_DN + LONG → score *0.88 → %.1f", adjusted_score)
     # ─────────────────────────────────────────────────────────────────
 
     # ── Ghost insight ────────────────────────────────────────────
@@ -1271,6 +1271,8 @@ def classify_signal(
                     "confidence":   result.confidence,
                     "trigger_type": getattr(signal, "trigger_type", None) or getattr(signal, "setup_quality", None) or "UNKNOWN",
                     "final_score":  result.score_adjusted,
+                    "rsi":          getattr(signal, "rsi5", None) or (signal.metadata.get("rsi5") if signal.metadata else None) or 50.0,
+                    "cvd_slope":    (signal.metadata.get("cvd_slope") if signal.metadata else None) or 0.0,
                 },
                 reason=result.decision,
             )

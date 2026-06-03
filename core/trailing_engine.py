@@ -193,7 +193,11 @@ class TrailingEngine:
             regime = get_market_regime()
         except Exception:
             pass
-        is_trending_matching = (regime == "BULLISH" and side == "LONG") or (regime == "BEARISH" and side == "SHORT")
+        is_trending_matching = (
+            (regime == "BULLISH" and side == "LONG")
+            or (regime == "BEARISH" and side == "SHORT")
+            or (regime in ("TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"))
+        )
 
         # Kullanılacak SL: state'deki güncel SL (trailing hareket etmiş olabilir)
         active_sl = state.current_sl if state.current_sl > 0 else sl
@@ -314,7 +318,7 @@ class TrailingEngine:
             state.trailing_active = True  # TP2 sonrası trailing başlar
 
             from database import get_market_regime
-            trailing_type = "step" if get_market_regime() == "CHOPPY" else getattr(config, "TRAILING_STOP_TYPE", "atr")
+            trailing_type = "step" if get_market_regime() in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL") else getattr(config, "TRAILING_STOP_TYPE", "atr")
             if trailing_type == "step" and tp1 > 0:
                 new_sl = tp1
                 logger.info(
@@ -385,7 +389,7 @@ class TrailingEngine:
             dynamic_mult = self.trail_atr_mult * 0.8 if is_trending_matching else self.trail_atr_mult
             trail_distance = atr * dynamic_mult
             from database import get_market_regime
-            trailing_type = "step" if get_market_regime() == "CHOPPY" else getattr(config, "TRAILING_STOP_TYPE", "atr")
+            trailing_type = "step" if get_market_regime() in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL") else getattr(config, "TRAILING_STOP_TYPE", "atr")
 
             if trailing_type == "step":
                 step_size = atr * 0.5

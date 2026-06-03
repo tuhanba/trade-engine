@@ -318,3 +318,148 @@ class TrendEngine:
         aligned = sum(1 for d in timeframes.values() if d == target)
         label = {4: "STRONG", 3: "GOOD", 2: "WEAK"}.get(aligned, "AGAINST")
         return {"score": aligned, "details": timeframes, "label": label}
+
+
+class MLMarketRegimeClassifier:
+    """
+    Lightweight ML Market Regime Classifier using K-Means clustering.
+    Classifies the market into one of four regimes:
+    (1) TRENDING_HIGH_VOL
+    (2) TRENDING_LOW_VOL
+    (3) CHOPPY_HIGH_VOL
+    (4) CHOPPY_LOW_VOL
+    """
+    def __init__(self, client):
+        self.client = client
+
+    def get_regime_features(self, symbol: str = "BTCUSDT", limit: int = 150) -> pd.DataFrame:
+        try:
+            from core.trend_engine import TrendEngine
+            engine = TrendEngine(self.client)
+            df = engine.get_candles(symbol, "1h", limit)
+            if df.empty or len(df) < 100:
+                return pd.DataFrame()
+
+            # 1. ATR (14)
+            h, l, c = df["high"], df["low"], df["close"]
+            tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+            df["atr"] = tr.rolling(14).mean()
+            df["atr_pct"] = df["atr"] / df["close"]
+
+            # 2. Relative Volume (20)
+            df["vol_sma"] = df["volume"].rolling(20).mean()
+            df["rel_vol"] = df["volume"] / (df["vol_sma"] + 1e-10)
+
+            # 3. RSI (14)
+            delta = df["close"].diff()
+            gain = (delta.where(delta > 0, 0.0)).rolling(14).mean()
+            loss = (-delta.where(delta < 0, 0.0)).rolling(14).mean()
+            rs = gain / (loss + 1e-10)
+            df["rsi"] = 100 - (100 / (1 + rs))
+
+            # 4. ADX (14)
+            raw_plus = h.diff().clip(lower=0)
+            raw_minus = (-l.diff()).clip(lower=0)
+            plus_dm = raw_plus.where(raw_plus >= raw_minus, 0.0)
+            minus_dm = raw_minus.where(raw_minus >= plus_dm, 0.0)
+
+            plus_di = 100 * (plus_dm.rolling(14).mean() / (df["atr"] + 1e-10))
+            minus_di = 100 * (minus_dm.rolling(14).mean() / (df["atr"] + 1e-10))
+            dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10))
+            df["adx"] = dx.rolling(14).mean()
+
+            df_clean = df[["atr_pct", "rel_vol", "rsi", "adx"]].dropna()
+            return df_clean.tail(100)
+        except Exception as e:
+            logger.error(f"[MLRegime] Feature generation failed: {e}")
+            return pd.DataFrame()
+
+    def classify(self, symbol: str = "BTCUSDT") -> str:
+        df_features = self.get_regime_features(symbol)
+        
+        # Rule-based fallback if features are insufficient
+        if df_features.empty or len(df_features) < 30:
+            logger.warning("[MLRegime] Insufficient features for clustering. Using rule-based fallback.")
+            return self._fallback_rule_based(symbol)
+
+        try:
+            from sklearn.cluster import KMeans
+            import numpy as np
+
+            X = df_features.values
+            kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
+            kmeans.fit(X)
+            
+            last_label = kmeans.labels_[-1]
+            centroids = kmeans.cluster_centers_  # (4, 4)
+
+            # Features index: 0: atr_pct, 1: rel_vol, 2: rsi, 3: adx
+            cluster_metrics = []
+            for j in range(4):
+                cluster_metrics.append({
+                    "cluster": j,
+                    "mean_adx": centroids[j][3],
+                    "mean_vol": centroids[j][0]  # atr_pct
+                })
+
+            # Sort by mean_adx descending
+            sorted_by_adx = sorted(cluster_metrics, key=lambda x: x["mean_adx"], reverse=True)
+
+            # Top 2 are TRENDING, bottom 2 are CHOPPY
+            trending_clusters = sorted_by_adx[:2]
+            choppy_clusters = sorted_by_adx[2:]
+
+            # Within trending, sort by volume/volatility
+            trending_clusters = sorted(trending_clusters, key=lambda x: x["mean_vol"], reverse=True)
+            t_high_vol = trending_clusters[0]["cluster"]
+            t_low_vol = trending_clusters[1]["cluster"]
+
+            # Within choppy, sort by volume/volatility
+            choppy_clusters = sorted(choppy_clusters, key=lambda x: x["mean_vol"], reverse=True)
+            c_high_vol = choppy_clusters[0]["cluster"]
+            c_low_vol = choppy_clusters[1]["cluster"]
+
+            mapping = {
+                t_high_vol: "TRENDING_HIGH_VOL",
+                t_low_vol: "TRENDING_LOW_VOL",
+                c_high_vol: "CHOPPY_HIGH_VOL",
+                c_low_vol: "CHOPPY_LOW_VOL"
+            }
+
+            regime = mapping[last_label]
+            logger.info(f"[MLRegime] Clustering successful. Current regime: {regime}")
+            return regime
+        except Exception as e:
+            logger.error(f"[MLRegime] KMeans clustering failed: {e}. Using rule-based fallback.")
+            return self._fallback_rule_based(symbol)
+
+    def _fallback_rule_based(self, symbol: str) -> str:
+        try:
+            from core.trend_engine import TrendEngine
+            engine = TrendEngine(self.client)
+            df = engine.get_candles(symbol, "1h", 30)
+            if df.empty:
+                return "CHOPPY_LOW_VOL"
+            
+            btc_trend = engine.get_btc_trend()
+            is_trending = btc_trend in ("BULLISH", "BEARISH")
+            
+            h, l, c = df["high"], df["low"], df["close"]
+            tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+            atr = tr.rolling(14).mean().iloc[-1]
+            atr_pct = atr / c.iloc[-1]
+            
+            is_high_vol = atr_pct > 0.012
+            
+            if is_trending and is_high_vol:
+                return "TRENDING_HIGH_VOL"
+            elif is_trending and not is_high_vol:
+                return "TRENDING_LOW_VOL"
+            elif not is_trending and is_high_vol:
+                return "CHOPPY_HIGH_VOL"
+            else:
+                return "CHOPPY_LOW_VOL"
+        except Exception as e:
+            logger.error(f"[MLRegime] Fallback failed: {e}")
+            return "CHOPPY_LOW_VOL"
+

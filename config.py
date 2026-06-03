@@ -129,6 +129,8 @@ MIN_TP_FEE_SPREAD_RATIO            = _env_float("MIN_TP_FEE_SPREAD_RATIO", 2.5)
 SCALP_OB_WALL_MULTIPLIER           = _env_float("SCALP_OB_WALL_MULTIPLIER", 5.0)
 SCALP_OB_WALL_PCT                  = _env_float("SCALP_OB_WALL_PCT", 0.002)
 SCALP_CVD_DIVERGENCE_FILTER_ENABLED = _env_bool("SCALP_CVD_DIVERGENCE_FILTER_ENABLED", True)
+RSI_LIMIT = 30.0
+CVD_FILTER_VAL = -0.10
 
 # Paper / Timing
 INITIAL_PAPER_BALANCE = _env_float("INITIAL_PAPER_BALANCE", 2000.0)
@@ -259,6 +261,8 @@ _DYNAMIC_PARAMS_MAP = {
     "OI_SPIKE_LIMIT":                 ("oi_spike_limit", float),
     "DAILY_PROFIT_LOCK_PCT":          ("daily_profit_lock_pct", float),
     "WEEKLY_PROFIT_LOCK_PCT":         ("weekly_profit_lock_pct", float),
+    "RSI_LIMIT":                      ("rsi_limit", float),
+    "CVD_FILTER_VAL":                 ("cvd_filter_val", float),
 }
 
 _AI_PARAMS_MAP = {
@@ -293,6 +297,33 @@ def __getattr__(name: str) -> Any:
     if val is None:
         val = _STATIC_DEFAULTS.get(name)
         
+    # Dynamic scaling based on market regime
+    if val is not None:
+        if name == "RISK_PCT":
+            try:
+                import database
+                regime = database.get_market_regime()
+                if regime == "TRENDING_HIGH_VOL":
+                    val = val * 1.2
+                elif regime == "CHOPPY_HIGH_VOL":
+                    val = val * 0.5
+                elif regime == "CHOPPY_LOW_VOL":
+                    val = val * 0.75
+            except Exception:
+                pass
+        elif name == "TRADE_THRESHOLD":
+            try:
+                import database
+                regime = database.get_market_regime()
+                if regime == "TRENDING_HIGH_VOL":
+                    val = val - 2.0
+                elif regime == "CHOPPY_HIGH_VOL":
+                    val = val + 5.0
+                elif regime == "CHOPPY_LOW_VOL":
+                    val = val + 3.0
+            except Exception:
+                pass
+
     if not is_testing:
         _CONFIG_CACHE[name] = (val, now + _CONFIG_CACHE_TTL)
         

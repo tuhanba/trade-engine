@@ -72,6 +72,8 @@ def maybe_ghost_log(signal: dict, reason: str) -> None:
             "trigger_type": signal.get("trigger_type") or signal.get("setup_quality") or signal.get("quality", "unknown"),
             "final_score":  signal.get("final_score", 0),
             "market_regime": signal.get("market_regime", "NEUTRAL"),
+            "rsi":          float(signal.get("rsi") or signal.get("rsi5") or 50.0),
+            "cvd_slope":    float(signal.get("cvd_slope") or 0.0),
         })
         logger.debug(
             "[Ghost2] %s ghost#%d kaydedildi reason=%s",

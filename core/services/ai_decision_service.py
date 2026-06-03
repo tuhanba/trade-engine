@@ -69,10 +69,19 @@ class AIDecisionService:
                 "funding_rate": trigger_result.get("funding_rate", 0.0),
                 "funding_rate_8h": trigger_result.get("funding_rate_8h", 0.0),
                 "cvd_value": trigger_result.get("cvd_value", 0.0),
+                "cvd_slope": trigger_result.get("cvd_slope", 0.0),
                 "oi_change_pct": trigger_result.get("oi_change_pct", 0.0),
             }
             
             decision = await asyncio.to_thread(self.ai_engine.evaluate, sig)
+            
+            # yapay zeka Çoklu Ajan Konsensüs Kapısı (Consensus Gate)
+            if decision["decision"] == "ALLOW":
+                passed, reason = self._check_consensus(sig)
+                if not passed:
+                    logger.info(f"[Consensus Gate] Trade on {symbol} vetoed by consensus agents: {reason}")
+                    decision["decision"] = "VETO"
+                    decision["reason"] = reason
             
             sig.final_score = decision["final_score"]
             sig.confidence = decision["confidence"]
@@ -131,3 +140,44 @@ class AIDecisionService:
 
         except Exception as e:
             logger.error(f"[AIDecisionService] Error processing {symbol}: {e}")
+
+    def _check_consensus(self, sig) -> tuple[bool, str]:
+        """
+        Consensus check from alternative specialist agents:
+        1. Macro Watchdog: checks macro settings, volume skewness, correlation.
+        2. Micro Momentum: checks extreme momentum exhaustions.
+        """
+        direction = str(sig.direction).upper()
+        meta = sig.metadata or {}
+        
+        cvd_slope = float(meta.get("cvd_slope", 0.0))
+        btc_trend = str(meta.get("btc_trend", "NEUTRAL")).upper()
+        ob_ratio = float(meta.get("ob_ratio", 1.0))
+        rsi5 = float(meta.get("rsi5", 50.0))
+        momentum_3c = float(meta.get("momentum_3c", 0.0))
+        
+        # 1. Macro Watchdog Check
+        if direction == "LONG":
+            if cvd_slope < -0.05 and btc_trend == "BEARISH":
+                return False, "macro_watchdog_veto: opposing BTC trend and negative CVD flow"
+            if ob_ratio < 0.35:
+                return False, "macro_watchdog_veto: extreme seller depth dominance"
+        elif direction == "SHORT":
+            if cvd_slope > 0.05 and btc_trend == "BULLISH":
+                return False, "macro_watchdog_veto: opposing BTC trend and positive CVD flow"
+            if ob_ratio > 3.0:
+                return False, "macro_watchdog_veto: extreme buyer depth dominance"
+                
+        # 2. Micro Momentum Check
+        if direction == "LONG":
+            if rsi5 > 75:
+                return False, "micro_momentum_veto: rsi5 overbought exhaustion"
+            if momentum_3c < -1.0:
+                return False, "micro_momentum_veto: strong opposing short-term momentum"
+        elif direction == "SHORT":
+            if rsi5 < 25:
+                return False, "micro_momentum_veto: rsi5 oversold exhaustion"
+            if momentum_3c > 1.0:
+                return False, "micro_momentum_veto: strong opposing short-term momentum"
+                
+        return True, ""

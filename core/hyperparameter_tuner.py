@@ -138,5 +138,109 @@ def optimize_parameters():
     except Exception as opt_err:
         logger.error(f"[Tuner] Optuna optimization failed: {opt_err}")
 
+
+def check_win_rate_and_trigger_opt(db_path: str) -> bool:
+    """
+    Checks the win rate of the last 20 closed trades.
+    Returns True if the win rate is below 50%.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("""
+            SELECT net_pnl, realized_pnl
+            FROM trades
+            WHERE status = 'closed'
+            ORDER BY id DESC
+            LIMIT 20
+        """)
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        
+        if len(rows) < 20:
+            logger.debug(f"[Tuner] Not enough closed trades to check win-rate (found {len(rows)}/20).")
+            return False
+            
+        wins = sum(1 for r in rows if float(r.get("net_pnl") or r.get("realized_pnl") or 0.0) > 0.0)
+        win_rate = wins / len(rows)
+        logger.info(f"[Tuner] Win rate of last 20 closed trades is {win_rate:.2f} ({wins} wins).")
+        return win_rate < 0.50
+    except Exception as e:
+        logger.error(f"[Tuner] Error checking win rate: {e}")
+        return False
+
+
+def get_simulated_ghosts(db_path: str) -> list:
+    """Fetch simulated ghosts for optimization."""
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("""
+            SELECT g.direction, g.side, g.rsi, g.cvd_slope, r.virtual_pnl_r
+            FROM ghost_signals g
+            JOIN ghost_results r ON g.id = r.ghost_id
+            WHERE r.virtual_outcome IN ('WIN', 'LOSS')
+        """)
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.error(f"[Tuner] Error fetching simulated ghosts: {e}")
+        return []
+
+
+def optimize_ghost_filters(db_path: str) -> tuple[float, float, float] | None:
+    """
+    Optimizes RSI_LIMIT and CVD_FILTER_VAL using Optuna based on simulated ghost signals.
+    """
+    logger.info("[Tuner] Starting otonom ghost filter optimization...")
+    ghosts = get_simulated_ghosts(db_path)
+    if len(ghosts) < 5:
+        logger.warning(f"[Tuner] Not enough simulated ghosts to optimize filters safely (found {len(ghosts)}/5). Skipping.")
+        return None
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    def objective(trial):
+        # RSI limit parameter space (oversold/overbought boundary)
+        rsi_limit = trial.suggest_float("rsi_limit", 20.0, 45.0, step=1.0)
+        # CVD slope filter parameter space
+        cvd_filter_val = trial.suggest_float("cvd_filter_val", -0.20, 0.10, step=0.01)
+
+        simulated_pnl = 0.0
+
+        for g in ghosts:
+            direction = str(g.get("direction") or g.get("side", "LONG")).upper()
+            rsi = float(g.get("rsi") or 50.0)
+            cvd_slope = float(g.get("cvd_slope") or 0.0)
+            pnl_r = float(g.get("virtual_pnl_r") or 0.0)
+
+            # Filter simulation
+            is_allowed = False
+            if direction == "LONG":
+                if rsi >= rsi_limit and cvd_slope >= cvd_filter_val:
+                    is_allowed = True
+            else:  # SHORT
+                if rsi <= (100.0 - rsi_limit) and cvd_slope <= -cvd_filter_val:
+                    is_allowed = True
+
+            if is_allowed:
+                simulated_pnl += pnl_r
+
+        return simulated_pnl
+
+    try:
+        study = optuna.create_study(direction="maximize")
+        study.optimize(objective, n_trials=50)
+
+        best_params = study.best_params
+        best_value = study.best_value
+        logger.info(f"[Tuner] Ghost filter optimization finished. Best simulated PnL: {best_value:.2f}R. RSI_LIMIT={best_params['rsi_limit']:.1f}, CVD_FILTER_VAL={best_params['cvd_filter_val']:.4f}")
+        return best_params["rsi_limit"], best_params["cvd_filter_val"], best_value
+    except Exception as e:
+        logger.error(f"[Tuner] Ghost filter Optuna study failed: {e}")
+        return None
+
+
 if __name__ == "__main__":
     optimize_parameters()

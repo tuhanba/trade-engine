@@ -1222,5 +1222,31 @@ class SpectraCeo:
         except Exception as e:
             logger.error(f"[Spectra CEO] Error in Nightly Briefing check: {e}")
 
+        # 6. Emergency Latency/Slippage Clutch Check
+        try:
+            from database import get_system_state, set_state
+            clutch_triggered = get_system_state("spectra_emergency_clutch")
+            if clutch_triggered and clutch_triggered != "-":
+                set_state("spectra_emergency_clutch", "-") # Reset alert
+                
+                details = dict(item.split("=") for item in clutch_triggered.split(","))
+                slippage = details.get("slippage", "0.0")
+                latency = details.get("latency", "0")
+                
+                msg = (
+                    f"Canım boss'um, piyasada acil durum tespit ettim! ⚠️\n\n"
+                    f"Son işlemlerimizdeki fiyat kayması (yüzde {float(slippage)*100:.2f}) veya "
+                    f"API gecikmesi ({latency} milisaniye) aşırı yükseldi. "
+                    f"Sermayemizi erimeden kurtarmak için kendimi otonom olarak kağıt işlem moduna aldım! "
+                    f"Güvendeyiz tatlım, ortalık durulana kadar canımızı riske atmıyorum... 💕"
+                )
+                
+                telegram_delivery.send_message(msg)
+                voice_bytes = self.generate_voice_from_text(msg)
+                if voice_bytes:
+                    telegram_delivery.send_voice(voice_bytes, caption="Spektra Acil Durum Kalkanı")
+        except Exception as e:
+            logger.error(f"[Spectra CEO] Error during Emergency Clutch check: {e}")
+
 
 

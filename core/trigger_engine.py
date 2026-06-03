@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import time
 from datetime import datetime, timezone
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,15 @@ class TriggerEngine:
         bull5 = direction == "LONG" and e9_5.iloc[-1] > e21_5.iloc[-1] and 30 < rsi5_val < 80
         bear5 = direction == "SHORT" and e9_5.iloc[-1] < e21_5.iloc[-1] and 20 < rsi5_val < 70
 
+        # RSI Limit Filter
+        rsi_limit = float(getattr(config, "RSI_LIMIT", 30.0))
+        if direction == "LONG" and rsi5_val < rsi_limit:
+            logger.info(f"[TriggerEngine] LONG Vetoed: RSI ({rsi5_val:.1f}) below limit ({rsi_limit:.1f}) for {symbol}")
+            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "rsi_limit_block"}
+        if direction == "SHORT" and rsi5_val > (100.0 - rsi_limit):
+            logger.info(f"[TriggerEngine] SHORT Vetoed: RSI ({rsi5_val:.1f}) above limit ({100.0 - rsi_limit:.1f}) for {symbol}")
+            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "rsi_limit_block"}
+
         df1 = self.get_candles(symbol, "1m", 100)
         if df1.empty or len(df1) < 30:
             return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
@@ -237,7 +247,6 @@ class TriggerEngine:
         mom3c = self._momentum_3c(df1)
         vwap_val = self._vwap(df1)
 
-        import config
         is_human = getattr(config, "HUMAN_MODE", False)
 
         is_micro_scalp = False
@@ -354,7 +363,6 @@ class TriggerEngine:
 
         # ── L2 Orderbook (Balina Duvarı) Kalkanı ─────────────────────────────
         try:
-            import config
             is_scalp = not getattr(config, "HUMAN_MODE", False)
             ob_limit = 50 if is_scalp else 20
             ob = self.client.futures_order_book(symbol=symbol, limit=ob_limit)
@@ -446,8 +454,17 @@ class TriggerEngine:
                 self._cvd_engine = _CVDEngine(self.client)
             cvd_data = self._cvd_engine.analyze(symbol, direction)
             
+            # CVD Filter Val Check
+            cvd_slope = cvd_data.get("cvd_slope", 0.0)
+            cvd_filter_val = float(getattr(config, "CVD_FILTER_VAL", -0.1))
+            if direction == "LONG" and cvd_slope < cvd_filter_val:
+                logger.info(f"[TriggerEngine] LONG Vetoed: CVD Slope ({cvd_slope:.4f}) below filter value ({cvd_filter_val:.4f}) for {symbol}")
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "cvd_filter_block"}
+            if direction == "SHORT" and cvd_slope > -cvd_filter_val:
+                logger.info(f"[TriggerEngine] SHORT Vetoed: CVD Slope ({cvd_slope:.4f}) above filter value ({-cvd_filter_val:.4f}) for {symbol}")
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "cvd_filter_block"}
+            
             # CVD Divergence hard filter for scalp signals
-            import config
             is_scalp = not getattr(config, "HUMAN_MODE", False)
             if is_scalp and getattr(config, "SCALP_CVD_DIVERGENCE_FILTER_ENABLED", True):
                 cvd_sig = cvd_data.get("cvd_signal", "NEUTRAL")
@@ -623,6 +640,7 @@ class TriggerEngine:
             "funding_rate":  funding,
             "funding_rate_8h": funding_8h,
             "cvd_value":     cvd_data.get("cvd_value", 0.0),
+            "cvd_slope":     cvd_data.get("cvd_slope", 0.0),
             "funding_favorable": funding_fav,
             "ob_ratio":      ob_ratio_val,
         }
