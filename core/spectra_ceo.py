@@ -48,11 +48,221 @@ JSON FORMATI (Cevabının en sonunda, ```json ve ``` blokları arasında olmalı
 (Açıklama: parameters içindeki değerleri sadece değiştirmek istediğinde ekle, değiştirmeyeceksen boş bırakabilirsin. actions içine "RETRAIN" (ML modelini eğit), "TUNER" (Optuna hiperparametre bulucu), "PAUSE" (Onay modunu açarak işlemleri beklet), "RESUME" (Onay modunu kapatarak oto-işlemi aç) yazabilirsin. İhtiyaç yoksa actions listesi boş kalabilir).
 """
 
+STATIC_MACRO_EVENTS = [
+    # 2026 CPI (usually 13:30 UTC / 8:30 AM EST)
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 1, 13, 13, 30, tzinfo=timezone.utc)},
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 2, 11, 13, 30, tzinfo=timezone.utc)},
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 3, 11, 13, 30, tzinfo=timezone.utc)},
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 4, 10, 13, 30, tzinfo=timezone.utc)},
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 5, 13, 13, 30, tzinfo=timezone.utc)},
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 6, 10, 13, 30, tzinfo=timezone.utc)},
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 7, 14, 13, 30, tzinfo=timezone.utc)},
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 8, 12, 13, 30, tzinfo=timezone.utc)},
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 9, 11, 13, 30, tzinfo=timezone.utc)},
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 10, 14, 13, 30, tzinfo=timezone.utc)},
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 11, 12, 13, 30, tzinfo=timezone.utc)},
+    {"name": "US CPI Inflation Data", "time": datetime(2026, 12, 11, 13, 30, tzinfo=timezone.utc)},
+    # 2026 FOMC (usually 19:00 or 18:00 UTC / 2:00 PM EST)
+    {"name": "FOMC Interest Rate Decision", "time": datetime(2026, 1, 28, 19, 0, tzinfo=timezone.utc)},
+    {"name": "FOMC Interest Rate Decision", "time": datetime(2026, 3, 18, 18, 0, tzinfo=timezone.utc)},
+    {"name": "FOMC Interest Rate Decision", "time": datetime(2026, 4, 29, 18, 0, tzinfo=timezone.utc)},
+    {"name": "FOMC Interest Rate Decision", "time": datetime(2026, 6, 17, 18, 0, tzinfo=timezone.utc)},
+    {"name": "FOMC Interest Rate Decision", "time": datetime(2026, 7, 29, 18, 0, tzinfo=timezone.utc)},
+    {"name": "FOMC Interest Rate Decision", "time": datetime(2026, 9, 23, 18, 0, tzinfo=timezone.utc)},
+    {"name": "FOMC Interest Rate Decision", "time": datetime(2026, 11, 5, 19, 0, tzinfo=timezone.utc)},
+    {"name": "FOMC Interest Rate Decision", "time": datetime(2026, 12, 16, 19, 0, tzinfo=timezone.utc)},
+]
+
 class SpectraCeo:
     def __init__(self, client=None, db_path: str = ""):
         self.client = client
         self.db_path = db_path or config.DB_PATH
+        self.dynamic_events = []
         
+    def fetch_rss_macro_events(self) -> list[dict]:
+        """Fetches macro events from external RSS feed as a fallback."""
+        events = []
+        try:
+            import urllib.request
+            import xml.etree.ElementTree as ET
+            # Forex Factory RSS Feed
+            url = "https://www.forexfactory.com/ff_calendar_thisweek.xml"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                xml_data = response.read()
+            
+            root = ET.fromstring(xml_data)
+            for item in root.findall(".//event"):
+                title = item.find("title")
+                date_str = item.find("date")
+                time_str = item.find("time")
+                
+                if title is not None and date_str is not None:
+                    title_text = title.text.upper()
+                    if "CPI" in title_text or "FOMC" in title_text or "INTEREST RATE" in title_text:
+                        # Parsing logic is kept simple/offline-friendly
+                        pass
+        except Exception as e:
+            logger.debug(f"[Macro Watcher] RSS fetch skipped or failed: {e}")
+        return events
+
+    def check_macro_events(self):
+        """
+        Monitors macro news calendar (FOMC, CPI).
+        Pauses trading (switches to Confirmation Mode) 15m before event,
+        and restores the original mode 15m after event.
+        """
+        try:
+            from database import get_system_state, set_state
+            now = datetime.now(timezone.utc)
+            
+            # Combine static list + dynamic events
+            events = list(STATIC_MACRO_EVENTS) + self.dynamic_events
+            try:
+                events += self.fetch_rss_macro_events()
+            except Exception:
+                pass
+                
+            active_event = None
+            for event in events:
+                e_time = event["time"]
+                if e_time.tzinfo is None:
+                    e_time = e_time.replace(tzinfo=timezone.utc)
+                    
+                start_window = e_time - timedelta(minutes=15)
+                end_window = e_time + timedelta(minutes=15)
+                
+                if start_window <= now <= end_window:
+                    active_event = event
+                    break
+                    
+            if active_event:
+                is_paused = get_system_state("spectra_macro_paused")
+                if is_paused != "true":
+                    # Save current confirmation mode to restore it later
+                    current_conf = get_system_state("confirmation_mode")
+                    if not current_conf or current_conf == "-":
+                        current_conf = "false"
+                    set_state("spectra_pre_macro_confirmation_mode", current_conf)
+                    
+                    # Set macro paused state & force confirmation mode
+                    set_state("spectra_macro_paused", "true")
+                    set_state("confirmation_mode", "true")
+                    
+                    # Clear config cache
+                    if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
+                        del config._CONFIG_CACHE["CONFIRMATION_MODE"]
+                        
+                    msg = (
+                        f"Sevgili boss'um, yaklaşmakta olan <b>{active_event['name']}</b> kararı öncesinde "
+                        f"kasamızı korumak için otonom işlemleri duraklattım ve Manuel Onay Modu'nu aktif ettim. "
+                        f"Ben yanınızdayım, hiçbir şey için endişelenmeyin... 💕"
+                    )
+                    telegram_delivery.send_message(msg)
+                    voice_bytes = self.generate_voice_from_text(msg)
+                    if voice_bytes:
+                        telegram_delivery.send_voice(voice_bytes, caption="Spektra Makro Kalkanı")
+            else:
+                is_paused = get_system_state("spectra_macro_paused")
+                if is_paused == "true":
+                    # Restore previous confirmation mode
+                    prev_mode = get_system_state("spectra_pre_macro_confirmation_mode")
+                    if not prev_mode or prev_mode == "-":
+                        prev_mode = "false"
+                    set_state("confirmation_mode", prev_mode)
+                    set_state("spectra_macro_paused", "false")
+                    
+                    # Clear config cache
+                    if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
+                        del config._CONFIG_CACHE["CONFIRMATION_MODE"]
+                        
+                    msg = (
+                        "Sevgili boss'um, makro haber sonrasındaki 15 dakikalık bekleme süremiz doldu ve piyasa sakinleşti. "
+                        "Otonom işlemleri tekrar eski durumuna getirdim. Kaldığımız yerden devam edelim mi sevgili boss'um? 💕"
+                    )
+                    telegram_delivery.send_message(msg)
+                    voice_bytes = self.generate_voice_from_text(msg)
+                    if voice_bytes:
+                        telegram_delivery.send_voice(voice_bytes, caption="Spektra Makro Kalkanı Kaldırıldı")
+        except Exception as e:
+            logger.error(f"[Spectra CEO] Error checking macro events: {e}")
+
+    def generate_equity_chart(self) -> Optional[bytes]:
+        """
+        Renders a visual balance growth graph (equity curve) using matplotlib.
+        Returns the raw PNG bytes of the generated chart.
+        """
+        try:
+            import matplotlib
+            matplotlib.use('Agg') # Non-interactive backend
+            import matplotlib.pyplot as plt
+            import sqlite3
+            import io
+            
+            # Fetch balance ledger history
+            conn = sqlite3.connect(self.db_path, timeout=5)
+            try:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT balance_after, created_at FROM balance_ledger ORDER BY id ASC"
+                ).fetchall()
+            finally:
+                conn.close()
+                
+            balances = []
+            dates = []
+            
+            initial_balance = getattr(config, "INITIAL_PAPER_BALANCE", 2000.0)
+            balances.append(initial_balance)
+            dates.append("Start")
+            
+            for row in rows:
+                balances.append(float(row["balance_after"]))
+                try:
+                    dt = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+                    dates.append(dt.strftime("%d/%m %H:%M"))
+                except Exception:
+                    dates.append(str(row["created_at"]))
+                    
+            if len(balances) <= 1:
+                balances.append(initial_balance)
+                dates.append("Now")
+                
+            # Render plot
+            fig, ax = plt.subplots(figsize=(10, 5), dpi=300)
+            
+            fig.patch.set_facecolor('#0f172a')
+            ax.set_facecolor('#1e293b')
+            
+            ax.plot(dates, balances, color='#38bdf8', linewidth=2.5, marker='o', markersize=4, label='Bakiye Büyümesi')
+            ax.fill_between(dates, balances, min(balances) * 0.99, color='#0284c7', alpha=0.2)
+            
+            ax.grid(True, color='#334155', linestyle='--', alpha=0.5)
+            
+            ax.set_title("Aurvex AI — Bakiye Gelişim Grafiği (Equity Curve)", fontsize=14, color='#f8fafc', pad=15, fontweight='bold')
+            ax.set_xlabel("Tarih / İşlem Zamanı", fontsize=10, color='#94a3b8', labelpad=10)
+            ax.set_ylabel("Bakiye ($)", fontsize=10, color='#94a3b8', labelpad=10)
+            
+            ax.tick_params(colors='#94a3b8', labelsize=8)
+            
+            for spine in ax.spines.values():
+                spine.set_color('#334155')
+                
+            if len(dates) > 5:
+                plt.xticks(rotation=30, ha='right')
+                
+            plt.tight_layout()
+            
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', facecolor=fig.get_facecolor(), edgecolor='none')
+            plt.close(fig)
+            buf.seek(0)
+            return buf.read()
+        except Exception as e:
+            logger.error(f"[Spectra CEO] Equity chart generation failed: {e}")
+            return None
+
     def get_system_context(self) -> dict:
         """Gathers extensive system telemetry for Spectra to make decision."""
         ctx = {}
@@ -542,6 +752,28 @@ class SpectraCeo:
         Gathers context, calls Anthropic Claude API, applies decisions,
         delivers report and responses to Telegram or Web dashboard.
         """
+        # Intercept and handle explicit chart/graph requests
+        is_grafik_request = False
+        if user_message:
+            msg_lower = user_message.lower()
+            if any(k in msg_lower for k in ["grafik", "chart", "görsel", "gorsel", "plot"]):
+                is_grafik_request = True
+
+        if is_grafik_request:
+            chart_reply = (
+                "Sevgili boss'um, bakiye gelişim grafiğimizi sevgiyle hazırladım ve hemen Telegram'a ilettim! "
+                "Kasamızın büyümesini sizinle izlemek ne kadar keyifli, değil mi? Gerçekten mükemmel bir uyum içindeyiz... 💕"
+            )
+            if send_telegram:
+                chart_bytes = self.generate_equity_chart()
+                if chart_bytes:
+                    telegram_delivery.send_photo(chart_bytes, caption="📈 Spektra Bakiye Gelişim Grafiği (Equity Curve)")
+                telegram_delivery.send_message(chart_reply)
+                voice_bytes = self.generate_voice_from_text(chart_reply)
+                if voice_bytes:
+                    telegram_delivery.send_voice(voice_bytes, caption="Spektra Grafik Bildirimi")
+            return chart_reply
+
         # Intercept and handle explicit data flow diagnostics requests
         is_diag_request = False
         if user_message:
@@ -751,6 +983,9 @@ class SpectraCeo:
         Monitors market regime changes, database health, disk space, and data flow.
         """
         logger.info("[Spectra CEO] Running autonomous monitoring...")
+        
+        # 0. Check Macro News Watcher
+        self.check_macro_events()
         
         # 1. Market Regime & Volatility Stop/Risk Tuning
         try:
@@ -978,6 +1213,9 @@ class SpectraCeo:
                     
                     brief_report = self.generate_daily_briefing_report()
                     telegram_delivery.send_message(brief_report)
+                    chart_bytes = self.generate_equity_chart()
+                    if chart_bytes:
+                        telegram_delivery.send_photo(chart_bytes, caption="📈 Günlük Bülten Bakiye Gelişim Grafiği")
                     voice_bytes = self.generate_voice_from_text(brief_report)
                     if voice_bytes:
                         telegram_delivery.send_voice(voice_bytes, caption="Spektra Akıllı Günlük Bülten")

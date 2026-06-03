@@ -437,6 +437,11 @@ class RiskEngine:
                 except Exception:
                     pass
 
+            # Macro News Watcher Gate
+            macro_paused_str = database.get_system_state("spectra_macro_paused")
+            if macro_paused_str == "true":
+                return {"valid": False, "score": 0, "risk_reject_reason": "macro_news_watcher_paused"}
+
             # Sector Guard (Maximum 2 open trades per sector)
             current_sector = get_coin_sector(symbol)
             if current_sector != "OTHER":
@@ -700,8 +705,8 @@ class RiskEngine:
                 # Calculate correlation
                 corr = calculate_historical_correlation(symbol, t_sym, self.client)
                 logger.info(f"[Correlation Check] {symbol} vs {t_sym}: {corr:.3f}")
-                if corr > 0.90:
-                    logger.warning(f"[Correlation Block] {symbol} blocked due to high correlation with {t_sym} ({corr:.3f} > 0.90)")
+                if corr > 0.85:
+                    logger.warning(f"[Correlation Block] {symbol} blocked due to high correlation with {t_sym} ({corr:.3f} > 0.85)")
                     return {"valid": False, "score": 0, "risk_reject_reason": "high_correlation_block"}
                 elif corr > 0.75:
                     correlation_risk_mult = min(correlation_risk_mult, 0.5)

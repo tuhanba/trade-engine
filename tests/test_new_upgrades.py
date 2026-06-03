@@ -940,3 +940,214 @@ def test_spectra_nightly_briefing():
     except Exception:
         pass
 
+
+def test_macro_news_watcher_pauses_and_resumes():
+    from core.spectra_ceo import SpectraCeo
+    from core.risk_engine import RiskEngine
+    import sqlite3
+    import os
+    from datetime import datetime, timezone, timedelta
+    from unittest.mock import patch, MagicMock
+
+    temp_db = "temp_db_spectra_macro_test.db"
+    if os.path.exists(temp_db):
+        os.remove(temp_db)
+
+    import database
+    with patch("config.DB_PATH", temp_db):
+        database.init_db()
+
+    ceo = SpectraCeo(db_path=temp_db)
+    risk_engine = RiskEngine(None, db_path=temp_db)
+
+    try:
+        # Register a mock event that is happening 5 minutes from now (inside the 15-minute window)
+        event_time = datetime.now(timezone.utc) + timedelta(minutes=5)
+        ceo.dynamic_events = [{"name": "Mock Macro Event", "time": event_time}]
+
+        with patch("telegram_delivery.send_message") as mock_send_msg, \
+             patch("telegram_delivery.send_voice") as mock_send_voice, \
+             patch("core.spectra_ceo.SpectraCeo.generate_voice_from_text", return_value=b"voice"), \
+             patch("config.DB_PATH", temp_db):
+
+            # 1. Run monitoring -> Should trigger macro pause
+            ceo.run_autonomous_monitoring()
+
+            from database import get_system_state
+            assert get_system_state("spectra_macro_paused") == "true"
+            assert get_system_state("confirmation_mode") == "true"
+
+            # 2. RiskEngine should now reject signals due to macro pause
+            res = risk_engine.calculate("BTCUSDT", "LONG", 50000.0, "A", 1000.0)
+            assert res["valid"] is False
+            assert res["risk_reject_reason"] == "macro_news_watcher_paused"
+
+            # 3. Simulate event passed (16 minutes ago)
+            event_time_past = datetime.now(timezone.utc) - timedelta(minutes=16)
+            ceo.dynamic_events = [{"name": "Mock Macro Event", "time": event_time_past}]
+
+            ceo.run_autonomous_monitoring()
+
+            assert get_system_state("spectra_macro_paused") == "false"
+            assert get_system_state("confirmation_mode") == "false"
+    finally:
+        if os.path.exists(temp_db):
+            os.remove(temp_db)
+
+
+def test_live_correlation_guard():
+    from core.risk_engine import RiskEngine
+    from unittest.mock import patch, MagicMock
+
+    mock_client = MagicMock()
+    # 20 klines, let's say they have prices that are highly correlated
+    # High, Low, Close index: 4 is close
+    k_a = [[0, 0, 0, 0, 100.0 + i, 0, 0, 0, 0, 0, 0, 0] for i in range(20)]
+    k_b = [[0, 0, 0, 0, 200.0 + i * 1.1, 0, 0, 0, 0, 0, 0, 0] for i in range(20)]
+    
+    mock_client.futures_klines.side_effect = lambda symbol, interval, limit: k_a if symbol == "BTCUSDT" else k_b
+
+    risk_engine = RiskEngine(mock_client, db_path="trading.db")
+
+    open_trades = [
+        {"symbol": "BTCUSDT", "direction": "LONG", "margin_used": 10.0}
+    ]
+
+    with patch("database.get_open_trades", return_value=open_trades), \
+         patch("database.get_system_state", return_value="-"):
+         
+        # Calculate correlation for ETHUSDT vs open trade BTCUSDT
+        # Since they are perfectly correlated (1.0), it should be blocked (> 0.85)
+        res = risk_engine.calculate("ETHUSDT", "LONG", 3000.0, "A", 1000.0)
+        assert res["valid"] is False
+        assert res["risk_reject_reason"] == "high_correlation_block"
+
+
+def test_liquidity_sweep_detector():
+    from core.trigger_engine import TriggerEngine, _GLOBAL_KLINE_CACHE
+    _GLOBAL_KLINE_CACHE.clear()
+    from unittest.mock import MagicMock, patch
+
+    mock_client = MagicMock()
+    engine = TriggerEngine(mock_client)
+
+    # We need to build a DataFrame of 51 candles where the last candle sweeps the low
+    # Previous candles are trending to pass the ADX filter, scaled up to avoid volatility filter
+    klines = []
+    for i in range(50):
+        # Time, Open, High, Low, Close, Volume
+        klines.append([0, 1000.0 + i, 1002.0 + i, 999.0 + i, 1001.0 + i, 1.0, 0, 0, 0, 0, 0, 0])
+    # Add a sweep candle: low sweeps to 1010.0, but closes at 1045.0
+    klines.append([0, 1049.0, 1051.0, 1010.0, 1045.0, 10.0, 0, 0, 0, 0, 0, 0])
+
+    mock_client.futures_klines.return_value = klines
+
+    # Mock relative volume, momentum, RSI, and disable CVD divergence check
+    with patch.object(engine, "_relative_volume", return_value=3.0), \
+         patch.object(engine, "_momentum_3c", return_value=1.0), \
+         patch.object(engine, "_rsi", return_value=50.0), \
+         patch("core.trigger_engine._btc_allows", return_value=(True, 1.0)), \
+         patch("core.ml_signal_scorer.score_signal", return_value=80.0), \
+         patch("config.HUMAN_MODE", False), \
+         patch("config.SCALP_CVD_DIVERGENCE_FILTER_ENABLED", False):
+         
+        # Analyze LONG signal
+        res = engine.analyze("BTCUSDT", "LONG")
+        assert res["is_liquidity_sweep"] is True
+        # Quality should be upgraded (e.g. S) and score boosted
+        assert res["quality"] in ("A+", "S")
+
+
+def test_momentum_based_trailing_tp3_bypass():
+    from core.trailing_engine import TrailingEngine, TradeExitState
+    from unittest.mock import patch
+
+    engine = TrailingEngine(
+        tp1_close_pct=40,
+        tp2_close_pct=30,
+        runner_close_pct=30,
+        trail_atr_mult=1.5,
+        breakeven_enabled=True,
+    )
+
+    trade = {
+        "id": 123,
+        "symbol": "BTCUSDT",
+        "direction": "LONG",
+        "entry": 50000.0,
+        "sl": 48000.0,
+        "tp1": 52000.0,
+        "tp2": 54000.0,
+        "tp3": 58000.0,
+        "qty": 0.1,
+    }
+
+    state = TradeExitState(
+        tp1_hit=True,
+        tp2_hit=True,
+        current_sl=54000.0,
+        highest_price=56000.0,
+        qty_remaining_pct=30.0,
+        initial_sl=48000.0
+    )
+
+    # 1. Under non-trending regime, hitting TP3 should fully close the position
+    with patch("database.get_market_regime", return_value="NEUTRAL"):
+        res = engine.evaluate(trade, 58100.0, state, atr=1000.0)
+        assert res.should_full_close is True
+        assert res.full_close_reason == "TP3_HIT"
+
+    # Reset state
+    state.tp3_hit = False
+    state.qty_remaining_pct = 30.0
+
+    # 2. Under trending matching regime (BULLISH for LONG), hitting TP3 should bypass full close,
+    # partial close half of the remaining (15%), and continue trailing
+    with patch("database.get_market_regime", return_value="BULLISH"):
+        res = engine.evaluate(trade, 58100.0, state, atr=1000.0)
+        assert res.should_full_close is False
+        assert res.should_partial_close is True
+        assert res.close_pct == 15.0
+        assert res.reason == "TP3_TRENDING_PARTIAL"
+        assert state.trailing_active is True
+
+
+def test_spectra_chart_generator():
+    from core.spectra_ceo import SpectraCeo
+    import sqlite3
+    import os
+
+    temp_db = "temp_db_spectra_chart_test.db"
+    if os.path.exists(temp_db):
+        os.remove(temp_db)
+
+    conn = sqlite3.connect(temp_db)
+    conn.execute("""
+        CREATE TABLE balance_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id INTEGER,
+            symbol TEXT,
+            event_type TEXT,
+            amount REAL,
+            balance_before REAL,
+            balance_after REAL,
+            note TEXT,
+            created_at TEXT
+        )
+    """)
+    # Insert some balances
+    conn.execute("INSERT INTO balance_ledger (balance_after, created_at) VALUES (2050.0, '2026-06-03T10:00:00Z')")
+    conn.execute("INSERT INTO balance_ledger (balance_after, created_at) VALUES (2100.0, '2026-06-03T11:00:00Z')")
+    conn.commit()
+    conn.close()
+
+    ceo = SpectraCeo(db_path=temp_db)
+    try:
+        chart_bytes = ceo.generate_equity_chart()
+        assert chart_bytes is not None
+        assert len(chart_bytes) > 0
+        assert isinstance(chart_bytes, bytes)
+    finally:
+        if os.path.exists(temp_db):
+            os.remove(temp_db)
+

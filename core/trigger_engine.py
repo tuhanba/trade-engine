@@ -125,6 +125,43 @@ class TriggerEngine:
             score += strength if c > o else -strength
         return round(score, 3)
 
+    def _detect_liquidity_sweep(self, df: pd.DataFrame, direction: str, rv: float) -> bool:
+        if len(df) < 32:
+            return False
+        try:
+            last_idx = -1
+            open_p = df["open"].iloc[last_idx]
+            high_p = df["high"].iloc[last_idx]
+            low_p  = df["low"].iloc[last_idx]
+            close_p = df["close"].iloc[last_idx]
+            candle_range = high_p - low_p
+            if candle_range <= 0:
+                return False
+                
+            if direction == "LONG":
+                # Low sweeps below the minimum of the previous 30 periods
+                min_30 = df["low"].iloc[-31:-1].min()
+                if low_p < min_30:
+                    lower_tail = min(open_p, close_p) - low_p
+                    # Tail is at least 50% of the entire candle range, close is in the upper 50%
+                    if lower_tail >= 0.5 * candle_range and close_p > (high_p + low_p) / 2:
+                        # High relative volume
+                        if rv >= 1.5:
+                            return True
+            elif direction == "SHORT":
+                # High sweeps above the maximum of the previous 30 periods
+                max_30 = df["high"].iloc[-31:-1].max()
+                if high_p > max_30:
+                    upper_tail = high_p - max(open_p, close_p)
+                    # Tail is at least 50% of the entire candle range, close is in the lower 50%
+                    if upper_tail >= 0.5 * candle_range and close_p < (high_p + low_p) / 2:
+                        # High relative volume
+                        if rv >= 1.5:
+                            return True
+        except Exception as e:
+            logger.warning(f"Error in Stop-Hunt detection: {e}")
+        return False
+
 
 
     def analyze(self, symbol: str, direction: str, btc_trend: str = "NEUTRAL",
@@ -269,6 +306,23 @@ class TriggerEngine:
 
         if (direction == "LONG" and hist > 0) or (direction == "SHORT" and hist < 0): score += 1.0
         if (direction == "LONG" and c1 > vwap_val) or (direction == "SHORT" and c1 < vwap_val): score += 1.0
+
+        # Stop-Hunt / Liquidity Sweep Detector
+        is_sweep = False
+        try:
+            rv5 = self._relative_volume(df5, 20)
+            if self._detect_liquidity_sweep(df5, direction, rv5):
+                is_sweep = True
+                score = min(10.0, score + 2.0)
+                # Boost Quality
+                quality_order = ["C", "B", "A", "A+", "S"]
+                if quality in quality_order:
+                    idx = quality_order.index(quality)
+                    if idx < len(quality_order) - 1:
+                        quality = quality_order[idx + 1]
+                logger.info(f"[Stop-Hunt Detector] Liquidity sweep detected for {symbol} {direction}. Quality boosted to {quality}, Score +2.0 (new score: {score})")
+        except Exception as e:
+            logger.debug(f"[Stop-Hunt Detector] Error: {e}")
 
         # S Sınıfı Kontrolü
         s_score = 0
@@ -534,6 +588,7 @@ class TriggerEngine:
         return {
             "quality": quality,
             "score": min(10.0, max(0.0, score)),
+            "is_liquidity_sweep": is_sweep,
             "ml_score": ml_score,
             "confluence_score": confluence_score,
             "confluence_total": confluence_total,

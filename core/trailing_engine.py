@@ -186,6 +186,15 @@ class TrailingEngine:
         if current_price <= 0 or entry <= 0:
             return PartialCloseResult()
 
+        # Get market regime and check if trending matching
+        regime = "NEUTRAL"
+        try:
+            from database import get_market_regime
+            regime = get_market_regime()
+        except Exception:
+            pass
+        is_trending_matching = (regime == "BULLISH" and side == "LONG") or (regime == "BEARISH" and side == "SHORT")
+
         # Kullanılacak SL: state'deki güncel SL (trailing hareket etmiş olabilir)
         active_sl = state.current_sl if state.current_sl > 0 else sl
 
@@ -315,7 +324,8 @@ class TrailingEngine:
             else:
                 # ATR-bazlı trailing stop
                 if atr and atr > 0:
-                    trail_distance = atr * self.trail_atr_mult
+                    dynamic_mult = self.trail_atr_mult * 0.8 if is_trending_matching else self.trail_atr_mult
+                    trail_distance = atr * dynamic_mult
                     if side == "LONG":
                         new_sl = max(state.current_sl, current_price - trail_distance)
                     else:
@@ -340,22 +350,40 @@ class TrailingEngine:
 
         # ── 5. TP3 / Runner kontrolü ─────────────────────────────────
         if tp3 > 0 and state.tp2_hit and not state.tp3_hit and self._tp_hit(side, current_price, tp3):
-            state.tp3_hit = True
-            state.qty_remaining_pct -= self.runner_close_pct
+            if is_trending_matching:
+                half_runner = state.qty_remaining_pct / 2.0
+                state.tp3_hit = True
+                state.qty_remaining_pct -= half_runner
+                state.trailing_active = True
+                logger.info(
+                    "[Trailing] TRENDING Regime - TP3 hit bypassed for full close. Partial closing half of runner (%s%%) to let profits run: #%s %s @ %.4f",
+                    half_runner, trade_id, symbol, current_price
+                )
+                return PartialCloseResult(
+                    should_partial_close=True,
+                    close_pct=half_runner,
+                    close_at_price=current_price,
+                    reason="TP3_TRENDING_PARTIAL",
+                    new_sl=state.current_sl
+                )
+            else:
+                state.tp3_hit = True
+                state.qty_remaining_pct -= self.runner_close_pct
 
-            logger.info(
-                "[Trailing] TP3 vuruldu: #%s %s @ %.4f  Runner kapatılıyor",
-                trade_id, symbol, current_price,
-            )
-            return PartialCloseResult(
-                should_full_close=True,
-                close_at_price=current_price,
-                full_close_reason="TP3_HIT",
-            )
+                logger.info(
+                    "[Trailing] TP3 vuruldu: #%s %s @ %.4f  Runner kapatılıyor",
+                    trade_id, symbol, current_price,
+                )
+                return PartialCloseResult(
+                    should_full_close=True,
+                    close_at_price=current_price,
+                    full_close_reason="TP3_HIT",
+                )
 
         # ── 6. Aktif Trailing Stop güncellemesi ──────────────────────
         if state.trailing_active and atr and atr > 0:
-            trail_distance = atr * self.trail_atr_mult
+            dynamic_mult = self.trail_atr_mult * 0.8 if is_trending_matching else self.trail_atr_mult
+            trail_distance = atr * dynamic_mult
             from database import get_market_regime
             trailing_type = "step" if get_market_regime() == "CHOPPY" else getattr(config, "TRAILING_STOP_TYPE", "atr")
 

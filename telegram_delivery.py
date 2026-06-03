@@ -665,6 +665,16 @@ def send_voice(voice_bytes: bytes, caption: Optional[str] = None) -> bool:
         return False
 
 
+def send_photo(photo_bytes: bytes, caption: str = "") -> bool:
+    """Public wrapper to send a photo via Telegram."""
+    try:
+        ok, _ = _send_photo_raw(photo_bytes, caption)
+        return ok
+    except Exception as e:
+        logger.error("[Telegram] send_photo: %s", e)
+        return False
+
+
 def send_veto_alert(sig_data: dict | Any, candidate_id: int) -> bool:
     """
     AI tarafından veto edilen veya watchlist'e alınan yüksek skorlu sinyal
