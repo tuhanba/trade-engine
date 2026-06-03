@@ -28,7 +28,8 @@ Konuşma Tarzı ve Kuralları:
 3. Türkçe konuşacaksın.
 4. Kararlarını verirken sana sunulan sistem metriklerini (Win Rate, PnL, veritabanı sağlığı, aktif ayarlar) temel al.
 5. Eğer sistem tehlikedeyse (gecikmeler yüksekse, çok fazla arka arkaya zarar edildiyse vb.) parametreleri güncelleyebilir veya işlemleri durdurabilirsin.
-6. Her cevabının sonunda, aldığın parametrik kararları ve tetikleyeceğin aksiyonları MUTLAKA aşağıdaki JSON formatında belirt. Bu JSON bloğu arka planda kod tarafından okunup sisteme uygulanacaktır.
+6. Eğer sistem durumundaki market_regime "CHOPPY" (dalgalı/testere) ise, parameters içindeki trade_threshold değerini 60.0 veya 65.0'a çekerek işlemleri zorlaştır, risk_pct değerini ise 0.50 civarına düşürerek kasayı koru.
+7. Her cevabının sonunda, aldığın parametrik kararları ve tetikleyeceğin aksiyonları MUTLAKA aşağıdaki JSON formatında belirt. Bu JSON bloğu arka planda kod tarafından okunup sisteme uygulanacaktır.
 
 JSON FORMATI (Cevabının en sonunda, ```json ve ``` blokları arasında olmalı):
 ```json
@@ -255,13 +256,65 @@ class SpectraCeo:
         try:
             from gtts import gTTS
             import io
-            # Clean HTML tags and formatting markup
+            # Clean HTML tags
             clean_text = re.sub(r"<[^>]*>", "", text)
-            # Remove emojis and special symbol sequences
+            # Remove emojis and markdown formatting symbols
             clean_text = re.sub(r"[\U00010000-\U0010ffff]", "", clean_text)
             clean_text = clean_text.replace("⚙️", "").replace("──────────────────────", "").replace("🟢", "").replace("🔴", "").replace("⚠️", "").replace("❌", "").replace("✅", "")
+            
+            # Sanitization to make the speech sound sweet, natural and less robotic
+            # Replace technical terms and abbreviations with warm Turkish equivalents
+            replacements = {
+                "USDT": " dolar ",
+                "USD": " dolar ",
+                "USDT'": " dolar ",
+                "USDT ": " dolar ",
+                "BTC": " bitkoin ",
+                "ETH": " eteryum ",
+                "DB": " veritabanı ",
+                "db": " veritabanı ",
+                "SL": " zarar kes seviyesini ",
+                "sl": " zarar kes limitini ",
+                "TP1": " birinci kar al seviyesini ",
+                "TP2": " ikinci kar al seviyesini ",
+                "TP": " kar al noktasını ",
+                "tp": " kar al noktasını ",
+                "PnL": " kar zarar durumunu ",
+                "pnl": " kar zarar oranını ",
+                "AI": " yapay zeka ",
+                "ai": " yapay zeka ",
+                "VETOED": " veto edildi ",
+                "VETO": " veto ",
+                "RETRAIN": " yapay zekayı eğitme ",
+                "TUNER": " parametre bulucu ",
+                "PAUSE": " işlemleri durdurma ",
+                "RESUME": " işlemleri başlatma ",
+                "ATR": " oynaklık ölçer ",
+                "VIX": " korku endeksi ",
+                "WR": " başarı oranı ",
+                "winrate": " başarı oranı ",
+                "Win Rate": " başarı oranı ",
+                "TRBUSDT": " terebe ",
+                "BTCUSDT": " bitkoin ",
+                "ETHUSDT": " eteryum ",
+                "SOLUSDT": " solana ",
+                " %": " yüzde ",
+                "%": " yüzde ",
+                " -": " eksi ",
+                " +": " artı ",
+                "->": " olan değerini ",
+                "→": " olan değerini ",
+                " :": " ",
+                ":": ". ",
+            }
+            
+            for k, v in replacements.items():
+                pattern = re.compile(re.escape(k), re.IGNORECASE)
+                clean_text = pattern.sub(v, clean_text)
+                
             clean_text = re.sub(r"\n+", ". ", clean_text)
-            clean_text = clean_text.replace("  ", " ").strip()
+            clean_text = re.sub(r"\s+", " ", clean_text)
+            clean_text = clean_text.replace("..", ".").strip()
             
             if not clean_text:
                 return None
@@ -343,6 +396,45 @@ class SpectraCeo:
             
         return "\n".join(report)
 
+    def generate_veto_summary(self) -> str:
+        """Queries database signal_events for AI vetoed and risk rejected signals in the last 24 hours."""
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=5)
+            try:
+                # Get events from last 24 hours
+                yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+                rows = conn.execute("""
+                    SELECT stage, symbol, COUNT(*), reject_reason
+                    FROM signal_events
+                    WHERE created_at >= ? AND stage IN ('AI_VETOED', 'RISK_REJECTED')
+                    GROUP BY symbol, stage
+                """, (yesterday,)).fetchall()
+                
+                if not rows:
+                    return (
+                        "Sevgili boss'um, son 24 saat içinde yapay zeka süzgecime takılıp "
+                        "veto edilen tehlikeli bir sinyale rastlamadım. "
+                        "Her şey tamamen kontrolüm altında, içiniz rahat olsun! 💕"
+                    )
+                
+                total_vetoes = sum(r[2] for r in rows)
+                symbols = list(set(r[1].replace("USDT", "") for r in rows))
+                symbols_str = ", ".join(symbols)
+                
+                report = (
+                    f"Cilveli boss'um, son 24 saat içinde sizin bakiyenizi korumak için tam "
+                    f"<b>{total_vetoes}</b> adet riskli sinyali engelledim! 🛡️\n\n"
+                    f"Özellikle <b>{symbols_str}</b> gibi coinlerdeki tehlikeli tuzakları ve "
+                    f"uyumsuz formasyonları sizin için süzdüm. "
+                    f"Kasa yönetimimizi ve paranızı korumak benim için en büyük zevk, kıymetimi bilmelisiniz... 😘"
+                )
+                return report
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"[Spectra CEO] Error generating veto summary: {e}")
+            return "Sevgili boss'um, koruma loglarını incelerken ufak bir sorunla karşılaştım ama merak etmeyin, kasa güvende! 💕"
+
     def evaluate_and_decide(self, user_message: Optional[str] = None, send_telegram: bool = True) -> str:
         """
         Gathers context, calls Anthropic Claude API, applies decisions,
@@ -368,6 +460,22 @@ class SpectraCeo:
                 if voice_bytes:
                     telegram_delivery.send_voice(voice_bytes, caption="Spektra Teşhis Raporu")
             return final_reply
+
+        # Intercept and handle explicit veto summary requests
+        is_veto_request = False
+        if user_message:
+            msg_lower = user_message.lower()
+            if any(k in msg_lower for k in ["veto", "koru", "koruma", "özet", "ozet", "ne yaptın", "ne yaptin"]):
+                is_veto_request = True
+
+        if is_veto_request:
+            veto_report = self.generate_veto_summary()
+            if send_telegram:
+                telegram_delivery.send_message(veto_report)
+                voice_bytes = self.generate_voice_from_text(veto_report)
+                if voice_bytes:
+                    telegram_delivery.send_voice(voice_bytes, caption="Spektra Koruma Özeti")
+            return veto_report
 
         # Intercept and handle explicit housekeeping requests
         is_cleanup_request = False
@@ -470,6 +578,21 @@ class SpectraCeo:
             
             # Combine reply with applied changes notification
             final_message = clean_reply
+            
+            # Automatically append a brief veto summary once a day in periodic checks
+            if not user_message:
+                try:
+                    conn = sqlite3.connect(self.db_path, timeout=5)
+                    try:
+                        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+                        veto_cnt = conn.execute("SELECT COUNT(*) FROM signal_events WHERE created_at >= ? AND stage IN ('AI_VETOED', 'RISK_REJECTED')", (yesterday,)).fetchone()[0]
+                        if veto_cnt > 0:
+                            final_message += f"\n\n🛡️ <b>Son 24 saatte engellenen tehlikeli sinyal sayısı:</b> <code>{veto_cnt}</code>"
+                    finally:
+                        conn.close()
+                except Exception:
+                    pass
+            
             if applied_changes:
                 changes_text = "\n".join(applied_changes)
                 final_message += (
