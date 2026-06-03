@@ -28,4 +28,5 @@ anthropic>=0.25.0
 matplotlib>=3.7.0
 # TTS Voice Engine for Spectra (Phase E)
 gTTS>=2.3.0
+edge-tts>=6.1.3
 

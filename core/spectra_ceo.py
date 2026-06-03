@@ -252,10 +252,10 @@ class SpectraCeo:
         return deleted_count, saved_space_mb
 
     def generate_voice_from_text(self, text: str) -> Optional[bytes]:
-        """Converts Turkish text to speech using gTTS and returns the raw audio bytes."""
+        """Converts Turkish text to speech using edge-tts (falling back to gTTS) and returns the raw audio bytes."""
         try:
-            from gtts import gTTS
             import io
+            import re
             # Clean HTML tags
             clean_text = re.sub(r"<[^>]*>", "", text)
             # Remove emojis and markdown formatting symbols
@@ -319,6 +319,58 @@ class SpectraCeo:
             if not clean_text:
                 return None
                 
+            # Try edge-tts first for natural sweet voice
+            try:
+                import asyncio
+                import aiohttp
+                from aiohttp.resolver import ThreadedResolver
+                import edge_tts
+                
+                # Patch TCPConnector to bypass custom resolver (aiodns)
+                orig_init = aiohttp.TCPConnector.__init__
+                try:
+                    def new_init(connector_self, *args, **kwargs):
+                        kwargs['resolver'] = ThreadedResolver()
+                        orig_init(connector_self, *args, **kwargs)
+                    
+                    # Apply temporary monkey patch to TCPConnector for this call
+                    aiohttp.TCPConnector.__init__ = new_init
+                    
+                    async def run_edge_tts():
+                        # tr-TR-EmelNeural is highly realistic and sweet-sounding
+                        communicate = edge_tts.Communicate(clean_text, "tr-TR-EmelNeural")
+                        audio_data = b""
+                        async for chunk in communicate.stream():
+                            if chunk["type"] == "audio":
+                                audio_data += chunk["data"]
+                        return audio_data
+                    
+                    # Get event loop or run
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        
+                    if loop.is_running():
+                        import threading
+                        from concurrent.futures import ThreadPoolExecutor
+                        with ThreadPoolExecutor(max_workers=1) as executor:
+                            future = executor.submit(lambda: asyncio.run(run_edge_tts()))
+                            voice_bytes = future.result()
+                    else:
+                        voice_bytes = loop.run_until_complete(run_edge_tts())
+                finally:
+                    # Restore TCPConnector constructor just in case
+                    aiohttp.TCPConnector.__init__ = orig_init
+                
+                if voice_bytes and len(voice_bytes) > 0:
+                    return voice_bytes
+            except Exception as e:
+                logger.warning(f"[Spectra CEO] edge-tts failed, falling back to gTTS: {e}")
+                
+            # Fallback to gTTS
+            from gtts import gTTS
             tts = gTTS(text=clean_text, lang="tr")
             fp = io.BytesIO()
             tts.write_to_fp(fp)
@@ -327,6 +379,7 @@ class SpectraCeo:
         except Exception as e:
             logger.error(f"[Spectra CEO] Voice generation failed: {e}")
             return None
+
 
     def diagnose_data_flow(self) -> str:
         """Runs diagnostics on database size, records, Redis status, and IP whitelist, returning a report."""
@@ -626,3 +679,145 @@ class SpectraCeo:
             if send_telegram:
                 telegram_delivery.send_message(err_msg)
             return err_msg
+
+    def run_autonomous_monitoring(self):
+        """
+        Spectra's active monitoring of the system.
+        Monitors market regime changes, database health, disk space, and data flow.
+        """
+        logger.info("[Spectra CEO] Running autonomous monitoring...")
+        
+        # 1. Market Regime & Volatility Stop/Risk Tuning
+        try:
+            from database import get_market_regime, set_state, get_system_state
+            regime = get_market_regime()
+            
+            # Read last known regime from database
+            last_regime = get_system_state("spectra_last_regime") or "NEUTRAL"
+            
+            if regime != last_regime:
+                logger.info(f"[Spectra CEO] Market regime changed from {last_regime} to {regime}")
+                set_state("spectra_last_regime", regime)
+                
+                if regime == "CHOPPY":
+                    # Scale down risk to protect the bankroll
+                    # Read current settings to restore them later
+                    import config
+                    curr_risk = float(getattr(config, "RISK_PCT", 0.75))
+                    curr_threshold = float(getattr(config, "TRADE_THRESHOLD", 55.0))
+                    
+                    # Store previous parameters if not already in CHOPPY mode
+                    set_state("spectra_pre_choppy_risk", str(curr_risk))
+                    set_state("spectra_pre_choppy_threshold", str(curr_threshold))
+                    
+                    # Apply defensive mode: risk_pct -> 0.5, trade_threshold -> 65.0
+                    set_state("risk_pct", "0.5")
+                    set_state("trade_threshold", "65.0")
+                    try:
+                        conn = sqlite3.connect(self.db_path, timeout=5)
+                        conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (0.5,))
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        logger.error(f"[Spectra CEO] Error updating risk_pct in params: {e}")
+                    
+                    # Clear cache
+                    for key in ["RISK_PCT", "TRADE_THRESHOLD"]:
+                        if key in config._CONFIG_CACHE:
+                            del config._CONFIG_CACHE[key]
+                            
+                    msg = (
+                        "Sevgili boss'um, piyasada yoğun bir oynaklık ve testere rejimi (CHOPPY) tespit ettim! ⚠️\n\n"
+                        "Kasamızı korumak amacıyla risk seviyemizi otonom olarak <b>%0.50</b>'ye çektim ve "
+                        "giriş eşiğimizi <b>65.0</b>'a yükselttim. Ben buradayım, paranız tamamen güvende! 💕"
+                    )
+                    telegram_delivery.send_message(msg)
+                    voice_bytes = self.generate_voice_from_text(msg)
+                    if voice_bytes:
+                        telegram_delivery.send_voice(voice_bytes, caption="Spektra Otonom Risk Koruma Kalkanı")
+                        
+                elif last_regime == "CHOPPY":
+                    # Restore previous settings
+                    from database import get_system_state
+                    prev_risk = get_system_state("spectra_pre_choppy_risk") or "0.75"
+                    prev_threshold = get_system_state("spectra_pre_choppy_threshold") or "55.0"
+                    
+                    set_state("risk_pct", prev_risk)
+                    set_state("trade_threshold", prev_threshold)
+                    try:
+                        conn = sqlite3.connect(self.db_path, timeout=5)
+                        conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (float(prev_risk),))
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        logger.error(f"[Spectra CEO] Error restoring risk_pct in params: {e}")
+                    
+                    # Clear cache
+                    import config
+                    for key in ["RISK_PCT", "TRADE_THRESHOLD"]:
+                        if key in config._CONFIG_CACHE:
+                            del config._CONFIG_CACHE[key]
+                            
+                    msg = (
+                        f"Sevgili boss'um, piyasadaki o aşırı oynaklık ve testere havası dağıldı, "
+                        f"rejim normale döndü! ✨\n\n"
+                        f"Risk oranımızı tekrar eski değeri olan <b>%{float(prev_risk)*100:.1f}</b>'e ve "
+                        f"işlem giriş eşiğimizi <b>{prev_threshold}</b> seviyesine geri getirdim. "
+                        f"Yeni kârlı fırsatları yakalamak için sabırsızlanıyorum! 💕"
+                    )
+                    telegram_delivery.send_message(msg)
+                    voice_bytes = self.generate_voice_from_text(msg)
+                    if voice_bytes:
+                        telegram_delivery.send_voice(voice_bytes, caption="Spektra Otonom Risk Modu Güncellemesi")
+        except Exception as e:
+            logger.error(f"[Spectra CEO] Error monitoring market regime: {e}")
+            
+        # 2. Housekeeping alert if space > 10MB and hasn't prompted in last 12 hours
+        try:
+            from database import get_system_state, set_state
+            files_to_clean = self.scan_unnecessary_files()
+            total_size = sum(os.path.getsize(f) for f in files_to_clean) / (1024 * 1024)
+            
+            if total_size > 10.0:
+                last_prompt_str = get_system_state("spectra_last_cleanup_prompt")
+                should_prompt = True
+                if last_prompt_str:
+                    try:
+                        last_prompt_dt = datetime.fromisoformat(last_prompt_str)
+                        if datetime.now(timezone.utc) - last_prompt_dt < timedelta(hours=12):
+                            should_prompt = False
+                    except Exception:
+                        pass
+                        
+                if should_prompt:
+                    set_state("spectra_last_cleanup_prompt", datetime.now(timezone.utc).isoformat())
+                    db_files = [f for f in files_to_clean if f.endswith(".db")]
+                    log_files = [f for f in files_to_clean if f.endswith(".log")]
+                    
+                    prompt_text = (
+                        f"Sevgili boss'um, sunucumuzda birikmiş atıl dosyalar tespit ettim... 💕\n\n"
+                        f"📁 <b>Silinmek İstenen Gereksiz Dosyalar:</b>\n"
+                        f"  • Geçici Backtest DB Dosyaları (<code>backtest_temp_*.db</code>): <b>{len(db_files)}</b> adet\n"
+                        f"  • Sistem Log Dosyaları (<code>*.log</code>): <b>{len(log_files)}</b> adet\n"
+                        f"  • Toplam Boyut: <code>{total_size:.2f} MB</code>\n\n"
+                        f"⚠️ <b>ÖNEMLİ NOT:</b> Bu dosyalar sadece geçmiş simülasyonlardan kalan atıl dosyalardır. "
+                        f"<b>Geçmiş trade geçmişimize ve verilerimize KESİNLİKLE dokunmuyorum!</b> "
+                        f"Disk alanımızı rahatlatmak için bu atıl dosyaları temizlememe izin veriyor musunuz cilveli boss'um?"
+                    )
+                    reply_markup = {
+                        "inline_keyboard": [
+                            [
+                                {"text": "✅ BULUTU TEMİZLE", "callback_data": "cmd:clean_server"},
+                                {"text": "❌ KALSIN", "callback_data": "cmd:cancel_clean"}
+                            ]
+                        ]
+                    }
+                    telegram_delivery.send_message(prompt_text, reply_markup=reply_markup)
+                    voice_bytes = self.generate_voice_from_text(prompt_text)
+                    if voice_bytes:
+                        telegram_delivery.send_voice(voice_bytes, caption="Sunucu temizliği onay talebi")
+        except Exception as e:
+            logger.error(f"[Spectra CEO] Error during housekeeping check: {e}")
+
+
+

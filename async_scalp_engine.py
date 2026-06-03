@@ -151,6 +151,7 @@ class AsyncScalpEngine:
             from core.spectra_ceo import SpectraCeo
             self.spectra_ceo = SpectraCeo(self.client)
             asyncio.create_task(self._spectra_ceo_loop())
+            asyncio.create_task(self._spectra_monitor_loop())
         except Exception as e:
             logger.error(f"Spectra CEO başlatılamadı: {e}")
 
@@ -289,6 +290,18 @@ class AsyncScalpEngine:
             except Exception as e:
                 logger.error(f"[Spectra CEO Loop] Task failed: {e}")
             await asyncio.sleep(43200) # 12 hours
+
+    async def _spectra_monitor_loop(self):
+        """Run Spectra CEO Autonomous Monitoring loop every 5 minutes."""
+        # Initial delay to let the bot stabilize (e.g., 2 minutes)
+        await asyncio.sleep(120)
+        while True:
+            try:
+                if self.spectra_ceo:
+                    await asyncio.to_thread(self.spectra_ceo.run_autonomous_monitoring)
+            except Exception as e:
+                logger.error(f"[Spectra Monitor Loop] Task failed: {e}")
+            await asyncio.sleep(300) # 5 minutes
 
     async def stop(self):
         logger.info("Stopping engine...")

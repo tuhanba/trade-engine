@@ -497,3 +497,167 @@ def test_spectra_chat_endpoint():
         assert "voice" in data
         mock_eval.assert_called_once_with("naber", send_telegram=False)
 
+
+def test_spectra_autonomous_monitoring():
+    """Verify Spectra's autonomous monitoring of regimes and housekeeping alerts."""
+    from core.spectra_ceo import SpectraCeo
+    from unittest.mock import patch, MagicMock
+    import os
+    import sqlite3
+
+    temp_db = "temp_db_spectra_monitoring.db"
+    if os.path.exists(temp_db):
+        os.remove(temp_db)
+
+    conn = sqlite3.connect(temp_db)
+    conn.execute("""
+        CREATE TABLE params (
+            id INTEGER PRIMARY KEY,
+            risk_pct REAL,
+            sl_atr_mult REAL,
+            tp_atr_mult REAL,
+            updated_at TEXT
+        )
+    """)
+    conn.execute("INSERT INTO params (id, risk_pct) VALUES (1, 0.75)")
+    conn.commit()
+    conn.close()
+
+    ceo = SpectraCeo(db_path=temp_db)
+
+    try:
+        with patch("database.get_market_regime") as mock_get_regime, \
+             patch("database.get_system_state") as mock_get_state, \
+             patch("database.set_state") as mock_set_state, \
+             patch("telegram_delivery.send_message") as mock_send_msg, \
+             patch("telegram_delivery.send_voice") as mock_send_voice, \
+             patch("core.spectra_ceo.SpectraCeo.generate_voice_from_text", return_value=b"voice_data"), \
+             patch("core.spectra_ceo.SpectraCeo.scan_unnecessary_files") as mock_scan_files, \
+             patch("os.path.getsize") as mock_getsize:
+
+            # --- Test Case 1: NEUTRAL to CHOPPY transition ---
+            mock_get_regime.return_value = "CHOPPY"
+            mock_get_state.side_effect = lambda key, default=None: {
+                "spectra_last_regime": "NEUTRAL",
+                "spectra_last_cleanup_prompt": None
+            }.get(key, default)
+            mock_scan_files.return_value = []
+
+            ceo.run_autonomous_monitoring()
+
+            # Check that we set the last regime and saved previous settings
+            mock_set_state.assert_any_call("spectra_last_regime", "CHOPPY")
+            mock_set_state.assert_any_call("risk_pct", "0.5")
+            mock_set_state.assert_any_call("trade_threshold", "65.0")
+            mock_send_msg.assert_called()
+            mock_send_voice.assert_called_with(b"voice_data", caption="Spektra Otonom Risk Koruma Kalkanı")
+
+            # Check that risk_pct inside params table was updated to 0.5
+            conn = sqlite3.connect(temp_db)
+            row = conn.execute("SELECT risk_pct FROM params WHERE id = 1").fetchone()
+            conn.close()
+            assert row[0] == 0.5
+
+            # --- Test Case 2: CHOPPY to NEUTRAL transition ---
+            mock_set_state.reset_mock()
+            mock_send_msg.reset_mock()
+            mock_send_voice.reset_mock()
+
+            mock_get_regime.return_value = "NEUTRAL"
+            mock_get_state.side_effect = lambda key, default=None: {
+                "spectra_last_regime": "CHOPPY",
+                "spectra_pre_choppy_risk": "0.85",
+                "spectra_pre_choppy_threshold": "58.0",
+                "spectra_last_cleanup_prompt": None
+            }.get(key, default)
+
+            ceo.run_autonomous_monitoring()
+
+            mock_set_state.assert_any_call("spectra_last_regime", "NEUTRAL")
+            mock_set_state.assert_any_call("risk_pct", "0.85")
+            mock_set_state.assert_any_call("trade_threshold", "58.0")
+            mock_send_msg.assert_called()
+            mock_send_voice.assert_called_with(b"voice_data", caption="Spektra Otonom Risk Modu Güncellemesi")
+
+            # Check that risk_pct inside params table was restored to 0.85
+            conn = sqlite3.connect(temp_db)
+            row = conn.execute("SELECT risk_pct FROM params WHERE id = 1").fetchone()
+            conn.close()
+            assert row[0] == 0.85
+
+            # --- Test Case 3: Housekeeping warning (> 10MB) ---
+            mock_set_state.reset_mock()
+            mock_send_msg.reset_mock()
+            mock_send_voice.reset_mock()
+
+            mock_get_regime.return_value = "NEUTRAL"
+            mock_get_state.side_effect = lambda key, default=None: {
+                "spectra_last_regime": "NEUTRAL",
+                "spectra_last_cleanup_prompt": None
+            }.get(key, default)
+
+            mock_scan_files.return_value = ["dummy_backtest_temp_1.db", "dummy_sys.log"]
+            mock_getsize.side_effect = lambda f: 6 * 1024 * 1024  # 12MB total
+
+            ceo.run_autonomous_monitoring()
+
+            # Check prompt setting
+            assert any(call[0][0] == "spectra_last_cleanup_prompt" for call in mock_set_state.call_args_list)
+            args, kwargs = mock_send_msg.call_args
+            assert "Silinmek İstenen Gereksiz Dosyalar" in args[0]
+            assert "Geçmiş trade geçmişimize ve verilerimize KESİNLİKLE dokunmuyorum" in args[0]
+            assert "cmd:clean_server" in kwargs["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+
+    finally:
+        if os.path.exists(temp_db):
+            os.remove(temp_db)
+
+
+def test_spectra_edge_tts_voice_generation():
+    """Verify that edge-tts is prioritized and custom TCPConnector resolver monkeypatch is applied/restored."""
+    from core.spectra_ceo import SpectraCeo
+    from unittest.mock import patch
+    import aiohttp
+
+    orig_init = aiohttp.TCPConnector.__init__
+
+    class AsyncCommunicateMock:
+        def __init__(self, text, voice):
+            self.text = text
+            self.voice = voice
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"mocked_edge_tts_bytes"}
+
+    with patch("edge_tts.Communicate", side_effect=AsyncCommunicateMock) as mock_comm:
+        ceo = SpectraCeo()
+        voice = ceo.generate_voice_from_text("Tatlı ses tonu deneme.")
+
+        mock_comm.assert_called_once_with("Tatlı ses tonu deneme.", "tr-TR-EmelNeural")
+        assert voice == b"mocked_edge_tts_bytes"
+        assert aiohttp.TCPConnector.__init__ is orig_init
+
+
+def test_spectra_voice_fallback_to_gtts():
+    """Verify that if edge-tts fails, voice generation falls back to gTTS."""
+    from core.spectra_ceo import SpectraCeo
+    from unittest.mock import patch
+    import aiohttp
+
+    orig_init = aiohttp.TCPConnector.__init__
+
+    with patch("edge_tts.Communicate", side_effect=Exception("Connection failed")), \
+         patch("gtts.gTTS") as mock_gtts:
+
+        def mock_write(fp):
+            fp.write(b"mocked_gtts_bytes")
+
+        mock_gtts.return_value.write_to_fp.side_effect = mock_write
+
+        ceo = SpectraCeo()
+        voice = ceo.generate_voice_from_text("Fallback deneme.")
+
+        mock_gtts.assert_called_once_with(text="Fallback deneme.", lang="tr")
+        assert voice == b"mocked_gtts_bytes"
+        assert aiohttp.TCPConnector.__init__ is orig_init
+
