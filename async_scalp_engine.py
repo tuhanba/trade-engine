@@ -218,6 +218,12 @@ class AsyncScalpEngine:
         # Tüm market için stream başlat
         await self.market_data.start_all_tickers()
 
+        try:
+            from telegram_delivery import send_message
+            send_message("🟢 <b>Sistem Başlatıldı!</b>\n🤖 Asenkron Scalp Motoru piyasayı taramaya başladı.")
+        except Exception:
+            pass
+
         # Engine çalışmaya devam eder — shutdown ana coroutine'de yönetilir
         # (while True döngüsü kaldırıldı; ana task CancelledError ile bitecek)
 
@@ -636,12 +642,6 @@ async def main():
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, shutdown_signal)
-
-    try:
-        from telegram_delivery import send_message
-        send_message("🟢 <b>Sistem Başlatıldı!</b>\n🤖 Asenkron Scalp Motoru piyasayı taramaya başladı.")
-    except Exception:
-        pass
 
     # Engine'i başlat (kurulumu tamamla)
     try:
