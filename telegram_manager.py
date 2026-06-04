@@ -38,6 +38,9 @@ class TelegramManager:
             logger.warning("TelegramManager: token/chat_id eksik")
             return
         
+        # Webhook çakışmasını önlemek ve polling'i garanti altına almak için aktif webhook'u silelim
+        self._delete_webhook()
+        
         # Register commands on Telegram Bot Menu
         self._register_commands()
 
@@ -624,6 +627,17 @@ class TelegramManager:
                 logger.warning(f"Telegram komut listesi kaydedilemedi: {resp.text}")
         except Exception as e:
             logger.warning(f"Telegram komut listesi kaydı sırasında hata: {e}")
+
+    def _delete_webhook(self):
+        url = f"https://api.telegram.org/bot{self.token}/deleteWebhook"
+        try:
+            resp = requests.post(url, timeout=_TIMEOUT)
+            if resp.status_code == 200 and resp.json().get("ok"):
+                logger.info("Telegram webhook temizlendi, polling moduna geçildi.")
+            else:
+                logger.warning(f"Telegram webhook temizlenemedi: {resp.text}")
+        except Exception as e:
+            logger.warning(f"Telegram webhook temizleme hatası: {e}")
 
     def _get_help_markup(self) -> dict:
         return {
