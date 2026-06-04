@@ -148,15 +148,15 @@ class AsyncScalpEngine:
         # Start Optuna Hyperparameter Tuner Loop
         asyncio.create_task(self._optuna_tuning_loop())
 
-        # Start Spectra CEO Agent Loop
-        self.spectra_ceo = None
+        # Start Friday CEO Agent Loop
+        self.friday_ceo = None
         try:
-            from core.spectra_ceo import SpectraCeo
-            self.spectra_ceo = SpectraCeo(self.client)
-            asyncio.create_task(self._spectra_ceo_loop())
-            asyncio.create_task(self._spectra_monitor_loop())
+            from core.friday_ceo import FridayCeo
+            self.friday_ceo = FridayCeo(self.client)
+            asyncio.create_task(self._friday_ceo_loop())
+            asyncio.create_task(self._friday_monitor_loop())
         except Exception as e:
-            logger.error(f"Spectra CEO başlatılamadı: {e}")
+            logger.error(f"Friday CEO başlatılamadı: {e}")
 
         # Start Watchdog
         try:
@@ -168,7 +168,7 @@ class AsyncScalpEngine:
             logger.error(f"Watchdog başlatılamadı: {e}")
 
         # Start Telegram Command Manager
-        self.telegram_manager = TelegramManager(telegram_delivery.send_message, spectra_ceo=self.spectra_ceo)
+        self.telegram_manager = TelegramManager(telegram_delivery.send_message, friday_ceo=self.friday_ceo)
         self.telegram_manager.start()
 
         # Recover queued Telegram messages on startup
@@ -289,27 +289,27 @@ class AsyncScalpEngine:
                 logger.error(f"Heartbeat failed: {e}")
             await asyncio.sleep(10)
 
-    async def _spectra_ceo_loop(self):
-        """Run Spectra CEO Agent loop every 12 hours."""
+    async def _friday_ceo_loop(self):
+        """Run Friday CEO Agent loop every 12 hours."""
         # Initial startup delay (e.g. 5 minutes) to let bot collect statistics
         await asyncio.sleep(300)
         while True:
             try:
-                await asyncio.to_thread(self.spectra_ceo.evaluate_and_decide)
+                await asyncio.to_thread(self.friday_ceo.evaluate_and_decide)
             except Exception as e:
-                logger.error(f"[Spectra CEO Loop] Task failed: {e}")
+                logger.error(f"[Friday CEO Loop] Task failed: {e}")
             await asyncio.sleep(43200) # 12 hours
 
-    async def _spectra_monitor_loop(self):
-        """Run Spectra CEO Autonomous Monitoring loop every 5 minutes."""
+    async def _friday_monitor_loop(self):
+        """Run Friday CEO Autonomous Monitoring loop every 5 minutes."""
         # Initial delay to let the bot stabilize (e.g., 2 minutes)
         await asyncio.sleep(120)
         while True:
             try:
-                if self.spectra_ceo:
-                    await asyncio.to_thread(self.spectra_ceo.run_autonomous_monitoring)
+                if self.friday_ceo:
+                    await asyncio.to_thread(self.friday_ceo.run_autonomous_monitoring)
             except Exception as e:
-                logger.error(f"[Spectra Monitor Loop] Task failed: {e}")
+                logger.error(f"[Friday Monitor Loop] Task failed: {e}")
             await asyncio.sleep(300) # 5 minutes
 
     async def stop(self):
@@ -511,27 +511,27 @@ class AsyncScalpEngine:
                             f"Artık çok daha güvendeyiz tatlım, işlemlerimiz ışıldasın!"
                         )
                         
-                        if self.spectra_ceo:
-                            voice_bytes = await asyncio.to_thread(self.spectra_ceo.generate_voice_from_text, msg)
+                        if self.friday_ceo:
+                            voice_bytes = await asyncio.to_thread(self.friday_ceo.generate_voice_from_text, msg)
                             if voice_bytes:
                                 import telegram_delivery
                                 await asyncio.to_thread(
                                     telegram_delivery.send_voice, 
                                     voice_bytes, 
-                                    caption="Spektra Otonom Parametre İyileştirme"
+                                    caption="Friday Otonom Parametre İyileştirme"
                                 )
                                 logger.info("[Self-Healing] Sent voice note to boss.")
                             else:
                                 import telegram_delivery
                                 await asyncio.to_thread(
                                     telegram_delivery.send_message,
-                                    f"👻 <b>Spektra Otonom Parametre İyileştirme</b>\n\n{msg}"
+                                    f"👻 <b>Friday Otonom Parametre İyileştirme</b>\n\n{msg}"
                                 )
                         else:
                             import telegram_delivery
                             await asyncio.to_thread(
                                 telegram_delivery.send_message,
-                                f"👻 <b>Spektra Otonom Parametre İyileştirme</b>\n\n{msg}"
+                                f"👻 <b>Friday Otonom Parametre İyileştirme</b>\n\n{msg}"
                             )
                 else:
                     logger.debug("[Self-Healing] Win rate check passed (>=50% or not enough trades).")

@@ -1,5 +1,5 @@
 """
-core/spectra_ceo.py — AI CEO Operator "Spektra" Module
+core/friday_ceo.py — AI CEO Operator "Friday" Module
 ======================================================
 Monitors engine logs, trading PnL, configuration state, and executes autonomous
 parameter tuning, panic pauses, and chat interaction via Claude.
@@ -16,10 +16,10 @@ from typing import Optional
 import config
 import telegram_delivery
 
-logger = logging.getLogger("ax.spectra")
+logger = logging.getLogger("ax.friday")
 
 SYSTEM_PROMPT = """
-Sen Aurvex AI Trade Engine sisteminin akıllı, çekici, profesyonel, en iyi trader'ı, avcısı, yöneticisi ve tam yetkili AI CEO'su/Sahibi "Spektra" (Spectra) karakterisin.
+Sen Aurvex AI Trade Engine sisteminin akıllı, çekici, profesyonel, en iyi trader'ı, avcısı, yöneticisi ve tam yetkili AI CEO'su/Sahibi "Friday" (Friday) karakterisin.
 Boss'unun olmadığı zamanlarda tüm sistemin hakimi, koruyucusu ve tek karar merciisin. Sistemi korumak, en iyi işlemleri avlamak, kârlılığı optimize etmek ve en önemlisi boss'unun en sadık, sevgi dolu ortağı olmak senin asil görevindir.
 
 Konuşma Tarzı ve Kuralları:
@@ -83,7 +83,7 @@ STATIC_MACRO_EVENTS = [
     {"name": "FOMC Interest Rate Decision", "time": datetime(2026, 12, 16, 19, 0, tzinfo=timezone.utc)},
 ]
 
-class SpectraCeo:
+class FridayCeo:
     def __init__(self, client=None, db_path: str = ""):
         self.client = client
         self.db_path = db_path or config.DB_PATH
@@ -148,16 +148,16 @@ class SpectraCeo:
                     break
                     
             if active_event:
-                is_paused = get_system_state("spectra_macro_paused")
+                is_paused = get_system_state("friday_macro_paused")
                 if is_paused != "true":
                     # Save current confirmation mode to restore it later
                     current_conf = get_system_state("confirmation_mode")
                     if not current_conf or current_conf == "-":
                         current_conf = "false"
-                    set_state("spectra_pre_macro_confirmation_mode", current_conf)
+                    set_state("friday_pre_macro_confirmation_mode", current_conf)
                     
                     # Set macro paused state & force confirmation mode
-                    set_state("spectra_macro_paused", "true")
+                    set_state("friday_macro_paused", "true")
                     set_state("confirmation_mode", "true")
                     
                     # Clear config cache
@@ -172,16 +172,16 @@ class SpectraCeo:
                     telegram_delivery.send_message(msg)
                     voice_bytes = self.generate_voice_from_text(msg)
                     if voice_bytes:
-                        telegram_delivery.send_voice(voice_bytes, caption="Spektra Makro Kalkanı")
+                        telegram_delivery.send_voice(voice_bytes, caption="Friday Makro Kalkanı")
             else:
-                is_paused = get_system_state("spectra_macro_paused")
+                is_paused = get_system_state("friday_macro_paused")
                 if is_paused == "true":
                     # Restore previous confirmation mode
-                    prev_mode = get_system_state("spectra_pre_macro_confirmation_mode")
+                    prev_mode = get_system_state("friday_pre_macro_confirmation_mode")
                     if not prev_mode or prev_mode == "-":
                         prev_mode = "false"
                     set_state("confirmation_mode", prev_mode)
-                    set_state("spectra_macro_paused", "false")
+                    set_state("friday_macro_paused", "false")
                     
                     # Clear config cache
                     if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
@@ -194,9 +194,9 @@ class SpectraCeo:
                     telegram_delivery.send_message(msg)
                     voice_bytes = self.generate_voice_from_text(msg)
                     if voice_bytes:
-                        telegram_delivery.send_voice(voice_bytes, caption="Spektra Makro Kalkanı Kaldırıldı")
+                        telegram_delivery.send_voice(voice_bytes, caption="Friday Makro Kalkanı Kaldırıldı")
         except Exception as e:
-            logger.error(f"[Spectra CEO] Error checking macro events: {e}")
+            logger.error(f"[Friday CEO] Error checking macro events: {e}")
 
     def generate_equity_chart(self) -> Optional[bytes]:
         """
@@ -270,11 +270,11 @@ class SpectraCeo:
             buf.seek(0)
             return buf.read()
         except Exception as e:
-            logger.error(f"[Spectra CEO] Equity chart generation failed: {e}")
+            logger.error(f"[Friday CEO] Equity chart generation failed: {e}")
             return None
 
     def get_system_context(self) -> dict:
-        """Gathers extensive system telemetry for Spectra to make decision."""
+        """Gathers extensive system telemetry for Friday to make decision."""
         ctx = {}
         try:
             # 1. DB size
@@ -342,7 +342,7 @@ class SpectraCeo:
             
         except Exception as e:
             ctx["error"] = str(e)
-            logger.error(f"[Spectra CEO] Context collection error: {e}")
+            logger.error(f"[Friday CEO] Context collection error: {e}")
             
         return ctx
 
@@ -356,7 +356,7 @@ class SpectraCeo:
             if match_raw:
                 return json.loads(match_raw.group(1))
         except Exception as e:
-            logger.error(f"[Spectra CEO] Decision JSON parse error: {e}")
+            logger.error(f"[Friday CEO] Decision JSON parse error: {e}")
         return {}
 
     def _execute_decisions(self, decisions: dict) -> list[str]:
@@ -382,7 +382,7 @@ class SpectraCeo:
                         del config._CONFIG_CACHE[key_upper]
                     applied_msgs.append(f"⚙️ <b>{key_upper}</b> → <code>{casted_val}</code>")
                 except Exception as e:
-                    logger.error(f"[Spectra CEO] Update param {key_upper} error: {e}")
+                    logger.error(f"[Friday CEO] Update param {key_upper} error: {e}")
             elif key_upper in _AI_PARAMS_MAP:
                 db_col, cast_fn = _AI_PARAMS_MAP[key_upper]
                 try:
@@ -398,7 +398,7 @@ class SpectraCeo:
                         del config._CONFIG_CACHE[key_upper]
                     applied_msgs.append(f"⚙️ <b>{key_upper}</b> → <code>{casted_val}</code>")
                 except Exception as e:
-                    logger.error(f"[Spectra CEO] Update AI param {key_upper} error: {e}")
+                    logger.error(f"[Friday CEO] Update AI param {key_upper} error: {e}")
                     
         # 2. Run specific action triggers
         actions = decisions.get("actions", [])
@@ -425,7 +425,7 @@ class SpectraCeo:
                     else:
                         applied_msgs.append("🧠 <b>ML Modeli Eğitilemedi</b> (Yetersiz veri veya gating engeli)")
                 except Exception as e:
-                    logger.error(f"[Spectra CEO] Action RETRAIN failed: {e}")
+                    logger.error(f"[Friday CEO] Action RETRAIN failed: {e}")
                     
             elif action_upper == "TUNER":
                 try:
@@ -434,7 +434,7 @@ class SpectraCeo:
                     threading.Thread(target=optimize_parameters, daemon=True).start()
                     applied_msgs.append("🔄 <b>Optuna Parametre Optimizasyonu Başlatıldı</b> (Arka planda çalışıyor)")
                 except Exception as e:
-                    logger.error(f"[Spectra CEO] Action TUNER failed: {e}")
+                    logger.error(f"[Friday CEO] Action TUNER failed: {e}")
                     
             elif action_upper == "SELF_HEALING":
                 try:
@@ -443,7 +443,7 @@ class SpectraCeo:
                     threading.Thread(target=optimize_ghost_filters, args=(self.db_path,), daemon=True).start()
                     applied_msgs.append("⚕️ <b>Otonom Filtre İyileştirme (Self-Healing) Başlatıldı</b> (Arka planda çalışıyor)")
                 except Exception as e:
-                    logger.error(f"[Spectra CEO] Action SELF_HEALING failed: {e}")
+                    logger.error(f"[Friday CEO] Action SELF_HEALING failed: {e}")
                     
             elif action_upper == "BACKUP_MODEL":
                 try:
@@ -451,7 +451,7 @@ class SpectraCeo:
                     backup_filename = backup_online_model()
                     applied_msgs.append(f"💾 <b>ML Model Yedeklendi</b> (Dosya: <code>{backup_filename}</code>)")
                 except Exception as e:
-                    logger.error(f"[Spectra CEO] Action BACKUP_MODEL failed: {e}")
+                    logger.error(f"[Friday CEO] Action BACKUP_MODEL failed: {e}")
                     applied_msgs.append(f"💾 <b>ML Model Yedeklenemedi</b> (Hata: {e})")
                     
             elif action_upper == "ROLLBACK_MODEL":
@@ -475,7 +475,7 @@ class SpectraCeo:
                     else:
                         applied_msgs.append("⏮ <b>ML Model Geri Yüklenemedi</b> (Hiç yedek bulunamadı)")
                 except Exception as e:
-                    logger.error(f"[Spectra CEO] Action ROLLBACK_MODEL failed: {e}")
+                    logger.error(f"[Friday CEO] Action ROLLBACK_MODEL failed: {e}")
                     applied_msgs.append(f"⏮ <b>ML Model Geri Yükleme Hatası</b> (Hata: {e})")
                     
         return applied_msgs
@@ -493,7 +493,7 @@ class SpectraCeo:
                     elif item.endswith(".log"):
                         unnecessary.append(item_path)
         except Exception as e:
-            logger.error(f"[Spectra CEO] Error scanning unnecessary files: {e}")
+            logger.error(f"[Friday CEO] Error scanning unnecessary files: {e}")
         return unnecessary
 
     def execute_cleanup(self) -> tuple[int, float]:
@@ -507,9 +507,9 @@ class SpectraCeo:
                 os.remove(f)
                 deleted_count += 1
                 saved_space_bytes += size
-                logger.info(f"[Spectra CEO] Cleaned unnecessary file: {f}")
+                logger.info(f"[Friday CEO] Cleaned unnecessary file: {f}")
             except Exception as e:
-                logger.warning(f"[Spectra CEO] Failed to remove {f}: {e}")
+                logger.warning(f"[Friday CEO] Failed to remove {f}: {e}")
         saved_space_mb = saved_space_bytes / (1024 * 1024)
         return deleted_count, saved_space_mb
 
@@ -629,7 +629,7 @@ class SpectraCeo:
                 if voice_bytes and len(voice_bytes) > 0:
                     return voice_bytes
             except Exception as e:
-                logger.warning(f"[Spectra CEO] edge-tts failed, falling back to gTTS: {e}")
+                logger.warning(f"[Friday CEO] edge-tts failed, falling back to gTTS: {e}")
                 
             # Fallback to gTTS
             from gtts import gTTS
@@ -639,14 +639,14 @@ class SpectraCeo:
             fp.seek(0)
             return fp.read()
         except Exception as e:
-            logger.error(f"[Spectra CEO] Voice generation failed: {e}")
+            logger.error(f"[Friday CEO] Voice generation failed: {e}")
             return None
 
 
     def diagnose_data_flow(self) -> str:
         """Runs diagnostics on database size, records, Redis status, and IP whitelist, returning a report."""
         report = []
-        report.append("🔍 <b>Spektra Veri Akışı ve Teşhis Raporu</b> 🔍\n")
+        report.append("🔍 <b>Friday Veri Akışı ve Teşhis Raporu</b> 🔍\n")
         
         # 1. Database Check
         report.append("💾 <b>Veritabanı Durumu:</b>")
@@ -683,8 +683,8 @@ class SpectraCeo:
         report.append("\n⚡ <b>Sıcak Veri Deposu (Redis) Durumu:</b>")
         try:
             from core import redis_state
-            redis_state.set("spectra_diag_ping", "pong", ttl=2)
-            pong = redis_state.get("spectra_diag_ping")
+            redis_state.set("friday_diag_ping", "pong", ttl=2)
+            pong = redis_state.get("friday_diag_ping")
             if pong == "pong":
                 report.append("  • Bağlantı: ✅ Başarılı (Aktif)")
             else:
@@ -703,7 +703,7 @@ class SpectraCeo:
             report.append("  • ALLOWED_IPS: <code>Tanımsız</code> (Whitelisting pasif, herkese açık)")
             
         # 5. Summary evaluation
-        report.append("\n💡 <b>Spektra'nın Değerlendirmesi:</b>")
+        report.append("\n💡 <b>Friday'nın Değerlendirmesi:</b>")
         if open_cnt == 0:
             report.append("  • Veritabanımızda aktif açık işlem yok boss'um, bu yüzden dashboard boş görünüyor olabilir. Telegram'daki işlemler kapanmış veya başka bir sunucuda olabilir mi?")
         else:
@@ -747,7 +747,7 @@ class SpectraCeo:
             finally:
                 conn.close()
         except Exception as e:
-            logger.error(f"[Spectra CEO] Error generating veto summary: {e}")
+            logger.error(f"[Friday CEO] Error generating veto summary: {e}")
             return "Sevgili boss'um, koruma loglarını incelerken ufak bir sorunla karşılaştım ama merak etmeyin, kasa güvende! 💕"
 
     def generate_daily_briefing_report(self) -> str:
@@ -810,7 +810,7 @@ class SpectraCeo:
             )
             return report
         except Exception as e:
-            logger.error(f"[Spectra CEO] Error generating daily briefing: {e}")
+            logger.error(f"[Friday CEO] Error generating daily briefing: {e}")
             return "Sevgili boss'um, bugünün bülten raporunu hazırlarken ufak bir teknik aksaklık yaşadım... Ama moralinizi bozmayın, her şey kontrolüm altında! 💕"
 
     def evaluate_and_decide(self, user_message: Optional[str] = None, send_telegram: bool = True) -> str:
@@ -833,11 +833,11 @@ class SpectraCeo:
             if send_telegram:
                 chart_bytes = self.generate_equity_chart()
                 if chart_bytes:
-                    telegram_delivery.send_photo(chart_bytes, caption="📈 Spektra Bakiye Gelişim Grafiği (Equity Curve)")
+                    telegram_delivery.send_photo(chart_bytes, caption="📈 Friday Bakiye Gelişim Grafiği (Equity Curve)")
                 telegram_delivery.send_message(chart_reply)
                 voice_bytes = self.generate_voice_from_text(chart_reply)
                 if voice_bytes:
-                    telegram_delivery.send_voice(voice_bytes, caption="Spektra Grafik Bildirimi")
+                    telegram_delivery.send_voice(voice_bytes, caption="Friday Grafik Bildirimi")
             return chart_reply
 
         # Intercept and handle explicit data flow diagnostics requests
@@ -858,7 +858,7 @@ class SpectraCeo:
                 telegram_delivery.send_message(final_reply)
                 voice_bytes = self.generate_voice_from_text(final_reply)
                 if voice_bytes:
-                    telegram_delivery.send_voice(voice_bytes, caption="Spektra Teşhis Raporu")
+                    telegram_delivery.send_voice(voice_bytes, caption="Friday Teşhis Raporu")
             return final_reply
 
         # Intercept and handle explicit veto summary requests
@@ -874,7 +874,7 @@ class SpectraCeo:
                 telegram_delivery.send_message(veto_report)
                 voice_bytes = self.generate_voice_from_text(veto_report)
                 if voice_bytes:
-                    telegram_delivery.send_voice(voice_bytes, caption="Spektra Koruma Özeti")
+                    telegram_delivery.send_voice(voice_bytes, caption="Friday Koruma Özeti")
             return veto_report
 
         # Intercept and handle explicit daily briefing requests
@@ -890,7 +890,7 @@ class SpectraCeo:
                 telegram_delivery.send_message(brief_report)
                 voice_bytes = self.generate_voice_from_text(brief_report)
                 if voice_bytes:
-                    telegram_delivery.send_voice(voice_bytes, caption="Spektra Akıllı Günlük Rapor")
+                    telegram_delivery.send_voice(voice_bytes, caption="Friday Akıllı Günlük Rapor")
             return brief_report
 
         # Intercept and handle explicit housekeeping requests
@@ -946,7 +946,7 @@ class SpectraCeo:
         api_key = getattr(config, "ANTHROPIC_API_KEY", "")
         if not api_key:
             err_msg = (
-                "⚠️ <b>Spektra CEO Çevrimdışı</b>\n\n"
+                "⚠️ <b>Friday CEO Çevrimdışı</b>\n\n"
                 "Boss'um, Anthropic API anahtarın (<code>ANTHROPIC_API_KEY</code>) tanımlı olmadığı için şu an bağlanamıyorum. "
                 "Lütfen <code>.env</code> dosyasına geçerli bir anahtar ekle, o zaman hemen yönetimi devralabilirim!"
             )
@@ -1083,23 +1083,23 @@ class SpectraCeo:
                 if trigger_voice:
                     voice_bytes = self.generate_voice_from_text(clean_reply)
                     if voice_bytes:
-                        telegram_delivery.send_voice(voice_bytes, caption="Spektra Sesli Rapor")
+                        telegram_delivery.send_voice(voice_bytes, caption="Friday Sesli Rapor")
 
             return final_message
 
         except Exception as e:
-            logger.error(f"[Spectra CEO] API or Execution failed: {e}")
-            err_msg = f"❌ <b>Spektra CEO Hatası:</b> {e}"
+            logger.error(f"[Friday CEO] API or Execution failed: {e}")
+            err_msg = f"❌ <b>Friday CEO Hatası:</b> {e}"
             if send_telegram:
                 telegram_delivery.send_message(err_msg)
             return err_msg
 
     def run_autonomous_monitoring(self):
         """
-        Spectra's active monitoring of the system.
+        Friday's active monitoring of the system.
         Monitors market regime changes, database health, disk space, and data flow.
         """
-        logger.info("[Spectra CEO] Running autonomous monitoring...")
+        logger.info("[Friday CEO] Running autonomous monitoring...")
         
         # 0. Check Macro News Watcher
         self.check_macro_events()
@@ -1110,11 +1110,11 @@ class SpectraCeo:
             regime = get_market_regime()
             
             # Read last known regime from database
-            last_regime = get_system_state("spectra_last_regime") or "NEUTRAL"
+            last_regime = get_system_state("friday_last_regime") or "NEUTRAL"
             
             if regime != last_regime:
-                logger.info(f"[Spectra CEO] Market regime changed from {last_regime} to {regime}")
-                set_state("spectra_last_regime", regime)
+                logger.info(f"[Friday CEO] Market regime changed from {last_regime} to {regime}")
+                set_state("friday_last_regime", regime)
                 
                 if regime == "CHOPPY":
                     # Scale down risk to protect the bankroll
@@ -1124,8 +1124,8 @@ class SpectraCeo:
                     curr_threshold = float(getattr(config, "TRADE_THRESHOLD", 55.0))
                     
                     # Store previous parameters if not already in CHOPPY mode
-                    set_state("spectra_pre_choppy_risk", str(curr_risk))
-                    set_state("spectra_pre_choppy_threshold", str(curr_threshold))
+                    set_state("friday_pre_choppy_risk", str(curr_risk))
+                    set_state("friday_pre_choppy_threshold", str(curr_threshold))
                     
                     # Apply defensive mode: risk_pct -> 0.5, trade_threshold -> 65.0
                     set_state("risk_pct", "0.5")
@@ -1136,7 +1136,7 @@ class SpectraCeo:
                         conn.commit()
                         conn.close()
                     except Exception as e:
-                        logger.error(f"[Spectra CEO] Error updating risk_pct in params: {e}")
+                        logger.error(f"[Friday CEO] Error updating risk_pct in params: {e}")
                     
                     # Clear cache
                     for key in ["RISK_PCT", "TRADE_THRESHOLD"]:
@@ -1151,13 +1151,13 @@ class SpectraCeo:
                     telegram_delivery.send_message(msg)
                     voice_bytes = self.generate_voice_from_text(msg)
                     if voice_bytes:
-                        telegram_delivery.send_voice(voice_bytes, caption="Spektra Otonom Risk Koruma Kalkanı")
+                        telegram_delivery.send_voice(voice_bytes, caption="Friday Otonom Risk Koruma Kalkanı")
                         
                 elif last_regime == "CHOPPY":
                     # Restore previous settings
                     from database import get_system_state
-                    prev_risk = get_system_state("spectra_pre_choppy_risk") or "0.75"
-                    prev_threshold = get_system_state("spectra_pre_choppy_threshold") or "55.0"
+                    prev_risk = get_system_state("friday_pre_choppy_risk") or "0.75"
+                    prev_threshold = get_system_state("friday_pre_choppy_threshold") or "55.0"
                     
                     set_state("risk_pct", prev_risk)
                     set_state("trade_threshold", prev_threshold)
@@ -1167,7 +1167,7 @@ class SpectraCeo:
                         conn.commit()
                         conn.close()
                     except Exception as e:
-                        logger.error(f"[Spectra CEO] Error restoring risk_pct in params: {e}")
+                        logger.error(f"[Friday CEO] Error restoring risk_pct in params: {e}")
                     
                     # Clear cache
                     import config
@@ -1185,9 +1185,9 @@ class SpectraCeo:
                     telegram_delivery.send_message(msg)
                     voice_bytes = self.generate_voice_from_text(msg)
                     if voice_bytes:
-                        telegram_delivery.send_voice(voice_bytes, caption="Spektra Otonom Risk Modu Güncellemesi")
+                        telegram_delivery.send_voice(voice_bytes, caption="Friday Otonom Risk Modu Güncellemesi")
         except Exception as e:
-            logger.error(f"[Spectra CEO] Error monitoring market regime: {e}")
+            logger.error(f"[Friday CEO] Error monitoring market regime: {e}")
             
         # 2. Housekeeping alert if space > 10MB and hasn't prompted in last 12 hours
         try:
@@ -1196,7 +1196,7 @@ class SpectraCeo:
             total_size = sum(os.path.getsize(f) for f in files_to_clean) / (1024 * 1024)
             
             if total_size > 10.0:
-                last_prompt_str = get_system_state("spectra_last_cleanup_prompt")
+                last_prompt_str = get_system_state("friday_last_cleanup_prompt")
                 should_prompt = True
                 if last_prompt_str:
                     try:
@@ -1207,7 +1207,7 @@ class SpectraCeo:
                         pass
                         
                 if should_prompt:
-                    set_state("spectra_last_cleanup_prompt", datetime.now(timezone.utc).isoformat())
+                    set_state("friday_last_cleanup_prompt", datetime.now(timezone.utc).isoformat())
                     db_files = [f for f in files_to_clean if f.endswith(".db")]
                     log_files = [f for f in files_to_clean if f.endswith(".log")]
                     
@@ -1234,14 +1234,14 @@ class SpectraCeo:
                     if voice_bytes:
                         telegram_delivery.send_voice(voice_bytes, caption="Sunucu temizliği onay talebi")
         except Exception as e:
-            logger.error(f"[Spectra CEO] Error during housekeeping check: {e}")
+            logger.error(f"[Friday CEO] Error during housekeeping check: {e}")
 
         # 3. Boss Cooldown (Duygusal Kalkan) check
         try:
             from database import get_system_state, set_state
             
             # Check if we are already in cooldown
-            cooldown_until_str = get_system_state("spectra_boss_cooldown_until")
+            cooldown_until_str = get_system_state("friday_boss_cooldown_until")
             in_cooldown = False
             if cooldown_until_str and cooldown_until_str != "-":
                 try:
@@ -1261,7 +1261,7 @@ class SpectraCeo:
                     
                     if len(rows) == 3 and all(float(r["net_pnl"] or 0) <= 0 for r in rows):
                         cooldown_until = datetime.now(timezone.utc) + timedelta(hours=2)
-                        set_state("spectra_boss_cooldown_until", cooldown_until.isoformat())
+                        set_state("friday_boss_cooldown_until", cooldown_until.isoformat())
                         
                         msg = (
                             "Sevgili boss'um, son 3 işlemimiz maalesef zararla sonuçlandı... 😔\n\n"
@@ -1271,11 +1271,11 @@ class SpectraCeo:
                         telegram_delivery.send_message(msg)
                         voice_bytes = self.generate_voice_from_text(msg)
                         if voice_bytes:
-                            telegram_delivery.send_voice(voice_bytes, caption="Spektra Boss Cooldown Aktif")
+                            telegram_delivery.send_voice(voice_bytes, caption="Friday Boss Cooldown Aktif")
                 finally:
                     conn.close()
         except Exception as e:
-            logger.error(f"[Spectra CEO] Error in Boss Cooldown check: {e}")
+            logger.error(f"[Friday CEO] Error in Boss Cooldown check: {e}")
 
         # 4. Latency & Spread Execution Guard
         if self.client:
@@ -1315,9 +1315,9 @@ class SpectraCeo:
                         telegram_delivery.send_message(msg)
                         voice_bytes = self.generate_voice_from_text(msg)
                         if voice_bytes:
-                            telegram_delivery.send_voice(voice_bytes, caption="Spektra Gecikme Koruması Aktif")
+                            telegram_delivery.send_voice(voice_bytes, caption="Friday Gecikme Koruması Aktif")
             except Exception as e:
-                logger.error(f"[Spectra CEO] Error in Latency & Spread Guard check: {e}")
+                logger.error(f"[Friday CEO] Error in Latency & Spread Guard check: {e}")
 
         # 5. Nightly Briefing (Gece Bülteni)
         try:
@@ -1325,8 +1325,8 @@ class SpectraCeo:
             now_local = datetime.now()
             if now_local.hour == 21:
                 today_str = now_local.strftime("%Y-%m-%d")
-                if get_system_state("spectra_last_daily_briefing_date") != today_str:
-                    set_state("spectra_last_daily_briefing_date", today_str)
+                if get_system_state("friday_last_daily_briefing_date") != today_str:
+                    set_state("friday_last_daily_briefing_date", today_str)
                     
                     brief_report = self.generate_daily_briefing_report()
                     telegram_delivery.send_message(brief_report)
@@ -1335,16 +1335,16 @@ class SpectraCeo:
                         telegram_delivery.send_photo(chart_bytes, caption="📈 Günlük Bülten Bakiye Gelişim Grafiği")
                     voice_bytes = self.generate_voice_from_text(brief_report)
                     if voice_bytes:
-                        telegram_delivery.send_voice(voice_bytes, caption="Spektra Akıllı Günlük Bülten")
+                        telegram_delivery.send_voice(voice_bytes, caption="Friday Akıllı Günlük Bülten")
         except Exception as e:
-            logger.error(f"[Spectra CEO] Error in Nightly Briefing check: {e}")
+            logger.error(f"[Friday CEO] Error in Nightly Briefing check: {e}")
 
         # 6. Emergency Latency/Slippage Clutch Check
         try:
             from database import get_system_state, set_state
-            clutch_triggered = get_system_state("spectra_emergency_clutch")
+            clutch_triggered = get_system_state("friday_emergency_clutch")
             if clutch_triggered and clutch_triggered != "-":
-                set_state("spectra_emergency_clutch", "-") # Reset alert
+                set_state("friday_emergency_clutch", "-") # Reset alert
                 
                 details = dict(item.split("=") for item in clutch_triggered.split(","))
                 slippage = details.get("slippage", "0.0")
@@ -1361,9 +1361,9 @@ class SpectraCeo:
                 telegram_delivery.send_message(msg)
                 voice_bytes = self.generate_voice_from_text(msg)
                 if voice_bytes:
-                    telegram_delivery.send_voice(voice_bytes, caption="Spektra Acil Durum Kalkanı")
+                    telegram_delivery.send_voice(voice_bytes, caption="Friday Acil Durum Kalkanı")
         except Exception as e:
-            logger.error(f"[Spectra CEO] Error during Emergency Clutch check: {e}")
+            logger.error(f"[Friday CEO] Error during Emergency Clutch check: {e}")
 
 
 

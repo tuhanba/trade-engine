@@ -1,7 +1,7 @@
 """
-core/voice_generator.py - Phase G Spektra AI Text-To-Speech Module
+core/voice_generator.py - Phase G Friday AI Text-To-Speech Module
 ==================================================================
-Uses edge-tts to generate natural Turkish neural voices for Spektra briefs.
+Uses edge-tts to generate natural Turkish neural voices for Friday briefs.
 """
 
 import asyncio
@@ -34,8 +34,8 @@ def generate_voice_briefing(text: str, output_path: str, voice: str = "tr-TR-Dil
         asyncio.set_event_loop(loop)
         loop.run_until_complete(_generate_tts_async(text, output_path, voice))
         loop.close()
-        logger.info(f"Spektra TTS generated successfully at: {output_path}")
+        logger.info(f"Friday TTS generated successfully at: {output_path}")
         return True
     except Exception as e:
-        logger.error(f"Spektra TTS generation failed: {e}")
+        logger.error(f"Friday TTS generation failed: {e}")
         return False

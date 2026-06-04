@@ -427,18 +427,18 @@ class RiskEngine:
                 return {"valid": False, "score": 0, "risk_reject_reason": "duplicate_symbol"}
 
             # Boss Cooldown Gate
-            cooldown_until_str = database.get_system_state("spectra_boss_cooldown_until")
+            cooldown_until_str = database.get_system_state("friday_boss_cooldown_until")
             if cooldown_until_str and cooldown_until_str != "-":
                 try:
                     from datetime import datetime, timezone
                     cooldown_dt = datetime.fromisoformat(cooldown_until_str)
                     if datetime.now(timezone.utc) < cooldown_dt:
-                        return {"valid": False, "score": 0, "risk_reject_reason": "spectra_boss_cooldown"}
+                        return {"valid": False, "score": 0, "risk_reject_reason": "friday_boss_cooldown"}
                 except Exception:
                     pass
 
             # Macro News Watcher Gate
-            macro_paused_str = database.get_system_state("spectra_macro_paused")
+            macro_paused_str = database.get_system_state("friday_macro_paused")
             if macro_paused_str == "true":
                 return {"valid": False, "score": 0, "risk_reject_reason": "macro_news_watcher_paused"}
 
@@ -742,7 +742,7 @@ class RiskEngine:
                         try:
                             from database import update_system_state
                             update_system_state("tg_execution_mode", "paper")
-                            update_system_state("spectra_emergency_clutch", f"slippage={avg_slippage:.3f},latency={avg_latency}")
+                            update_system_state("friday_emergency_clutch", f"slippage={avg_slippage:.3f},latency={avg_latency}")
                             logger.critical(f"[Emergency Clutch] CRITICAL latency ({avg_latency}ms) or slippage ({avg_slippage:.3f}%) detected! Autonomously switched engine to paper mode.")
                             return {"valid": False, "score": 0, "risk_reject_reason": "emergency_clutch_switch_triggered"}
                         except Exception as cl_err:

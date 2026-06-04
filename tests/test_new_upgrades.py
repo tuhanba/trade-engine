@@ -329,12 +329,12 @@ def test_ml_telegram_commands():
         assert "yeniden eğitiliyor" in args1[0]
         assert "Modeli Başarıyla Eğitildi" in args2[0]
 
-def test_spectra_ceo_context():
-    """Verify that SpectraCeo gathers correct system stats and config values."""
-    from core.spectra_ceo import SpectraCeo
+def test_friday_ceo_context():
+    """Verify that FridayCeo gathers correct system stats and config values."""
+    from core.friday_ceo import FridayCeo
     import os
     
-    ceo = SpectraCeo(db_path="trading.db")
+    ceo = FridayCeo(db_path="trading.db")
     ctx = ceo.get_system_context()
     
     assert "db_size_mb" in ctx
@@ -342,13 +342,13 @@ def test_spectra_ceo_context():
     assert ctx["config"]["execution_mode"] in ("paper", "live")
     assert "market_regime" in ctx
 
-def test_spectra_decision_parsing():
-    """Verify that SpectraCeo parses Claude JSON output and applies parameter updates and actions."""
-    from core.spectra_ceo import SpectraCeo
+def test_friday_decision_parsing():
+    """Verify that FridayCeo parses Claude JSON output and applies parameter updates and actions."""
+    from core.friday_ceo import FridayCeo
     import sqlite3
     import os
     
-    temp_db = "temp_db_spectra.db"
+    temp_db = "temp_db_friday.db"
     if os.path.exists(temp_db):
         os.remove(temp_db)
         
@@ -366,7 +366,7 @@ def test_spectra_decision_parsing():
     conn.commit()
     conn.close()
     
-    ceo = SpectraCeo(db_path=temp_db)
+    ceo = FridayCeo(db_path=temp_db)
     
     # Test valid JSON parser
     raw_response = (
@@ -412,18 +412,18 @@ def test_spectra_decision_parsing():
     if os.path.exists(temp_db):
         os.remove(temp_db)
 
-def test_spectra_telegram_command():
-    """Verify that TelegramManager correctly forwards /spectra command to SpectraCeo."""
+def test_friday_telegram_command():
+    """Verify that TelegramManager correctly forwards /friday command to FridayCeo."""
     from telegram_manager import TelegramManager
-    from core.spectra_ceo import SpectraCeo
+    from core.friday_ceo import FridayCeo
     
     mock_send = MagicMock()
-    mock_ceo = MagicMock(spec=SpectraCeo)
+    mock_ceo = MagicMock(spec=FridayCeo)
     
-    bot = TelegramManager(send_fn=mock_send, spectra_ceo=mock_ceo)
+    bot = TelegramManager(send_fn=mock_send, friday_ceo=mock_ceo)
     
-    # Execute /spectra command with arguments
-    bot._cmd_spectra(["boss", "naber"])
+    # Execute /friday command with arguments
+    bot._cmd_friday(["boss", "naber"])
     
     # Verify that it starts a thread to execute evaluate_and_decide with the joined arguments
     import time
@@ -431,29 +431,29 @@ def test_spectra_telegram_command():
     mock_ceo.evaluate_and_decide.assert_called_once_with("boss naber")
 
 
-def test_spectra_voice_generation():
-    """Verify that SpectraCeo generate_voice_from_text works and generates valid bytes."""
-    from core.spectra_ceo import SpectraCeo
-    ceo = SpectraCeo()
+def test_friday_voice_generation():
+    """Verify that FridayCeo generate_voice_from_text works and generates valid bytes."""
+    from core.friday_ceo import FridayCeo
+    ceo = FridayCeo()
     voice_bytes = ceo.generate_voice_from_text("Merhaba Boss, her şey yolunda.")
     assert voice_bytes is not None
     assert len(voice_bytes) > 0
     assert isinstance(voice_bytes, bytes)
 
 
-def test_spectra_server_housekeeping():
-    """Verify that SpectraCeo scans and cleans up temporary backtest and log files safely."""
-    from core.spectra_ceo import SpectraCeo
-    import core.spectra_ceo
+def test_friday_server_housekeeping():
+    """Verify that FridayCeo scans and cleans up temporary backtest and log files safely."""
+    from core.friday_ceo import FridayCeo
+    import core.friday_ceo
     import os
     
-    ceo = SpectraCeo()
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(core.spectra_ceo.__file__)))
+    ceo = FridayCeo()
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(core.friday_ceo.__file__)))
     
     
     # Create test dummy files
     temp_db_path = os.path.join(base_dir, "backtest_temp_9999.db")
-    temp_log_path = os.path.join(base_dir, "test_spectra_dummy.log")
+    temp_log_path = os.path.join(base_dir, "test_friday_dummy.log")
     
     with open(temp_db_path, "w") as f:
         f.write("dummy db content")
@@ -481,14 +481,14 @@ def test_spectra_server_housekeeping():
             os.remove(temp_log_path)
 
 
-def test_spectra_chat_endpoint():
-    """Verify that /api/spectra/chat endpoint processes chat messages and returns voice/reply."""
+def test_friday_chat_endpoint():
+    """Verify that /api/friday/chat endpoint processes chat messages and returns voice/reply."""
     from app import app
     from unittest.mock import patch
     
-    with patch("core.spectra_ceo.SpectraCeo.evaluate_and_decide", return_value="Merhaba Boss! Ben Spektra. ```json\n{}\n```") as mock_eval:
+    with patch("core.friday_ceo.FridayCeo.evaluate_and_decide", return_value="Merhaba Boss! Ben Friday. ```json\n{}\n```") as mock_eval:
         client = app.test_client()
-        resp = client.post("/api/spectra/chat", json={"message": "naber"})
+        resp = client.post("/api/friday/chat", json={"message": "naber"})
         
         assert resp.status_code == 200
         data = resp.get_json()
@@ -498,14 +498,14 @@ def test_spectra_chat_endpoint():
         mock_eval.assert_called_once_with("naber", send_telegram=False)
 
 
-def test_spectra_autonomous_monitoring():
-    """Verify Spectra's autonomous monitoring of regimes and housekeeping alerts."""
-    from core.spectra_ceo import SpectraCeo
+def test_friday_autonomous_monitoring():
+    """Verify Friday's autonomous monitoring of regimes and housekeeping alerts."""
+    from core.friday_ceo import FridayCeo
     from unittest.mock import patch, MagicMock
     import os
     import sqlite3
 
-    temp_db = "temp_db_spectra_monitoring.db"
+    temp_db = "temp_db_friday_monitoring.db"
     if os.path.exists(temp_db):
         os.remove(temp_db)
 
@@ -523,7 +523,7 @@ def test_spectra_autonomous_monitoring():
     conn.commit()
     conn.close()
 
-    ceo = SpectraCeo(db_path=temp_db)
+    ceo = FridayCeo(db_path=temp_db)
 
     try:
         import datetime as dt_mod
@@ -542,27 +542,27 @@ def test_spectra_autonomous_monitoring():
              patch("database.set_state") as mock_set_state, \
              patch("telegram_delivery.send_message") as mock_send_msg, \
              patch("telegram_delivery.send_voice") as mock_send_voice, \
-             patch("core.spectra_ceo.SpectraCeo.generate_voice_from_text", return_value=b"voice_data"), \
-             patch("core.spectra_ceo.SpectraCeo.scan_unnecessary_files") as mock_scan_files, \
+             patch("core.friday_ceo.FridayCeo.generate_voice_from_text", return_value=b"voice_data"), \
+             patch("core.friday_ceo.FridayCeo.scan_unnecessary_files") as mock_scan_files, \
              patch("os.path.getsize") as mock_getsize, \
-             patch("core.spectra_ceo.datetime", MockDatetime):
+             patch("core.friday_ceo.datetime", MockDatetime):
 
             # --- Test Case 1: NEUTRAL to CHOPPY transition ---
             mock_get_regime.return_value = "CHOPPY"
             mock_get_state.side_effect = lambda key, default=None: {
-                "spectra_last_regime": "NEUTRAL",
-                "spectra_last_cleanup_prompt": None
+                "friday_last_regime": "NEUTRAL",
+                "friday_last_cleanup_prompt": None
             }.get(key, default)
             mock_scan_files.return_value = []
 
             ceo.run_autonomous_monitoring()
 
             # Check that we set the last regime and saved previous settings
-            mock_set_state.assert_any_call("spectra_last_regime", "CHOPPY")
+            mock_set_state.assert_any_call("friday_last_regime", "CHOPPY")
             mock_set_state.assert_any_call("risk_pct", "0.5")
             mock_set_state.assert_any_call("trade_threshold", "65.0")
             mock_send_msg.assert_called()
-            mock_send_voice.assert_called_with(b"voice_data", caption="Spektra Otonom Risk Koruma Kalkanı")
+            mock_send_voice.assert_called_with(b"voice_data", caption="Friday Otonom Risk Koruma Kalkanı")
 
             # Check that risk_pct inside params table was updated to 0.5
             conn = sqlite3.connect(temp_db)
@@ -577,19 +577,19 @@ def test_spectra_autonomous_monitoring():
 
             mock_get_regime.return_value = "NEUTRAL"
             mock_get_state.side_effect = lambda key, default=None: {
-                "spectra_last_regime": "CHOPPY",
-                "spectra_pre_choppy_risk": "0.85",
-                "spectra_pre_choppy_threshold": "58.0",
-                "spectra_last_cleanup_prompt": None
+                "friday_last_regime": "CHOPPY",
+                "friday_pre_choppy_risk": "0.85",
+                "friday_pre_choppy_threshold": "58.0",
+                "friday_last_cleanup_prompt": None
             }.get(key, default)
 
             ceo.run_autonomous_monitoring()
 
-            mock_set_state.assert_any_call("spectra_last_regime", "NEUTRAL")
+            mock_set_state.assert_any_call("friday_last_regime", "NEUTRAL")
             mock_set_state.assert_any_call("risk_pct", "0.85")
             mock_set_state.assert_any_call("trade_threshold", "58.0")
             mock_send_msg.assert_called()
-            mock_send_voice.assert_called_with(b"voice_data", caption="Spektra Otonom Risk Modu Güncellemesi")
+            mock_send_voice.assert_called_with(b"voice_data", caption="Friday Otonom Risk Modu Güncellemesi")
 
             # Check that risk_pct inside params table was restored to 0.85
             conn = sqlite3.connect(temp_db)
@@ -604,8 +604,8 @@ def test_spectra_autonomous_monitoring():
 
             mock_get_regime.return_value = "NEUTRAL"
             mock_get_state.side_effect = lambda key, default=None: {
-                "spectra_last_regime": "NEUTRAL",
-                "spectra_last_cleanup_prompt": None
+                "friday_last_regime": "NEUTRAL",
+                "friday_last_cleanup_prompt": None
             }.get(key, default)
 
             mock_scan_files.return_value = ["dummy_backtest_temp_1.db", "dummy_sys.log"]
@@ -614,7 +614,7 @@ def test_spectra_autonomous_monitoring():
             ceo.run_autonomous_monitoring()
 
             # Check prompt setting
-            assert any(call[0][0] == "spectra_last_cleanup_prompt" for call in mock_set_state.call_args_list)
+            assert any(call[0][0] == "friday_last_cleanup_prompt" for call in mock_set_state.call_args_list)
             args, kwargs = mock_send_msg.call_args
             assert "Silinmek İstenen Gereksiz Dosyalar" in args[0]
             assert "Geçmiş trade geçmişimize ve verilerimize KESİNLİKLE dokunmuyorum" in args[0]
@@ -625,9 +625,9 @@ def test_spectra_autonomous_monitoring():
             os.remove(temp_db)
 
 
-def test_spectra_edge_tts_voice_generation():
+def test_friday_edge_tts_voice_generation():
     """Verify that edge-tts is prioritized and custom TCPConnector resolver monkeypatch is applied/restored."""
-    from core.spectra_ceo import SpectraCeo
+    from core.friday_ceo import FridayCeo
     from unittest.mock import patch
     import aiohttp
 
@@ -642,7 +642,7 @@ def test_spectra_edge_tts_voice_generation():
             yield {"type": "audio", "data": b"mocked_edge_tts_bytes"}
 
     with patch("edge_tts.Communicate", side_effect=AsyncCommunicateMock) as mock_comm:
-        ceo = SpectraCeo()
+        ceo = FridayCeo()
         voice = ceo.generate_voice_from_text("Tatlı ses tonu deneme.")
 
         mock_comm.assert_called_once_with("Tatlı ses tonu deneme.", "tr-TR-EmelNeural")
@@ -650,9 +650,9 @@ def test_spectra_edge_tts_voice_generation():
         assert aiohttp.TCPConnector.__init__ is orig_init
 
 
-def test_spectra_voice_fallback_to_gtts():
+def test_friday_voice_fallback_to_gtts():
     """Verify that if edge-tts fails, voice generation falls back to gTTS."""
-    from core.spectra_ceo import SpectraCeo
+    from core.friday_ceo import FridayCeo
     from unittest.mock import patch
     import aiohttp
 
@@ -666,7 +666,7 @@ def test_spectra_voice_fallback_to_gtts():
 
         mock_gtts.return_value.write_to_fp.side_effect = mock_write
 
-        ceo = SpectraCeo()
+        ceo = FridayCeo()
         voice = ceo.generate_voice_from_text("Fallback deneme.")
 
         mock_gtts.assert_called_once_with(text="Fallback deneme.", lang="tr")
@@ -674,15 +674,15 @@ def test_spectra_voice_fallback_to_gtts():
         assert aiohttp.TCPConnector.__init__ is orig_init
 
 
-def test_spectra_boss_cooldown():
+def test_friday_boss_cooldown():
     """Verify that 3 consecutive losses trigger boss cooldown, blocking new trades."""
-    from core.spectra_ceo import SpectraCeo
+    from core.friday_ceo import FridayCeo
     from core.risk_engine import RiskEngine
     import sqlite3
     import os
     from unittest.mock import patch, MagicMock
 
-    temp_db = "temp_db_spectra_cooldown.db"
+    temp_db = "temp_db_friday_cooldown.db"
     if os.path.exists(temp_db):
         os.remove(temp_db)
 
@@ -727,12 +727,12 @@ def test_spectra_boss_cooldown():
     conn.commit()
     conn.close()
 
-    ceo = SpectraCeo(db_path=temp_db)
+    ceo = FridayCeo(db_path=temp_db)
     risk_engine = RiskEngine(None, db_path=temp_db)
 
     with patch("telegram_delivery.send_message") as mock_send, \
          patch("telegram_delivery.send_voice") as mock_voice, \
-         patch("core.spectra_ceo.SpectraCeo.generate_voice_from_text", return_value=b"voice"):
+         patch("core.friday_ceo.FridayCeo.generate_voice_from_text", return_value=b"voice"):
         
         # 1. Verify cooldown is triggered by monitoring
         with patch("config.DB_PATH", temp_db):
@@ -740,13 +740,13 @@ def test_spectra_boss_cooldown():
             
             # Verify system_state now contains the cooldown
             from database import get_system_state
-            cooldown_val = get_system_state("spectra_boss_cooldown_until")
+            cooldown_val = get_system_state("friday_boss_cooldown_until")
             assert cooldown_val != "-"
             
             # 2. Verify RiskEngine calculate rejects due to boss cooldown
             res = risk_engine.calculate("ETHUSDT", "LONG", 3000.0, "A", 1000.0)
             assert res["valid"] is False
-            assert res["risk_reject_reason"] == "spectra_boss_cooldown"
+            assert res["risk_reject_reason"] == "friday_boss_cooldown"
 
     try:
         if os.path.exists(temp_db):
@@ -755,14 +755,14 @@ def test_spectra_boss_cooldown():
         pass
 
 
-def test_spectra_sector_guard():
+def test_friday_sector_guard():
     """Verify that sector limit prevents opening >2 trades in the same narrative group."""
     from core.risk_engine import RiskEngine
     import sqlite3
     import os
     from unittest.mock import patch
 
-    temp_db = "temp_db_spectra_sector.db"
+    temp_db = "temp_db_friday_sector.db"
     if os.path.exists(temp_db):
         try:
             os.remove(temp_db)
@@ -812,14 +812,14 @@ def test_spectra_sector_guard():
         pass
 
 
-def test_spectra_execution_guard():
+def test_friday_execution_guard():
     """Verify that Latency & Spread Guard switches system to confirmation mode under poor conditions."""
-    from core.spectra_ceo import SpectraCeo
+    from core.friday_ceo import FridayCeo
     import sqlite3
     import os
     from unittest.mock import patch, MagicMock
 
-    temp_db = "temp_db_spectra_exec_guard.db"
+    temp_db = "temp_db_friday_exec_guard.db"
     if os.path.exists(temp_db):
         try:
             os.remove(temp_db)
@@ -844,12 +844,12 @@ def test_spectra_execution_guard():
         "asks": [["100.2", "1.0"]]  # spread = 0.2% (> 0.1%)
     }
 
-    ceo = SpectraCeo(client=mock_client, db_path=temp_db)
+    ceo = FridayCeo(client=mock_client, db_path=temp_db)
 
     with patch("config.DB_PATH", temp_db), \
          patch("telegram_delivery.send_message") as mock_send, \
          patch("telegram_delivery.send_voice") as mock_voice, \
-         patch("core.spectra_ceo.SpectraCeo.generate_voice_from_text", return_value=b"voice"):
+         patch("core.friday_ceo.FridayCeo.generate_voice_from_text", return_value=b"voice"):
         
         ceo.run_autonomous_monitoring()
 
@@ -865,14 +865,14 @@ def test_spectra_execution_guard():
         pass
 
 
-def test_spectra_nightly_briefing():
+def test_friday_nightly_briefing():
     """Verify that daily performance briefing is correctly compiled and triggerable."""
-    from core.spectra_ceo import SpectraCeo
+    from core.friday_ceo import FridayCeo
     import sqlite3
     import os
     from unittest.mock import patch
 
-    temp_db = "temp_db_spectra_briefing.db"
+    temp_db = "temp_db_friday_briefing.db"
     if os.path.exists(temp_db):
         try:
             os.remove(temp_db)
@@ -918,12 +918,12 @@ def test_spectra_nightly_briefing():
     conn.commit()
     conn.close()
 
-    ceo = SpectraCeo(db_path=temp_db)
+    ceo = FridayCeo(db_path=temp_db)
 
     with patch("config.DB_PATH", temp_db), \
          patch("telegram_delivery.send_message") as mock_send, \
          patch("telegram_delivery.send_voice") as mock_voice, \
-         patch("core.spectra_ceo.SpectraCeo.generate_voice_from_text", return_value=b"voice"):
+         patch("core.friday_ceo.FridayCeo.generate_voice_from_text", return_value=b"voice"):
         
         # Test manual trigger via evaluate_and_decide with keyword "rapor"
         report = ceo.evaluate_and_decide("günün bülteni")
@@ -942,14 +942,14 @@ def test_spectra_nightly_briefing():
 
 
 def test_macro_news_watcher_pauses_and_resumes():
-    from core.spectra_ceo import SpectraCeo
+    from core.friday_ceo import FridayCeo
     from core.risk_engine import RiskEngine
     import sqlite3
     import os
     from datetime import datetime, timezone, timedelta
     from unittest.mock import patch, MagicMock
 
-    temp_db = "temp_db_spectra_macro_test.db"
+    temp_db = "temp_db_friday_macro_test.db"
     if os.path.exists(temp_db):
         os.remove(temp_db)
 
@@ -957,7 +957,7 @@ def test_macro_news_watcher_pauses_and_resumes():
     with patch("config.DB_PATH", temp_db):
         database.init_db()
 
-    ceo = SpectraCeo(db_path=temp_db)
+    ceo = FridayCeo(db_path=temp_db)
     risk_engine = RiskEngine(None, db_path=temp_db)
 
     try:
@@ -967,14 +967,14 @@ def test_macro_news_watcher_pauses_and_resumes():
 
         with patch("telegram_delivery.send_message") as mock_send_msg, \
              patch("telegram_delivery.send_voice") as mock_send_voice, \
-             patch("core.spectra_ceo.SpectraCeo.generate_voice_from_text", return_value=b"voice"), \
+             patch("core.friday_ceo.FridayCeo.generate_voice_from_text", return_value=b"voice"), \
              patch("config.DB_PATH", temp_db):
 
             # 1. Run monitoring -> Should trigger macro pause
             ceo.run_autonomous_monitoring()
 
             from database import get_system_state
-            assert get_system_state("spectra_macro_paused") == "true"
+            assert get_system_state("friday_macro_paused") == "true"
             assert get_system_state("confirmation_mode") == "true"
 
             # 2. RiskEngine should now reject signals due to macro pause
@@ -988,7 +988,7 @@ def test_macro_news_watcher_pauses_and_resumes():
 
             ceo.run_autonomous_monitoring()
 
-            assert get_system_state("spectra_macro_paused") == "false"
+            assert get_system_state("friday_macro_paused") == "false"
             assert get_system_state("confirmation_mode") == "false"
     finally:
         if os.path.exists(temp_db):
@@ -1113,12 +1113,12 @@ def test_momentum_based_trailing_tp3_bypass():
         assert state.trailing_active is True
 
 
-def test_spectra_chart_generator():
-    from core.spectra_ceo import SpectraCeo
+def test_friday_chart_generator():
+    from core.friday_ceo import FridayCeo
     import sqlite3
     import os
 
-    temp_db = "temp_db_spectra_chart_test.db"
+    temp_db = "temp_db_friday_chart_test.db"
     if os.path.exists(temp_db):
         os.remove(temp_db)
 
@@ -1142,7 +1142,7 @@ def test_spectra_chart_generator():
     conn.commit()
     conn.close()
 
-    ceo = SpectraCeo(db_path=temp_db)
+    ceo = FridayCeo(db_path=temp_db)
     try:
         chart_bytes = ceo.generate_equity_chart()
         assert chart_bytes is not None

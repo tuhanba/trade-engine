@@ -16,7 +16,7 @@ import database
 from core.online_learning import update_online_model, predict_online_probability, get_learner
 from core.portfolio_risk import calculate_max_correlation, calculate_portfolio_var, calculate_sharpe_sortino_ratios
 from core.voice_generator import generate_voice_briefing
-from core.spectra_ceo import SpectraCeo
+from core.friday_ceo import FridayCeo
 
 
 class TestPhaseGQuantum(unittest.TestCase):
@@ -129,7 +129,7 @@ class TestPhaseGQuantum(unittest.TestCase):
     def test_voice_note_briefing_generation(self, mock_tts):
         """Verify edge-tts voice briefs output structure."""
         mock_tts.return_value = None
-        tmp_voice_path = "static/voice/test_spektra_brief.ogg"
+        tmp_voice_path = "static/voice/test_friday_brief.ogg"
         
         res = generate_voice_briefing("Merhaba boss, piyasa harika görünüyor.", tmp_voice_path)
         self.assertTrue(res)

@@ -14,7 +14,7 @@ import config
 import database
 from app import app
 from telegram_manager import TelegramManager
-from core.spectra_ceo import SYSTEM_PROMPT
+from core.friday_ceo import SYSTEM_PROMPT
 
 
 class TestDashboardTelegramAudit(unittest.TestCase):
@@ -89,8 +89,8 @@ class TestDashboardTelegramAudit(unittest.TestCase):
                 _ALLOWED_IPS.clear()
                 _ALLOWED_IPS.update(orig_allowed)
 
-    def test_spectra_ceo_quant_prompt_upgrade(self):
-        """Verify Spektra CEO prompt contains professional quantitative metrics."""
+    def test_friday_ceo_quant_prompt_upgrade(self):
+        """Verify Friday CEO prompt contains professional quantitative metrics."""
         self.assertIn("GMM (Gaussian Mixture Model)", SYSTEM_PROMPT)
         self.assertIn("Pearson korelasyon matrisi", SYSTEM_PROMPT)
         self.assertIn("CVD (Cumulative Volume Delta)", SYSTEM_PROMPT)

@@ -1665,20 +1665,20 @@ def api_telemetry_report():
         return Response(f"Error rendering report: {str(e)}", status=500)
 
 
-@app.route("/api/spectra/chat", methods=["POST"])
-def api_spectra_chat():
-    """Endpoint to chat with Spectra CEO from Web dashboard."""
+@app.route("/api/friday/chat", methods=["POST"])
+def api_friday_chat():
+    """Endpoint to chat with Friday CEO from Web dashboard."""
     try:
         body = request.json or {}
         user_message = body.get("message", "").strip()
         if not user_message:
             return jsonify({"ok": False, "error": "Mesaj bos olamaz."}), 400
 
-        from core.spectra_ceo import SpectraCeo
+        from core.friday_ceo import FridayCeo
         import base64
         import re
         
-        ceo = SpectraCeo()
+        ceo = FridayCeo()
         reply = ceo.evaluate_and_decide(user_message, send_telegram=False)
         
         # Strip json block to get clean text for voice
@@ -1703,7 +1703,7 @@ def api_spectra_chat():
             "voice": voice_base64
         })
     except Exception as exc:
-        logger.error(f"Spectra UI Chat error: {exc}")
+        logger.error(f"Friday UI Chat error: {exc}")
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 

@@ -17,9 +17,9 @@ _TIMEOUT  = 10
 
 
 class TelegramManager:
-    def __init__(self, send_fn: Callable[[str], bool], spectra_ceo=None):
+    def __init__(self, send_fn: Callable[[str], bool], friday_ceo=None):
         self.send_fn        = send_fn
-        self.spectra_ceo    = spectra_ceo
+        self.friday_ceo    = friday_ceo
         self.token          = config.TELEGRAM_BOT_TOKEN
         self.chat_id        = str(config.TELEGRAM_CHAT_ID)
         self.is_paused      = False
@@ -171,16 +171,16 @@ class TelegramManager:
             "/export":  self._cmd_export,
             "/ml":      self._cmd_ml,
             "/retrain": self._cmd_retrain,
-            "/spectra": self._cmd_spectra,
-            "/spectra_voice": self._cmd_spectra_voice,
-            "/spektra_ses":   self._cmd_spectra_voice,
+            "/friday": self._cmd_friday,
+            "/friday_voice": self._cmd_friday_voice,
+            "/friday_ses":   self._cmd_friday_voice,
             "/diagnose": self._cmd_diagnose,
             "/teshis":   self._cmd_diagnose,
         }
         handler = handlers.get(cmd)
         if handler:
             try:
-                if cmd in ("/close", "/set", "/spectra"):
+                if cmd in ("/close", "/set", "/friday"):
                     handler(args)
                 else:
                     handler()
@@ -210,15 +210,15 @@ class TelegramManager:
         self._answer_callback_query(cb_id, "İşlem alınıyor...")
         
         if action == "clean_server":
-            if self.spectra_ceo:
+            if self.friday_ceo:
                 try:
-                    deleted_count, saved_space = self.spectra_ceo.execute_cleanup()
+                    deleted_count, saved_space = self.friday_ceo.execute_cleanup()
                     msg_text = f"✅ <b>Sunucu Temizliği Başarılı!</b>\n\nToplam <code>{deleted_count}</code> adet gereksiz dosya silindi ve yaklaşık <code>{saved_space:.2f} MB</code> alan boşaltıldı."
                     self._edit_message_text(msg_text, msg_id, None)
                 except Exception as e:
                     self._edit_message_text(f"❌ <b>Temizlik sırasında hata oluştu:</b> {e}", msg_id, None)
             else:
-                self._edit_message_text("❌ <b>Spektra CEO modülü aktif değil.</b>", msg_id, None)
+                self._edit_message_text("❌ <b>Friday CEO modülü aktif değil.</b>", msg_id, None)
             return
         elif action == "cancel_clean":
             self._edit_message_text("❌ <b>Temizlik işlemi boss tarafından iptal edildi.</b>", msg_id, None)
@@ -612,8 +612,8 @@ class TelegramManager:
                 {"command": "retrain", "description": "ML modelini arka planda sıfırdan eğitir"},
                 {"command": "diagnose", "description": "Sistem derin teşhis ve analiz raporu"},
                 {"command": "teshis", "description": "Sistem derin teşhis ve analiz raporu"},
-                {"command": "spectra_voice", "description": "Spektra'dan sesli durum raporu alır"},
-                {"command": "spektra_ses", "description": "Spektra'dan sesli durum raporu alır"}
+                {"command": "friday_voice", "description": "Friday'dan sesli durum raporu alır"},
+                {"command": "friday_ses", "description": "Friday'dan sesli durum raporu alır"}
             ]
         }
         try:
@@ -1534,9 +1534,9 @@ class TelegramManager:
                 except Exception:
                     pass
 
-    def _cmd_spectra(self, args: list):
-        if not self.spectra_ceo:
-            self.send_fn("⚠️ <b>Spektra CEO Aktif Değil</b>\n\nBoss'um, Spektra CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin ol!")
+    def _cmd_friday(self, args: list):
+        if not self.friday_ceo:
+            self.send_fn("⚠️ <b>Friday CEO Aktif Değil</b>\n\nBoss'um, Friday CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin ol!")
             return
             
         user_msg = None
@@ -1545,20 +1545,20 @@ class TelegramManager:
             
         import threading
         threading.Thread(
-            target=self.spectra_ceo.evaluate_and_decide,
+            target=self.friday_ceo.evaluate_and_decide,
             args=(user_msg,),
             daemon=True
         ).start()
 
-    def _cmd_spectra_voice(self):
-        if not self.spectra_ceo:
-            self.send_fn("⚠️ <b>Spektra CEO Aktif Değil</b>\n\nBoss'um, Spektra CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin ol!")
+    def _cmd_friday_voice(self):
+        if not self.friday_ceo:
+            self.send_fn("⚠️ <b>Friday CEO Aktif Değil</b>\n\nBoss'um, Friday CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin ol!")
             return
             
-        self.send_fn("⏳ Spektra CEO sesli raporunu hazırlıyor, lütfen bekleyin...")
+        self.send_fn("⏳ Friday CEO sesli raporunu hazırlıyor, lütfen bekleyin...")
         import threading
         threading.Thread(
-            target=self.spectra_ceo.evaluate_and_decide,
+            target=self.friday_ceo.evaluate_and_decide,
             args=("sesli rapor oku",),
             daemon=True
         ).start()
