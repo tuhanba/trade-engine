@@ -172,6 +172,10 @@ class TelegramManager:
             "/ml":      self._cmd_ml,
             "/retrain": self._cmd_retrain,
             "/spectra": self._cmd_spectra,
+            "/spectra_voice": self._cmd_spectra_voice,
+            "/spektra_ses":   self._cmd_spectra_voice,
+            "/diagnose": self._cmd_diagnose,
+            "/teshis":   self._cmd_diagnose,
         }
         handler = handlers.get(cmd)
         if handler:
@@ -605,7 +609,11 @@ class TelegramManager:
                 {"command": "paper", "description": "Sanal Para Modu (Paper Trading)"},
                 {"command": "live", "description": "Gerçek Para Modu (Live Trading)"},
                 {"command": "ml", "description": "Yapay Zeka (ML) durum ve istatistiklerini gösterir"},
-                {"command": "retrain", "description": "ML modelini arka planda sıfırdan eğitir"}
+                {"command": "retrain", "description": "ML modelini arka planda sıfırdan eğitir"},
+                {"command": "diagnose", "description": "Sistem derin teşhis ve analiz raporu"},
+                {"command": "teshis", "description": "Sistem derin teşhis ve analiz raporu"},
+                {"command": "spectra_voice", "description": "Spektra'dan sesli durum raporu alır"},
+                {"command": "spektra_ses", "description": "Spektra'dan sesli durum raporu alır"}
             ]
         }
         try:
@@ -722,6 +730,150 @@ class TelegramManager:
             f"✅ <i>Tüm arka plan servisleri ve veritabanı aktif şekilde çalışıyor.</i>"
         )
 
+    def _cmd_diagnose(self):
+        import os
+        import time
+        import subprocess
+        import database
+        
+        # System Uptime
+        uptime = int(time.time() - self._start_time)
+        h, rem = divmod(uptime, 3600)
+        m = rem // 60
+        
+        # RAM and Disk status
+        ram_text = "N/A"
+        disk_text = "N/A"
+        try:
+            import psutil
+            # RAM
+            vm = psutil.virtual_memory()
+            ram_used_gb = vm.used / (1024 ** 3)
+            ram_total_gb = vm.total / (1024 ** 3)
+            ram_text = f"{ram_used_gb:.1f} / {ram_total_gb:.1f} GB (%{vm.percent:.1f})"
+            
+            # Disk
+            du = psutil.disk_usage('.')
+            disk_used_gb = du.used / (1024 ** 3)
+            disk_total_gb = du.total / (1024 ** 3)
+            disk_text = f"{disk_used_gb:.1f} / {disk_total_gb:.1f} GB (%{du.percent:.1f})"
+        except ImportError:
+            # Fallback for Linux when psutil is not available
+            if os.name != 'nt':
+                try:
+                    df_res = subprocess.run(["df", "-h", "."], capture_output=True, text=True, timeout=2)
+                    if df_res.returncode == 0:
+                        lines = df_res.stdout.strip().split('\n')
+                        if len(lines) > 1:
+                            parts = lines[1].split()
+                            if len(parts) >= 5:
+                                disk_text = f"Used: {parts[2]}, Total: {parts[1]} ({parts[4]})"
+                    free_res = subprocess.run(["free", "-m"], capture_output=True, text=True, timeout=2)
+                    if free_res.returncode == 0:
+                        lines = free_res.stdout.strip().split('\n')
+                        for line in lines:
+                            if line.startswith("Mem:"):
+                                parts = line.split()
+                                total_mb = int(parts[1])
+                                used_mb = int(parts[2])
+                                pct = (used_mb / total_mb) * 100
+                                ram_text = f"{used_mb / 1024:.1f} / {total_mb / 1024:.1f} GB (%{pct:.1f})"
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Error reading resource stats: {e}")
+            
+        # Physical DB position, size, WAL size
+        db_path = getattr(config, "DB_PATH", "trading.db")
+        db_abs = os.path.abspath(db_path)
+        db_size_mb = 0.0
+        wal_size_mb = 0.0
+        try:
+            if os.path.exists(db_path):
+                db_size_mb = os.path.getsize(db_path) / (1024 * 1024)
+            if os.path.exists(db_path + "-wal"):
+                wal_size_mb = os.path.getsize(db_path + "-wal") / (1024 * 1024)
+        except Exception as e:
+            logger.warning(f"Error reading DB sizes: {e}")
+            
+        # Active Python processes
+        py_processes = []
+        try:
+            import psutil
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmd = proc.info.get('cmdline') or []
+                    cmd_str = " ".join(cmd)
+                    if 'python' in proc.info.get('name', '').lower() or any('python' in arg.lower() for arg in cmd):
+                        if any(k in cmd_str for k in ['app.py', 'scalp_bot.py', 'telegram_manager.py', 'run']):
+                            py_processes.append(f"• PID {proc.pid}: <code>{cmd_str[:60]}...</code>")
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+        except ImportError:
+            # Fallback using ps command on Linux
+            if os.name != 'nt':
+                try:
+                    ps_res = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=3)
+                    if ps_res.returncode == 0:
+                        lines = ps_res.stdout.strip().split('\n')
+                        for line in lines:
+                            if 'python' in line.lower() and any(k in line for k in ['app.py', 'scalp_bot.py', 'telegram_manager.py']):
+                                parts = line.split()
+                                if len(parts) >= 11:
+                                    pid = parts[1]
+                                    cmd = " ".join(parts[10:])
+                                    py_processes.append(f"• PID {pid}: <code>{cmd[:60]}...</code>")
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Error listing python processes: {e}")
+            
+        if not py_processes:
+            py_processes.append("• <i>Aktif Python süreci bulunamadı veya yetki yetersiz.</i>")
+            
+        # Running Docker processes
+        docker_containers = []
+        try:
+            res = subprocess.run(["docker", "ps", "--format", "{{.Names}} ({{.Status}})"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                lines = [line.strip() for line in res.stdout.strip().split('\n') if line.strip()]
+                for line in lines[:5]:
+                    docker_containers.append(f"🐳 {line}")
+            else:
+                docker_containers.append("🐳 <i>Docker komutu hata verdi veya çalışmıyor.</i>")
+        except Exception:
+            docker_containers.append("🐳 <i>Docker bulunamadı.</i>")
+            
+        # IP Whitelist status
+        allowed_ips_env = os.getenv("ALLOWED_IPS", "").strip()
+        if allowed_ips_env:
+            whitelist_status = f"✅ Etkin\n🔑 <b>İzin Verilen IP'ler:</b> <code>{allowed_ips_env}</code>"
+        else:
+            whitelist_status = "❌ Devre Dışı (Tüm IP'lere Açık)"
+            
+        # Format and send report
+        proc_str = "\n".join(py_processes[:5])
+        docker_str = "\n".join(docker_containers[:5])
+        
+        report = (
+            f"🛠 <b>Sistem Teşhis Raporu (/diagnose)</b>\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"⏱ <b>Kesintisiz Çalışma (Uptime):</b> {h} Saat {m} Dakika\n"
+            f"🧠 <b>RAM Durumu:</b> {ram_text}\n"
+            f"💾 <b>Disk Durumu:</b> {disk_text}\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📂 <b>DB Dosya Konumu:</b>\n<code>{db_abs}</code>\n"
+            f"📊 <b>DB Boyutu:</b> {db_size_mb:.2f} MB | <b>WAL Boyutu:</b> {wal_size_mb:.2f} MB\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"🔒 <b>IP Whitelist Durumu:</b> {whitelist_status}\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"🐍 <b>Aktif Python Süreçleri:</b>\n{proc_str}\n\n"
+            f"🐳 <b>Docker Konteynerleri:</b>\n{docker_str}\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"⚡ <i>Teşhis başarıyla tamamlandı.</i>"
+        )
+        self.send_fn(report)
+
     def _cmd_status(self):
         text, markup = self._generate_status_data()
         self.send_fn(text, reply_markup=markup)
@@ -733,8 +885,8 @@ class TelegramManager:
         bal_label = "Canlı Cüzdan (Binance)" if exec_mode == "live" else "Sanal Kasa"
         init    = getattr(config, "INITIAL_PAPER_BALANCE", 2000.0)
         roi     = ((bal - init) / init * 100) if init else 0
-        open_t  = database.get_open_trades()
-        stats   = database.get_dashboard_stats()
+        open_t  = database.get_open_trades(exec_mode)
+        stats   = database.get_dashboard_stats(exec_mode)
         uptime  = int(time.time() - self._start_time)
         h, rem  = divmod(uptime, 3600)
         m       = rem // 60
@@ -744,8 +896,8 @@ class TelegramManager:
             with database.get_conn() as conn:
                 today_pnl = conn.execute("""
                     SELECT COALESCE(SUM(net_pnl), 0) FROM trades
-                    WHERE LOWER(status)='closed' AND DATE(close_time)=? AND is_valid_for_stats=1
-                """, (today,)).fetchone()[0] or 0
+                    WHERE LOWER(status)='closed' AND DATE(close_time)=? AND is_valid_for_stats=1 AND environment=?
+                """, (today, exec_mode)).fetchone()[0] or 0
                 ghost_n = conn.execute(
                     "SELECT COUNT(*) FROM ghost_signals"
                 ).fetchone()[0]
@@ -787,32 +939,42 @@ class TelegramManager:
 
     def _cmd_stats(self):
         import database
-        stats = database.get_dashboard_stats()
+        exec_mode = getattr(config, "EXECUTION_MODE", "paper")
+        stats = database.get_dashboard_stats(exec_mode)
         total = stats.get("total_trades", 0)
         wins  = stats.get("win_trades", 0)
         loss  = stats.get("loss_trades", 0)
         pnl   = stats.get("total_pnl", 0)
         wr    = stats.get("win_rate", 0)
-        bal   = database.get_paper_balance() or 0
+        
+        details = database.get_active_balance_details()
+        bal = details.get("total", 0.0)
         init  = getattr(config, "INITIAL_PAPER_BALANCE", 2000.0)
         roi   = ((bal - init) / init * 100) if init else 0
+        
+        mode_label = "Canlı Cüzdan" if exec_mode == "live" else "Sanal Kasa"
+        sharpe = stats.get("sharpe_ratio", 0.0)
+        sortino = stats.get("sortino_ratio", 0.0)
         self.send_fn(
-            f"📊 <b>Genel Performans İstatistikleri</b>\n\n"
-            f"Bu veriler botun şu ana kadar gösterdiği tüm başarı oranını özetler:\n\n"
+            f"📊 <b>Genel Performans İstatistikleri ({exec_mode.upper()})</b>\n\n"
+            f"Bu veriler botun şu ama kadar gösterdiği tüm başarı oranını özetler:\n\n"
             f"🔸 <b>Toplam Kapanan İşlem:</b> {total} adet\n"
             f"🔸 <b>Başarı Oranı (Kazanılan/Kaybedilen):</b> {wins} Başarılı / {loss} Zararlı\n"
             f"🔸 <b>Win Rate (Kazanma Yüzdesi):</b> %{wr:.1f}\n"
-            f"🔸 <b>Kümülatif Net Kâr:</b> ${pnl:+.2f}\n\n"
+            f"🔸 <b>Kümülatif Net Kâr:</b> ${pnl:+.2f}\n"
+            f"🔸 <b>Sharpe Oranı (Sharpe):</b> {sharpe}\n"
+            f"🔸 <b>Sortino Oranı (Sortino):</b> {sortino}\n\n"
             f"💼 <b>Kasa Durumu:</b>\n"
             f"🔸 Başlangıç: ${init:.2f}\n"
-            f"🔸 Güncel Bakiye: ${bal:.2f}\n"
+            f"🔸 Güncel {mode_label}: ${bal:.2f}\n"
             f"🔸 Toplam Büyüme (ROI): %{roi:+.1f}\n\n"
             f"💡 <i>Not: Yüksek kâr faktörü, düşük win rate'den daha önemlidir. Bot kârı uzatıp zararı erken keser.</i>"
         )
 
     def _cmd_trades(self):
         import database
-        trades = database.get_recent_trades(5)
+        exec_mode = getattr(config, "EXECUTION_MODE", "paper")
+        trades = database.get_recent_trades(5, environment=exec_mode)
         if not trades:
             self.send_fn("Henuez kapatilmis trade yok.")
             return
@@ -838,8 +1000,8 @@ class TelegramManager:
             with database.get_conn() as conn:
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 row   = conn.execute(
-                    "SELECT COALESCE(SUM(net_pnl),0) FROM trades WHERE DATE(close_time)=? AND status='closed' AND is_valid_for_stats=1",
-                    (today,)
+                    "SELECT COALESCE(SUM(net_pnl),0) FROM trades WHERE DATE(close_time)=? AND status='closed' AND is_valid_for_stats=1 AND environment=?",
+                    (today, details.get("execution_mode", "paper"))
                 ).fetchone()
             today_pnl = float(row[0]) if row else 0.0
         except Exception:
@@ -862,7 +1024,8 @@ class TelegramManager:
 
     def _generate_open_data(self) -> tuple[str, dict]:
         import database
-        trades = database.get_open_trades()
+        exec_mode = getattr(config, "EXECUTION_MODE", "paper")
+        trades = database.get_open_trades(exec_mode)
         if not trades:
             return "Açık trade yok.", {"inline_keyboard": [[{"text": "🔄 Yenile", "callback_data": "cmd:open"}]]}
         lines = []
@@ -1097,6 +1260,7 @@ class TelegramManager:
     def _cmd_daily(self):
         import database
         try:
+            exec_mode = getattr(config, "EXECUTION_MODE", "paper")
             with database.get_conn() as conn:
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 row   = conn.execute(
@@ -1104,8 +1268,8 @@ class TelegramManager:
                               SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END),
                               SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END),
                               COALESCE(SUM(net_pnl), 0)
-                       FROM trades WHERE DATE(close_time)=? AND status='closed' AND is_valid_for_stats=1""",
-                    (today,)
+                       FROM trades WHERE DATE(close_time)=? AND status='closed' AND is_valid_for_stats=1 AND environment=?""",
+                    (today, exec_mode)
                 ).fetchone()
             total  = row[0] or 0
             wins   = row[1] or 0
@@ -1385,3 +1549,17 @@ class TelegramManager:
             args=(user_msg,),
             daemon=True
         ).start()
+
+    def _cmd_spectra_voice(self):
+        if not self.spectra_ceo:
+            self.send_fn("⚠️ <b>Spektra CEO Aktif Değil</b>\n\nBoss'um, Spektra CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin ol!")
+            return
+            
+        self.send_fn("⏳ Spektra CEO sesli raporunu hazırlıyor, lütfen bekleyin...")
+        import threading
+        threading.Thread(
+            target=self.spectra_ceo.evaluate_and_decide,
+            args=("sesli rapor oku",),
+            daemon=True
+        ).start()
+

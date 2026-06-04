@@ -578,6 +578,14 @@ class TriggerEngine:
                 "cvd_value": cvd_data.get("cvd_value", 0.0),
                 "oi_change_pct": oi_data.get("oi_change_pct", 0.0),
             }
+            
+            # Cache features in Redis Feature Store
+            try:
+                from core.redis_feature_store import set_features
+                set_features(symbol, ml_signal, ttl=300)
+            except Exception as re_err:
+                logger.debug(f"[Redis Feature Store] Save failed for {symbol}: {re_err}")
+
             ml_score = score_signal(ml_signal)
             
             if ml_score < 35:

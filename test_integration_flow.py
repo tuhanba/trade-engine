@@ -154,8 +154,8 @@ class TestIntegrationFlow(unittest.TestCase):
 
         with database.get_conn() as conn:
             conn.execute("""
-                INSERT INTO trades (id, symbol, direction, status, entry, sl, qty, open_time, metadata)
-                VALUES (?, ?, 'LONG', 'OPEN', 100.0, 90.0, 1.0, ?, ?)
+                INSERT INTO trades (id, symbol, direction, status, entry, sl, qty, open_time, metadata, environment)
+                VALUES (?, ?, 'LONG', 'OPEN', 100.0, 90.0, 1.0, ?, ?, 'paper')
             """, (trade_id, symbol, open_time, metadata_json))
 
         # 2. Evaluate trade via execution_engine
@@ -204,8 +204,8 @@ class TestIntegrationFlow(unittest.TestCase):
 
         with database.get_conn() as conn:
             conn.execute("""
-                INSERT INTO trades (id, symbol, direction, status, entry, sl, qty, open_time, metadata)
-                VALUES (?, ?, 'SHORT', 'OPEN', 3000.0, 3100.0, 1.0, ?, ?)
+                INSERT INTO trades (id, symbol, direction, status, entry, sl, qty, open_time, metadata, environment)
+                VALUES (?, ?, 'SHORT', 'OPEN', 3000.0, 3100.0, 1.0, ?, ?, 'paper')
             """, (trade_id, symbol, open_time, metadata_json))
 
         engine = ExecutionEngine()
@@ -253,8 +253,8 @@ class TestIntegrationFlow(unittest.TestCase):
             
             with database.get_conn() as conn:
                 conn.execute("""
-                    INSERT INTO trades (id, symbol, direction, status, entry, sl, qty, open_time, metadata, net_pnl, risk_usd)
-                    VALUES (?, ?, 'LONG', 'OPEN', 150.0, 140.0, 1.0, '2026-06-01 00:00:00', '{}', 0.0, 10.0)
+                    INSERT INTO trades (id, symbol, direction, status, entry, sl, qty, open_time, metadata, net_pnl, risk_usd, environment)
+                    VALUES (?, ?, 'LONG', 'OPEN', 150.0, 140.0, 1.0, '2026-06-01 00:00:00', '{}', 0.0, 10.0, 'paper')
                 """, (trade_id, symbol))
                 
             from core.services.execution_service import ExecutionService

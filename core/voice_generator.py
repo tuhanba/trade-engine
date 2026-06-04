@@ -1,0 +1,41 @@
+"""
+core/voice_generator.py - Phase G Spektra AI Text-To-Speech Module
+==================================================================
+Uses edge-tts to generate natural Turkish neural voices for Spektra briefs.
+"""
+
+import asyncio
+import logging
+import os
+
+logger = logging.getLogger("ax.voice_generator")
+
+
+async def _generate_tts_async(text: str, output_path: str, voice: str = "tr-TR-DilaraNeural") -> None:
+    import edge_tts
+    # Clean text: remove complex markdown symbols that TTS might try to read literally
+    clean_text = text.replace("**", "").replace("###", "").replace("##", "").replace("*", "").replace("`", "").replace("━━━━━━━━━━━━━━━━", "")
+    
+    communicate = edge_tts.Communicate(clean_text, voice)
+    await communicate.save(output_path)
+
+
+def generate_voice_briefing(text: str, output_path: str, voice: str = "tr-TR-DilaraNeural") -> bool:
+    """
+    Synchronous wrapper to generate neural Turkish voice file (.ogg / .mp3) from text.
+    """
+    try:
+        # Create output directory if not exists
+        out_dir = os.path.dirname(output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+            
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_generate_tts_async(text, output_path, voice))
+        loop.close()
+        logger.info(f"Spektra TTS generated successfully at: {output_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Spektra TTS generation failed: {e}")
+        return False

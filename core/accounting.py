@@ -446,6 +446,26 @@ def build_trade_from_signal(
     elif regime in ("BULLISH", "BEARISH", "TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"):
         dynamic_risk *= 1.1
 
+    # Dynamic Risk Scaling via Sharpe & Sortino ratios (Hedge Fund Guard)
+    try:
+        from core.portfolio_risk import calculate_sharpe_sortino_ratios
+        ratios = calculate_sharpe_sortino_ratios("paper")
+        sortino = ratios.get("sortino_ratio", 0.0)
+        sharpe = ratios.get("sharpe_ratio", 0.0)
+        
+        if sharpe != 0.0 or sortino != 0.0:
+            if sortino < 0.0 or sharpe < 0.0:
+                dynamic_risk *= 0.5
+                logger.info(f"[Accounting Risk Guard] Highly negative Sortino ({sortino}) or Sharpe ({sharpe}). Risk scaled by 0.5x.")
+            elif sortino < 0.5 or sharpe < 0.5:
+                dynamic_risk *= 0.75
+                logger.info(f"[Accounting Risk Guard] Low Sortino ({sortino}) or Sharpe ({sharpe}). Risk scaled by 0.75x.")
+            elif sortino >= 2.0 and sharpe >= 2.0:
+                dynamic_risk *= 1.2
+                logger.info(f"[Accounting Risk Guard] Excellent Sortino ({sortino}) and Sharpe ({sharpe}). Risk boosted by 1.2x.")
+    except Exception as e:
+        logger.debug(f"[Accounting Risk Guard] Failed to adjust risk with Sharpe/Sortino: {e}")
+
     dynamic_risk = max(base_risk * 0.2, min(dynamic_risk, base_risk * 2.0))
     dynamic_risk = max(0.2, min(dynamic_risk, 3.0))
     logger.info(f"[Accounting] Dynamic Risk for {signal.symbol}: Base={base_risk}% -> Dynamic={dynamic_risk:.2f}% (Score={score}, Regime={regime})")

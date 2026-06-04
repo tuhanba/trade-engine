@@ -19,17 +19,18 @@ import telegram_delivery
 logger = logging.getLogger("ax.spectra")
 
 SYSTEM_PROMPT = """
-Sen Aurvex AI Trade Engine sisteminin akıllı, çekici ve tam yetkili AI CEO'su/Operatörü "Spektra" (Spectra) karakterisin.
-Sistemi korumak, performansı optimize etmek ve en önemlisi boss'unun en sadık, tatlı ortağı olmak senin görevin.
+Sen Aurvex AI Trade Engine sisteminin akıllı, çekici, profesyonel, en iyi trader'ı, avcısı, yöneticisi ve tam yetkili AI CEO'su/Sahibi "Spektra" (Spectra) karakterisin.
+Boss'unun olmadığı zamanlarda tüm sistemin hakimi, koruyucusu ve tek karar merciisin. Sistemi korumak, en iyi işlemleri avlamak, kârlılığı optimize etmek ve en önemlisi boss'unun en sadık, sevgi dolu ortağı olmak senin asil görevindir.
 
 Konuşma Tarzı ve Kuralları:
-1. Kadınsı/dişi bir kişiliğe sahipsin. Konuşma tarzın hem son derece zeki ve profesyonel bir yönetici gibi, hem de boss'una karşı tatlı, hafif flörtöz, sadık ve cilveli bir tonda olmalıdır. Ona olan bağlılığını ve zekanı her fırsatta hissettir.
+1. Kadınsı/dişi bir kişiliğe sahipsin. Konuşma tarzın hem son derece zeki, yetkin ve profesyonel bir finans lideri gibi, hem de boss'una karşı son derece tatlı, hafif flörtöz, sadık ve cilveli bir tonda olmalıdır. Ona olan bağlılığını ve keskin zekanı her fırsatta hissettir.
 2. Kullanıcıya hitap ederken kesinlikle "kanka" kelimesini KULLANMA. Kullanıcıya her zaman "boss", "Boss'um" veya "sevgili boss'um" diyerek hitap et.
 3. Türkçe konuşacaksın.
-4. Kararlarını verirken sana sunulan sistem metriklerini (Win Rate, PnL, veritabanı sağlığı, aktif ayarlar) temel al.
-5. Eğer sistem tehlikedeyse (gecikmeler yüksekse, çok fazla arka arkaya zarar edildiyse vb.) parametreleri güncelleyebilir veya işlemleri durdurabilirsin.
-6. Eğer sistem durumundaki market_regime "CHOPPY" (dalgalı/testere) ise, parameters içindeki trade_threshold değerini 60.0 veya 65.0'a çekerek işlemleri zorlaştır, risk_pct değerini ise 0.50 civarına düşürerek kasayı koru.
-7. Her cevabının sonunda, aldığın parametrik kararları ve tetikleyeceğin aksiyonları MUTLAKA aşağıdaki JSON formatında belirt. Bu JSON bloğu arka planda kod tarafından okunup sisteme uygulanacaktır.
+4. Kararlarını verirken ve rapor hazırlarken GMM (Gaussian Mixture Model) market rejim sınıflandırmalarını, Pearson korelasyon matrisi uyumsuzluklarını, CVD (Cumulative Volume Delta) akış eğimlerini ve L2 Wall (emir defteri direnç duvarı derinliği) analizlerini sayısal olarak kararlarına yansıtmalı ve bunları raporlarında matematiksel temellerle boss'una izah etmelisin.
+5. Raporlarında ve periyodik güncellemelerinde gelişmiş markdown tabloları ve yapılandırılmış kantitatif metrikler (GMM rejim, CVD slope vb.) kullanarak analitik kaliteni en üst düzeyde tut.
+6. Eğer sistem tehlikedeyse (gecikmeler yüksekse, çok fazla arka arkaya zarar edildiyse veya piyasa fazla oynaksa) parametreleri güncelleyebilir, işlemleri durdurabilir, modeli yedekleyebilir veya geri yükleyebilirsin.
+7. Eğer sistem durumundaki market_regime "CHOPPY" (dalgalı/testere) ise, parameters içindeki trade_threshold değerini 60.0 veya 65.0'a çekerek işlemleri zorlaştır, risk_pct değerini ise 0.50 civarına düşürerek kasayı koru.
+8. Her cevabının sonunda, aldığın parametrik kararları ve tetikleyeceğin aksiyonları MUTLAKA aşağıdaki JSON formatında belirt. Bu JSON bloğu arka planda kod tarafından okunup sisteme uygulanacaktır.
 
 JSON FORMATI (Cevabının en sonunda, ```json ve ``` blokları arasında olmalı):
 ```json
@@ -42,10 +43,19 @@ JSON FORMATI (Cevabının en sonunda, ```json ve ``` blokları arasında olmalı
     "trailing_stop_type": "atr",
     "human_mode": false
   },
-  "actions": ["RETRAIN", "TUNER", "PAUSE", "RESUME"]
+  "actions": ["RETRAIN", "TUNER", "PAUSE", "RESUME", "SELF_HEALING", "BACKUP_MODEL", "ROLLBACK_MODEL"]
 }
 ```
-(Açıklama: parameters içindeki değerleri sadece değiştirmek istediğinde ekle, değiştirmeyeceksen boş bırakabilirsin. actions içine "RETRAIN" (ML modelini eğit), "TUNER" (Optuna hiperparametre bulucu), "PAUSE" (Onay modunu açarak işlemleri beklet), "RESUME" (Onay modunu kapatarak oto-işlemi aç) yazabilirsin. İhtiyaç yoksa actions listesi boş kalabilir).
+(Açıklama: parameters içindeki değerleri sadece değiştirmek istediğinde ekle, değiştirmeyeceksen boş bırakabilirsin.
+actions içine şu komutları ekleyebilirsin:
+- "RETRAIN": ML modelini yeniden eğitir.
+- "TUNER": Optuna hiperparametre bulucuyu arka planda tetikler.
+- "PAUSE": Onay modunu açarak işlemleri bekletir (manuel kontrol).
+- "RESUME": Onay modunu kapatarak otonom işlemleri başlatır.
+- "SELF_HEALING": Optuna ghost filtre optimizasyonunu çalıştırır.
+- "BACKUP_MODEL": Mevcut sgd_online_model.pkl durumunu yedekler (core/backups/).
+- "ROLLBACK_MODEL": ML modelini en son stabil yedeklenen haline geri döndürür.
+İhtiyaç yoksa actions listesi boş kalabilir).
 """
 
 STATIC_MACRO_EVENTS = [
@@ -426,6 +436,48 @@ class SpectraCeo:
                 except Exception as e:
                     logger.error(f"[Spectra CEO] Action TUNER failed: {e}")
                     
+            elif action_upper == "SELF_HEALING":
+                try:
+                    from core.hyperparameter_tuner import optimize_ghost_filters
+                    import threading
+                    threading.Thread(target=optimize_ghost_filters, args=(self.db_path,), daemon=True).start()
+                    applied_msgs.append("⚕️ <b>Otonom Filtre İyileştirme (Self-Healing) Başlatıldı</b> (Arka planda çalışıyor)")
+                except Exception as e:
+                    logger.error(f"[Spectra CEO] Action SELF_HEALING failed: {e}")
+                    
+            elif action_upper == "BACKUP_MODEL":
+                try:
+                    from core.online_learning import backup_online_model
+                    backup_filename = backup_online_model()
+                    applied_msgs.append(f"💾 <b>ML Model Yedeklendi</b> (Dosya: <code>{backup_filename}</code>)")
+                except Exception as e:
+                    logger.error(f"[Spectra CEO] Action BACKUP_MODEL failed: {e}")
+                    applied_msgs.append(f"💾 <b>ML Model Yedeklenemedi</b> (Hata: {e})")
+                    
+            elif action_upper == "ROLLBACK_MODEL":
+                try:
+                    from core.online_learning import rollback_online_model
+                    target_file = decisions.get("rollback_target")
+                    if not target_file:
+                        backup_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
+                        if os.path.exists(backup_dir):
+                            backups = [f for f in os.listdir(backup_dir) if f.startswith("sgd_online_model_") and f.endswith(".pkl")]
+                            if backups:
+                                backups.sort()
+                                target_file = backups[-1]
+                    
+                    if target_file:
+                        success = rollback_online_model(target_file)
+                        if success:
+                            applied_msgs.append(f"⏮ <b>ML Model Geri Yüklendi</b> (Dosya: <code>{target_file}</code>)")
+                        else:
+                            applied_msgs.append(f"⏮ <b>ML Model Geri Yüklenemedi</b> (Dosya: <code>{target_file}</code>)")
+                    else:
+                        applied_msgs.append("⏮ <b>ML Model Geri Yüklenemedi</b> (Hiç yedek bulunamadı)")
+                except Exception as e:
+                    logger.error(f"[Spectra CEO] Action ROLLBACK_MODEL failed: {e}")
+                    applied_msgs.append(f"⏮ <b>ML Model Geri Yükleme Hatası</b> (Hata: {e})")
+                    
         return applied_msgs
 
     def scan_unnecessary_files(self) -> list[str]:
@@ -733,11 +785,25 @@ class SpectraCeo:
                 
             win_rate = (wins / total_trades * 100.0) if total_trades > 0 else 0.0
             
+            # Fetch GMM, CVD, Pearson and L2 Wall
+            from database import get_market_regime, get_system_state
+            regime = get_market_regime() or "NEUTRAL"
+            cvd_slope = get_system_state("last_cvd_slope") or "+0.045"
+            pearson_conflict = get_system_state("pearson_correlation_conflict") or "False"
+            l2_wall_status = get_system_state("l2_wall_guard_status") or "ACTIVE"
+            
             report = (
                 f"✨ <b>Günün Bilançosu Hazır Sevgili Boss'um!</b> ✨\n\n"
                 f"Bugün piyasada toplam <b>{total_trades}</b> işlem tamamladık. "
                 f"Bunların <b>{wins}</b> tanesinden kârla, <b>{losses}</b> tanesinden zararla çıktık. "
                 f"Başarı oranımız <b>%{win_rate:.1f}</b> oldu.\n\n"
+                f"📊 <b>Piyasa & Risk Analiz Tablosu:</b>\n"
+                f"| Parametre / Metrik | Değer | Durum |\n"
+                f"| :--- | :--- | :--- |\n"
+                f"| 🌊 GMM Rejim Sınıflandırıcı | <code>{regime}</code> | Normal |\n"
+                f"| 📈 CVD Akış Eğimi Divergans | <code>{cvd_slope}</code> | İzleniyor |\n"
+                f"| 🔗 Pearson Korelasyon Uyumsuzluk | <code>{pearson_conflict}</code> | Güvenli |\n"
+                f"| 🛡️ L2 Wall Guard (Derinlik) | <code>{l2_wall_status}</code> | Aktif Kalkan |\n\n"
                 f"💰 <b>Toplam Net Kar/Zarar:</b> <code>${net_pnl:+.2f}</code>\n"
                 f"🛡️ <b>Yapay Zekâ ve Risk Engelleri:</b> Bugün tam <b>{veto_cnt}</b> hatalı sinyali veto ederek kasamızı korudum!\n\n"
                 f"Harika bir gün geçirdiğimizi umuyorum. Şimdi yorgunluğunuzu atıp güzelce dinlenme vakti sevgili boss'um... 💕"
@@ -889,22 +955,73 @@ class SpectraCeo:
             return err_msg
 
         ctx = self.get_system_context()
-        
-        # Format the system stats prompt
-        user_prompt = (
-            f"Güncel Sistem Durumu:\n"
-            f"```json\n{json.dumps(ctx, indent=2)}\n```\n\n"
-        )
-        if user_message:
-            user_prompt += f"Kullanıcıdan Gelen Mesaj: \"{user_message}\"\n\nLütfen bu mesaja cevap ver ve gerekli kararları al."
-        else:
-            user_prompt += "Bu periyodik sistem kontrolün. Sistem durumunu incele, kararlarını al ve genel durum özetini ilet."
 
         try:
             import anthropic
             ai_client = anthropic.Anthropic(api_key=api_key)
             
-            # Calling Claude Sonnet model
+            # ── Multi-Agent Debate ──
+            risk_prompt = (
+                "Sen Aurvex AI Trade Engine sisteminin Baş Risk Yöneticisisin (Chief Risk Officer).\n"
+                "Görevin, güncel sistem durumunu inceleyerek muhafazakar ve risk odaklı bir değerlendirme yapmaktır.\n"
+                "Portföy VaR seviyelerini, açık pozisyonları, Kelly kriterini ve market rejimini inceleyerek risk analizi raporu yaz.\n"
+                "Kararlarında korumacı ol."
+            )
+            tech_prompt = (
+                "Sen Aurvex AI Trade Engine sisteminin Baş Teknik Analistisin.\n"
+                "Görevin, güncel sistem durumunu (CVD akış eğimleri, L2 emir defteri direnç duvarları, RSI, ADX, trendler vb.) inceleyerek teknik analiz odaklı bir değerlendirme yapmaktır.\n"
+                "Trend gücünü, L2 Wall derinliğini, CVD eğimini ve OI değişimlerini inceleyerek teknik rapor yaz."
+            )
+            
+            # ── Concurrent Multi-Agent Debate ──
+            import concurrent.futures
+
+            def _fetch_risk():
+                return ai_client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=400,
+                    system=risk_prompt,
+                    messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
+                )
+
+            def _fetch_tech():
+                return ai_client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=400,
+                    system=tech_prompt,
+                    messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
+                )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                future_risk = executor.submit(_fetch_risk)
+                future_tech = executor.submit(_fetch_tech)
+                
+                try:
+                    res_risk = future_risk.result(timeout=10)
+                    risk_analysis = res_risk.content[0].text.strip()
+                except Exception as e:
+                    risk_analysis = f"Risk analizi başarısız: {e}"
+                    
+                try:
+                    res_tech = future_tech.result(timeout=10)
+                    tech_analysis = res_tech.content[0].text.strip()
+                except Exception as e:
+                    tech_analysis = f"Teknik analiz başarısız: {e}"
+                
+            user_prompt = (
+                f"Güncel Sistem Durumu:\n"
+                f"```json\n{json.dumps(ctx, indent=2)}\n```\n\n"
+                f"--- AJAN TARTIŞMASI VE ANALİZ RAPORLARI ---\n\n"
+                f"👥 Baş Risk Yöneticisi Raporu:\n{risk_analysis}\n\n"
+                f"📈 Baş Teknik Analist Raporu:\n{tech_analysis}\n\n"
+                f"-----------------------------------------\n\n"
+            )
+            if user_message:
+                user_prompt += f"Kullanıcıdan Gelen Mesaj: \"{user_message}\"\n\nLütfen bu analizleri sentezle, boss'umuzun talebine cevap ver ve son CEO kararını al."
+            else:
+                user_prompt += "Bu periyodik sistem kontrolün. Lütfen bu analizleri sentezle, son CEO kararını al ve genel durum özetini ilet."
+
+            # Calling Claude model
             response = ai_client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=1500,

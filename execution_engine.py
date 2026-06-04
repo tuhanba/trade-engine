@@ -84,6 +84,25 @@ class ExecutionEngine:
         Returns: trade_id veya None
         """
         start_time = time.time()
+        
+        # Get active positions
+        open_trades = database.get_open_trades()
+        open_symbols = [t["symbol"] for t in open_trades]
+        
+        # 1. Pearson Correlation Blocker
+        if open_symbols:
+            try:
+                from core.portfolio_risk import calculate_max_correlation
+                max_corr = calculate_max_correlation(open_symbols, signal.symbol)
+                if max_corr > getattr(config, "MAX_CORRELATION_THRESHOLD", 0.75):
+                    logger.warning(
+                        f"[Portfolio Risk] Trade rejected for {signal.symbol}: "
+                        f"Correlation with open positions ({max_corr:.2f}) exceeds threshold ({config.MAX_CORRELATION_THRESHOLD})"
+                    )
+                    return None
+            except Exception as e:
+                logger.error(f"Error checking Pearson correlation: {e}")
+
         stats = database.get_dashboard_stats()
         active_balance = stats.get("balance", config.INITIAL_PAPER_BALANCE if hasattr(config, "INITIAL_PAPER_BALANCE") else 2000.0)
 
@@ -98,6 +117,78 @@ class ExecutionEngine:
         if trade is None:
             logger.warning("Trade oluşturulamadı: %s", signal.symbol)
             return None
+
+        # 2. Value-at-Risk (VaR) Constraint
+        try:
+            from core.portfolio_risk import calculate_portfolio_var
+            candidate_pos = {
+                "symbol": trade.symbol,
+                "qty": trade.quantity,
+                "entry_price": trade.entry_price
+            }
+            port_var = calculate_portfolio_var(open_trades, candidate_pos, balance)
+            if port_var > getattr(config, "PORTFOLIO_VAR_LIMIT", 0.05):
+                logger.warning(
+                    f"[Portfolio Risk] Trade rejected for {trade.symbol}: "
+                    f"Portfolio VaR ({port_var*100:.2f}%) exceeds limit ({config.PORTFOLIO_VAR_LIMIT*100:.2f}%)"
+                )
+                return None
+        except Exception as e:
+            logger.error(f"Error checking portfolio VaR: {e}")
+
+        # 3. ML Online Learning Gating Constraint
+        if getattr(config, "DYNAMIC_THRESHOLD_ENABLED", True):
+            try:
+                from core.online_learning import predict_online_probability
+                meta = signal.metadata or {}
+                feat_dict = {
+                    "symbol": signal.symbol,
+                    "adx": meta.get("adx") or meta.get("adx15") or 0.0,
+                    "rv": meta.get("rv") or 1.0,
+                    "rsi5": meta.get("rsi5") or 50.0,
+                    "rsi1": meta.get("rsi1") or 50.0,
+                    "funding_favorable": meta.get("funding_favorable") or 0,
+                    "bb_width_pct": meta.get("bb_width") or meta.get("bb_width_pct") or 0.0,
+                    "ob_ratio": meta.get("ob_ratio") or 1.0,
+                    "volume_m": meta.get("volume_m") or 0.0,
+                    "btc_trend": getattr(signal, "market_regime", "NEUTRAL") or "NEUTRAL",
+                    "direction": signal.side,
+                    "session": meta.get("session") or "OFF",
+                    "hold_minutes": meta.get("hold_minutes") or 0,
+                    "partial_exit": meta.get("partial_exit") or 0,
+                    "bb_width_chg": meta.get("bb_width_chg") or 0.0,
+                    "momentum_3c": meta.get("momentum_3c") or 0.0,
+                    "prev_result": meta.get("prev_result") or "NONE",
+                    "funding_rate": meta.get("funding_rate") or 0.0,
+                    "cvd_value": meta.get("cvd_value") or 0.0,
+                    "oi_change_pct": meta.get("oi_change_pct") or 0.0,
+                }
+                prob = predict_online_probability(feat_dict)
+                
+                # ── Dynamic ML Gating Threshold based on Market Regime ──
+                try:
+                    from database import get_market_regime
+                    regime = get_market_regime()
+                except Exception:
+                    regime = "NEUTRAL"
+                
+                if regime and "CHOPPY" in regime.upper():
+                    min_threshold = 0.52
+                elif regime and "TRENDING" in regime.upper():
+                    min_threshold = 0.40
+                else:
+                    min_threshold = getattr(config, "MIN_ONLINE_PROBABILITY_THRESHOLD", 0.45)
+                    
+                from core.online_learning import get_learner
+                learner = get_learner()
+                if learner.trained and prob < min_threshold:
+                    logger.warning(
+                        f"[ML Online Gate] Trade rejected for {signal.symbol}: "
+                        f"Online win probability ({prob:.2%}) is below gating threshold ({min_threshold:.2%})"
+                    )
+                    return None
+            except Exception as e:
+                logger.error(f"Error checking ML Online gating: {e}")
 
         # Simulated price check for slippage (if get_current_price is available and different)
         current_p = get_current_price(signal.symbol) or signal.entry_price

@@ -53,6 +53,9 @@ def init(
         return False
 
 
+_local_cache = {}  # maps key -> (value, expiry_timestamp_or_none)
+
+
 def available() -> bool:
     return _available
 
@@ -62,9 +65,16 @@ def _k(key: str) -> str:
 
 
 def set(key: str, value: Any, ttl: Optional[int] = None) -> bool:
-    """Redis'e yazar. ttl saniye cinsinden (None → sonsuz)."""
+    """Redis'e yazar. Redis yoksa local in-memory cache'e yazar. ttl saniye cinsinden."""
+    import time
+    expiry = (time.time() + ttl) if ttl else None
+    
+    # Her koşulda local cache'e de yazalım (en hızlı okuma ve fallback için)
+    _local_cache[key] = (value, expiry)
+    
     if not _available:
-        return False
+        return True
+        
     try:
         raw = value if isinstance(value, str) else json.dumps(value, default=str)
         if ttl:
@@ -74,30 +84,48 @@ def set(key: str, value: Any, ttl: Optional[int] = None) -> bool:
         return True
     except Exception as exc:
         logger.debug("[Redis] set hatası %s: %s", key, exc)
-        return False
+        return True  # Local cache'e başarıyla yazıldığı için True dönüyoruz
 
 
 def get(key: str, default: Any = None) -> Any:
-    """Redis'ten okur. Bulunamazsa veya hata olursa default döner."""
+    """Redis'ten okur. Redis yoksa veya bulamazsa local in-memory cache'ten okur."""
+    import time
+    
+    # Önce local cache kontrolü (TTL aşılmadıysa direkt dön)
+    if key in _local_cache:
+        val, expiry = _local_cache[key]
+        if expiry is None or expiry > time.time():
+            return val
+        else:
+            del _local_cache[key]
+            
     if not _available:
         return default
+        
     try:
         raw = _client.get(_k(key))
         if raw is None:
             return default
         try:
-            return json.loads(raw)
+            val = json.loads(raw)
         except Exception:
-            return raw
+            val = raw
+        # Local cache'i güncelle
+        _local_cache[key] = (val, None)
+        return val
     except Exception as exc:
         logger.debug("[Redis] get hatası %s: %s", key, exc)
         return default
 
 
 def delete(key: str) -> bool:
-    """Redis anahtarını siler (cache invalidation için)."""
+    """Redis anahtarını ve local cache'i siler."""
+    if key in _local_cache:
+        del _local_cache[key]
+        
     if not _available:
-        return False
+        return True
+        
     try:
         _client.delete(_k(key))
         return True
@@ -107,8 +135,17 @@ def delete(key: str) -> bool:
 
 def exists(key: str) -> bool:
     """Anahtar var mı?"""
+    import time
+    if key in _local_cache:
+        val, expiry = _local_cache[key]
+        if expiry is None or expiry > time.time():
+            return True
+        else:
+            del _local_cache[key]
+            
     if not _available:
         return False
+        
     try:
         return bool(_client.exists(_k(key)))
     except Exception:
@@ -118,13 +155,16 @@ def exists(key: str) -> bool:
 def invalidate_open_trades() -> None:
     """Açık trade cache'ini geçersiz kılar — trade açılınca/kapanınca çağrılır."""
     delete("open_trades_cache")
+    delete("open_trades_cache_paper")
+    delete("open_trades_cache_live")
 
 
 def flush_db() -> bool:
-    """Redis veritabanındaki tüm anahtarları temizler."""
+    """Redis veritabanını ve local cache'i temizler."""
     global _client, _available
+    _local_cache.clear()
     if not _available or _client is None:
-        return False
+        return True
     try:
         _client.flushdb()
         logger.info("[Redis] Veritabanı başarıyla temizlendi (flushdb)")

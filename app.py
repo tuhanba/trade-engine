@@ -49,7 +49,7 @@ N8N_AVAILABLE = False
 
 app = Flask(__name__)
 app.secret_key = getattr(config, "SECRET_KEY", "ax_secret_2026")
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # ── IP Whitelist ──────────────────────────────────────────────────────
 # Varsayılan: devre dışı (boş string veya ALLOWED_IPS env var set edilmemiş)
@@ -71,20 +71,26 @@ def _get_client_ip() -> str:
 def _check_ip():
     """IP whitelist — sadece ALLOWED_IPS env var set edilmişse aktif."""
     if not _ALLOWED_IPS:
-        return  # Whitelist devre dışı (varsayılan)
+        return None
     if "0.0.0.0" in _ALLOWED_IPS:
-        return  # Açık erişim
+        return None
     client_ip = _get_client_ip()
     if client_ip not in _ALLOWED_IPS:
         logger.warning(f"IP engellendi: {client_ip} (İzin verilenler: {_ALLOWED_IPS})")
-        from flask import abort
-        abort(403)
+        return jsonify({
+            "ok": False,
+            "error": f"IP Access Denied. Your IP ({client_ip}) is not whitelisted.",
+            "client_ip": client_ip
+        }), 403
+    return None
 
 @app.before_request
 def check_access():
     # /api/* ve /stream için IP kontrolü (ALLOWED_IPS set edilmişse)
     if request.path.startswith("/api/") or request.path == "/stream":
-        _check_ip()
+        block_response = _check_ip()
+        if block_response is not None:
+            return block_response
     # /  (dashboard) herkese açık
 
 # ── CORS ─────────────────────────────────────────────────────────────
@@ -176,8 +182,14 @@ def api_dashboard_data():
             "profit_factor": real_stats.get("profit_factor", 1.0)
         }
         
+        try:
+            from database import get_market_regime
+            regime = get_market_regime() or "NEUTRAL"
+        except Exception:
+            regime = "NEUTRAL"
+            
         return jsonify({
-            "market_regime": "NEUTRAL",
+            "market_regime": regime,
             "macro_fng": sentiment.get("fng_value", 50),
             "total_balance": get_active_balance() or 1000.0,
             "daily_pnl": daily_pnl,
@@ -212,8 +224,9 @@ def api_stats():
         except Exception: return 0
 
     try:
-        stats = dashboard_service.get_stats()
         ax_status = dashboard_service.get_ax_status()
+        exec_mode = ax_status.get("execution_mode", "paper")
+        stats = dashboard_service.get_stats(exec_mode)
         return _ok({
             **stats,
             "balance":         stats.get("balance", ax_status.get("paper_balance", 0)),

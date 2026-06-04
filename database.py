@@ -47,6 +47,10 @@ def get_conn() -> Generator[sqlite3.Connection, None, None]:
         with conn:
             yield conn
     finally:
+        try:
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+        except Exception:
+            pass
         conn.close()
 
 
@@ -66,6 +70,10 @@ def open_db(db_path: str | None = None, timeout: int = 15) -> Generator[sqlite3.
     try:
         yield conn
     finally:
+        try:
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+        except Exception:
+            pass
         conn.close()
 
 
@@ -616,6 +624,50 @@ def create_hot_backup(db_path: str = None) -> None:
         logger.warning(f"[Database Backup] Failed to create hot backup: {e}")
 
 
+def start_nightly_maintenance() -> None:
+    """Starts a background thread that runs hot backups and VACUUM once a day."""
+    import threading
+    import time
+    from datetime import datetime, timezone
+    
+    def _run_loop():
+        # Wait 15 seconds on startup before running the first check
+        time.sleep(15)
+        while True:
+            try:
+                # Use absolute imports or import database here to avoid cyclic imports
+                import database
+                last_run = database.get_state("last_db_maintenance")
+                now = datetime.now(timezone.utc)
+                should_run = True
+                if last_run:
+                    try:
+                        last_dt = datetime.fromisoformat(last_run.replace("Z", "+00:00"))
+                        if last_dt.tzinfo is None:
+                            last_dt = last_dt.replace(tzinfo=timezone.utc)
+                        if (now - last_dt).total_seconds() < 86400:
+                            should_run = False
+                    except Exception:
+                        pass
+                
+                if should_run:
+                    logger.info("[Database Maintenance] Running scheduled hot backup and VACUUM...")
+                    create_hot_backup()
+                    with get_conn() as conn:
+                        conn.execute("VACUUM")
+                    database.set_state("last_db_maintenance", now.isoformat())
+                    logger.info("[Database Maintenance] Nightly maintenance complete.")
+                else:
+                    logger.debug("[Database Maintenance] Maintenance skipped, last run was less than 24 hours ago.")
+            except Exception as e:
+                logger.error(f"[Database Maintenance] Nightly maintenance failed: {e}")
+            # Check every hour
+            time.sleep(3600)
+            
+    t = threading.Thread(target=_run_loop, daemon=True, name="ax-db-maintenance")
+    t.start()
+
+
 def init_db() -> None:
     """Tabloları oluşturur (var olanları silmez)."""
     check_and_recover_db(config.DB_PATH)
@@ -895,6 +947,7 @@ def init_db() -> None:
         conn.close()
     _verify_schema()
     migrate_db()
+    start_nightly_maintenance()
 
 
 def migrate_db() -> list[str]:
@@ -1244,11 +1297,19 @@ def close_trade(
 
 # ── Trade sorgular ─────────────────────────────────────────────────
 
-def get_open_trades() -> list[dict]:
+def get_open_trades(environment: str | None = None) -> list[dict]:
     """Açık trade'leri döner. Redis cache (5s TTL) → SQLite fallback."""
+    if environment is None:
+        try:
+            import config
+            environment = getattr(config, "EXECUTION_MODE", "paper")
+        except Exception:
+            environment = "paper"
+
+    cache_key = f"open_trades_cache_{environment}"
     try:
         from core import redis_state
-        cached = redis_state.get("open_trades_cache")
+        cached = redis_state.get(cache_key)
         if cached is not None:
             return cached
     except Exception:
@@ -1257,12 +1318,13 @@ def get_open_trades() -> list[dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE LOWER(status) IN ('open','tp1_hit','runner') ORDER BY open_time DESC"
+            "SELECT * FROM trades WHERE LOWER(status) IN ('open','tp1_hit','runner') AND environment = ? ORDER BY open_time DESC",
+            (environment,)
         ).fetchall()
         result = [dict(r) for r in rows]
         try:
             from core import redis_state
-            redis_state.set("open_trades_cache", result, ttl=5)
+            redis_state.set(cache_key, result, ttl=5)
         except Exception:
             pass
         return result
@@ -1273,12 +1335,19 @@ def get_open_trades() -> list[dict]:
         conn.close()
 
 
-def get_recent_trades(limit: int = 100) -> list[dict]:
+def get_recent_trades(limit: int = 100, environment: str | None = None) -> list[dict]:
     """Son trade'leri döner — sadece kapanmış olanları ve dashboard uyumlu alias'larla."""
+    if environment is None:
+        try:
+            import config
+            environment = getattr(config, "EXECUTION_MODE", "paper")
+        except Exception:
+            environment = "paper"
+            
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE LOWER(status) = 'closed' ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT * FROM trades WHERE LOWER(status) = 'closed' AND environment = ? ORDER BY id DESC LIMIT ?", (environment, limit)
         ).fetchall()
         result = []
         for r in rows:
@@ -1346,9 +1415,9 @@ def get_partial_closes(trade_id: int) -> list[dict]:
 # ── Dashboard stats ────────────────────────────────────────────────
 
 import time as _time
-_stats_cache = {"data": {}, "time": 0}
+_stats_cache = {}
 
-def get_total_pnl() -> dict:
+def get_total_pnl(environment: str | None = None) -> dict:
     """
     Sistem genelinde tek PnL hesabı.
     Her yerde bu fonksiyon kullanılacak — farklı formüller üretmesin.
@@ -1358,18 +1427,28 @@ def get_total_pnl() -> dict:
         open_partial: Açık trade'lerde biriken partial close PnL'i
         total       : Üçünün toplamı
     """
+    if environment is None:
+        try:
+            import config
+            environment = getattr(config, "EXECUTION_MODE", "paper")
+        except Exception:
+            environment = "paper"
+            
     try:
         with get_conn() as conn:
             closed = conn.execute(
-                "SELECT COALESCE(SUM(net_pnl),0) FROM trades WHERE LOWER(status)='closed'"
+                "SELECT COALESCE(SUM(net_pnl),0) FROM trades WHERE LOWER(status)='closed' AND is_valid_for_stats = 1 AND environment = ?",
+                (environment,)
             ).fetchone()[0]
             open_u = conn.execute(
                 "SELECT COALESCE(SUM(unrealized_pnl),0) FROM trades"
-                " WHERE LOWER(status) IN ('open','tp1_hit','runner')"
+                " WHERE LOWER(status) IN ('open','tp1_hit','runner') AND environment = ?",
+                (environment,)
             ).fetchone()[0]
             open_p = conn.execute(
                 "SELECT COALESCE(SUM(realized_pnl),0) FROM trades"
-                " WHERE LOWER(status) IN ('open','tp1_hit','runner')"
+                " WHERE LOWER(status) IN ('open','tp1_hit','runner') AND environment = ?",
+                (environment,)
             ).fetchone()[0]
         closed = float(closed or 0)
         open_u = float(open_u or 0)
@@ -1385,31 +1464,45 @@ def get_total_pnl() -> dict:
         return {"closed_pnl": 0, "open_unreal": 0, "open_partial": 0, "total": 0}
 
 
-def get_dashboard_stats() -> dict:
+def get_dashboard_stats(environment: str | None = None) -> dict:
     """Dashboard için özet istatistikler."""
+    if environment is None:
+        try:
+            environment = getattr(config, "EXECUTION_MODE", "paper")
+        except Exception:
+            environment = "paper"
+
     global _stats_cache
     now = _time.time()
-    if now - _stats_cache["time"] < 0.2 and _stats_cache["data"]:
-        return _stats_cache["data"]
+    
+    if environment not in _stats_cache:
+        _stats_cache[environment] = {"data": {}, "time": 0}
+        
+    env_cache = _stats_cache[environment]
+    if now - env_cache["time"] < 0.2 and env_cache["data"]:
+        return env_cache["data"]
 
     conn = get_connection()
     try:
-        total = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
         open_count = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE LOWER(status) IN ('open', 'tp1_hit', 'runner')"
+            "SELECT COUNT(*) FROM trades WHERE LOWER(status) IN ('open', 'tp1_hit', 'runner') AND environment = ?",
+            (environment,)
         ).fetchone()[0]
         closed_count = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE LOWER(status)='closed'"
+            "SELECT COUNT(*) FROM trades WHERE LOWER(status)='closed' AND is_valid_for_stats = 1 AND environment = ?",
+            (environment,)
         ).fetchone()[0]
+        total = open_count + closed_count
 
         # Tek kaynaktan PnL — get_total_pnl() kullan
-        _pnl = get_total_pnl()
+        _pnl = get_total_pnl(environment)
         realized_pnl    = _pnl["closed_pnl"]
         unrealized_pnl  = _pnl["open_unreal"]
         accumulated_pnl = _pnl["open_partial"]
 
         win_count = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE LOWER(status)='closed' AND net_pnl > 0"
+            "SELECT COUNT(*) FROM trades WHERE LOWER(status)='closed' AND net_pnl > 0 AND is_valid_for_stats = 1 AND environment = ?",
+            (environment,)
         ).fetchone()[0]
         loss_count = closed_count - win_count
         winrate = round(
@@ -1420,8 +1513,8 @@ def get_dashboard_stats() -> dict:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         today_row = conn.execute(
             "SELECT COALESCE(SUM(net_pnl), 0) FROM trades "
-            "WHERE LOWER(status)='closed' AND DATE(close_time) = ?",
-            (today,),
+            "WHERE LOWER(status)='closed' AND DATE(close_time) = ? AND environment = ?",
+            (today, environment),
         ).fetchone()
         today_pnl = float(today_row[0]) if today_row else 0.0
 
@@ -1444,8 +1537,8 @@ def get_dashboard_stats() -> dict:
             SELECT 
                 COALESCE(SUM(CASE WHEN net_pnl > 0 THEN net_pnl ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN net_pnl < 0 THEN ABS(net_pnl) ELSE 0 END), 0)
-            FROM trades WHERE LOWER(status)='closed' AND is_valid_for_stats = 1
-        """).fetchone()
+            FROM trades WHERE LOWER(status)='closed' AND is_valid_for_stats = 1 AND environment = ?
+        """, (environment,)).fetchone()
         gross_profit = float(profit_row[0]) if profit_row else 0.0
         gross_loss = float(profit_row[1]) if profit_row else 0.0
         profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0.0 else (0.0 if gross_profit == 0.0 else 99.99)
@@ -1473,11 +1566,20 @@ def get_dashboard_stats() -> dict:
                 ghost_tp / (ghost_tp + ghost_sl) * 100, 1
             ) if (ghost_tp + ghost_sl) > 0 else 0.0,
         }
-        _stats_cache["data"] = result
-        _stats_cache["time"] = now
+        try:
+            from core.portfolio_risk import calculate_sharpe_sortino_ratios
+            ratios = calculate_sharpe_sortino_ratios(environment)
+            result["sharpe_ratio"] = ratios["sharpe_ratio"]
+            result["sortino_ratio"] = ratios["sortino_ratio"]
+        except Exception:
+            result["sharpe_ratio"] = 0.0
+            result["sortino_ratio"] = 0.0
+
+        env_cache["data"] = result
+        env_cache["time"] = now
         return result
     except Exception as exc:
-        logger.error("Dashboard stats alınamadı: %s", exc)
+        logger.error("get_dashboard_stats hatası: %s", exc)
         return {
             "total_trades": 0, "open_trades": 0, "closed_trades": 0,
             "realized_pnl": 0, "unrealized_pnl": 0, "accumulated_pnl": 0,
@@ -1754,24 +1856,38 @@ def update_trade(trade_id: int, updates: dict):
         )
 
 
-def get_closed_trades(limit: int = 200, valid_only: bool = True) -> list:
+def get_closed_trades(limit: int = 200, valid_only: bool = True, environment: str | None = None) -> list:
+    if environment is None:
+        try:
+            import config
+            environment = getattr(config, "EXECUTION_MODE", "paper")
+        except Exception:
+            environment = "paper"
+            
     with get_conn() as conn:
         if valid_only:
             rows = conn.execute(
                 """SELECT * FROM trades
-                   WHERE status = 'closed' AND is_valid_for_stats = 1
+                   WHERE status = 'closed' AND is_valid_for_stats = 1 AND environment = ?
                    ORDER BY id DESC LIMIT ?""",
-                (limit,)
+                (environment, limit)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM trades WHERE status = 'closed' ORDER BY id DESC LIMIT ?",
-                (limit,)
+                "SELECT * FROM trades WHERE status = 'closed' AND environment = ? ORDER BY id DESC LIMIT ?",
+                (environment, limit)
             ).fetchall()
         return [dict(r) for r in rows]
 
 
-def get_stats() -> dict:
+def get_stats(environment: str | None = None) -> dict:
+    if environment is None:
+        try:
+            import config
+            environment = getattr(config, "EXECUTION_MODE", "paper")
+        except Exception:
+            environment = "paper"
+            
     with get_conn() as conn:
         row = conn.execute("""
             SELECT
@@ -1784,8 +1900,8 @@ def get_stats() -> dict:
                 SUM(CASE WHEN net_pnl > 0 THEN net_pnl ELSE 0 END) as gross_profit,
                 SUM(CASE WHEN net_pnl < 0 THEN ABS(net_pnl) ELSE 0 END) as gross_loss
             FROM trades
-            WHERE status = 'closed' AND is_valid_for_stats = 1
-        """).fetchone()
+            WHERE status = 'closed' AND is_valid_for_stats = 1 AND environment = ?
+        """, (environment,)).fetchone()
 
         total = row["total_trades"] or 0
         wins = row["wins"] or 0
@@ -2332,6 +2448,11 @@ def upsert_pattern_memory(
                      float(f.get("oi_change_pct", 0) or 0),
                     )
                 )
+        try:
+            from core.online_learning import update_online_model
+            update_online_model(features or {}, outcome)
+        except Exception as e:
+            logger.warning("SGD online model update failed: %s", e)
     except Exception as exc:
         logger.warning("upsert_pattern_memory hatası [%s]: %s", pattern_hash, exc)
 

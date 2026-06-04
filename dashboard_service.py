@@ -101,13 +101,13 @@ def _get_health_impl() -> dict:
     }
 
 
-def get_live_trades() -> list:
+def get_live_trades(environment: str | None = None) -> list:
     """Açık trade'lerin detaylı listesi."""
-    return _safe_call(_get_live_trades_impl, [])
+    return _safe_call(_get_live_trades_impl, [], environment)
 
 
-def _get_live_trades_impl() -> list:
-    trades = database.get_open_trades()
+def _get_live_trades_impl(environment: str | None = None) -> list:
+    trades = database.get_open_trades(environment)
     result = []
     for t in trades:
         # Metadata'dan exit state parse et
@@ -161,14 +161,14 @@ def _get_live_trades_impl() -> list:
     return result
 
 
-def get_stats() -> dict:
+def get_stats(environment: str | None = None) -> dict:
     """Özet istatistikler (genişletilmiş)."""
-    return _safe_call(database.get_dashboard_stats, {})
+    return _safe_call(database.get_dashboard_stats, {}, environment)
 
 
-def get_trades(limit: int = 100) -> list[dict]:
+def get_trades(limit: int = 100, environment: str | None = None) -> list[dict]:
     """Son trade listesi."""
-    return database.get_recent_trades(limit)
+    return database.get_recent_trades(limit, environment)
 
 
 def get_signals(limit: int = 100) -> list[dict]:

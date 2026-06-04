@@ -32,7 +32,16 @@ def _env_float(key, default=0.0):
     except Exception: return default
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH  = str(BASE_DIR / _env("DB_PATH", "db/trading.db" if (BASE_DIR / "db").exists() else "trading.db"))
+_db_env = _env("DB_PATH")
+if _db_env:
+    DB_PATH = str(BASE_DIR / _db_env)
+else:
+    if (BASE_DIR / "trading.db").exists():
+        DB_PATH = str(BASE_DIR / "trading.db")
+    elif (BASE_DIR / "db" / "trading.db").exists():
+        DB_PATH = str(BASE_DIR / "db" / "trading.db")
+    else:
+        DB_PATH = str(BASE_DIR / "trading.db")
 
 # Execution
 EXECUTION_MODE          = _env("EXECUTION_MODE", "paper")
@@ -152,6 +161,13 @@ DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 20.0)
 WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 28.0) # 35→28: TELEGRAM'dan düşük olmalı
 TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 35.0)  # v6.0 gevşetildi (28→35)
 TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 55.0)     # v6.0 gevşetildi
+
+# Phase G: Quantum & Hedge Fund Automation Configuration
+DYNAMIC_THRESHOLD_ENABLED = _env_bool("DYNAMIC_THRESHOLD_ENABLED", True)
+MAX_CORRELATION_THRESHOLD = _env_float("MAX_CORRELATION_THRESHOLD", 0.75)
+PORTFOLIO_VAR_LIMIT = _env_float("PORTFOLIO_VAR_LIMIT", 0.05)
+MIN_ONLINE_PROBABILITY_THRESHOLD = _env_float("MIN_ONLINE_PROBABILITY_THRESHOLD", 0.45)
+
 
 # Circuit Breaker
 CIRCUIT_BREAKER_LOSSES  = _env_int("CIRCUIT_BREAKER_LOSSES", 3)
