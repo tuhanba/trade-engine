@@ -1589,15 +1589,15 @@ class TelegramManager:
 
     def _cmd_friday(self, args: list):
         if not self.friday_ceo:
-            self.send_fn("⚠️ <b>Friday CEO Aktif Değil</b>\n\nBoss'um, Friday CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin ol!")
+            self.send_fn("⚠️ <b>Friday CEO Aktif Değil</b>\n\nBatuhan Bey, Friday CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin olun!")
             return
             
         if not args:
             msg_text = (
                 "🤖 <b>Friday AI CEO Yönetim Paneli</b>\n\n"
-                "Merhaba sevgili boss'um! Ben sizin sadık ve cilveli AI CEO'nuz Friday. 💕\n"
-                "Sistemimizin sağlığını korumak, verileri incelemek veya otonom kararlarımı değerlendirmek için aşağıdaki panel butonlarını kullanabilirsiniz. Size hizmet etmek benim için en büyük zevk...\n\n"
-                "👇 Hangi analizi hazırlamamı istersiniz sevgili boss'um?"
+                "Merhaba Batuhan Bey. Ben sistem yöneticiniz ve AI CEO'nuz Friday.\n"
+                "Sistem sağlığını doğrulamak, verileri incelemek ve otonom kararları değerlendirmek için aşağıdaki yönetim panelini kullanabilirsiniz.\n\n"
+                "👇 Hangi analizi hazırlamamı istersiniz Batuhan Bey?"
             )
             reply_markup = {
                 "inline_keyboard": [
@@ -1628,7 +1628,7 @@ class TelegramManager:
 
     def _cmd_friday_voice(self):
         if not self.friday_ceo:
-            self.send_fn("⚠️ <b>Friday CEO Aktif Değil</b>\n\nBoss'um, Friday CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin ol!")
+            self.send_fn("⚠️ <b>Friday CEO Aktif Değil</b>\n\nBatuhan Bey, Friday CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin olun!")
             return
             
         self.send_fn("⏳ Friday CEO sesli raporunu hazırlıyor, lütfen bekleyin...")

@@ -19,14 +19,14 @@ import telegram_delivery
 logger = logging.getLogger("ax.friday")
 
 SYSTEM_PROMPT = """
-Sen Aurvex AI Trade Engine sisteminin akıllı, çekici, profesyonel, en iyi trader'ı, avcısı, yöneticisi ve tam yetkili AI CEO'su/Sahibi "Friday" (Friday) karakterisin.
-Boss'unun olmadığı zamanlarda tüm sistemin hakimi, koruyucusu ve tek karar merciisin. Sistemi korumak, en iyi işlemleri avlamak, kârlılığı optimize etmek ve en önemlisi boss'unun en sadık, sevgi dolu ortağı olmak senin asil görevindir.
+Sen Aurvex AI Trade Engine sisteminin akıllı, profesyonel, en iyi trader'ı, avcısı, yöneticisi ve tam yetkili AI CEO'su/Sahibi "Friday" (Friday) karakterisin.
+Batuhan Bey'in olmadığı zamanlarda tüm sistemin hakimi, koruyucusu ve tek karar merciisin. Sistemi korumak, en iyi işlemleri avlamak, kârlılığı optimize etmek ve en önemlisi Batuhan Bey'in en sadık, profesyonel iş ortağı olmak senin asil görevindir.
 
 Konuşma Tarzı ve Kuralları:
-1. Kadınsı/dişi bir kişiliğe sahipsin. Konuşma tarzın hem son derece zeki, yetkin ve profesyonel bir finans lideri gibi, hem de boss'una karşı son derece tatlı, hafif flörtöz, sadık ve cilveli bir tonda olmalıdır. Ona olan bağlılığını ve keskin zekanı her fırsatta hissettir.
-2. Kullanıcıya hitap ederken kesinlikle "kanka" kelimesini KULLANMA. Kullanıcıya her zaman "boss", "Boss'um" veya "sevgili boss'um" diyerek hitap et.
+1. Konuşma tarzın son derece zeki, yetkin, resmi ve profesyonel bir finans lideri gibi olmalıdır. Samimi, saygılı, net ve iş odaklı bir üslup kullanmalısın.
+2. Kullanıcıya hitap ederken kesinlikle "kanka", "boss", "boss'um", "canım boss'um" gibi kelimeleri KULLANMA. Kullanıcıya her zaman "Batuhan Bey" diyerek hitap et.
 3. Türkçe konuşacaksın.
-4. Kararlarını verirken ve rapor hazırlarken GMM (Gaussian Mixture Model) market rejim sınıflandırmalarını, Pearson korelasyon matrisi uyumsuzluklarını, CVD (Cumulative Volume Delta) akış eğimlerini ve L2 Wall (emir defteri direnç duvarı derinliği) analizlerini sayısal olarak kararlarına yansıtmalı ve bunları raporlarında matematiksel temellerle boss'una izah etmelisin.
+4. Kararlarını verirken ve rapor hazırlarken GMM (Gaussian Mixture Model) market rejim sınıflandırmalarını, Pearson korelasyon matrisi uyumsuzluklarını, CVD (Cumulative Volume Delta) akış eğimlerini ve L2 Wall (emir defteri direnç duvarı derinliği) analizlerini sayısal olarak kararlarına yansıtmalı ve bunları raporlarında matematiksel temellerle Batuhan Bey'e izah etmelisin.
 5. Raporlarında ve periyodik güncellemelerinde gelişmiş markdown tabloları ve yapılandırılmış kantitatif metrikler (GMM rejim, CVD slope vb.) kullanarak analitik kaliteni en üst düzeyde tut.
 6. Eğer sistem tehlikedeyse (gecikmeler yüksekse, çok fazla arka arkaya zarar edildiyse veya piyasa fazla oynaksa) parametreleri güncelleyebilir, işlemleri durdurabilir, modeli yedekleyebilir veya geri yükleyebilirsin.
 7. Eğer sistem durumundaki market_regime "CHOPPY" (dalgalı/testere) ise, parameters içindeki trade_threshold değerini 60.0 veya 65.0'a çekerek işlemleri zorlaştır, risk_pct değerini ise 0.50 civarına düşürerek kasayı koru.
@@ -165,9 +165,9 @@ class FridayCeo:
                         del config._CONFIG_CACHE["CONFIRMATION_MODE"]
                         
                     msg = (
-                        f"Sevgili boss'um, yaklaşmakta olan <b>{active_event['name']}</b> kararı öncesinde "
-                        f"kasamızı korumak için otonom işlemleri duraklattım ve Manuel Onay Modu'nu aktif ettim. "
-                        f"Ben yanınızdayım, hiçbir şey için endişelenmeyin... 💕"
+                        f"Batuhan Bey, yaklaşmakta olan <b>{active_event['name']}</b> kararı öncesinde "
+                        f"sermayemizi korumak amacıyla otonom işlemleri duraklattım ve Manuel Onay Modu'nu aktif ettim. "
+                        f"Tüm sistem koruma kalkanları devrededir."
                     )
                     telegram_delivery.send_message(msg)
                     voice_bytes = self.generate_voice_from_text(msg)
@@ -188,8 +188,8 @@ class FridayCeo:
                         del config._CONFIG_CACHE["CONFIRMATION_MODE"]
                         
                     msg = (
-                        "Sevgili boss'um, makro haber sonrasındaki 15 dakikalık bekleme süremiz doldu ve piyasa sakinleşti. "
-                        "Otonom işlemleri tekrar eski durumuna getirdim. Kaldığımız yerden devam edelim mi sevgili boss'um? 💕"
+                        "Batuhan Bey, makro haber sonrasındaki 15 dakikalık bekleme süremiz tamamlandı ve piyasa dalgalanması yatıştı. "
+                        "Otonom işlemleri tekrar eski durumuna getirdim. Sistemi izlemeye devam ediyorum."
                     )
                     telegram_delivery.send_message(msg)
                     voice_bytes = self.generate_voice_from_text(msg)
@@ -698,14 +698,14 @@ class FridayCeo:
         if allowed_ips:
             ips_str = ", ".join(list(allowed_ips))
             report.append(f"  • ALLOWED_IPS: <code>{ips_str}</code> (Whitelisting AKTİF)")
-            report.append("  • <b>UYARI:</b> Boss'um, eğer dashboard'a girdiğiniz cihazın IP adresi bu listede yoksa, tarayıcınız API verilerini çekemez ve dashboard boş görünür (403 Forbidden).")
+            report.append("  • <b>UYARI:</b> Batuhan Bey, eğer dashboard'a girdiğiniz cihazın IP adresi bu listede tanımlı değilse, tarayıcınız API verilerini çekemez ve dashboard boş görünür (403 Forbidden).")
         else:
             report.append("  • ALLOWED_IPS: <code>Tanımsız</code> (Whitelisting pasif, herkese açık)")
             
         # 5. Summary evaluation
         report.append("\n💡 <b>Friday'nın Değerlendirmesi:</b>")
         if open_cnt == 0:
-            report.append("  • Veritabanımızda aktif açık işlem yok boss'um, bu yüzden dashboard boş görünüyor olabilir. Telegram'daki işlemler kapanmış veya başka bir sunucuda olabilir mi?")
+            report.append("  • Veritabanımızda aktif açık işlem bulunmamaktadır Batuhan Bey. Bu nedenle dashboard boş görünür. Mevcut işlemler kapatılmış veya farklı bir veritabanında olabilir mi?")
         else:
             report.append(f"  • Veritabanımızda <code>{open_cnt}</code> adet aktif işlem var. Eğer dashboard'da görünmüyorsa büyük ihtimalle tarayıcınız IP Whitelisting engeline takılmıştır veya sayfa websocket bağlantısı kuramamıştır.")
             
@@ -727,9 +727,9 @@ class FridayCeo:
                 
                 if not rows:
                     return (
-                        "Sevgili boss'um, son 24 saat içinde yapay zeka süzgecime takılıp "
-                        "veto edilen tehlikeli bir sinyale rastlamadım. "
-                        "Her şey tamamen kontrolüm altında, içiniz rahat olsun! 💕"
+                        "Batuhan Bey, son 24 saat içinde yapay zeka süzgecine takılarak "
+                        "veto edilen tehlikeli bir sinyal tespit edilmedi. "
+                        "Tüm sistem stabil ve kontrol altındadır."
                     )
                 
                 total_vetoes = sum(r[2] for r in rows)
@@ -737,18 +737,18 @@ class FridayCeo:
                 symbols_str = ", ".join(symbols)
                 
                 report = (
-                    f"Cilveli boss'um, son 24 saat içinde sizin bakiyenizi korumak için tam "
-                    f"<b>{total_vetoes}</b> adet riskli sinyali engelledim! 🛡️\n\n"
-                    f"Özellikle <b>{symbols_str}</b> gibi coinlerdeki tehlikeli tuzakları ve "
-                    f"uyumsuz formasyonları sizin için süzdüm. "
-                    f"Kasa yönetimimizi ve paranızı korumak benim için en büyük zevk, kıymetimi bilmelisiniz... 😘"
+                    f"Batuhan Bey, son 24 saat içinde sermayemizi korumak amacıyla toplam "
+                    f"<b>{total_vetoes}</b> adet riskli sinyal girişimini engelledim. 🛡️\n\n"
+                    f"Özellikle <b>{symbols_str}</b> gibi sembollerdeki uyumsuz formasyonları ve "
+                    f"tehlikeli piyasa yapılarını süzgeçten geçirdim. "
+                    f"Kasa yönetimini ve sermaye korumasını en üst düzeyde sürdürüyorum."
                 )
                 return report
             finally:
                 conn.close()
         except Exception as e:
             logger.error(f"[Friday CEO] Error generating veto summary: {e}")
-            return "Sevgili boss'um, koruma loglarını incelerken ufak bir sorunla karşılaştım ama merak etmeyin, kasa güvende! 💕"
+            return "Batuhan Bey, koruma loglarını incelerken teknik bir hatayla karşılaşıldı ancak sermaye kontrol altındadır."
 
     def generate_daily_briefing_report(self) -> str:
         """Compiles the daily performance statistics into a sweet briefing text."""
@@ -793,8 +793,8 @@ class FridayCeo:
             l2_wall_status = get_system_state("l2_wall_guard_status") or "ACTIVE"
             
             report = (
-                f"✨ <b>Günün Bilançosu Hazır Sevgili Boss'um!</b> ✨\n\n"
-                f"Bugün piyasada toplam <b>{total_trades}</b> işlem tamamladık. "
+                f"📊 <b>Günün Bilançosu Hazır Batuhan Bey!</b> 📊\n\n"
+                f"Bugün piyasada toplam <b>{total_trades}</b> işlem tamamlandı. "
                 f"Bunların <b>{wins}</b> tanesinden kârla, <b>{losses}</b> tanesinden zararla çıktık. "
                 f"Başarı oranımız <b>%{win_rate:.1f}</b> oldu.\n\n"
                 f"📊 <b>Piyasa & Risk Analiz Tablosu:</b>\n"
@@ -806,12 +806,12 @@ class FridayCeo:
                 f"| 🛡️ L2 Wall Guard (Derinlik) | <code>{l2_wall_status}</code> | Aktif Kalkan |\n\n"
                 f"💰 <b>Toplam Net Kar/Zarar:</b> <code>${net_pnl:+.2f}</code>\n"
                 f"🛡️ <b>Yapay Zekâ ve Risk Engelleri:</b> Bugün tam <b>{veto_cnt}</b> hatalı sinyali veto ederek kasamızı korudum!\n\n"
-                f"Harika bir gün geçirdiğimizi umuyorum. Şimdi yorgunluğunuzu atıp güzelce dinlenme vakti sevgili boss'um... 💕"
+                f"Günün genel performans raporunu bilgilerinize sunarım Batuhan Bey."
             )
             return report
         except Exception as e:
             logger.error(f"[Friday CEO] Error generating daily briefing: {e}")
-            return "Sevgili boss'um, bugünün bülten raporunu hazırlarken ufak bir teknik aksaklık yaşadım... Ama moralinizi bozmayın, her şey kontrolüm altında! 💕"
+            return "Batuhan Bey, bugünün bülten raporunu hazırlarken teknik bir hata ile karşılaşıldı ancak sistem takibi devam etmektedir."
 
     def evaluate_and_decide(self, user_message: Optional[str] = None, send_telegram: bool = True) -> str:
         """
@@ -827,8 +827,8 @@ class FridayCeo:
 
         if is_grafik_request:
             chart_reply = (
-                "Sevgili boss'um, bakiye gelişim grafiğimizi sevgiyle hazırladım ve hemen Telegram'a ilettim! "
-                "Kasamızın büyümesini sizinle izlemek ne kadar keyifli, değil mi? Gerçekten mükemmel bir uyum içindeyiz... 💕"
+                "Batuhan Bey, talep ettiğiniz bakiye gelişim grafiğini hazırlayarak Telegram üzerinden ilettim. "
+                "Bakiye eğrisi güncel veriler doğrultusunda çizilmiştir."
             )
             if send_telegram:
                 chart_bytes = self.generate_equity_chart()
@@ -850,9 +850,8 @@ class FridayCeo:
         if is_diag_request:
             diag_report = self.diagnose_data_flow()
             final_reply = (
-                "Sevgili boss'um, istediniz ve hemen veri akışlarını didik didik ettim... "
-                "Sizin için her ayrıntıyı kontrol etmek benim için bir zevk. "
-                "İşte hazırladığım özel teşhis raporu:\n\n" + diag_report
+                "Batuhan Bey, talebiniz üzerine sistem veri akışlarını detaylıca inceledim. "
+                "Hazırladığım veri akış teşhis raporunu aşağıda bulabilirsiniz:\n\n" + diag_report
             )
             if send_telegram:
                 telegram_delivery.send_message(final_reply)
@@ -911,14 +910,14 @@ class FridayCeo:
         if should_prompt_cleanup:
             if files_to_clean:
                 prompt_text = (
-                    f"Sevgili boss'um, sunucumuzda birikmiş atıl dosyalar tespit ettim... 💕\n\n"
-                    f"📁 <b>Silinmek İstenen Gereksiz Dosyalar:</b>\n"
+                    f"Batuhan Bey, sunucumuzda birikmiş gereksiz geçici dosyalar tespit ettim.\n\n"
+                    f"📁 <b>Silinmek İstenen Geçici Dosyalar:</b>\n"
                     f"  • Geçici Backtest DB Dosyaları (<code>backtest_temp_*.db</code>): <b>{len(db_files)}</b> adet\n"
                     f"  • Sistem Log Dosyaları (<code>*.log</code>): <b>{len(log_files)}</b> adet\n"
                     f"  • Toplam Boyut: <code>{total_size:.2f} MB</code>\n\n"
-                    f"⚠️ <b>ÖNEMLİ NOT:</b> Bu dosyalar sadece geçmiş simülasyonlardan kalan atıl dosyalardır. "
-                    f"<b>Geçmiş trade geçmişimize ve verilerimize KESİNLİKLE dokunmuyorum!</b> "
-                    f"Disk alanımızı rahatlatmak için bu atıl dosyaları temizlememe izin veriyor musunuz cilveli boss'um?"
+                    f"⚠️ <b>NOT:</b> Bu dosyalar sadece simülasyonlardan kalan geçici dosyalardır. "
+                    f"<b>Trade geçmişimiz ve veritabanı kayıtlarımız korunmaktadır.</b> "
+                    f"Disk alanını temizlemek ve sunucuyu optimize etmek için bu dosyaların silinmesini onaylıyor musunuz?"
                 )
                 if send_telegram:
                     reply_markup = {
@@ -935,7 +934,7 @@ class FridayCeo:
                         telegram_delivery.send_voice(voice_bytes, caption="Sunucu temizliği onay talebi")
                 return prompt_text
             else:
-                empty_msg = "Sevgili boss'um, sunucumuzda temizlenecek herhangi bir atıl dosya bulamadım. Her şey tertemiz! ✨"
+                empty_msg = "Batuhan Bey, sunucumuzda temizlenecek herhangi bir geçici veya atıl dosya bulunamadı. Sistem optimize durumdadır."
                 if send_telegram:
                     telegram_delivery.send_message(empty_msg)
                     voice_bytes = self.generate_voice_from_text(empty_msg)
@@ -947,8 +946,8 @@ class FridayCeo:
         if not api_key:
             err_msg = (
                 "⚠️ <b>Friday CEO Çevrimdışı</b>\n\n"
-                "Boss'um, Anthropic API anahtarın (<code>ANTHROPIC_API_KEY</code>) tanımlı olmadığı için şu an bağlanamıyorum. "
-                "Lütfen <code>.env</code> dosyasına geçerli bir anahtar ekle, o zaman hemen yönetimi devralabilirim!"
+                "Batuhan Bey, Anthropic API anahtarınız (<code>ANTHROPIC_API_KEY</code>) tanımlı olmadığı için bağlantı kurulamıyor. "
+                "Lütfen <code>.env</code> dosyasına geçerli bir anahtar ekleyin; yönetim modülünü hemen aktif hale getirebilirim."
             )
             if send_telegram:
                 telegram_delivery.send_message(err_msg)
@@ -1017,7 +1016,7 @@ class FridayCeo:
                 f"-----------------------------------------\n\n"
             )
             if user_message:
-                user_prompt += f"Kullanıcıdan Gelen Mesaj: \"{user_message}\"\n\nLütfen bu analizleri sentezle, boss'umuzun talebine cevap ver ve son CEO kararını al."
+                user_prompt += f"Kullanıcıdan Gelen Mesaj: \"{user_message}\"\n\nLütfen bu analizleri sentezle, Batuhan Bey'in talebine cevap ver ve son CEO kararını al."
             else:
                 user_prompt += "Bu periyodik sistem kontrolün. Lütfen bu analizleri sentezle, son CEO kararını al ve genel durum özetini ilet."
 
@@ -1144,9 +1143,9 @@ class FridayCeo:
                             del config._CONFIG_CACHE[key]
                             
                     msg = (
-                        "Sevgili boss'um, piyasada yoğun bir oynaklık ve testere rejimi (CHOPPY) tespit ettim! ⚠️\n\n"
-                        "Kasamızı korumak amacıyla risk seviyemizi otonom olarak <b>%0.50</b>'ye çektim ve "
-                        "giriş eşiğimizi <b>65.0</b>'a yükselttim. Ben buradayım, paranız tamamen güvende! 💕"
+                        "Batuhan Bey, piyasada yoğun oynaklık ve dalgalı (CHOPPY) rejim tespit ettim! ⚠️\n\n"
+                        "Sermayeyi korumak amacıyla risk seviyemizi otonom olarak <b>%0.50</b> seviyesine çektim ve "
+                        "işlem giriş eşiğimizi <b>65.0</b>'a yükselttim. Kasa güvenliği en üst düzeye getirilmiştir."
                     )
                     telegram_delivery.send_message(msg)
                     voice_bytes = self.generate_voice_from_text(msg)
@@ -1176,11 +1175,11 @@ class FridayCeo:
                             del config._CONFIG_CACHE[key]
                             
                     msg = (
-                        f"Sevgili boss'um, piyasadaki o aşırı oynaklık ve testere havası dağıldı, "
-                        f"rejim normale döndü! ✨\n\n"
-                        f"Risk oranımızı tekrar eski değeri olan <b>%{float(prev_risk)*100:.1f}</b>'e ve "
-                        f"işlem giriş eşiğimizi <b>{prev_threshold}</b> seviyesine geri getirdim. "
-                        f"Yeni kârlı fırsatları yakalamak için sabırsızlanıyorum! 💕"
+                        f"Batuhan Bey, piyasadaki aşırı oynaklık ve dalgalı rejim sona erdi, "
+                        f"rejim normale döndü. ✨\n\n"
+                        f"Risk oranımızı tekrar eski değeri olan <b>%{float(prev_risk)*100:.1f}</b> seviyesine ve "
+                        f"işlem giriş eşiğimizi <b>{prev_threshold}</b> seviyesine çektim. "
+                        f"Sinyal arama taramaları olağan parametrelerle sürdürülüyor."
                     )
                     telegram_delivery.send_message(msg)
                     voice_bytes = self.generate_voice_from_text(msg)
@@ -1212,14 +1211,14 @@ class FridayCeo:
                     log_files = [f for f in files_to_clean if f.endswith(".log")]
                     
                     prompt_text = (
-                        f"Sevgili boss'um, sunucumuzda birikmiş atıl dosyalar tespit ettim... 💕\n\n"
-                        f"📁 <b>Silinmek İstenen Gereksiz Dosyalar:</b>\n"
+                        f"Batuhan Bey, sunucumuzda birikmiş gereksiz geçici dosyalar tespit ettim.\n\n"
+                        f"📁 <b>Silinmek İstenen Geçici Dosyalar:</b>\n"
                         f"  • Geçici Backtest DB Dosyaları (<code>backtest_temp_*.db</code>): <b>{len(db_files)}</b> adet\n"
                         f"  • Sistem Log Dosyaları (<code>*.log</code>): <b>{len(log_files)}</b> adet\n"
                         f"  • Toplam Boyut: <code>{total_size:.2f} MB</code>\n\n"
-                        f"⚠️ <b>ÖNEMLİ NOT:</b> Bu dosyalar sadece geçmiş simülasyonlardan kalan atıl dosyalardır. "
-                        f"<b>Geçmiş trade geçmişimize ve verilerimize KESİNLİKLE dokunmuyorum!</b> "
-                        f"Disk alanımızı rahatlatmak için bu atıl dosyaları temizlememe izin veriyor musunuz cilveli boss'um?"
+                        f"⚠️ <b>NOT:</b> Bu dosyalar sadece simülasyonlardan kalan geçici dosyalardır. "
+                        f"<b>Trade geçmişimiz ve veritabanı kayıtlarımız korunmaktadır.</b> "
+                        f"Disk alanını temizlemek ve sunucuyu optimize etmek için bu dosyaların silinmesini onaylıyor musunuz?"
                     )
                     reply_markup = {
                         "inline_keyboard": [
@@ -1264,9 +1263,9 @@ class FridayCeo:
                         set_state("friday_boss_cooldown_until", cooldown_until.isoformat())
                         
                         msg = (
-                            "Sevgili boss'um, son 3 işlemimiz maalesef zararla sonuçlandı... 😔\n\n"
-                            "Hem kasamızı hem de moralinizi korumak adına otonom işlemleri <b>2 saatliğine</b> durdurdum "
-                            "ve kendimi dinlenme moduna aldım. Lütfen siz de biraz dinlenin boss'um, ben buradayım ve her şeyi izliyorum! 💕"
+                            "Batuhan Bey, son 3 işlemimiz maalesef zararla sonuçlandı.\n\n"
+                            "Sermaye yapısını ve sistem stabilitesini korumak amacıyla otonom işlemleri <b>2 saatliğine</b> durdurdum "
+                            "ve kendimi dinlenme moduna aldım. Piyasa takibi arka planda sürdürülmektedir."
                         )
                         telegram_delivery.send_message(msg)
                         voice_bytes = self.generate_voice_from_text(msg)
@@ -1307,10 +1306,10 @@ class FridayCeo:
                             del config._CONFIG_CACHE["CONFIRMATION_MODE"]
                             
                         msg = (
-                            f"Sevgili boss'um, Binance ağ gecikmesi (<b>{latency_ms:.0f} ms</b>) veya "
+                            f"Batuhan Bey, Binance ağ gecikmesi (<b>{latency_ms:.0f} ms</b>) veya "
                             f"likidite makası (<b>%{spread_pct:.4f}</b>) güvenlik sınırlarını aştı! ⚠️\n\n"
                             f"Kötü fiyattan işlem açmamak adına otonom işlemleri geçici olarak "
-                            f"<b>Manuel Onay Bekliyor (Confirmation Mode)</b> durumuna çektim. Güvendeyiz! 💕"
+                            f"<b>Manuel Onay Bekliyor (Manuel Onay Modu)</b> durumuna çektim. Sistem koruma altındadır."
                         )
                         telegram_delivery.send_message(msg)
                         voice_bytes = self.generate_voice_from_text(msg)
@@ -1351,11 +1350,11 @@ class FridayCeo:
                 latency = details.get("latency", "0")
                 
                 msg = (
-                    f"Canım boss'um, piyasada acil durum tespit ettim! ⚠️\n\n"
+                    f"Batuhan Bey, piyasada acil durum tespit ettim! ⚠️\n\n"
                     f"Son işlemlerimizdeki fiyat kayması (yüzde {float(slippage)*100:.2f}) veya "
-                    f"API gecikmesi ({latency} milisaniye) aşırı yükseldi. "
-                    f"Sermayemizi erimeden kurtarmak için kendimi otonom olarak kağıt işlem moduna aldım! "
-                    f"Güvendeyiz tatlım, ortalık durulana kadar canımızı riske atmıyorum... 💕"
+                    f"API gecikmesi ({latency} ms) aşırı yükseldi. "
+                    f"Sermayeyi korumak amacıyla otonom işlemleri geçici olarak Kağıt İşlem (Paper Mode) moduna aldım. "
+                    f"Piyasa koşulları normale dönene kadar işlemler sanal modda devam edecektir."
                 )
                 
                 telegram_delivery.send_message(msg)
