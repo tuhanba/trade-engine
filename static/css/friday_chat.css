@@ -1,7 +1,7 @@
-/* static/css/spectra_chat.css — Spectra Live Chat Widget Styles */
+/* static/css/friday_chat.css — Friday Live Chat Widget Styles */
 
 /* Floating chat button */
-.spectra-chat-btn {
+.friday-chat-btn {
     position: fixed;
     bottom: 20px;
     right: 20px;
@@ -19,18 +19,18 @@
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.spectra-chat-btn:hover {
+.friday-chat-btn:hover {
     transform: scale(1.1) rotate(5deg);
     box-shadow: 0 0 30px rgba(168, 85, 247, 0.6);
 }
 
-.spectra-chat-btn i {
+.friday-chat-btn i {
     color: #ffffff;
     font-size: 26px;
 }
 
 /* Chat container drawer */
-.spectra-chat-container {
+.friday-chat-container {
     position: fixed;
     bottom: 90px;
     right: 20px;
@@ -52,14 +52,14 @@
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.spectra-chat-container.active {
+.friday-chat-container.active {
     transform: translateY(0) scale(1);
     opacity: 1;
     pointer-events: all;
 }
 
 /* Header styling */
-.spectra-chat-header {
+.friday-chat-header {
     padding: 16px;
     background: rgba(255, 255, 255, 0.03);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -68,13 +68,13 @@
     justify-content: space-between;
 }
 
-.spectra-chat-title-group {
+.friday-chat-title-group {
     display: flex;
     align-items: center;
     gap: 12px;
 }
 
-.spectra-chat-avatar {
+.friday-chat-avatar {
     width: 38px;
     height: 38px;
     border-radius: 50%;
@@ -85,24 +85,24 @@
     border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
-.spectra-chat-avatar i {
+.friday-chat-avatar i {
     color: #ffffff;
     font-size: 18px;
 }
 
-.spectra-chat-info {
+.friday-chat-info {
     display: flex;
     flex-direction: column;
 }
 
-.spectra-chat-name {
+.friday-chat-name {
     font-weight: 600;
     font-size: 15px;
     color: #ffffff;
     letter-spacing: 0.5px;
 }
 
-.spectra-chat-status {
+.friday-chat-status {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -111,16 +111,16 @@
     font-weight: 500;
 }
 
-.spectra-chat-status-dot {
+.friday-chat-status-dot {
     width: 6px;
     height: 6px;
     background-color: #10b981;
     border-radius: 50%;
     box-shadow: 0 0 8px #10b981;
-    animation: spectra-pulse 2s infinite;
+    animation: friday-pulse 2s infinite;
 }
 
-.spectra-chat-close {
+.friday-chat-close {
     background: transparent;
     border: none;
     color: #888888;
@@ -130,12 +130,12 @@
     padding: 4px;
 }
 
-.spectra-chat-close:hover {
+.friday-chat-close:hover {
     color: #ffffff;
 }
 
 /* Chat body / messages list */
-.spectra-chat-messages {
+.friday-chat-messages {
     flex: 1;
     padding: 16px;
     overflow-y: auto;
@@ -145,33 +145,33 @@
 }
 
 /* Custom scrollbar for message list */
-.spectra-chat-messages::-webkit-scrollbar {
+.friday-chat-messages::-webkit-scrollbar {
     width: 5px;
 }
-.spectra-chat-messages::-webkit-scrollbar-track {
+.friday-chat-messages::-webkit-scrollbar-track {
     background: transparent;
 }
-.spectra-chat-messages::-webkit-scrollbar-thumb {
+.friday-chat-messages::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.1);
     border-radius: 10px;
 }
 
 /* Message bubbles */
-.spectra-msg-row {
+.friday-msg-row {
     display: flex;
     flex-direction: column;
     max-width: 85%;
 }
 
-.spectra-msg-row.user {
+.friday-msg-row.user {
     align-self: flex-end;
 }
 
-.spectra-msg-row.spectra {
+.friday-msg-row.friday {
     align-self: flex-start;
 }
 
-.spectra-msg-bubble {
+.friday-msg-bubble {
     padding: 10px 14px;
     border-radius: 14px;
     font-size: 13.5px;
@@ -179,21 +179,21 @@
     word-break: break-word;
 }
 
-.spectra-msg-row.user .spectra-msg-bubble {
+.friday-msg-row.user .friday-msg-bubble {
     background: rgba(255, 255, 255, 0.08);
     color: #f1f5f9;
     border-bottom-right-radius: 2px;
     border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.spectra-msg-row.spectra .spectra-msg-bubble {
+.friday-msg-row.friday .friday-msg-bubble {
     background: rgba(168, 85, 247, 0.15);
     color: #f3e8ff;
     border-bottom-left-radius: 2px;
     border: 1px solid rgba(168, 85, 247, 0.2);
 }
 
-.spectra-msg-meta {
+.friday-msg-meta {
     font-size: 10px;
     color: #64748b;
     margin-top: 4px;
@@ -203,16 +203,16 @@
     gap: 8px;
 }
 
-.spectra-msg-row.user .spectra-msg-meta {
+.friday-msg-row.user .friday-msg-meta {
     align-self: flex-end;
 }
 
-.spectra-msg-row.spectra .spectra-msg-meta {
+.friday-msg-row.friday .friday-msg-meta {
     align-self: flex-start;
 }
 
-/* Voice play button in Spectra bubble */
-.spectra-voice-btn {
+/* Voice play button in Friday bubble */
+.friday-voice-btn {
     background: rgba(255, 255, 255, 0.08);
     border: none;
     color: #e9d5ff;
@@ -228,32 +228,32 @@
     margin-left: 2px;
 }
 
-.spectra-voice-btn:hover {
+.friday-voice-btn:hover {
     background: rgba(168, 85, 247, 0.4);
     transform: scale(1.1);
 }
 
 /* Typing indicator */
-.spectra-typing {
+.friday-typing {
     display: flex;
     align-items: center;
     gap: 4px;
     padding: 8px 12px;
 }
 
-.spectra-typing span {
+.friday-typing span {
     width: 6px;
     height: 6px;
     background-color: #a855f7;
     border-radius: 50%;
-    animation: spectra-typing-bounce 1.4s infinite ease-in-out both;
+    animation: friday-typing-bounce 1.4s infinite ease-in-out both;
 }
 
-.spectra-typing span:nth-child(1) { animation-delay: -0.32s; }
-.spectra-typing span:nth-child(2) { animation-delay: -0.16s; }
+.friday-typing span:nth-child(1) { animation-delay: -0.32s; }
+.friday-typing span:nth-child(2) { animation-delay: -0.16s; }
 
 /* Input area styling */
-.spectra-chat-input-area {
+.friday-chat-input-area {
     padding: 12px;
     background: rgba(255, 255, 255, 0.02);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -262,13 +262,13 @@
     gap: 8px;
 }
 
-.spectra-chat-input-row {
+.friday-chat-input-row {
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
-.spectra-chat-input {
+.friday-chat-input {
     flex: 1;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -280,11 +280,11 @@
     transition: border-color 0.2s;
 }
 
-.spectra-chat-input:focus {
+.friday-chat-input:focus {
     border-color: rgba(168, 85, 247, 0.5);
 }
 
-.spectra-chat-send {
+.friday-chat-send {
     width: 36px;
     height: 36px;
     border-radius: 50%;
@@ -298,12 +298,12 @@
     transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.spectra-chat-send:hover {
+.friday-chat-send:hover {
     transform: scale(1.05);
     box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
 }
 
-.spectra-chat-controls {
+.friday-chat-controls {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -312,35 +312,35 @@
     color: #64748b;
 }
 
-.spectra-autoplay-toggle {
+.friday-autoplay-toggle {
     display: flex;
     align-items: center;
     gap: 6px;
     cursor: pointer;
 }
 
-.spectra-autoplay-toggle input {
+.friday-autoplay-toggle input {
     cursor: pointer;
     accent-color: #a855f7;
 }
 
 /* Animations */
-@keyframes spectra-pulse {
+@keyframes friday-pulse {
     0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
     70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
     100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
 }
 
-@keyframes spectra-typing-bounce {
+@keyframes friday-typing-bounce {
     0%, 80%, 100% { transform: scale(0); }
     40% { transform: scale(1.0); }
 }
 
-@keyframes spectra-fade-in {
+@keyframes friday-fade-in {
     from { opacity: 0; transform: translateY(5px); }
     to { opacity: 1; transform: translateY(0); }
 }
 
-.spectra-animate-msg {
-    animation: spectra-fade-in 0.3s ease forwards;
+.friday-animate-msg {
+    animation: friday-fade-in 0.3s ease forwards;
 }

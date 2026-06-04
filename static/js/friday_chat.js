@@ -1,13 +1,13 @@
-/* static/js/spectra_chat.js — Spectra Live Chat Widget Logic */
+/* static/js/friday_chat.js — Friday Live Chat Widget Logic */
 
 document.addEventListener("DOMContentLoaded", () => {
-    const chatBtn = document.getElementById("spectraChatBtn");
-    const chatContainer = document.getElementById("spectraChatContainer");
-    const chatClose = document.getElementById("spectraChatClose");
-    const chatMessages = document.getElementById("spectraChatMessages");
-    const chatInput = document.getElementById("spectraChatInput");
-    const chatSend = document.getElementById("spectraChatSend");
-    const autoplayToggle = document.getElementById("spectraAutoplay");
+    const chatBtn = document.getElementById("fridayChatBtn");
+    const chatContainer = document.getElementById("fridayChatContainer");
+    const chatClose = document.getElementById("fridayChatClose");
+    const chatMessages = document.getElementById("fridayChatMessages");
+    const chatInput = document.getElementById("fridayChatInput");
+    const chatSend = document.getElementById("fridayChatSend");
+    const autoplayToggle = document.getElementById("fridayAutoplay");
 
     let isTyping = false;
     let currentAudio = null;
@@ -47,8 +47,8 @@ document.addEventListener("DOMContentLoaded", () => {
         // Add typing indicator
         showTypingIndicator();
 
-        // Fetch Spectra reply
-        fetch("/api/spectra/chat", {
+        // Fetch Friday reply
+        fetch("/api/friday/chat", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -59,40 +59,40 @@ document.addEventListener("DOMContentLoaded", () => {
         .then(data => {
             hideTypingIndicator();
             if (data.ok) {
-                appendMessage("spectra", data.reply, data.voice);
+                appendMessage("friday", data.reply, data.voice);
                 if (data.voice && autoplayToggle.checked) {
                     playVoice(data.voice);
                 }
             } else {
-                appendMessage("spectra", `❌ Hata: ${data.error || "Bilinmeyen bir hata oluştu."}`);
+                appendMessage("friday", `❌ Hata: ${data.error || "Bilinmeyen bir hata oluştu."}`);
             }
         })
         .catch(err => {
             hideTypingIndicator();
-            appendMessage("spectra", `❌ Bağlantı hatası: Sunucuya erişilemedi.`);
-            console.error("Spectra chat error:", err);
+            appendMessage("friday", `❌ Bağlantı hatası: Sunucuya erişilemedi.`);
+            console.error("Friday chat error:", err);
         });
     }
 
     function appendMessage(sender, text, voiceBase64 = null) {
         const msgRow = document.createElement("div");
-        msgRow.className = `spectra-msg-row ${sender} spectra-animate-msg`;
+        msgRow.className = `friday-msg-row ${sender} friday-animate-msg`;
 
         const bubble = document.createElement("div");
-        bubble.className = "spectra-msg-bubble";
+        bubble.className = "friday-msg-bubble";
         
         // Format text with code markup / line breaks
         bubble.innerHTML = formatText(text);
 
         const meta = document.createElement("div");
-        meta.className = "spectra-msg-meta";
+        meta.className = "friday-msg-meta";
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         meta.textContent = timeStr;
 
-        if (sender === "spectra" && voiceBase64) {
+        if (sender === "friday" && voiceBase64) {
             // Add a speaker button next to timestamp to replay audio
             const voiceBtn = document.createElement("button");
-            voiceBtn.className = "spectra-voice-btn";
+            voiceBtn.className = "friday-voice-btn";
             voiceBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
             voiceBtn.title = "Ses kaydını oynat";
             voiceBtn.addEventListener("click", () => {
@@ -110,11 +110,11 @@ document.addEventListener("DOMContentLoaded", () => {
     function showTypingIndicator() {
         isTyping = true;
         const typingRow = document.createElement("div");
-        typingRow.className = "spectra-msg-row spectra spectra-animate-msg";
-        typingRow.id = "spectraTypingIndicator";
+        typingRow.className = "friday-msg-row friday friday-animate-msg";
+        typingRow.id = "fridayTypingIndicator";
 
         const bubble = document.createElement("div");
-        bubble.className = "spectra-msg-bubble spectra-typing";
+        bubble.className = "friday-msg-bubble friday-typing";
         bubble.innerHTML = "<span></span><span></span><span></span>";
 
         typingRow.appendChild(bubble);
@@ -124,7 +124,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function hideTypingIndicator() {
         isTyping = false;
-        const typingIndicator = document.getElementById("spectraTypingIndicator");
+        const typingIndicator = document.getElementById("fridayTypingIndicator");
         if (typingIndicator) {
             typingIndicator.remove();
         }
