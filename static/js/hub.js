@@ -577,11 +577,13 @@ function addExecutionMonitorLog(text, level = 'info') {
 // ----------------------------------------------------
 function connectWebSocket() {
     try {
+        const pin = localStorage.getItem("dashboard_pin") || "";
         const socket = io(window.location.origin, {
             reconnection: true,
             reconnectionDelay: 3000,
             reconnectionAttempts: 5,
-            transports: ['websocket', 'polling']
+            transports: ['websocket', 'polling'],
+            query: { pin: pin }
         });
 
         socket.on('connect', () => {

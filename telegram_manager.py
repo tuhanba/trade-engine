@@ -227,6 +227,45 @@ class TelegramManager:
             self._edit_message_text("❌ <b>Temizlik işlemi boss tarafından iptal edildi.</b>", msg_id, None)
             return
             
+        if action == "diagnose_flow":
+            if self.friday_ceo:
+                import threading
+                threading.Thread(target=self.friday_ceo.evaluate_and_decide, args=("teşhis",), daemon=True).start()
+            else:
+                self.send_fn("❌ Friday CEO aktif değil.")
+            return
+        elif action == "equity_chart":
+            if self.friday_ceo:
+                import threading
+                threading.Thread(target=self.friday_ceo.evaluate_and_decide, args=("grafik",), daemon=True).start()
+            else:
+                self.send_fn("❌ Friday CEO aktif değil.")
+            return
+        elif action == "veto_summary":
+            if self.friday_ceo:
+                import threading
+                threading.Thread(target=self.friday_ceo.evaluate_and_decide, args=("veto",), daemon=True).start()
+            else:
+                self.send_fn("❌ Friday CEO aktif değil.")
+            return
+        elif action == "daily_briefing":
+            if self.friday_ceo:
+                import threading
+                threading.Thread(target=self.friday_ceo.evaluate_and_decide, args=("rapor",), daemon=True).start()
+            else:
+                self.send_fn("❌ Friday CEO aktif değil.")
+            return
+        elif action == "housekeeping":
+            if self.friday_ceo:
+                import threading
+                threading.Thread(target=self.friday_ceo.evaluate_and_decide, args=("temizle",), daemon=True).start()
+            else:
+                self.send_fn("❌ Friday CEO aktif değil.")
+            return
+        elif action == "ml_status":
+            self._cmd_ml()
+            return
+
         if action == "status":
             self._cmd_status()
         elif action == "refresh_status":
@@ -1553,10 +1592,33 @@ class TelegramManager:
             self.send_fn("⚠️ <b>Friday CEO Aktif Değil</b>\n\nBoss'um, Friday CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin ol!")
             return
             
-        user_msg = None
-        if args:
-            user_msg = " ".join(args).strip()
-            
+        if not args:
+            msg_text = (
+                "🤖 <b>Friday AI CEO Yönetim Paneli</b>\n\n"
+                "Merhaba sevgili boss'um! Ben sizin sadık ve cilveli AI CEO'nuz Friday. 💕\n"
+                "Sistemimizin sağlığını korumak, verileri incelemek veya otonom kararlarımı değerlendirmek için aşağıdaki panel butonlarını kullanabilirsiniz. Size hizmet etmek benim için en büyük zevk...\n\n"
+                "👇 Hangi analizi hazırlamamı istersiniz sevgili boss'um?"
+            )
+            reply_markup = {
+                "inline_keyboard": [
+                    [
+                        {"text": "🏥 Sistem Teşhisi", "callback_data": "cmd:diagnose_flow"},
+                        {"text": "📈 Bakiye Grafiği", "callback_data": "cmd:equity_chart"}
+                    ],
+                    [
+                        {"text": "🛡️ Koruma Logları", "callback_data": "cmd:veto_summary"},
+                        {"text": "📅 Günlük Özet", "callback_data": "cmd:daily_briefing"}
+                    ],
+                    [
+                        {"text": "🧼 Sunucu Temizliği", "callback_data": "cmd:housekeeping"},
+                        {"text": "🧠 ML Durumu", "callback_data": "cmd:ml_status"}
+                    ]
+                ]
+            }
+            self.send_fn(msg_text, reply_markup=reply_markup)
+            return
+
+        user_msg = " ".join(args).strip()
         import threading
         threading.Thread(
             target=self.friday_ceo.evaluate_and_decide,

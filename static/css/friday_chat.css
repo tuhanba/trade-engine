@@ -344,3 +344,155 @@
 .friday-animate-msg {
     animation: friday-fade-in 0.3s ease forwards;
 }
+
+/* Suggestion Chips */
+.friday-chat-suggestions {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 2px 4px 6px 4px;
+    margin-bottom: 2px;
+}
+.friday-chat-suggestions::-webkit-scrollbar {
+    height: 3px;
+}
+.friday-chat-suggestions::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+}
+.friday-chip {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #e2e8f0;
+    padding: 5px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.friday-chip:hover {
+    background: rgba(168, 85, 247, 0.12);
+    border-color: rgba(168, 85, 247, 0.3);
+    color: #f3e8ff;
+    transform: translateY(-1px);
+}
+
+/* Premium Glassmorphism Lock Overlay */
+.auth-lock-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(8, 5, 15, 0.92);
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+}
+.auth-lock-overlay.active {
+    opacity: 1;
+    pointer-events: all;
+}
+.auth-lock-card {
+    background: linear-gradient(135deg, rgba(20, 15, 35, 0.85) 0%, rgba(10, 20, 45, 0.85) 100%);
+    border: 1px solid rgba(212, 168, 67, 0.35);
+    border-radius: 20px;
+    padding: 40px;
+    width: 380px;
+    max-width: 90%;
+    text-align: center;
+    box-shadow: 0 15px 45px rgba(0, 0, 0, 0.7);
+    transform: translateY(20px);
+    transition: transform 0.4s ease;
+}
+.auth-lock-overlay.active .auth-lock-card {
+    transform: translateY(0);
+}
+.auth-lock-icon {
+    font-size: 40px;
+    color: #d4a843;
+    margin-bottom: 20px;
+    animation: auth-lock-pulse 2s infinite ease-in-out;
+}
+.auth-lock-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+}
+.auth-lock-subtitle {
+    font-size: 13px;
+    color: #94a3b8;
+    margin-bottom: 24px;
+    line-height: 1.5;
+}
+.auth-pin-group {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+.auth-pin-input {
+    width: 100%;
+    height: 48px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    color: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    text-align: center;
+    outline: none;
+    transition: all 0.3s;
+    letter-spacing: 6px;
+}
+.auth-pin-input:focus {
+    border-color: #d4a843;
+    box-shadow: 0 0 15px rgba(212, 168, 67, 0.25);
+}
+.auth-submit-btn {
+    width: 100%;
+    height: 44px;
+    background: linear-gradient(135deg, #d4a843 0%, #a27b2c 100%);
+    border: none;
+    color: #08050f;
+    border-radius: 12px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 4px 15px rgba(212, 168, 67, 0.2);
+}
+.auth-submit-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(212, 168, 67, 0.35);
+}
+.auth-submit-btn:active {
+    transform: translateY(1px);
+}
+.auth-error-msg {
+    color: #f87171;
+    font-size: 12px;
+    margin-top: 12px;
+    display: none;
+}
+@keyframes auth-lock-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.95; }
+    50% { transform: scale(1.05); opacity: 1; }
+}
+

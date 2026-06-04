@@ -68,29 +68,44 @@ def _get_client_ip() -> str:
         return real_ip
     return request.remote_addr or "0.0.0.0"
 
-def _check_ip():
-    """IP whitelist — sadece ALLOWED_IPS env var set edilmişse aktif."""
-    if not _ALLOWED_IPS:
-        return None
-    if "0.0.0.0" in _ALLOWED_IPS:
-        return None
-    client_ip = _get_client_ip()
-    if client_ip not in _ALLOWED_IPS:
-        logger.warning(f"IP engellendi: {client_ip} (İzin verilenler: {_ALLOWED_IPS})")
-        return jsonify({
-            "ok": False,
-            "error": f"IP Access Denied. Your IP ({client_ip}) is not whitelisted.",
-            "client_ip": client_ip
-        }), 403
+def _check_auth():
+    """IP whitelist ve Dashboard PIN kontrolü gerçekleştirir."""
+    # 1. IP Whitelist kontrolü (ALLOWED_IPS tanımlıysa)
+    if _ALLOWED_IPS and "0.0.0.0" not in _ALLOWED_IPS:
+        client_ip = _get_client_ip()
+        if client_ip not in _ALLOWED_IPS:
+            logger.warning(f"IP engellendi: {client_ip} (İzin verilenler: {_ALLOWED_IPS})")
+            return jsonify({
+                "ok": False,
+                "error": f"IP Access Denied. Your IP ({client_ip}) is not whitelisted.",
+                "client_ip": client_ip
+            }), 403
+
+    # 2. PIN kodu kontrolü (DASHBOARD_PIN tanımlıysa)
+    pin_required = getattr(config, "DASHBOARD_PIN", "").strip()
+    if pin_required:
+        client_pin = (
+            request.headers.get("X-Dashboard-PIN") or
+            request.args.get("pin") or
+            request.cookies.get("dashboard_pin")
+        )
+        if not client_pin or client_pin.strip() != pin_required:
+            logger.warning("Yetkisiz erişim denemesi: Geçersiz veya eksik Dashboard PIN.")
+            return jsonify({
+                "ok": False,
+                "error": "Unauthorized: Invalid or missing Dashboard PIN."
+            }), 401
+
     return None
 
 @app.before_request
 def check_access():
-    # /api/* ve /stream için IP kontrolü (ALLOWED_IPS set edilmişse)
+    # /api/* ve /stream için IP ve PIN kontrolü
     if request.path.startswith("/api/") or request.path == "/stream":
-        block_response = _check_ip()
+        block_response = _check_auth()
         if block_response is not None:
             return block_response
+
     # /  (dashboard) herkese açık
 
 # ── CORS ─────────────────────────────────────────────────────────────

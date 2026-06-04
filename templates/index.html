@@ -14,6 +14,43 @@
     <!-- Custom Style Sheet -->
     <link rel="stylesheet" href="/static/css/hub.css">
     <link rel="stylesheet" href="/static/css/friday_chat.css">
+
+    <!-- Global fetch interceptor for Dashboard PIN Authentication -->
+    <script>
+        (function() {
+            const originalFetch = window.fetch;
+            window.fetch = async function(resource, init) {
+                init = init || {};
+                init.headers = init.headers || {};
+                
+                const pin = localStorage.getItem("dashboard_pin");
+                if (pin) {
+                    if (init.headers instanceof Headers) {
+                        init.headers.set("X-Dashboard-PIN", pin);
+                    } else if (Array.isArray(init.headers)) {
+                        init.headers.push(["X-Dashboard-PIN", pin]);
+                    } else {
+                        init.headers["X-Dashboard-PIN"] = pin;
+                    }
+                }
+                
+                try {
+                    const response = await originalFetch(resource, init);
+                    if (response.status === 401 && resource.toString().includes("/api/")) {
+                        document.getElementById("authLockOverlay").classList.add("active");
+                        const errorMsg = document.getElementById("authErrorMsg");
+                        if (errorMsg) {
+                            errorMsg.textContent = "Geçersiz veya eksik Dashboard PIN kodu!";
+                            errorMsg.style.display = "block";
+                        }
+                    }
+                    return response;
+                } catch (error) {
+                    throw error;
+                }
+            };
+        })();
+    </script>
 </head>
 <body>
     <div class="glass-bg-radial"></div>
@@ -569,6 +606,13 @@
         </div>
 
         <div class="friday-chat-input-area">
+            <div class="friday-chat-suggestions">
+                <div class="friday-chip" data-cmd="teşhis"><i class="fa-solid fa-house-medical"></i> Teşhis</div>
+                <div class="friday-chip" data-cmd="grafik"><i class="fa-solid fa-chart-line"></i> Grafik</div>
+                <div class="friday-chip" data-cmd="veto"><i class="fa-solid fa-shield-halved"></i> Koruma</div>
+                <div class="friday-chip" data-cmd="rapor"><i class="fa-solid fa-file-invoice-dollar"></i> Özet</div>
+                <div class="friday-chip" data-cmd="temizle"><i class="fa-solid fa-broom"></i> Temizlik</div>
+            </div>
             <div class="friday-chat-input-row">
                 <input type="text" class="friday-chat-input" id="fridayChatInput" placeholder="Mesajınızı yazın, boss..." autocomplete="off">
                 <button class="friday-chat-send" id="fridayChatSend">
@@ -583,5 +627,68 @@
             </div>
         </div>
     </div>
+
+    <!-- Premium Glassmorphism Lock Overlay -->
+    <div class="auth-lock-overlay" id="authLockOverlay">
+        <div class="auth-lock-card">
+            <div class="auth-lock-icon">
+                <i class="fa-solid fa-user-shield"></i>
+            </div>
+            <div class="auth-lock-title">Friday Secure Guard</div>
+            <div class="auth-lock-subtitle">Bu dashboard Friday otonom ticaret yetkisiyle korunmaktadır. Lütfen erişim PIN kodunu girin.</div>
+            <div class="auth-pin-group">
+                <input type="password" class="auth-pin-input" id="authPinInput" placeholder="••••" maxlength="12" autocomplete="current-password">
+            </div>
+            <button class="auth-submit-btn" id="authSubmitBtn">Dashboard Erişimini Aç</button>
+            <div class="auth-error-msg" id="authErrorMsg">Geçersiz PIN Kodu!</div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const overlay = document.getElementById("authLockOverlay");
+            const pinInput = document.getElementById("authPinInput");
+            const submitBtn = document.getElementById("authSubmitBtn");
+            const errorMsg = document.getElementById("authErrorMsg");
+
+            function submitPin() {
+                const pin = pinInput.value.trim();
+                if (!pin) return;
+                
+                localStorage.setItem("dashboard_pin", pin);
+                
+                fetch("/api/stats")
+                .then(res => {
+                    if (res.status === 200) {
+                        overlay.classList.remove("active");
+                        errorMsg.style.display = "none";
+                        window.location.reload();
+                    } else if (res.status === 401) {
+                        errorMsg.textContent = "Hatalı PIN kodu! Lütfen tekrar deneyin.";
+                        errorMsg.style.display = "block";
+                        pinInput.value = "";
+                        pinInput.focus();
+                    } else {
+                        errorMsg.textContent = "Bağlantı hatası oluştu.";
+                        errorMsg.style.display = "block";
+                    }
+                })
+                .catch(err => {
+                    errorMsg.textContent = "Sunucuya erişilemiyor.";
+                    errorMsg.style.display = "block";
+                });
+            }
+
+            submitBtn.addEventListener("click", submitPin);
+            pinInput.addEventListener("keypress", (e) => {
+                if (e.key === "Enter") {
+                    submitPin();
+                }
+            });
+            
+            // Check status immediately
+            fetch("/api/stats");
+        });
+    </script>
 </body>
 </html>

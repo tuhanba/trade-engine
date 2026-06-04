@@ -27,6 +27,8 @@ class TestDashboardTelegramAudit(unittest.TestCase):
         with database.get_conn() as conn:
             conn.execute("DELETE FROM trades")
             conn.execute("DELETE FROM system_state")
+        # Clear stats cache to avoid cross-test caching interference
+        database._stats_cache.clear()
 
     def test_environment_stats_filtering(self):
         """Verify database functions filter trade stats correctly by environment."""
@@ -134,6 +136,63 @@ class TestDashboardTelegramAudit(unittest.TestCase):
         })
         self.assertEqual(len(sent_messages), 1)
         self.assertIn("Sistem Teşhis Raporu", sent_messages[0])
+
+    def test_dashboard_pin_unauthorized(self):
+        """Verify API requests return 401 when DASHBOARD_PIN is configured and no/invalid PIN is provided."""
+        orig_pin = getattr(config, "DASHBOARD_PIN", "")
+        config.DASHBOARD_PIN = "9999"
+        try:
+            client = app.test_client()
+            res = client.get("/api/stats")
+            self.assertEqual(res.status_code, 401)
+            
+            res = client.get("/api/stats", headers={"X-Dashboard-PIN": "0000"})
+            self.assertEqual(res.status_code, 401)
+        finally:
+            config.DASHBOARD_PIN = orig_pin
+
+    def test_dashboard_pin_authorized(self):
+        """Verify API requests return 200/ok when the correct DASHBOARD_PIN is provided."""
+        orig_pin = getattr(config, "DASHBOARD_PIN", "")
+        config.DASHBOARD_PIN = "9999"
+        try:
+            client = app.test_client()
+            res = client.get("/api/stats", headers={"X-Dashboard-PIN": "9999"})
+            self.assertEqual(res.status_code, 200)
+            
+            res = client.get("/api/stats?pin=9999")
+            self.assertEqual(res.status_code, 200)
+        finally:
+            config.DASHBOARD_PIN = orig_pin
+
+    def test_friday_menu_telegram_command(self):
+        """Verify that trigger /friday command without arguments returns a menu with interactive buttons."""
+        sent_messages = []
+        reply_markups = []
+        def mock_send(text, reply_markup=None):
+            sent_messages.append(text)
+            reply_markups.append(reply_markup)
+            return True
+            
+        tg_manager = TelegramManager(send_fn=mock_send, friday_ceo=MagicMock())
+        tg_manager.chat_id = "987654"
+        
+        tg_manager._handle_update({
+            "message": {
+                "text": "/friday",
+                "chat": {"id": 987654}
+            }
+        })
+        
+        self.assertEqual(len(sent_messages), 1)
+        self.assertIn("Friday AI CEO Yönetim Paneli", sent_messages[0])
+        self.assertIsNotNone(reply_markups[0])
+        self.assertIn("inline_keyboard", reply_markups[0])
+        
+        buttons = reply_markups[0]["inline_keyboard"]
+        flat_buttons = [btn for row in buttons for btn in row]
+        self.assertTrue(any(btn["text"] == "🏥 Sistem Teşhisi" for btn in flat_buttons))
+        self.assertTrue(any(btn["text"] == "📈 Bakiye Grafiği" for btn in flat_buttons))
 
 
 if __name__ == "__main__":

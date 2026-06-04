@@ -203,6 +203,8 @@ FUNDING_SHORT_MIN = _env_float("FUNDING_SHORT_MIN", -0.005)  # v6.0 gevşetildi
 # Flask
 FLASK_HOST = _env("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = _env_int("FLASK_PORT", 5000)
+DASHBOARD_PIN = _env("DASHBOARD_PIN", "")
+
 
 # Log
 LOG_DIR      = _env("LOG_DIR", "logs")

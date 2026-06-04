@@ -12,6 +12,15 @@ document.addEventListener("DOMContentLoaded", () => {
     let isTyping = false;
     let currentAudio = null;
 
+    // Bind suggestion chips
+    document.querySelectorAll(".friday-chip").forEach(chip => {
+        chip.addEventListener("click", () => {
+            const cmd = chip.getAttribute("data-cmd");
+            chatInput.value = cmd;
+            sendMessage();
+        });
+    });
+
     // Toggle Chat Panel
     chatBtn.addEventListener("click", () => {
         chatContainer.classList.toggle("active");

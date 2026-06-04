@@ -224,6 +224,14 @@ def initialize_websocket_events(socketio):
     @socketio.on('connect')
     def on_connect():
         from flask import request
+        import config
+        # Enforce PIN authentication on WebSocket connect if DASHBOARD_PIN is active
+        pin_required = getattr(config, "DASHBOARD_PIN", "").strip()
+        if pin_required:
+            client_pin = request.args.get("pin") or request.headers.get("X-Dashboard-PIN")
+            if not client_pin or client_pin.strip() != pin_required:
+                logger.warning(f"[WebSocket] Bağlantı reddedildi: Geçersiz PIN. (sid: {request.sid})")
+                return False  # returning False rejects connection
         sid = request.sid
         event_manager.register_client(sid)
         logger.info(f"[WebSocket] İstemci bağlandı (Local): {sid}")
