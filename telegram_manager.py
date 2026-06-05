@@ -1651,7 +1651,7 @@ class TelegramManager:
                         {"text": "📅 Günlük Özet", "callback_data": "cmd:daily_briefing"}
                     ],
                     [
-                        {"text": "🧼 Sunucu Temizliği", "callback_data": "cmd:housekeeping"},
+                        {"text": "🧼 Sunucu Temizliği", "callback_data": "cmd:clean_server"},
                         {"text": "🧠 ML Durumu", "callback_data": "cmd:ml_status"}
                     ]
                 ]
