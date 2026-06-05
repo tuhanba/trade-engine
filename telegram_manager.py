@@ -266,6 +266,7 @@ class TelegramManager:
             
         if action == "diagnose_flow":
             if self.friday_ceo:
+                self._edit_message_text("⏳ <b>Sistem Teşhisi Hazırlanıyor...</b>\n\nLütfen bekleyin Batuhan Bey, Friday verileri inceliyor.", msg_id, None)
                 import threading
                 threading.Thread(target=self.friday_ceo.evaluate_and_decide, args=("teşhis",), daemon=True).start()
             else:
@@ -273,6 +274,7 @@ class TelegramManager:
             return
         elif action == "equity_chart":
             if self.friday_ceo:
+                self._edit_message_text("⏳ <b>Bakiye Grafiği Oluşturuluyor...</b>\n\nMatplotlib bakiye gelişim eğrisini (Equity Curve) çiziyor.", msg_id, None)
                 import threading
                 threading.Thread(target=self.friday_ceo.evaluate_and_decide, args=("grafik",), daemon=True).start()
             else:
@@ -280,6 +282,7 @@ class TelegramManager:
             return
         elif action == "veto_summary":
             if self.friday_ceo:
+                self._edit_message_text("⏳ <b>Koruma Özeti Raporlanıyor...</b>\n\nSon 24 saatteki veto logları derleniyor.", msg_id, None)
                 import threading
                 threading.Thread(target=self.friday_ceo.evaluate_and_decide, args=("veto",), daemon=True).start()
             else:
@@ -287,6 +290,7 @@ class TelegramManager:
             return
         elif action == "daily_briefing":
             if self.friday_ceo:
+                self._edit_message_text("⏳ <b>Günlük Özet Derleniyor...</b>\n\nBugünkü otonom işlemler ve PnL analizi hazırlanıyor.", msg_id, None)
                 import threading
                 threading.Thread(target=self.friday_ceo.evaluate_and_decide, args=("rapor",), daemon=True).start()
             else:
@@ -294,10 +298,33 @@ class TelegramManager:
             return
         elif action == "housekeeping":
             if self.friday_ceo:
+                self._edit_message_text("⏳ <b>Sunucu Temizliği Yapılıyor...</b>\n\nGereksiz dosyalar taranıyor.", msg_id, None)
                 import threading
                 threading.Thread(target=self.friday_ceo.evaluate_and_decide, args=("temizle",), daemon=True).start()
             else:
                 self.send_fn("❌ Friday CEO aktif değil.")
+            return
+        elif action == "reset_balance":
+            self._edit_message_text("⏳ <b>Sanal Hesap Bakiyesi Sıfırlanıyor...</b>", msg_id, None)
+            try:
+                import database
+                with database.get_conn() as conn:
+                    conn.execute("UPDATE paper_account SET balance = 2000.0, initial_balance = 2000.0 WHERE id = 1")
+                    conn.execute("DELETE FROM balance_ledger")
+                    conn.execute("DELETE FROM trades")
+                    conn.commit()
+                msg_text = "✅ <b>Sanal Bakiye Sıfırlandı!</b>\n\nHesap bakiyesi tekrar <code>$2,000.00 USD</code> olarak güncellendi ve tüm işlem/bakiye geçmişi başarıyla temizlendi."
+                self._edit_message_text(msg_text, msg_id, None)
+            except Exception as e:
+                self._edit_message_text(f"❌ <b>Bakiye sıfırlama sırasında hata oluştu:</b> {e}", msg_id, None)
+            return
+        elif action == "heatmap_chart":
+            self._edit_message_text("⏳ <b>Kripto Isı Haritası Çiziliyor...</b>\n\nSon 30 günlük veriler analiz ediliyor.", msg_id, None)
+            try:
+                import telegram_delivery
+                telegram_delivery.send_heatmap(30)
+            except Exception as e:
+                self.send_fn(f"❌ <b>Isı haritası oluşturulamadı:</b> {e}")
             return
         elif action == "ml_status":
             self._cmd_ml()
@@ -1653,6 +1680,10 @@ class TelegramManager:
                     [
                         {"text": "🧼 Sunucu Temizliği", "callback_data": "cmd:clean_server"},
                         {"text": "🧠 ML Durumu", "callback_data": "cmd:ml_status"}
+                    ],
+                    [
+                        {"text": "📊 Isı Haritası", "callback_data": "cmd:heatmap_chart"},
+                        {"text": "💵 Bakiyeyi Sıfırla", "callback_data": "cmd:reset_balance"}
                     ]
                 ]
             }
