@@ -1112,28 +1112,55 @@ class FridayCeo:
             import concurrent.futures
 
             def _fetch_risk():
-                return ai_client.messages.create(
-                    model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-5-haiku-20241022"),
-                    max_tokens=400,
-                    system=risk_prompt,
-                    messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
-                )
+                try:
+                    return ai_client.messages.create(
+                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-haiku-20240307"),
+                        max_tokens=400,
+                        system=risk_prompt,
+                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
+                    )
+                except Exception as sub_err:
+                    logger.warning(f"[Friday CEO] Subagent risk failed, forcing Haiku V1: {sub_err}")
+                    return ai_client.messages.create(
+                        model="claude-3-haiku-20240307",
+                        max_tokens=400,
+                        system=risk_prompt,
+                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
+                    )
 
             def _fetch_tech():
-                return ai_client.messages.create(
-                    model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-5-haiku-20241022"),
-                    max_tokens=400,
-                    system=tech_prompt,
-                    messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
-                )
+                try:
+                    return ai_client.messages.create(
+                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-haiku-20240307"),
+                        max_tokens=400,
+                        system=tech_prompt,
+                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
+                    )
+                except Exception as sub_err:
+                    logger.warning(f"[Friday CEO] Subagent tech failed, forcing Haiku V1: {sub_err}")
+                    return ai_client.messages.create(
+                        model="claude-3-haiku-20240307",
+                        max_tokens=400,
+                        system=tech_prompt,
+                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
+                    )
 
             def _fetch_health():
-                return ai_client.messages.create(
-                    model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-5-haiku-20241022"),
-                    max_tokens=400,
-                    system=health_prompt,
-                    messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
-                )
+                try:
+                    return ai_client.messages.create(
+                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-haiku-20240307"),
+                        max_tokens=400,
+                        system=health_prompt,
+                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
+                    )
+                except Exception as sub_err:
+                    logger.warning(f"[Friday CEO] Subagent health failed, forcing Haiku V1: {sub_err}")
+                    return ai_client.messages.create(
+                        model="claude-3-haiku-20240307",
+                        max_tokens=400,
+                        system=health_prompt,
+                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
+                    )
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                 future_risk = executor.submit(_fetch_risk)
@@ -1172,15 +1199,26 @@ class FridayCeo:
             else:
                 user_prompt += "Bu periyodik sistem kontrolün. Lütfen bu analizleri sentezle, son CEO kararını al ve genel durum özetini ilet."
 
-            # Calling Claude model
-            response = ai_client.messages.create(
-                model=getattr(config, "FRIDAY_CEO_MODEL", "claude-3-5-sonnet-20241022"),
-                max_tokens=1500,
-                system=SYSTEM_PROMPT,
-                messages=[
-                    {"role": "user", "content": user_prompt}
-                ]
-            )
+            # Calling Claude model with automatic fallback if the configured model is not accessible
+            try:
+                response = ai_client.messages.create(
+                    model=getattr(config, "FRIDAY_CEO_MODEL", "claude-3-5-sonnet-20240620"),
+                    max_tokens=1500,
+                    system=SYSTEM_PROMPT,
+                    messages=[
+                        {"role": "user", "content": user_prompt}
+                    ]
+                )
+            except Exception as e:
+                logger.warning(f"[Friday CEO] Primary model failed, falling back to Claude 3 Haiku V1: {e}")
+                response = ai_client.messages.create(
+                    model="claude-3-haiku-20240307",
+                    max_tokens=1500,
+                    system=SYSTEM_PROMPT,
+                    messages=[
+                        {"role": "user", "content": user_prompt}
+                    ]
+                )
             
             reply_text = response.content[0].text
             
