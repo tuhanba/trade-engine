@@ -348,16 +348,42 @@ class FridayCeo:
 
     def _parse_decisions(self, text: str) -> dict:
         """Extracts JSON decision block from LLM response text."""
-        try:
-            match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+        import json
+        import re
+        
+        cleaned_text = text.strip()
+        if "```json" in cleaned_text:
+            match = re.search(r"```json\s*([\s\S]*?)\s*```", cleaned_text)
             if match:
-                return json.loads(match.group(1))
-            match_raw = re.search(r"(\{[\s\S]*?\})", text)
-            if match_raw:
-                return json.loads(match_raw.group(1))
+                cleaned_text = match.group(1)
+        elif "```" in cleaned_text:
+            match = re.search(r"```\s*([\s\S]*?)\s*```", cleaned_text)
+            if match:
+                cleaned_text = match.group(1)
+                
+        start_idx = cleaned_text.find("{")
+        end_idx = cleaned_text.rfind("}")
+        if start_idx == -1 or end_idx == -1 or start_idx > end_idx:
+            logger.error("[Friday CEO] No valid JSON block enclosing braces found in LLM response.")
+            return {}
+            
+        json_candidate = cleaned_text[start_idx:end_idx+1]
+        
+        # Remove trailing commas inside objects and arrays
+        json_candidate = re.sub(r",\s*}", "}", json_candidate)
+        json_candidate = re.sub(r",\s*\]", "]", json_candidate)
+        
+        try:
+            return json.loads(json_candidate)
         except Exception as e:
-            logger.error(f"[Friday CEO] Decision JSON parse error: {e}")
-        return {}
+            logger.warning(f"[Friday CEO] Standard JSON parse failed, trying cleanup: {e}")
+            try:
+                # Remove single-line comments // and multi-line comments /* ... */
+                json_candidate_clean = re.sub(r"/\*[\s\S]*?\*/|//.*", "", json_candidate)
+                return json.loads(json_candidate_clean)
+            except Exception as e2:
+                logger.error(f"[Friday CEO] Final JSON parse error: {e2}. Raw content tried: {json_candidate[:200]}")
+                return {}
 
     def _execute_decisions(self, decisions: dict) -> list[str]:
         """Applies dynamic settings updates and triggers background actions."""
@@ -1301,6 +1327,7 @@ class FridayCeo:
                     curr_mode = get_system_state("confirmation_mode")
                     if curr_mode != "true":
                         set_state("confirmation_mode", "true")
+                        set_state("friday_auto_paused_by_guard", "true")
                         import config
                         if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
                             del config._CONFIG_CACHE["CONFIRMATION_MODE"]
@@ -1315,6 +1342,25 @@ class FridayCeo:
                         voice_bytes = self.generate_voice_from_text(msg)
                         if voice_bytes:
                             telegram_delivery.send_voice(voice_bytes, caption="Friday Gecikme Koruması Aktif")
+                else:
+                    was_paused_by_guard = get_system_state("friday_auto_paused_by_guard") == "true"
+                    curr_mode = get_system_state("confirmation_mode")
+                    if was_paused_by_guard and curr_mode == "true":
+                        set_state("confirmation_mode", "false")
+                        set_state("friday_auto_paused_by_guard", "false")
+                        import config
+                        if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
+                            del config._CONFIG_CACHE["CONFIRMATION_MODE"]
+                            
+                        msg = (
+                            f"Batuhan Bey, Binance ağ gecikmesi (<b>{latency_ms:.0f} ms</b>) ve "
+                            f"likidite makası (<b>%{spread_pct:.4f}</b>) normal seviyelere döndü. ✨\n\n"
+                            f"Otonom ticaret modu otomatik olarak yeniden aktifleştirildi. Sistem devrededir."
+                        )
+                        telegram_delivery.send_message(msg)
+                        voice_bytes = self.generate_voice_from_text(msg)
+                        if voice_bytes:
+                            telegram_delivery.send_voice(voice_bytes, caption="Friday Otonom Ticaret Yeniden Aktif")
             except Exception as e:
                 logger.error(f"[Friday CEO] Error in Latency & Spread Guard check: {e}")
 

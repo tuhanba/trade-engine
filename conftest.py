@@ -1,5 +1,5 @@
 """
-tests/conftest.py – Pytest fixtures.
+conftest.py – Global Pytest fixtures for root tests.
 """
 
 import os

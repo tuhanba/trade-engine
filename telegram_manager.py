@@ -29,6 +29,7 @@ class TelegramManager:
         self._thread: Optional[threading.Thread] = None
         self._last_update_id = 0
         self._start_time    = time.time()
+        self._thread_local  = threading.local()
 
     def _is_configured(self) -> bool:
         return bool(self.token) and bool(self.chat_id)
@@ -133,9 +134,16 @@ class TelegramManager:
         msg       = update.get("message") or update.get("channel_post") or {}
         text      = (msg.get("text") or "").strip()
         from_chat = str(msg.get("chat", {}).get("id", ""))
+        from_user = str(msg.get("from", {}).get("id", "")) if msg.get("from") else ""
         if not text.startswith("/"):
             return
-        if from_chat and from_chat != self.chat_id:
+            
+        is_authorized = False
+        if self.chat_id:
+            allowed_ids = [x.strip() for x in self.chat_id.split(",") if x.strip()]
+            is_authorized = (from_chat in allowed_ids) or (from_user in allowed_ids)
+            
+        if not is_authorized:
             return
         parts = text.split()
         if not parts:
@@ -195,15 +203,33 @@ class TelegramManager:
     def _handle_callback_query(self, cb_query: dict):
         cb_id = cb_query.get("id")
         data = cb_query.get("data", "")
-        msg = cb_query.get("message", {})
+        
+        # Safely parse message to prevent AttributeError
+        msg = cb_query.get("message") or {}
         msg_id = msg.get("message_id")
         from_chat = str(msg.get("chat", {}).get("id", ""))
+        from_user = str(cb_query.get("from", {}).get("id", ""))
         
-        if from_chat != self.chat_id:
-            self._answer_callback_query(cb_id, "Yetkisiz sohbet.")
+        # Determine active chat ID for any edit/reply actions
+        active_chat = from_chat or from_user
+        if active_chat and "," in active_chat:
+            active_chat = active_chat.split(",")[0].strip()
+        if not active_chat:
+            active_chat = self.chat_id.split(",")[0].strip() if self.chat_id else ""
+            
+        self._thread_local.active_chat_id = active_chat
+        
+        is_authorized = False
+        if self.chat_id:
+            allowed_ids = [x.strip() for x in self.chat_id.split(",") if x.strip()]
+            is_authorized = (from_chat in allowed_ids) or (from_user in allowed_ids)
+            
+        if not is_authorized:
+            logger.warning(f"Yetkisiz callback query engellendi. Chat: {from_chat}, User: {from_user}, Data: {data}")
+            self._answer_callback_query(cb_id, "Yetkisiz sohbet veya kullanıcı.")
             return
             
-        logger.info("Callback query: %s", data)
+        logger.info(f"Callback query: {data} (Chat: {from_chat}, User: {from_user})")
         
         if not data.startswith("cmd:"):
             self._answer_callback_query(cb_id, "Bilinmeyen işlem.")
@@ -211,6 +237,17 @@ class TelegramManager:
             
         action = data[4:]
         self._answer_callback_query(cb_id, "İşlem alınıyor...")
+        
+        try:
+            self._execute_callback_action(action, msg, msg_id, from_chat, from_user)
+        except Exception as ex:
+            logger.exception(f"Callback query processing error for action {action}:")
+            if msg_id:
+                self._edit_message_text(f"❌ <b>İşlem hatası ({action}):</b> {ex}", msg_id, None)
+            else:
+                self.send_fn(f"❌ <b>İşlem hatası ({action}):</b> {ex}")
+
+    def _execute_callback_action(self, action: str, msg: dict, msg_id: Optional[int], from_chat: str, from_user: str):
         
         if action == "clean_server":
             if self.friday_ceo:
@@ -599,9 +636,13 @@ class TelegramManager:
             logger.warning(f"answerCallbackQuery hatası: {e}")
 
     def _edit_message_text(self, text: str, message_id: int, reply_markup: Optional[dict] = None) -> bool:
+        active_chat = getattr(self._thread_local, "active_chat_id", None) or self.chat_id
+        if active_chat and "," in active_chat:
+            active_chat = active_chat.split(",")[0].strip()
+            
         url = f"https://api.telegram.org/bot{self.token}/editMessageText"
         payload = {
-            "chat_id": self.chat_id,
+            "chat_id": active_chat,
             "message_id": message_id,
             "text": text[:4096],
             "parse_mode": "HTML"

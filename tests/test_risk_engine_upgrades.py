@@ -31,63 +31,15 @@ def setup_test_db(tmp_path, monkeypatch):
     db_path = tmp_path / "test_trading.db"
     monkeypatch.setattr(config, "DB_PATH", str(db_path))
     
-    conn = sqlite3.connect(str(db_path))
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS balance_ledger (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_id       INTEGER,
-            symbol         TEXT DEFAULT '',
-            event_type     TEXT DEFAULT 'CLOSE',
-            amount         REAL NOT NULL DEFAULT 0,
-            balance_before REAL DEFAULT 0,
-            balance_after  REAL NOT NULL DEFAULT 0,
-            note           TEXT DEFAULT '',
-            created_at     TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS trades (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol              TEXT NOT NULL,
-            direction           TEXT NOT NULL DEFAULT 'LONG',
-            status              TEXT DEFAULT 'OPEN',
-            net_pnl             REAL DEFAULT 0,
-            environment         TEXT,
-            slippage            REAL DEFAULT 0,
-            latency_ms          INTEGER DEFAULT 0
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS params (
-            id                  INTEGER PRIMARY KEY,
-            sl_atr_mult         REAL,
-            risk_pct            REAL,
-            tp_atr_mult         REAL
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS coin_cooldown (
-            symbol TEXT PRIMARY KEY,
-            until TEXT NOT NULL,
-            consec_losses INTEGER DEFAULT 0
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS coin_profiles (
-            symbol TEXT PRIMARY KEY,
-            win_rate REAL,
-            avg_mae REAL,
-            avg_mfe REAL,
-            fakeout_rate REAL,
-            danger_score REAL,
-            total_trades INTEGER
-        )
-    """)
-    conn.execute("INSERT INTO params (id, risk_pct) VALUES (1, 1.0)")
-    conn.execute("INSERT INTO balance_ledger (balance_after) VALUES (2000.0)")
-    conn.commit()
-    conn.close()
+    import database
+    database.init_db()
     
+    # Insert required test settings
+    with database.get_conn() as conn:
+        conn.execute("INSERT OR REPLACE INTO params (id, risk_pct) VALUES (1, 1.0)")
+        conn.execute("INSERT INTO balance_ledger (balance_after) VALUES (2000.0)")
+        conn.commit()
+        
     return str(db_path)
 
 def test_pearson_correlation_block(setup_test_db):

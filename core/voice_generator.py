@@ -30,6 +30,22 @@ def generate_voice_briefing(text: str, output_path: str, voice: str = "tr-TR-Dil
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
             
+        # Housekeeping: prune old voice files older than 24 hours
+        if out_dir and os.path.exists(out_dir):
+            import time
+            now = time.time()
+            cutoff = now - (24 * 3600)
+            for filename in os.listdir(out_dir):
+                file_path = os.path.join(out_dir, filename)
+                if os.path.isfile(file_path):
+                    try:
+                        mtime = os.path.getmtime(file_path)
+                        if mtime < cutoff:
+                            os.remove(file_path)
+                            logger.info(f"Housekeeping: pruned old voice file {filename}")
+                    except Exception as he:
+                        logger.warning(f"Housekeeping error for file {filename}: {he}")
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(_generate_tts_async(text, output_path, voice))

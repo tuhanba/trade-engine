@@ -194,6 +194,47 @@ class TestDashboardTelegramAudit(unittest.TestCase):
         self.assertTrue(any(btn["text"] == "🏥 Sistem Teşhisi" for btn in flat_buttons))
         self.assertTrue(any(btn["text"] == "📈 Bakiye Grafiği" for btn in flat_buttons))
 
+    def test_telegram_callback_query_robustness(self):
+        """Verify callback query processing with None messages and multiple chat IDs."""
+        sent_messages = []
+        def mock_send(text, reply_markup=None):
+            sent_messages.append(text)
+            return True
+            
+        tg_manager = TelegramManager(send_fn=mock_send)
+        tg_manager.chat_id = "987654,112233"  # Multiple comma-separated IDs
+        
+        # Mock API calls inside TelegramManager
+        tg_manager._answer_callback_query = MagicMock()
+        tg_manager._edit_message_text = MagicMock()
+        
+        # Case 1: Callback query with None message (should not raise AttributeError)
+        cb_query_none_msg = {
+            "id": "cb_123",
+            "data": "cmd:refresh_settings",
+            "message": None,
+            "from": {"id": 987654}  # Authorized user ID
+        }
+        
+        # Call handler (should run and answer the query)
+        tg_manager._handle_callback_query(cb_query_none_msg)
+        
+        tg_manager._answer_callback_query.assert_any_call("cb_123", "İşlem alınıyor...")
+        
+        # Case 2: Clicked in group chat (unauthorized chat, but authorized user)
+        cb_query_group_chat = {
+            "id": "cb_456",
+            "data": "cmd:refresh_settings",
+            "message": {
+                "message_id": 555,
+                "chat": {"id": -1002345}  # Group chat ID
+            },
+            "from": {"id": 112233}  # Authorized user ID
+        }
+        
+        tg_manager._handle_callback_query(cb_query_group_chat)
+        tg_manager._answer_callback_query.assert_any_call("cb_456", "İşlem alınıyor...")
+
 
 if __name__ == "__main__":
     unittest.main()

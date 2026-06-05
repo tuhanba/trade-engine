@@ -708,6 +708,7 @@ class RiskEngine:
 
             # 3. Dynamic Pearson Correlation Risk Clustering Shield
             correlation_risk_mult = 1.0
+            has_conflict = False
             for t in open_trades:
                 t_sym = t.get("symbol")
                 if t_sym == symbol:
@@ -716,11 +717,24 @@ class RiskEngine:
                 corr = calculate_historical_correlation(symbol, t_sym, self.client)
                 logger.info(f"[Correlation Check] {symbol} vs {t_sym}: {corr:.3f}")
                 if corr > 0.85:
+                    has_conflict = True
+                    try:
+                        from database import set_state
+                        set_state("pearson_correlation_conflict", "True")
+                    except Exception:
+                        pass
                     logger.warning(f"[Correlation Block] {symbol} blocked due to high correlation with {t_sym} ({corr:.3f} > 0.85)")
                     return {"valid": False, "score": 0, "risk_reject_reason": "high_correlation_block"}
                 elif corr > 0.75:
                     correlation_risk_mult = min(correlation_risk_mult, 0.5)
                     logger.info(f"[Correlation Warning] {symbol} risk scaled down due to correlation with {t_sym} ({corr:.3f} > 0.75)")
+            
+            if not has_conflict:
+                try:
+                    from database import set_state
+                    set_state("pearson_correlation_conflict", "False")
+                except Exception:
+                    pass
             risk_pct *= correlation_risk_mult
 
             # 4. Adaptive Slippage & Latency Guard

@@ -616,8 +616,8 @@ def test_friday_autonomous_monitoring():
             # Check prompt setting
             assert any(call[0][0] == "friday_last_cleanup_prompt" for call in mock_set_state.call_args_list)
             args, kwargs = mock_send_msg.call_args
-            assert "Silinmek İstenen Gereksiz Dosyalar" in args[0]
-            assert "Geçmiş trade geçmişimize ve verilerimize KESİNLİKLE dokunmuyorum" in args[0]
+            assert "Silinmek İstenen Geçici Dosyalar" in args[0]
+            assert "Trade geçmişimiz ve veritabanı kayıtlarımız korunmaktadır" in args[0]
             assert "cmd:clean_server" in kwargs["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
 
     finally:
@@ -928,7 +928,7 @@ def test_friday_nightly_briefing():
         # Test manual trigger via evaluate_and_decide with keyword "rapor"
         report = ceo.evaluate_and_decide("günün bülteni")
         
-        assert "Bugün piyasada toplam <b>2</b> işlem tamamladık" in report
+        assert "Bugün piyasada toplam <b>2</b> işlem tamamlandı" in report
         assert "toplam net kar/zarar" in report.lower()
         assert "+30.00" in report
         assert "<b>1</b> hatalı sinyali veto ederek" in report

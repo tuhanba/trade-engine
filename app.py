@@ -245,7 +245,7 @@ def api_stats():
         return _ok({
             **stats,
             "balance":         stats.get("balance", ax_status.get("paper_balance", 0)),
-            "initial_balance": stats.get("initial_balance", ax_status.get("initial_balance", 500.0)),
+            "initial_balance": stats.get("initial_balance", ax_status.get("initial_balance", getattr(config, "INITIAL_PAPER_BALANCE", 2000.0))),
             "bot_running":     ax_status.get("bot_running", False),
             "execution_mode":  ax_status.get("execution_mode", "paper"),
             # BUG FIX: Frontend için zorunlu alanlar — get_dashboard_stats'dan gelir
@@ -938,13 +938,13 @@ def api_paper_state():
         return jsonify({
             "ok": True,
             "data": {
-                "balance": float(bal[0]) if bal else 500.0,
+                "balance": float(bal[0]) if bal else getattr(config, "INITIAL_PAPER_BALANCE", 2000.0),
                 "open_trades": open_count,
                 "closed_trades": closed_count,
             }
         })
     except Exception as e:
-        return jsonify({"ok": True, "data": {"balance": 500.0}, "error": str(e)})
+        return jsonify({"ok": True, "data": {"balance": getattr(config, "INITIAL_PAPER_BALANCE", 2000.0)}, "error": str(e)})
 
 
 # ── /api/history ──────────────────────────────────────────────────────────────
@@ -1038,13 +1038,13 @@ def api_paper_stats():
             ).fetchone()
         return jsonify({
             "ok": True,
-            "balance": float(bal[0]) if bal else 500.0,
+            "balance": float(bal[0]) if bal else getattr(config, "INITIAL_PAPER_BALANCE", 2000.0),
             "ghost_tracking": [dict(zip(
                 ["tracked_from","total","wins","losses","avg_mfe"], r
             )) for r in ghost],
         })
     except Exception as e:
-        return jsonify({"ok": True, "balance": 500.0, "ghost_tracking": [], "error": str(e)})
+        return jsonify({"ok": True, "balance": getattr(config, "INITIAL_PAPER_BALANCE", 2000.0), "ghost_tracking": [], "error": str(e)})
 
 
 # ── /api/circuit_breaker ──────────────────────────────────────────────────────
@@ -1311,7 +1311,7 @@ def api_equity_curve():
     """Son 30 gunluk kumulatif PnL serisi."""
     try:
         with get_conn() as conn:
-            initial_balance = 500.0
+            initial_balance = getattr(config, "INITIAL_PAPER_BALANCE", 2000.0)
             for q in [
                 "SELECT balance FROM balance_ledger ORDER BY id ASC LIMIT 1",
                 "SELECT balance FROM paper_account ORDER BY id ASC LIMIT 1",

@@ -167,11 +167,11 @@ class TestIntegrationFlow(unittest.TestCase):
              patch.object(config, 'TIME_DECAY_ENABLED', True):
             
             # Retrieve trade and run update
-            trade = database.get_open_trades()[0]
+            trade = database.get_open_trades("paper")[0]
             engine._process_single_trade(trade)
             
             # Assert database SL is updated to 95.0
-            updated_trade = database.get_open_trades()[0]
+            updated_trade = database.get_open_trades("paper")[0]
             self.assertAlmostEqual(updated_trade["sl"], 95.0, delta=1.0)
             
             # Assert WebSocket event was broadcast
@@ -215,12 +215,12 @@ class TestIntegrationFlow(unittest.TestCase):
              patch.object(config, 'TIME_DECAY_ENABLED', True):
             
             # Find the open scalp trade and process it
-            open_trades = database.get_open_trades()
+            open_trades = database.get_open_trades("paper")
             trade = [t for t in open_trades if t["id"] == trade_id][0]
             engine._process_single_trade(trade)
             
             # Assert database SL is updated to 3050.0 (3100 + (3000 - 3100) * 0.5 = 3050.0)
-            open_trades_after = database.get_open_trades()
+            open_trades_after = database.get_open_trades("paper")
             updated_trade = [t for t in open_trades_after if t["id"] == trade_id][0]
             self.assertAlmostEqual(updated_trade["sl"], 3050.0, delta=1.0)
             
@@ -278,7 +278,7 @@ class TestIntegrationFlow(unittest.TestCase):
                 
                 # Check for closed trades and publish events
                 # Simulate monitoring step of checking difference
-                exec_svc_open = {t["id"] for t in database.get_open_trades()}
+                exec_svc_open = {t["id"] for t in database.get_open_trades("paper")}
                 # It was open initially, now closed. We simulate closed detection
                 closed_ids = {trade_id} - exec_svc_open
                 

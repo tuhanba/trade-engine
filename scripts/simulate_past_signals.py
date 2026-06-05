@@ -491,7 +491,7 @@ def main():
     args = parser.parse_args()
 
     db_path = args.db or getattr(config, "DB_PATH", "trading.db")
-    initial_balance = args.balance or getattr(config, "INITIAL_PAPER_BALANCE", 500.0)
+    initial_balance = args.balance or getattr(config, "INITIAL_PAPER_BALANCE", 2000.0)
 
     if not os.path.exists(db_path):
         print(f"{RED}❌ DB bulunamadı: {db_path}{NC}")

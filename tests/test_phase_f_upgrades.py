@@ -44,91 +44,15 @@ def setup_test_db(tmp_path, monkeypatch):
     db_path = tmp_path / "test_trading.db"
     monkeypatch.setattr(config, "DB_PATH", str(db_path))
     
-    conn = sqlite3.connect(str(db_path))
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS system_state (
-            key TEXT PRIMARY KEY,
-            value TEXT,
-            updated_at TEXT
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS balance_ledger (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_id       INTEGER,
-            symbol         TEXT DEFAULT '',
-            event_type     TEXT DEFAULT 'CLOSE',
-            amount         REAL NOT NULL DEFAULT 0,
-            balance_before REAL DEFAULT 0,
-            balance_after  REAL NOT NULL DEFAULT 0,
-            note           TEXT DEFAULT '',
-            created_at     TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS trades (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol              TEXT NOT NULL,
-            direction           TEXT NOT NULL DEFAULT 'LONG',
-            status              TEXT DEFAULT 'OPEN',
-            net_pnl             REAL DEFAULT 0,
-            realized_pnl        REAL DEFAULT 0,
-            environment         TEXT,
-            slippage            REAL DEFAULT 0,
-            latency_ms          INTEGER DEFAULT 0
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS params (
-            id                  INTEGER PRIMARY KEY,
-            sl_atr_mult         REAL,
-            risk_pct            REAL,
-            tp_atr_mult         REAL,
-            updated_at          TEXT
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS ghost_signals (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            candidate_id    INTEGER,
-            symbol          TEXT DEFAULT '',
-            timeframe       TEXT DEFAULT '5m',
-            direction       TEXT DEFAULT '',
-            entry_price     REAL DEFAULT 0,
-            stop_loss       REAL DEFAULT 0,
-            tp1             REAL DEFAULT 0,
-            tp2             REAL DEFAULT 0,
-            tp3             REAL DEFAULT 0,
-            atr             REAL DEFAULT 0,
-            final_score     REAL DEFAULT 0,
-            reject_reason   TEXT DEFAULT '',
-            trigger_type    TEXT DEFAULT 'UNKNOWN',
-            market_regime   TEXT DEFAULT 'NEUTRAL',
-            coin            TEXT DEFAULT '',
-            side            TEXT DEFAULT '',
-            take_profit     REAL DEFAULT 0,
-            confidence      REAL DEFAULT 0,
-            simulated       INTEGER DEFAULT 0,
-            rsi             REAL DEFAULT 50.0,
-            cvd_slope       REAL DEFAULT 0.0,
-            created_at      TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS ghost_results (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            ghost_id        INTEGER NOT NULL,
-            virtual_outcome TEXT DEFAULT 'OPEN',
-            virtual_pnl_r   REAL DEFAULT 0,
-            simulated_at    TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (ghost_id) REFERENCES ghost_signals(id)
-        )
-    """)
-    conn.execute("INSERT INTO params (id, risk_pct) VALUES (1, 1.0)")
-    conn.execute("INSERT INTO balance_ledger (balance_after) VALUES (2000.0)")
-    conn.commit()
-    conn.close()
+    import database
+    database.init_db()
     
+    # Insert required test settings
+    with database.get_conn() as conn:
+        conn.execute("INSERT OR REPLACE INTO params (id, risk_pct) VALUES (1, 1.0)")
+        conn.execute("INSERT INTO balance_ledger (balance_after) VALUES (2000.0)")
+        conn.commit()
+        
     return str(db_path)
 
 def test_ml_market_regime_classifier_success():

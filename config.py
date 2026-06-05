@@ -348,32 +348,47 @@ def __getattr__(name: str) -> Any:
     return val
 
 def _read_dynamic_param_from_db(name: str) -> Any:
+    import sqlite3
+    import time
+    
+    max_retries = 5
+    base_delay = 0.05
+    
     if name in _DYNAMIC_PARAMS_MAP:
-        try:
-            db_key, cast_fn = _DYNAMIC_PARAMS_MAP[name]
-            import sqlite3
-            # Dairesel importu önlemek için raw connection:
-            conn = sqlite3.connect(DB_PATH, timeout=5)
-            conn.row_factory = sqlite3.Row
-            row = conn.execute("SELECT value FROM system_state WHERE key = ?", (db_key,)).fetchone()
-            conn.close()
-            if row and row["value"] is not None:
-                return cast_fn(row["value"])
-        except Exception:
-            pass
+        db_key, cast_fn = _DYNAMIC_PARAMS_MAP[name]
+        for attempt in range(max_retries):
+            try:
+                conn = sqlite3.connect(DB_PATH, timeout=30.0)
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("SELECT value FROM system_state WHERE key = ?", (db_key,)).fetchone()
+                conn.close()
+                if row and row["value"] is not None:
+                    return cast_fn(row["value"])
+                break
+            except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
+                if attempt == max_retries - 1:
+                    logger.warning(f"Database lockout reading dynamic param {name}: {e}")
+                time.sleep(base_delay * (2 ** attempt))
+            except Exception:
+                break
 
     if name in _AI_PARAMS_MAP:
-        try:
-            db_col, cast_fn = _AI_PARAMS_MAP[name]
-            import sqlite3
-            conn = sqlite3.connect(DB_PATH, timeout=5)
-            conn.row_factory = sqlite3.Row
-            row = conn.execute("SELECT * FROM params ORDER BY id DESC LIMIT 1").fetchone()
-            conn.close()
-            if row and row[db_col] is not None:
-                return cast_fn(row[db_col])
-        except Exception:
-            pass
+        db_col, cast_fn = _AI_PARAMS_MAP[name]
+        for attempt in range(max_retries):
+            try:
+                conn = sqlite3.connect(DB_PATH, timeout=30.0)
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("SELECT * FROM params ORDER BY id DESC LIMIT 1").fetchone()
+                conn.close()
+                if row and row[db_col] is not None:
+                    return cast_fn(row[db_col])
+                break
+            except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
+                if attempt == max_retries - 1:
+                    logger.warning(f"Database lockout reading AI param {name}: {e}")
+                time.sleep(base_delay * (2 ** attempt))
+            except Exception:
+                break
 
     if name in _STATIC_DEFAULTS:
         return _STATIC_DEFAULTS[name]
