@@ -77,7 +77,28 @@ else
     exit 1
 fi
 
-# 6. Execute Diagnostics Audit
+# 6. Post-Start Operations (Redis Flush & Friday State Reset)
+echo -e "\n${YELLOW}🧼 [6] Flushing Redis cache & resetting Friday CEO blocks...${NC}"
+sleep 3  # Wait a few seconds for services to fully bind
+docker exec aurvex_redis redis-cli flushall >/dev/null 2>&1 || true
+docker exec aurvex_engine python -c "import database; database.set_state('confirmation_mode', 'false'); database.set_state('friday_auto_paused_by_guard', 'false'); database.set_state('friday_boss_cooldown_until', ''); database.set_state('friday_emergency_clutch', 'false')" >/dev/null 2>&1 || true
+echo -e "${GREEN}✅ Redis önbelleği temizlendi ve otonom durumlar başarıyla sıfırlandı.${NC}"
+
+# 7. Automated Container Verification
+echo -e "\n${YELLOW}🧪 [7] Verifying container health and patch states...${NC}"
+if docker exec aurvex_engine python health_check.py; then
+    echo -e "${GREEN}✅ Konteyner sağlık testi başarılı.${NC}"
+else
+    echo -e "${RED}⚠️ Konteyner sağlık testi başarısız veya uyarı verdi!${NC}"
+fi
+
+if docker exec aurvex_engine python verify_fixes.py; then
+    echo -e "${GREEN}✅ Yama ve veritabanı şema doğrulaması başarılı.${NC}"
+else
+    echo -e "${RED}⚠️ Yama doğrulaması başarısız veya uyarı verdi!${NC}"
+fi
+
+# 8. Execute Diagnostics Audit
 echo -e "\n${YELLOW}📊 Running system audit to verify single process health...${NC}"
 chmod +x diagnostics.sh
 ./diagnostics.sh
