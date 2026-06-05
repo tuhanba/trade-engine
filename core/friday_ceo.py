@@ -1114,15 +1114,15 @@ class FridayCeo:
             def _fetch_risk():
                 try:
                     return ai_client.messages.create(
-                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-haiku-20240307"),
+                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-5-haiku-20241022"),
                         max_tokens=400,
                         system=risk_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
                     )
                 except Exception as sub_err:
-                    logger.warning(f"[Friday CEO] Subagent risk failed, forcing Haiku V1: {sub_err}")
+                    logger.warning(f"[Friday CEO] Subagent risk failed, forcing Haiku V2: {sub_err}")
                     return ai_client.messages.create(
-                        model="claude-3-haiku-20240307",
+                        model="claude-3-5-haiku-20241022",
                         max_tokens=400,
                         system=risk_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
@@ -1131,15 +1131,15 @@ class FridayCeo:
             def _fetch_tech():
                 try:
                     return ai_client.messages.create(
-                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-haiku-20240307"),
+                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-5-haiku-20241022"),
                         max_tokens=400,
                         system=tech_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
                     )
                 except Exception as sub_err:
-                    logger.warning(f"[Friday CEO] Subagent tech failed, forcing Haiku V1: {sub_err}")
+                    logger.warning(f"[Friday CEO] Subagent tech failed, forcing Haiku V2: {sub_err}")
                     return ai_client.messages.create(
-                        model="claude-3-haiku-20240307",
+                        model="claude-3-5-haiku-20241022",
                         max_tokens=400,
                         system=tech_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
@@ -1148,15 +1148,15 @@ class FridayCeo:
             def _fetch_health():
                 try:
                     return ai_client.messages.create(
-                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-haiku-20240307"),
+                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-5-haiku-20241022"),
                         max_tokens=400,
                         system=health_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
                     )
                 except Exception as sub_err:
-                    logger.warning(f"[Friday CEO] Subagent health failed, forcing Haiku V1: {sub_err}")
+                    logger.warning(f"[Friday CEO] Subagent health failed, forcing Haiku V2: {sub_err}")
                     return ai_client.messages.create(
-                        model="claude-3-haiku-20240307",
+                        model="claude-3-5-haiku-20241022",
                         max_tokens=400,
                         system=health_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
@@ -1202,7 +1202,7 @@ class FridayCeo:
             # Calling Claude model with automatic fallback if the configured model is not accessible
             try:
                 response = ai_client.messages.create(
-                    model=getattr(config, "FRIDAY_CEO_MODEL", "claude-3-5-sonnet-20240620"),
+                    model=getattr(config, "FRIDAY_CEO_MODEL", "claude-3-5-sonnet-20241022"),
                     max_tokens=1500,
                     system=SYSTEM_PROMPT,
                     messages=[
@@ -1210,9 +1210,9 @@ class FridayCeo:
                     ]
                 )
             except Exception as e:
-                logger.warning(f"[Friday CEO] Primary model failed, falling back to Claude 3 Haiku V1: {e}")
+                logger.warning(f"[Friday CEO] Primary model failed, falling back to Claude 3.5 Haiku V2: {e}")
                 response = ai_client.messages.create(
-                    model="claude-3-haiku-20240307",
+                    model="claude-3-5-haiku-20241022",
                     max_tokens=1500,
                     system=SYSTEM_PROMPT,
                     messages=[
