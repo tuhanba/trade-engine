@@ -110,6 +110,7 @@ async def test_execution_service_confirmation_gate():
     """Verify that ExecutionService intercepts execution when CONFIRMATION_MODE is enabled."""
     with patch("config.CONFIRMATION_MODE", True), \
          patch("config.EXECUTION_MODE", "paper"), \
+         patch("config.CONFIRMATION_AUTO_EXECUTE_HIGH_QUALITY", False), \
          patch("database.update_candidate_status") as mock_update_status, \
          patch("database.save_signal_event") as mock_save_event, \
          patch("telegram_delivery.send_message") as mock_send_msg:
@@ -605,7 +606,8 @@ def test_friday_autonomous_monitoring():
             mock_get_regime.return_value = "NEUTRAL"
             mock_get_state.side_effect = lambda key, default=None: {
                 "friday_last_regime": "NEUTRAL",
-                "friday_last_cleanup_prompt": None
+                "friday_last_cleanup_prompt": None,
+                "confirmation_mode": "true"
             }.get(key, default)
 
             mock_scan_files.return_value = ["dummy_backtest_temp_1.db", "dummy_sys.log"]
@@ -619,6 +621,32 @@ def test_friday_autonomous_monitoring():
             assert "Silinmek İstenen Geçici Dosyalar" in args[0]
             assert "Trade geçmişimiz ve veritabanı kayıtlarımız korunmaktadır" in args[0]
             assert "cmd:clean_server" in kwargs["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+            
+            # --- Test Case 4: Autonomous Housekeeping (confirmation_mode = false) ---
+            mock_set_state.reset_mock()
+            mock_send_msg.reset_mock()
+            mock_send_voice.reset_mock()
+
+            mock_get_regime.return_value = "NEUTRAL"
+            mock_get_state.side_effect = lambda key, default=None: {
+                "friday_last_regime": "NEUTRAL",
+                "friday_last_cleanup_prompt": None,
+                "confirmation_mode": "false"
+            }.get(key, default)
+
+            mock_scan_files.return_value = ["dummy_backtest_temp_1.db", "dummy_sys.log"]
+            mock_getsize.side_effect = lambda f: 6 * 1024 * 1024  # 12MB total
+
+            with patch("core.friday_ceo.FridayCeo.execute_cleanup", return_value=(2, 12.0)) as mock_execute_cleanup:
+                ceo.run_autonomous_monitoring()
+                
+                # Check that execute_cleanup was called autonomously
+                mock_execute_cleanup.assert_called_once()
+                # Check that success message was sent to Telegram
+                mock_send_msg.assert_called()
+                args, kwargs = mock_send_msg.call_args
+                assert "Otonom Altyapı Temizliği" in args[0]
+                assert "12.00 MB" in args[0]
 
     finally:
         if os.path.exists(temp_db):
@@ -1151,4 +1179,130 @@ def test_friday_chart_generator():
     finally:
         if os.path.exists(temp_db):
             os.remove(temp_db)
+
+
+def test_footprint_imbalance_boost():
+    from core.ai_decision_engine import OrderFlowAgent
+    from core.data_layer import SignalData
+    from unittest.mock import MagicMock
+
+    agent = OrderFlowAgent()
+    sig = SignalData()
+    sig.symbol = "BTCUSDT"
+    sig.side = "LONG"
+    sig.score = 70.0
+
+    # Case 1: Bullish imbalance (90 buys, 10 sells -> buy_ratio = 0.90)
+    mock_client = MagicMock()
+    mock_client.futures_recent_trades.return_value = (
+        [{"qty": "1.0", "isBuyerMaker": False} for _ in range(90)] +
+        [{"qty": "1.0", "isBuyerMaker": True} for _ in range(10)]
+    )
+    context = {"client": mock_client}
+    vote, score, reason = agent.evaluate(sig, context)
+    assert score > 70.0
+    assert "Footprint Bullish Imbalance" in reason
+
+    # Case 2: Bearish imbalance (10 buys, 90 sells -> buy_ratio = 0.10) for SHORT
+    sig.side = "SHORT"
+    mock_client_bear = MagicMock()
+    mock_client_bear.futures_recent_trades.return_value = (
+        [{"qty": "1.0", "isBuyerMaker": False} for _ in range(10)] +
+        [{"qty": "1.0", "isBuyerMaker": True} for _ in range(90)]
+    )
+    context_bear = {"client": mock_client_bear}
+    vote, score, reason = agent.evaluate(sig, context_bear)
+    assert score > 70.0
+    assert "Footprint Bearish Imbalance" in reason
+
+
+def test_gmm_regime_adaptive_multipliers():
+    from core.risk_engine import RiskEngine
+    from unittest.mock import MagicMock, patch
+    import config
+
+    mock_client = MagicMock()
+    mock_client.futures_klines.return_value = [
+        [0, 100, 101, 99, 100, 10, 0, 0, 0, 0, 0, 0] for _ in range(30)
+    ]
+
+    engine = RiskEngine(mock_client, db_path="trading.db")
+
+    # Retrieve base neutral calculation for reference
+    with patch("database.get_market_regime", return_value="NEUTRAL"), \
+         patch("database.get_open_trades", return_value=[]), \
+         patch("database.get_system_state", return_value="-"), \
+         patch("sqlite3.connect") as mock_sqlite_conn:
+         
+        mock_cursor = MagicMock()
+        mock_sqlite_conn.return_value.cursor.return_value = mock_cursor
+        mock_sqlite_conn.return_value.execute.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (0.0,)
+        
+        neutral_res = engine.calculate("BTCUSDT", "LONG", 50000.0, "A+", 1000.0, score=70.0)
+
+    # 1. TRENDING_HIGH_VOL: stops 1.3x, targets 1.3x
+    with patch("database.get_market_regime", return_value="TRENDING_HIGH_VOL"), \
+         patch("database.get_open_trades", return_value=[]), \
+         patch("database.get_system_state", return_value="-"), \
+         patch("sqlite3.connect") as mock_sqlite_conn:
+        
+        mock_cursor = MagicMock()
+        mock_sqlite_conn.return_value.cursor.return_value = mock_cursor
+        mock_sqlite_conn.return_value.execute.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (0.0,)
+        
+        res = engine.calculate("BTCUSDT", "LONG", 50000.0, "A+", 1000.0, score=70.0)
+        # Verify stop distance is scaled up by 1.3
+        dist_neutral = abs(neutral_res["sl"] - 50000.0)
+        dist_trending = abs(res["sl"] - 50000.0)
+        assert pytest.approx(dist_trending) == dist_neutral * 1.3
+
+    # 2. CHOPPY_HIGH_VOL: stops 1.4x, targets 0.8x
+    with patch("database.get_market_regime", return_value="CHOPPY_HIGH_VOL"), \
+         patch("database.get_open_trades", return_value=[]), \
+         patch("database.get_system_state", return_value="-"), \
+         patch("sqlite3.connect") as mock_sqlite_conn:
+        
+        mock_cursor = MagicMock()
+        mock_sqlite_conn.return_value.cursor.return_value = mock_cursor
+        mock_sqlite_conn.return_value.execute.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = (0.0,)
+        
+        res = engine.calculate("BTCUSDT", "LONG", 50000.0, "A+", 1000.0, score=70.0)
+        dist_choppy = abs(res["sl"] - 50000.0)
+        assert pytest.approx(dist_choppy) == dist_neutral * 1.4
+
+
+def test_stop_hunt_liquidity_sweep_boost():
+    from core.ai_decision_engine import classify_signal
+    from core.data_layer import SignalData
+    from unittest.mock import patch
+
+    sig = SignalData()
+    sig.symbol = "BTCUSDT"
+    sig.side = "LONG"
+    sig.entry_price = 50000.0
+    sig.stop_loss = 49000.0
+    sig.tp1 = 53000.0  # High RR (>3.0) gives *1.2 bonus, ensuring base adjusted score is high enough
+    sig.score = 70.0
+    sig.setup_quality = "B"
+
+    # Context with is_liquidity_sweep and bypassed sentiment calls
+    context = {
+        "is_liquidity_sweep": True,
+        "fng_value": 50,
+        "macro_sentiment": "neutral"
+    }
+
+    with patch("database.get_market_regime", return_value="NEUTRAL"), \
+         patch("database.get_open_trades", return_value=[]), \
+         patch("core.ai_decision_engine.GhostMemoryManager.get_symbol_ghost_stats", return_value={"total": 0, "tp_hits": 0, "sl_hits": 0, "ghost_winrate": 0.0}), \
+         patch("core.ai_decision_engine.GhostMemoryManager.get_direction_bias", return_value={}), \
+         patch("core.ai_decision_engine.GhostMemoryManager.get_score_multiplier", return_value=1.0):
+        res = classify_signal(sig, context)
+        # Quality should be upgraded from B to A
+        assert sig.setup_quality == "A"
+        # Adjusted score should be boosted (base adjusted score around 75.6 + 10 = 85.6)
+        assert res.score_adjusted >= 80.0
 

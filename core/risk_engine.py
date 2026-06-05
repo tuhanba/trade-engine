@@ -137,9 +137,9 @@ def check_correlated_exposure(symbol: str, direction: str, open_trades: list) ->
         # 2. Directional Correlation Block (Overtrading Control)
         # Don't take too many trades in the same direction if we already have exposure
         same_direction = [t for t in open_trades if t.get("direction", t.get("side", "")) == direction]
-        MAX_SAME_DIRECTION = 3 # Hard limit for now, could be moved to config
+        MAX_SAME_DIRECTION = int(getattr(config, "MAX_SAME_DIRECTION", 5))
         if len(same_direction) >= MAX_SAME_DIRECTION:
-            logger.debug(f"[Risk] {symbol} blocked due to max directional exposure ({direction}).")
+            logger.debug(f"[Risk] {symbol} blocked due to max directional exposure ({direction}) (limit={MAX_SAME_DIRECTION}).")
             return False
 
         return True
@@ -359,12 +359,43 @@ def calculate_kelly_risk_pct(symbol: str, setup_rr: float, base_risk_pct: float)
         # Kelly Formülü: K = W - (1 - W) / R
         kelly_f = win_rate - ((1.0 - win_rate) / payoff)
         
-        # Quarter-Kelly (K * 0.25)
-        fractional_kelly = kelly_f * 0.25
+        # Dinamik Kelly Kesri (Win Rate'e göre ölçeklenir)
+        kelly_fraction = 0.25
+        if win_rate >= 0.60:
+            kelly_fraction = 0.45
+        elif win_rate >= 0.50:
+            kelly_fraction = 0.35
+        elif win_rate < 0.40:
+            kelly_fraction = 0.15
+            
+        fractional_kelly = kelly_f * kelly_fraction
         risk_pct = fractional_kelly * 100
         
-        # Clamp to safety limits
-        clamped = max(0.5, min(3.0, risk_pct))
+        # Kelly Safety Cap Check
+        # If win_rate < 0.45 or consecutive losses >= 2, cap Kelly at 1.2%
+        consec_losses = 0
+        try:
+            with get_conn() as conn:
+                recent_trades = conn.execute("""
+                    SELECT net_pnl FROM trades 
+                    WHERE status = 'closed'
+                    ORDER BY id DESC LIMIT 5
+                """).fetchall()
+                for r in recent_trades:
+                    pnl_val = float(r[0] or 0)
+                    if pnl_val <= 0:
+                        consec_losses += 1
+                    else:
+                        break
+        except Exception as consec_err:
+            logger.debug(f"[Kelly Safety Cap] consecutive loss check failed: {consec_err}")
+
+        kelly_safety_cap = 3.0
+        if win_rate < 0.45 or consec_losses >= 2:
+            kelly_safety_cap = 1.2
+            logger.info(f"[Kelly Safety Cap Triggered] win_rate={win_rate:.2f}, consecutive_losses={consec_losses}. Cap set to 1.2% (down from 3.0%)")
+
+        clamped = max(0.5, min(kelly_safety_cap, risk_pct))
         logger.info(f"[Kelly Sizing] {symbol}: W={win_rate:.2f}, R={payoff:.2f}, Kelly={kelly_f:.3f}, Risk%={clamped:.2f}% (Base: {base_risk_pct}%)")
         return clamped
     except Exception as e:
@@ -463,9 +494,10 @@ class RiskEngine:
                 return {"valid": False, "score": 0, "risk_reject_reason": "directional_correlation_blocked"}
 
             # L2 Order Book Wall Guard Check
-            is_blocked, wall_reason = self.check_order_book_wall(symbol, direction, entry)
-            if is_blocked:
-                return {"valid": False, "score": 0, "risk_reject_reason": wall_reason}
+            if getattr(config, "ORDER_BOOK_WALL_FILTER_ENABLED", True):
+                is_blocked, wall_reason = self.check_order_book_wall(symbol, direction, entry)
+                if is_blocked:
+                    return {"valid": False, "score": 0, "risk_reject_reason": wall_reason}
             sl_atr_mult = float(getattr(config, "HUMAN_SL_ATR_MULT" if _human else "SL_ATR_MULT", 2.0 if _human else 1.8))
             tp1_r = float(getattr(config, "HUMAN_TP1_R" if _human else "TP1_R", 1.5 if _human else 1.5))
             tp2_r = float(getattr(config, "HUMAN_TP2_R" if _human else "TP2_R", 2.5 if _human else 2.5))
@@ -539,15 +571,39 @@ class RiskEngine:
             try:
                 from database import get_market_regime
                 regime = get_market_regime()
+                
+                # Apply GMM Regime-Adaptive TP/SL ATR Multipliers
+                if regime == "TRENDING_HIGH_VOL":
+                    sl_atr_mult *= 1.3
+                    tp1_r *= 1.3
+                    tp2_r *= 1.3
+                    tp3_r *= 1.3
+                    logger.info(f"[GMM-Adaptive] TRENDING_HIGH_VOL scaling applied: stops 1.3x, targets 1.3x.")
+                elif regime == "CHOPPY_HIGH_VOL":
+                    is_choppy = True
+                    sl_atr_mult *= 1.4
+                    tp1_r *= 0.8
+                    tp2_r *= 0.8
+                    tp3_r *= 0.8
+                    logger.info(f"[GMM-Adaptive] CHOPPY_HIGH_VOL scaling applied: stops 1.4x, targets 0.8x.")
+                elif regime == "CHOPPY_LOW_VOL":
+                    is_choppy = True
+                    sl_atr_mult *= 0.85
+                    tp1_r *= 0.75
+                    tp2_r *= 0.75
+                    tp3_r *= 0.75
+                    logger.info(f"[GMM-Adaptive] CHOPPY_LOW_VOL scaling applied: stops 0.85x, targets 0.75x.")
+                
                 if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
                     is_choppy = True
                     # Kötü piyasada kârı erken al (Scalp TP)
-                    tp1_r = max(1.0, tp1_r * 0.8)
-                    tp2_r = max(1.5, tp2_r * 0.8)
-                    tp3_r = max(2.5, tp3_r * 0.8)
+                    if regime == "CHOPPY":
+                        tp1_r = max(1.0, tp1_r * 0.8)
+                        tp2_r = max(1.5, tp2_r * 0.8)
+                        tp3_r = max(2.5, tp3_r * 0.8)
                     
-                    # OTONOM KALİTE GATING: CHOPPY piyasada sadece en iyi kalitedeki işlemlere izin ver
-                    if quality not in ("S", "A+"):
+                    # OTONOM KALİTE GATING: CHOPPY piyasada S, A+, A kalitelerine izin ver (gevşetildi)
+                    if quality not in ("S", "A+", "A"):
                         return {"valid": False, "score": 0, "risk_reject_reason": "choppy_market_quality_gate"}
                     # OTONOM SKOR GATING: CHOPPY piyasada eşiği 5 puan artır
                     required_score = float(getattr(config, "TRADE_THRESHOLD", 55.0)) + 5.0
@@ -560,7 +616,7 @@ class RiskEngine:
                         or (regime == "BEARISH" and direction == "SHORT")
                         or (regime in ("TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"))
                     )
-                    if is_trending_dir:
+                    if is_trending_dir and regime != "TRENDING_HIGH_VOL":
                         tp2_r *= 1.2
                         tp3_r *= 1.5
             except Exception as e:
@@ -665,11 +721,20 @@ class RiskEngine:
                     logger.warning(f"[Risk-Drawdown-Lock] HARD LOCKOUT! Drawdown {drawdown_pct:.2f}% >= limit {drawdown_lock_pct}%. ATH={ath_balance:.2f}, Current={current_bal:.2f}")
                     return {"valid": False, "score": 0, "risk_reject_reason": "drawdown_hard_lock"}
                 
-                # Defensive Drawdown mode check
-                drawdown_defensive_pct = float(getattr(config, "DRAWDOWN_DEFENSIVE_PCT", 5.0))
-                if drawdown_pct >= drawdown_defensive_pct:
-                    risk_pct *= 0.5
-                    logger.info(f"[Risk-Drawdown-Defensive] Defensive mode: Drawdown {drawdown_pct:.2f}% >= limit {drawdown_defensive_pct}%. Risk scaled by 0.5x to {risk_pct:.2f}%")
+                # Progressive Drawdown Risk Governor
+                progressive_enabled = getattr(config, "PROGRESSIVE_DRAWDOWN_ENABLED", False)
+                if progressive_enabled:
+                    if drawdown_pct > 1.0:
+                        scale_factor = (drawdown_pct - 1.0) / (drawdown_lock_pct - 1.0 + 1e-10)
+                        drawdown_mult = max(0.15, min(1.0, 1.0 - scale_factor))
+                        risk_pct *= drawdown_mult
+                        logger.info(f"[Risk-Drawdown-Progressive] Drawdown {drawdown_pct:.2f}% scaled risk by {drawdown_mult:.2f}x to {risk_pct:.2f}%")
+                else:
+                    # Defensive Drawdown mode check (binary fallback)
+                    drawdown_defensive_pct = float(getattr(config, "DRAWDOWN_DEFENSIVE_PCT", 5.0))
+                    if drawdown_pct >= drawdown_defensive_pct:
+                        risk_pct *= 0.5
+                        logger.info(f"[Risk-Drawdown-Defensive] Defensive mode: Drawdown {drawdown_pct:.2f}% >= limit {drawdown_defensive_pct}%. Risk scaled by 0.5x to {risk_pct:.2f}%")
                 
                 # Equity Curve SMA check
                 if bool(getattr(config, "EQUITY_CURVE_FILTER_ENABLED", True)):
@@ -842,6 +907,41 @@ class RiskEngine:
                 sl_atr_mult *= 1.25
             elif atr_pct < 0.008:
                 sl_atr_mult *= 0.85
+
+            # GMM Regime-Adaptive TP/SL ATR Multipliers
+            try:
+                from database import get_market_regime
+                regime = get_market_regime()
+                if regime == "TRENDING_HIGH_VOL":
+                    sl_atr_mult *= 1.3
+                    tp1_r *= 1.3
+                    tp2_r *= 1.3
+                    tp3_r *= 1.3
+                elif regime == "CHOPPY_HIGH_VOL":
+                    sl_atr_mult *= 1.4
+                    tp1_r *= 0.8
+                    tp2_r *= 0.8
+                    tp3_r *= 0.8
+                elif regime == "CHOPPY_LOW_VOL":
+                    sl_atr_mult *= 0.85
+                    tp1_r *= 0.75
+                    tp2_r *= 0.75
+                    tp3_r *= 0.75
+                elif regime in ("CHOPPY", "SIDEWAYS"):
+                    tp1_r = max(1.0, tp1_r * 0.8)
+                    tp2_r = max(1.5, tp2_r * 0.8)
+                    tp3_r = max(2.5, tp3_r * 0.8)
+                elif regime in ("BULLISH", "BEARISH", "TRENDING_LOW_VOL"):
+                    is_trending_dir = (
+                        (regime == "BULLISH" and direction == "LONG")
+                        or (regime == "BEARISH" and direction == "SHORT")
+                        or (regime == "TRENDING_LOW_VOL")
+                    )
+                    if is_trending_dir:
+                        tp2_r *= 1.2
+                        tp3_r *= 1.5
+            except Exception as e:
+                logger.debug(f"[Risk Preview] Dynamic TP scaling failed: {e}")
 
             is_long = direction == "LONG"
             sl_dist = atr_val * sl_atr_mult

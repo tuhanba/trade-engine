@@ -126,10 +126,12 @@ class ExecutionService:
                 trade_thr -= 3.0
                 logger.debug("[ExecutionService] %s ML bonus → thr=%.1f", symbol, trade_thr)
 
-            qualities = getattr(config, "EXECUTABLE_QUALITIES", ("S", "A+", "A", "B", "C"))
+            qualities = getattr(config, "EXECUTABLE_QUALITIES", ("S", "A+", "A", "B", "C", "M"))
 
             if sig.final_score >= trade_thr and sig.setup_quality in qualities:
-                is_high_quality = sig.setup_quality in ("S", "A+") or sig.final_score >= 75.0
+                conf_qualities = getattr(config, "CONFIRMATION_AUTO_EXECUTE_QUALITIES", ("S", "A+", "A"))
+                conf_score     = getattr(config, "CONFIRMATION_AUTO_EXECUTE_SCORE", 70.0)
+                is_high_quality = sig.setup_quality in conf_qualities or sig.final_score >= conf_score
                 auto_exec_high  = getattr(config, "CONFIRMATION_AUTO_EXECUTE_HIGH_QUALITY", True)
                 
                 if getattr(config, "CONFIRMATION_MODE", False) and not (is_high_quality and auto_exec_high):

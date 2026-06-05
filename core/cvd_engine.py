@@ -170,6 +170,115 @@ class CVDEngine:
             logger.error(f"[CVD] Analiz hatası {symbol}: {e}")
             return _neutral_result()
 
+    def analyze_mtf_cvd(self, symbol: str, direction: str) -> dict:
+        """
+        Calculates Multi-Timeframe Cumulative Volume Delta (CVD) divergence and absorption on 1m, 5m, and 15m.
+        """
+        res_mtf = {}
+        timeframes = ["1m", "5m", "15m"]
+        
+        for tf in timeframes:
+            df = self.get_candles_with_cvd(symbol, tf, 60)
+            if df.empty or len(df) < 20:
+                res_mtf[tf] = {
+                    "cvd_slope": 0.0,
+                    "buy_ratio": 0.5,
+                    "avg_buy_ratio": 0.5,
+                    "cvd_divergence": False,
+                    "cvd_signal": "NEUTRAL",
+                    "price_change": 0.0
+                }
+                continue
+                
+            last_cvd = df["cvd"].iloc[-1]
+            cvd_5ago = df["cvd"].iloc[-6]
+            cvd_std = float(df["cvd"].std())
+            cvd_slope = (last_cvd - cvd_5ago) / (cvd_std + 1e-10)
+            
+            price_change = (df["close"].iloc[-1] - df["close"].iloc[-11]) / df["close"].iloc[-11]
+            last_buy_ratio = float(df["buy_ratio"].iloc[-1])
+            avg_buy_ratio = float(df["buy_ratio"].tail(5).mean())
+            
+            price_up = price_change > 0.002
+            price_dn = price_change < -0.002
+            cvd_up = cvd_slope > 0.05
+            cvd_dn = cvd_slope < -0.05
+            
+            bullish_div = price_dn and cvd_up
+            bearish_div = price_up and cvd_dn
+            
+            cvd_sig = "NEUTRAL"
+            if bullish_div:
+                cvd_sig = "BULLISH"
+            elif bearish_div:
+                cvd_sig = "BEARISH"
+            elif cvd_up and price_up:
+                cvd_sig = "CONFIRM_LONG"
+            elif cvd_dn and price_dn:
+                cvd_sig = "CONFIRM_SHORT"
+                
+            res_mtf[tf] = {
+                "cvd_slope": cvd_slope,
+                "buy_ratio": last_buy_ratio,
+                "avg_buy_ratio": avg_buy_ratio,
+                "cvd_divergence": bullish_div or bearish_div,
+                "cvd_signal": cvd_sig,
+                "price_change": price_change
+            }
+
+        cvd_absorption = "NEUTRAL"
+        for tf in ["1m", "5m"]:
+            tf_data = res_mtf[tf]
+            slope = tf_data["cvd_slope"]
+            p_chg = tf_data["price_change"]
+            avg_br = tf_data["avg_buy_ratio"]
+            
+            if abs(p_chg) <= 0.0005:  # <= 0.05% price change
+                if avg_br > 0.58 and slope > 0.1:
+                    cvd_absorption = "BULLISH_ABSORPTION"
+                elif avg_br < 0.42 and slope < -0.1:
+                    cvd_absorption = "BEARISH_ABSORPTION"
+                    
+            if cvd_absorption != "NEUTRAL":
+                break
+
+        df_5m = self.get_candles_with_cvd(symbol, "5m", 60)
+        last_cvd = df_5m["cvd"].iloc[-1] if not df_5m.empty else 0.0
+        
+        res_5m = res_mtf["5m"]
+        bonus = 0.0
+        cvd_sig = res_5m["cvd_signal"]
+        if cvd_sig == "BULLISH":
+            bonus = 1.5 if direction == "LONG" else -1.0
+        elif cvd_sig == "BEARISH":
+            bonus = 1.5 if direction == "SHORT" else -1.0
+        elif cvd_sig == "CONFIRM_LONG" and direction == "LONG":
+            bonus = 1.0
+        elif cvd_sig == "CONFIRM_SHORT" and direction == "SHORT":
+            bonus = 1.0
+            
+        avg_buy_ratio = res_5m["avg_buy_ratio"]
+        if avg_buy_ratio > 0.60 and direction == "LONG":
+            bonus += 0.5
+        elif avg_buy_ratio < 0.40 and direction == "SHORT":
+            bonus += 0.5
+        elif avg_buy_ratio > 0.60 and direction == "SHORT":
+            bonus -= 0.5
+        elif avg_buy_ratio < 0.40 and direction == "LONG":
+            bonus -= 0.5
+            
+        return {
+            "cvd_signal": cvd_sig,
+            "cvd_score_bonus": round(max(-2.0, min(2.0, bonus)), 2),
+            "cvd_divergence": res_5m["cvd_divergence"],
+            "cvd_slope": round(res_5m["cvd_slope"], 4),
+            "buy_ratio": round(res_5m["buy_ratio"], 3),
+            "avg_buy_ratio": round(res_5m["avg_buy_ratio"], 3),
+            "cvd_value": round(last_cvd, 4),
+            "cvd_absorption": cvd_absorption,
+            "mtf_signals": {tf: data["cvd_signal"] for tf, data in res_mtf.items()}
+        }
+
 
 def _neutral_result() -> dict:
     return {

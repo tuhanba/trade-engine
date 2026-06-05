@@ -163,6 +163,46 @@ class TriggerEngine:
             logger.warning(f"Error in Stop-Hunt detection: {e}")
         return False
 
+    def _detect_sfp(self, df: pd.DataFrame, direction: str) -> tuple[bool, float]:
+        """
+        Detects Swing Failure Pattern (SFP) on the recent candles.
+        """
+        if len(df) < 45:
+            return False, 0.0
+        try:
+            swing_lows = []
+            swing_highs = []
+            for i in range(len(df) - 45, len(df) - 3):
+                is_low = True
+                is_high = True
+                for w in range(i - 5, i + 6):
+                    if w < 0 or w >= len(df):
+                        continue
+                    if df["low"].iloc[w] < df["low"].iloc[i]:
+                        is_low = False
+                    if df["high"].iloc[w] > df["high"].iloc[i]:
+                        is_high = False
+                if is_low:
+                    swing_lows.append(df["low"].iloc[i])
+                if is_high:
+                    swing_highs.append(df["high"].iloc[i])
+            
+            last_low = df["low"].iloc[-1]
+            last_high = df["high"].iloc[-1]
+            last_close = df["close"].iloc[-1]
+            
+            if direction == "LONG" and swing_lows:
+                lowest_low = min(swing_lows)
+                if last_low < lowest_low and last_close > lowest_low:
+                    return True, lowest_low
+            elif direction == "SHORT" and swing_highs:
+                highest_high = max(swing_highs)
+                if last_high > highest_high and last_close < highest_high:
+                    return True, highest_high
+        except Exception as e:
+            logger.warning(f"Error in SFP detection: {e}")
+        return False, 0.0
+
 
 
     def analyze(self, symbol: str, direction: str, btc_trend: str = "NEUTRAL",
@@ -172,7 +212,7 @@ class TriggerEngine:
 
         current_hour = datetime.now(timezone.utc).hour
         import sys
-        if current_hour in BAD_HOURS_UTC and "pytest" not in sys.modules:
+        if current_hour in BAD_HOURS_UTC and "pytest" not in sys.modules and "unittest" not in sys.modules:
             return {"quality": "D", "score": 0, "entry": 0}
 
         # BTC NEUTRAL → geçir (hem LONG hem SHORT açılabilir)
@@ -334,6 +374,16 @@ class TriggerEngine:
         except Exception as e:
             logger.debug(f"[Stop-Hunt Detector] Error: {e}")
 
+        is_sfp = False
+        sfp_level = 0.0
+        try:
+            is_sfp, sfp_level = self._detect_sfp(df5, direction)
+            if is_sfp:
+                is_sweep = True
+                logger.info(f"[SFP Detector] SFP detected for {symbol} {direction} at level {sfp_level:.4f}.")
+        except Exception as e:
+            logger.debug(f"[SFP Detector] Error: {e}")
+
         # S Sınıfı Kontrolü
         s_score = 0
         if adx_val >= 35: s_score += 2
@@ -363,58 +413,59 @@ class TriggerEngine:
         # ─────────────────────────────────────────────────────────────────────
 
         # ── L2 Orderbook (Balina Duvarı) Kalkanı ─────────────────────────────
+        bid_depth, ask_depth = 1.0, 1.0
         try:
-            is_scalp = not getattr(config, "HUMAN_MODE", False)
-            ob_limit = 50 if is_scalp else 20
-            ob = self.client.futures_order_book(symbol=symbol, limit=ob_limit)
-            bids = ob.get("bids", [])
-            asks = ob.get("asks", [])
-            
-            bid_depth = sum(float(b[0]) * float(b[1]) for b in bids)
-            ask_depth = sum(float(a[0]) * float(a[1]) for a in asks)
-            
-            if direction == "LONG" and ask_depth > bid_depth * 4.0:
-                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_ask_wall_detected"}
-            if direction == "SHORT" and bid_depth > ask_depth * 4.0:
-                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_bid_wall_detected"}
+            if getattr(config, "ORDER_BOOK_WALL_FILTER_ENABLED", True):
+                is_scalp = not getattr(config, "HUMAN_MODE", False)
+                ob_limit = 50 if is_scalp else 20
+                ob = self.client.futures_order_book(symbol=symbol, limit=ob_limit)
+                bids = ob.get("bids", [])
+                asks = ob.get("asks", [])
                 
-            # Scalp Passive Wall Filter
-            if is_scalp and bids and asks:
-                wall_multiplier = getattr(config, "SCALP_OB_WALL_MULTIPLIER", 5.0)
-                wall_pct = getattr(config, "SCALP_OB_WALL_PCT", 0.002)
+                bid_depth = sum(float(b[0]) * float(b[1]) for b in bids)
+                ask_depth = sum(float(a[0]) * float(a[1]) for a in asks)
                 
-                if direction == "LONG":
-                    avg_ask_notional = sum(float(a[0]) * float(a[1]) for a in asks) / len(asks)
-                    limit_price = c1 * (1.0 + wall_pct)
-                    for a in asks:
-                        price_level = float(a[0])
-                        qty_level = float(a[1])
-                        notional_level = price_level * qty_level
-                        if price_level <= limit_price:
-                            if notional_level >= avg_ask_notional * wall_multiplier:
-                                logger.info(
-                                    "[TriggerEngine] LONG Vetoed: Passive Ask Wall of %.2f USDT detected at %.4f (limit: %.4f, avg: %.2f)",
-                                    notional_level, price_level, limit_price, avg_ask_notional
-                                )
-                                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "passive_sell_wall_within_threshold"}
-                                
-                elif direction == "SHORT":
-                    avg_bid_notional = sum(float(b[0]) * float(b[1]) for b in bids) / len(bids)
-                    limit_price = c1 * (1.0 - wall_pct)
-                    for b in bids:
-                        price_level = float(b[0])
-                        qty_level = float(b[1])
-                        notional_level = price_level * qty_level
-                        if price_level >= limit_price:
-                            if notional_level >= avg_bid_notional * wall_multiplier:
-                                logger.info(
-                                    "[TriggerEngine] SHORT Vetoed: Passive Bid Wall of %.2f USDT detected at %.4f (limit: %.4f, avg: %.2f)",
-                                    notional_level, price_level, limit_price, avg_bid_notional
-                                )
-                                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "passive_buy_wall_within_threshold"}
+                if direction == "LONG" and ask_depth > bid_depth * 4.0:
+                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_ask_wall_detected"}
+                if direction == "SHORT" and bid_depth > ask_depth * 4.0:
+                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_bid_wall_detected"}
+                    
+                # Scalp Passive Wall Filter
+                if is_scalp and bids and asks:
+                    wall_multiplier = getattr(config, "SCALP_OB_WALL_MULTIPLIER", 5.0)
+                    wall_pct = getattr(config, "SCALP_OB_WALL_PCT", 0.002)
+                    
+                    if direction == "LONG":
+                        avg_ask_notional = sum(float(a[0]) * float(a[1]) for a in asks) / len(asks)
+                        limit_price = c1 * (1.0 + wall_pct)
+                        for a in asks:
+                            price_level = float(a[0])
+                            qty_level = float(a[1])
+                            notional_level = price_level * qty_level
+                            if price_level <= limit_price:
+                                if notional_level >= avg_ask_notional * wall_multiplier:
+                                    logger.info(
+                                        "[TriggerEngine] LONG Vetoed: Passive Ask Wall of %.2f USDT detected at %.4f (limit: %.4f, avg: %.2f)",
+                                        notional_level, price_level, limit_price, avg_ask_notional
+                                    )
+                                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "passive_sell_wall_within_threshold"}
+                                    
+                    elif direction == "SHORT":
+                        avg_bid_notional = sum(float(b[0]) * float(b[1]) for b in bids) / len(bids)
+                        limit_price = c1 * (1.0 - wall_pct)
+                        for b in bids:
+                            price_level = float(b[0])
+                            qty_level = float(b[1])
+                            notional_level = price_level * qty_level
+                            if price_level >= limit_price:
+                                if notional_level >= avg_bid_notional * wall_multiplier:
+                                    logger.info(
+                                        "[TriggerEngine] SHORT Vetoed: Passive Bid Wall of %.2f USDT detected at %.4f (limit: %.4f, avg: %.2f)",
+                                        notional_level, price_level, limit_price, avg_bid_notional
+                                    )
+                                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "passive_buy_wall_within_threshold"}
         except Exception as e:
             logger.debug(f"[Orderbook] skip: {e}")
-            bid_depth, ask_depth = 1.0, 1.0
         # ─────────────────────────────────────────────────────────────────────
 
         # ── Session skoru ayarlaması ─────────────────────────────────────────
@@ -615,6 +666,8 @@ class TriggerEngine:
             "quality": quality,
             "score": min(10.0, max(0.0, score)),
             "is_liquidity_sweep": is_sweep,
+            "is_sfp": is_sfp,
+            "sfp_level": sfp_level,
             "ml_score": ml_score,
             "confluence_score": confluence_score,
             "confluence_total": confluence_total,

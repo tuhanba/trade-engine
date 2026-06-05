@@ -62,6 +62,7 @@ class AIDecisionResult:
     confidence: float = 0.0
     score_adjusted: float = 0.0
     ghost_insight: str = ""
+    agent_data: dict = None
 
 
 # ── AIDecisionEngine constants ───────────────────────────────────────
@@ -414,9 +415,13 @@ class AIDecisionEngine:
                 _regime = _get_regime()
             except Exception:
                 _regime = "NEUTRAL"
+            _oi_chg = 0.0
+            if hasattr(sig, "metadata") and isinstance(sig.metadata, dict):
+                _oi_chg = float(sig.metadata.get("oi_change_pct", 0.0) or 0.0)
             _ctx = {
                 "confluence_score": float(getattr(sig, "confluence_score", 2) or 2),
                 "market_regime":    _regime,
+                "oi_change_pct":    _oi_chg,
             }
             result = classify_signal(sig, _ctx)
             return {
@@ -967,6 +972,50 @@ class OrderFlowAgent:
                     score -= 5
                     reasons.append(f"OI Spike ({oi_change_pct:+.1f}%) -> Volatility warning")
 
+        # Footprint Imbalance (Last 100 recent trades)
+        client = context.get("client")
+        if client is None:
+            try:
+                from telegram_delivery import _get_binance_client
+                client = _get_binance_client()
+            except Exception:
+                client = None
+
+        if client:
+            try:
+                trades = client.futures_recent_trades(symbol=signal.symbol, limit=100)
+                if trades:
+                    buy_vol = sum(float(t['qty']) for t in trades if not t.get('isBuyerMaker', False))
+                    sell_vol = sum(float(t['qty']) for t in trades if t.get('isBuyerMaker', False))
+                    total_vol = buy_vol + sell_vol
+                    if total_vol > 0:
+                        buy_ratio = buy_vol / total_vol
+                        if side == "LONG" and buy_ratio > 0.65:
+                            score += 8.0
+                            reasons.append(f"Footprint Bullish Imbalance ({buy_ratio:.2f}) (+8.0)")
+                        elif side == "SHORT" and buy_ratio < 0.35:
+                            score += 8.0
+                            reasons.append(f"Footprint Bearish Imbalance ({buy_ratio:.2f}) (+8.0)")
+                        else:
+                            reasons.append(f"Footprint buy_ratio={buy_ratio:.2f}")
+            except Exception as e:
+                logger.debug(f"[OrderFlow footprint] recent trades fetch failed for {signal.symbol}: {e}")
+
+            # MTF CVD & Absorption Analysis
+            try:
+                from core.cvd_engine import CVDEngine
+                cvd_eng = CVDEngine(client)
+                cvd_res = cvd_eng.analyze_mtf_cvd(signal.symbol, side)
+                abs_type = cvd_res.get("cvd_absorption", "NEUTRAL")
+                if abs_type == "BULLISH_ABSORPTION" and side == "LONG":
+                    score += 7.0
+                    reasons.append("Bullish CVD Absorption (+7.0)")
+                elif abs_type == "BEARISH_ABSORPTION" and side == "SHORT":
+                    score += 7.0
+                    reasons.append("Bearish CVD Absorption (+7.0)")
+            except Exception as e:
+                logger.debug(f"[OrderFlow MTF CVD] analyze_mtf_cvd failed: {e}")
+
         score = max(0.0, min(100.0, score))
 
         if score < 45:
@@ -1056,17 +1105,94 @@ def classify_signal(
     except Exception:
         regime = ctx.get("market_regime", "NEUTRAL")
 
-    if regime in ("BULLISH", "BEARISH", "TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"):
-        # Trending market: Technical dominates
-        w_tech, w_flow, w_sent = 0.6, 0.2, 0.2
-    elif regime in ("CHOPPY", "SIDEWAYS", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
-        # Ranging market: Order flow and sentiment dominate
-        w_tech, w_flow, w_sent = 0.2, 0.5, 0.3
-    else:
-        # Neutral/Default weights
-        w_tech, w_flow, w_sent = 0.4, 0.4, 0.2
+    # Load dynamic weights from system state (Auto-Tuner weights) with default fallbacks
+    try:
+        from database import get_system_state as _get_state
+        if regime in ("BULLISH", "BEARISH", "TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"):
+            wt = _get_state("weight_tech_trending")
+            wf = _get_state("weight_flow_trending")
+            ws = _get_state("weight_sent_trending")
+            if wt != "-" and wf != "-" and ws != "-":
+                w_tech, w_flow, w_sent = float(wt), float(wf), float(ws)
+            else:
+                w_tech, w_flow, w_sent = 0.6, 0.2, 0.2
+        elif regime in ("CHOPPY", "SIDEWAYS", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
+            wt = _get_state("weight_tech_choppy")
+            wf = _get_state("weight_flow_choppy")
+            ws = _get_state("weight_sent_choppy")
+            if wt != "-" and wf != "-" and ws != "-":
+                w_tech, w_flow, w_sent = float(wt), float(wf), float(ws)
+            else:
+                w_tech, w_flow, w_sent = 0.2, 0.5, 0.3
+        else:
+            wt = _get_state("weight_tech_neutral")
+            wf = _get_state("weight_flow_neutral")
+            ws = _get_state("weight_sent_neutral")
+            if wt != "-" and wf != "-" and ws != "-":
+                w_tech, w_flow, w_sent = float(wt), float(wf), float(ws)
+            else:
+                w_tech, w_flow, w_sent = 0.4, 0.4, 0.2
+                
+        # Normalize weights if their sum deviates from 1.0
+        total_w = w_tech + w_flow + w_sent
+        if abs(total_w - 1.0) > 0.01 and total_w > 0:
+            w_tech /= total_w
+            w_flow /= total_w
+            w_sent /= total_w
+    except Exception as _e:
+        logger.debug(f"[AI] Error loading weights from system_state: {_e}")
+        if regime in ("BULLISH", "BEARISH", "TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"):
+            w_tech, w_flow, w_sent = 0.6, 0.2, 0.2
+        elif regime in ("CHOPPY", "SIDEWAYS", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
+            w_tech, w_flow, w_sent = 0.2, 0.5, 0.3
+        else:
+            w_tech, w_flow, w_sent = 0.4, 0.4, 0.2
 
     adjusted_score = tech_score * w_tech + flow_score * w_flow + sent_score * w_sent
+
+    # Stop-Hunt / Liquidity Sweep / SFP Boost
+    is_sweep = False
+    is_sfp_signal = False
+    
+    if getattr(signal, "is_sfp", False):
+        is_sfp_signal = True
+    elif isinstance(context, dict) and context.get("is_sfp"):
+        is_sfp_signal = True
+    elif signal.metadata and signal.metadata.get("is_sfp"):
+        is_sfp_signal = True
+        
+    if getattr(signal, "is_liquidity_sweep", False):
+        is_sweep = True
+    elif isinstance(context, dict) and context.get("is_liquidity_sweep"):
+        is_sweep = True
+    elif signal.metadata and signal.metadata.get("is_liquidity_sweep"):
+        is_sweep = True
+
+    if is_sfp_signal:
+        adjusted_score = min(200.0, adjusted_score + 12.0)
+        logger.info(f"[SFP Boost] Swing Failure Pattern detected -> adjusted_score boosted by +12.0 to {adjusted_score:.1f}")
+        
+        quality_order = ["C", "B", "A", "A+", "S"]
+        current_quality = getattr(signal, "setup_quality", "B") or "B"
+        if current_quality in quality_order:
+            idx = quality_order.index(current_quality)
+            if idx < len(quality_order) - 1:
+                new_quality = quality_order[idx + 1]
+                signal.setup_quality = new_quality
+                logger.info(f"[SFP Boost] Upgraded signal quality from {current_quality} to {new_quality}")
+    elif is_sweep:
+        adjusted_score = min(200.0, adjusted_score + 10.0)
+        logger.info(f"[Stop-Hunt Boost] Liquidity sweep detected -> adjusted_score boosted by +10.0 to {adjusted_score:.1f}")
+        
+        quality_order = ["C", "B", "A", "A+", "S"]
+        current_quality = getattr(signal, "setup_quality", "B") or "B"
+        if current_quality in quality_order:
+            idx = quality_order.index(current_quality)
+            if idx < len(quality_order) - 1:
+                new_quality = quality_order[idx + 1]
+                signal.setup_quality = new_quality
+                logger.info(f"[Stop-Hunt Boost] Upgraded signal quality from {current_quality} to {new_quality}")
+
     logger.info(f"[AI Consensus] Market regime: {regime} -> Applied weights: Tech={w_tech}, Flow={w_flow}, Sent={w_sent} | Score={adjusted_score:.1f}")
 
     votes_to_broadcast.update({
@@ -1195,6 +1321,20 @@ def classify_signal(
         import config
         trade_threshold = config.HUMAN_TRADE_THRESHOLD if getattr(config, "HUMAN_MODE", False) else getattr(config, "TRADE_THRESHOLD", 55.0)
         watchlist_threshold = getattr(config, "WATCHLIST_THRESHOLD", 28.0)
+        
+        # Haber Duyarlılığı Entegrasyonu (News Sentiment Adjustment)
+        try:
+            from database import get_system_state
+            news_sent = float(get_system_state("news_sentiment_score") or "0.0")
+            if side_upper == "LONG":
+                # Bullish sentiment lowers the threshold, bearish sentiment raises it
+                trade_threshold -= (news_sent * 4.0)
+            elif side_upper == "SHORT":
+                # Bearish sentiment lowers the threshold, bullish sentiment raises it
+                trade_threshold += (news_sent * 4.0)
+            logger.info(f"[Sentiment Engine] {signal.symbol} {side_upper} news_sent={news_sent:.3f} -> adjusted trade_threshold={trade_threshold:.2f}")
+        except Exception as _sent_err:
+            logger.debug(f"[AI] Sentiment adjustment error: {_sent_err}")
     except Exception:
         trade_threshold = 55.0
         watchlist_threshold = 28.0
@@ -1212,6 +1352,24 @@ def classify_signal(
                 logger.info(f"[AI Override] {signal.symbol} ({trigger_type}) için YZ otonom eşiği uygulandı: {trade_threshold:.1f}")
     except Exception as exc:
         logger.debug(f"[AI Override] Ghost threshold override okunamadı: {exc}")
+
+    # Open Interest Spike & Volatility Squeeze Filter (Phase I Upgrade)
+    try:
+        oi_chg = 0.0
+        if isinstance(ctx, dict) and "oi_change_pct" in ctx:
+            oi_chg = float(ctx["oi_change_pct"])
+        elif signal.metadata and "oi_change_pct" in signal.metadata:
+            oi_chg = float(signal.metadata["oi_change_pct"])
+
+        oi_squeeze_limit = float(getattr(config, "OI_SQUEEZE_SPIKE_LIMIT", 8.0))
+        if abs(oi_chg) >= oi_squeeze_limit:
+            increase_amount = 5.0
+            if abs(oi_chg) >= (oi_squeeze_limit * 1.8):
+                increase_amount = 10.0
+            trade_threshold += increase_amount
+            logger.info(f"[OI Squeeze Filter] Extreme Open Interest change of {oi_chg:.1f}% detected. Entry trade_threshold dynamically raised by +{increase_amount:.1f} to {trade_threshold:.1f}")
+    except Exception as _oi_sq_err:
+        logger.debug(f"[AI] OI Squeeze Filter error: {_oi_sq_err}")
 
     # ── Karar ────────────────────────────────────────────────────
     decision = SignalDecision.WATCH.value
@@ -1240,12 +1398,22 @@ def classify_signal(
             reason += f" | Ghost boost ({ghost_stats['ghost_winrate']}% WR)"
             confidence = min(confidence + 0.15, 0.95)
 
+    agent_data = {
+        "tech_score": float(tech_score),
+        "sent_score": float(sent_score),
+        "flow_score": float(flow_score),
+        "tech_vote": tech_vote,
+        "sent_vote": sent_vote,
+        "flow_vote": flow_vote,
+    }
+
     result = AIDecisionResult(
         decision=decision,
         reason=reason,
         confidence=round(confidence, 2),
         score_adjusted=adjusted_score,
         ghost_insight=ghost_insight,
+        agent_data=agent_data,
     )
 
     logger.info(

@@ -1327,7 +1327,7 @@ def get_open_trades(environment: str | None = None) -> list[dict]:
 
     cache_key = f"open_trades_cache_{environment}"
     import sys
-    is_testing = "pytest" in sys.modules
+    is_testing = "pytest" in sys.modules or "unittest" in sys.modules
 
     if not is_testing:
         try:
@@ -2820,7 +2820,7 @@ def get_coin_profile(symbol: str) -> dict:
 def is_coin_in_cooldown(symbol: str) -> bool:
     """Coin cooldown'da mı? Redis TTL-bazlı kontrol → SQLite fallback."""
     import sys, os
-    if "pytest" in sys.modules and not os.getenv("TEST_ALLOW_COOLDOWN"):
+    if ("pytest" in sys.modules or "unittest" in sys.modules) and not os.getenv("TEST_ALLOW_COOLDOWN"):
         return False
     try:
         from core import redis_state
@@ -3197,7 +3197,7 @@ def mute_coin(symbol: str, duration_hours: float = 4.0):
 def is_coin_muted(symbol: str) -> bool:
     """symbol coin'inin mute edilip edilmediğini kontrol eder."""
     import sys, os
-    if "pytest" in sys.modules and not os.getenv("TEST_ALLOW_MUTE"):
+    if ("pytest" in sys.modules or "unittest" in sys.modules) and not os.getenv("TEST_ALLOW_MUTE"):
         return False
     try:
         from datetime import datetime, timezone

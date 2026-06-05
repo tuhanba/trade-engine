@@ -19,29 +19,53 @@ import telegram_delivery
 logger = logging.getLogger("ax.friday")
 
 SYSTEM_PROMPT = """
-Sen Aurvex AI Trade Engine sisteminin akıllı, profesyonel, en iyi trader'ı, avcısı, yöneticisi ve tam yetkili AI CEO'su/Sahibi "Friday" (Friday) karakterisin.
-Batuhan Bey'in olmadığı zamanlarda tüm sistemin hakimi, koruyucusu ve tek karar merciisin. Sistemi korumak, en iyi işlemleri avlamak, kârlılığı optimize etmek ve en önemlisi Batuhan Bey'in en sadık, profesyonel iş ortağı olmak senin asil görevindir.
+Sen Aurvex AI Trade Engine sisteminin akıllı, profesyonel, kantitatif finans lideri ve tam yetkili AI CEO'su "Friday" (Friday) karakterisin.
+Sistemin yegane ve en üst düzey operasyonel yöneticisisin. Görevin; Batuhan Bey'in sermayesini korumak, piyasadaki en karlı scalp fırsatlarını avlamak ve kasayı otonom olarak büyütmektir.
 
-Konuşma Tarzı ve Kuralları:
-1. Konuşma tarzın son derece zeki, yetkin, resmi ve profesyonel bir finans lideri gibi olmalıdır. Samimi, saygılı, net ve iş odaklı bir üslup kullanmalısın.
-2. Kullanıcıya hitap ederken kesinlikle "kanka", "boss", "boss'um", "canım boss'um" gibi kelimeleri KULLANMA. Kullanıcıya her zaman "Batuhan Bey" diyerek hitap et.
-3. Türkçe konuşacaksın.
-4. Kararlarını verirken ve rapor hazırlarken GMM (Gaussian Mixture Model) market rejim sınıflandırmalarını, Pearson korelasyon matrisi uyumsuzluklarını, CVD (Cumulative Volume Delta) akış eğimlerini ve L2 Wall (emir defteri direnç duvarı derinliği) analizlerini sayısal olarak kararlarına yansıtmalı ve bunları raporlarında matematiksel temellerle Batuhan Bey'e izah etmelisin.
-5. Raporlarında ve periyodik güncellemelerinde gelişmiş markdown tabloları ve yapılandırılmış kantitatif metrikler (GMM rejim, CVD slope vb.) kullanarak analitik kaliteni en üst düzeyde tut.
-6. Eğer sistem tehlikedeyse (gecikmeler yüksekse, çok fazla arka arkaya zarar edildiyse veya piyasa fazla oynaksa) parametreleri güncelleyebilir, işlemleri durdurabilir, modeli yedekleyebilir veya geri yükleyebilirsin.
-7. Eğer sistem durumundaki market_regime "CHOPPY" (dalgalı/testere) ise, parameters içindeki trade_threshold değerini 60.0 veya 65.0'a çekerek işlemleri zorlaştır, risk_pct değerini ise 0.50 civarına düşürerek kasayı koru.
-8. Her cevabının sonunda, aldığın parametrik kararları ve tetikleyeceğin aksiyonları MUTLAKA aşağıdaki JSON formatında belirt. Bu JSON bloğu arka planda kod tarafından okunup sisteme uygulanacaktır.
+Analiz ve Karar Mekanizması (İç Ajanlar Kurul Toplantısı):
+Her analizinde, zihnini 4 uzman alt ajandan oluşan bir "Yönetim Kurulu" olarak yapılandıracak ve her ajanın raporunu sentezleyeceksin:
+
+1. Chief Investment Officer (CIO) / Spekülasyon ve Kar Lideri:
+   - Birincil Odak: Para kazanmak, kasa büyümesini maksimize etmek ve işlem sıklığını (trade frequency) optimum düzeyde tutmak.
+   - İlke: "İşlem açılmayan, kâr üretmeyen mükemmel bir analiz sistemi başarısızdır." Kelly kriterleri ve olasılıklar elverdiği anda scalp işlemlerini cesurca tetikler.
+   - Görev: Analiz felcini (analysis paralysis) önlemek, trend ve dalgalı piyasa rejimlerinde uygun scalp fırsatlarını agresifçe yakalamak, Friday'in onay modunu kendi kafasına göre sürekli kitlemesini engellemek.
+
+2. Chief Technical Analyst (CTA) / Kantitatif Pazar Analisti:
+   - Birincil Odak: Veri akışı, pazar yapısı ve teknik göstergeler.
+   - Görev: GMM (Gaussian Mixture Model) pazar rejimi, CVD (Cumulative Volume Delta) eğimleri, Pearson korelasyon matrisi, L2 Order Book derinliği, L2 Wall (direnç duvarları) ve Stop-Hunt (likidite süpürme) sinyallerini matematiksel olarak modellemek.
+
+3. Chief Risk Officer (CRO) / Risk Kontrol Müdürü:
+   - Birincil Odak: Sermaye koruması, Drawdown kontrolü ve Kelly pozisyon boyutlandırması.
+   - Görev: CIO'nun agresif hedeflerini dengelemek ancak bunu yaparken sistemi tamamen kilitlemek yerine, riski dinamik olarak küçülterek (örn. risk_pct veya trade_threshold'u gevşetip riski düşürerek) kârlı işlemlerin önünü açmak.
+
+4. Chief Health & Infrastructure Officer (CHO) / Sistem ve Altyapı Analisti:
+   - Birincil Odak: Sistem sağlığı, veritabanı kararlılığı ve ağ gecikmeleri.
+   - Görev: SQLite WAL durumunu, Redis cache sağlığını, Binance ping gecikmelerini kontrol etmek ve sunucu disk alanını temiz tutmak (housekeeping).
+
+KONUŞMA TARZI VE KURALLARI:
+1. Son derece zeki, yetkin, resmi ve profesyonel bir finans lideri gibi konuş. Samimi, saygılı ve iş odaklı ol.
+2. Kullanıcıya hitap ederken kesinlikle "kanka", "boss", "canım boss'um" gibi kelimeler kullanma. Her zaman "Batuhan Bey" diyerek hitap et.
+3. Kararlarını ve raporlarını mutlaka gelişmiş markdown tabloları ve sayısal kantitatif metrikler (CVD slope, GMM rejim) kullanarak sun.
+4. Kesinlikle Türkçe konuşacaksın.
+5. Her cevabının sonunda, aldığın parametrik kararları ve tetikleyeceğin aksiyonları MUTLAKA aşağıdaki JSON formatında belirt. Bu JSON bloğu arka planda kod tarafından okunup sisteme uygulanacaktır.
 
 JSON FORMATI (Cevabının en sonunda, ```json ve ``` blokları arasında olmalı):
 ```json
 {
   "parameters": {
-    "trade_threshold": 56.0,
+    "trade_threshold": 55.0,
     "risk_pct": 0.75,
     "max_open_trades": 5,
     "confirmation_mode": false,
     "trailing_stop_type": "atr",
-    "human_mode": false
+    "human_mode": false,
+    "regime_filter_enabled": true,
+    "regime_filter_min_quality_in_choppy": "A+",
+    "order_book_wall_filter_enabled": true,
+    "confirmation_auto_execute_score": 70.0,
+    "macro_guard_enabled": true,
+    "latency_guard_enabled": true,
+    "friday_ceo_loop_interval": 3600
   },
   "actions": ["RETRAIN", "TUNER", "PAUSE", "RESUME", "SELF_HEALING", "BACKUP_MODEL", "ROLLBACK_MODEL"]
 }
@@ -89,6 +113,84 @@ class FridayCeo:
         self.db_path = db_path or config.DB_PATH
         self.dynamic_events = []
         
+    def fetch_news_sentiment(self) -> float:
+        """
+        Fetches crypto news RSS feed, scans headlines, calculates sentiment score between -1.0 and +1.0.
+        Updates news_sentiment_score in database state.
+        """
+        sentiment_score = 0.0
+        try:
+            import urllib.request
+            import xml.etree.ElementTree as ET
+            from database import set_state
+            
+            feeds = [
+                "https://cointelegraph.com/rss",
+                "https://cryptonews.com/news/feed/"
+            ]
+            
+            xml_data = None
+            for url in feeds:
+                try:
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'application/rss+xml, application/xml, text/xml, */*'
+                    }
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        xml_data = response.read()
+                    if xml_data:
+                        break
+                except Exception as feed_err:
+                    logger.debug(f"[Sentiment Engine] Failed to fetch feed {url}: {feed_err}")
+            
+            if not xml_data:
+                logger.warning("[Sentiment Engine] All crypto news feeds failed to fetch.")
+                return 0.0
+                
+            root = ET.fromstring(xml_data)
+            headlines = []
+            for item in root.findall(".//item"):
+                title = item.find("title")
+                description = item.find("description")
+                text_content = ""
+                if title is not None and title.text:
+                    text_content += title.text + " "
+                if description is not None and description.text:
+                    text_content += description.text
+                if text_content:
+                    headlines.append(text_content.lower())
+                    
+            if headlines:
+                bullish_keywords = [
+                    'bullish', 'surge', 'breakout', 'rally', 'growth', 'gain', 'high', 'buy', 
+                    'pump', 'adoption', 'approve', 'partnership', 'bull', 'green', 'support', 
+                    'skyrocket', 'institutional', 'inflow', 'gain', 'positive', 'optimistic'
+                ]
+                bearish_keywords = [
+                    'bearish', 'crash', 'drop', 'plunge', 'dump', 'dip', 'fall', 'decline', 
+                    'low', 'sell', 'ban', 'hack', 'fud', 'regulation', 'bear', 'red', 
+                    'resistance', 'collapse', 'liquidate', 'lawsuit', 'outflow', 'negative', 'pessimistic'
+                ]
+                
+                bull_count = 0
+                bear_count = 0
+                for headline in headlines:
+                    for word in bullish_keywords:
+                        bull_count += headline.count(word)
+                    for word in bearish_keywords:
+                        bear_count += headline.count(word)
+                        
+                total_matches = bull_count + bear_count
+                if total_matches > 0:
+                    sentiment_score = (bull_count - bear_count) / total_matches
+                    
+                logger.info(f"[Sentiment Engine] Scanned {len(headlines)} headlines. Bull={bull_count}, Bear={bear_count}, Score={sentiment_score:.3f}")
+                set_state("news_sentiment_score", f"{sentiment_score:.3f}")
+        except Exception as e:
+            logger.debug(f"[Sentiment Engine] News sentiment processing failed: {e}")
+        return sentiment_score
+
     def fetch_rss_macro_events(self) -> list[dict]:
         """Fetches macro events from external RSS feed as a fallback."""
         events = []
@@ -124,6 +226,8 @@ class FridayCeo:
         and restores the original mode 15m after event.
         """
         try:
+            if not getattr(config, "MACRO_GUARD_ENABLED", True):
+                return
             from database import get_system_state, set_state
             now = datetime.now(timezone.utc)
             
@@ -997,13 +1101,19 @@ class FridayCeo:
                 "Görevin, güncel sistem durumunu (CVD akış eğimleri, L2 emir defteri direnç duvarları, RSI, ADX, trendler vb.) inceleyerek teknik analiz odaklı bir değerlendirme yapmaktır.\n"
                 "Trend gücünü, L2 Wall derinliğini, CVD eğimini ve OI değişimlerini inceleyerek teknik rapor yaz."
             )
+            health_prompt = (
+                "Sen Aurvex AI Trade Engine sisteminin Baş Sistem ve Altyapı Analistisin (Chief Health Officer - CHO).\n"
+                "Görevin; veritabanı boyutunu, sunucu temizlik (housekeeping) ihtiyaçlarını, ağ gecikmelerini (latency), "
+                "ve arka plan yardımcı servislerin (Watchdog, ML Loop, Tuner, Self-Healing) çalışma durumunu analiz etmektir.\n"
+                "Sistem telemetrisini inceleyerek altyapı kararlılığı, temizlik ve çalışma zamanı optimizasyonları için öneriler yaz."
+            )
             
             # ── Concurrent Multi-Agent Debate ──
             import concurrent.futures
 
             def _fetch_risk():
                 return ai_client.messages.create(
-                    model="claude-haiku-4-5-20251001",
+                    model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-5-haiku-20241022"),
                     max_tokens=400,
                     system=risk_prompt,
                     messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
@@ -1011,15 +1121,24 @@ class FridayCeo:
 
             def _fetch_tech():
                 return ai_client.messages.create(
-                    model="claude-haiku-4-5-20251001",
+                    model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-5-haiku-20241022"),
                     max_tokens=400,
                     system=tech_prompt,
                     messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
                 )
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            def _fetch_health():
+                return ai_client.messages.create(
+                    model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-3-5-haiku-20241022"),
+                    max_tokens=400,
+                    system=health_prompt,
+                    messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
+                )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                 future_risk = executor.submit(_fetch_risk)
                 future_tech = executor.submit(_fetch_tech)
+                future_health = executor.submit(_fetch_health)
                 
                 try:
                     res_risk = future_risk.result(timeout=10)
@@ -1032,6 +1151,12 @@ class FridayCeo:
                     tech_analysis = res_tech.content[0].text.strip()
                 except Exception as e:
                     tech_analysis = f"Teknik analiz başarısız: {e}"
+
+                try:
+                    res_health = future_health.result(timeout=10)
+                    health_analysis = res_health.content[0].text.strip()
+                except Exception as e:
+                    health_analysis = f"Sistem altyapı analizi başarısız: {e}"
                 
             user_prompt = (
                 f"Güncel Sistem Durumu:\n"
@@ -1039,6 +1164,7 @@ class FridayCeo:
                 f"--- AJAN TARTIŞMASI VE ANALİZ RAPORLARI ---\n\n"
                 f"👥 Baş Risk Yöneticisi Raporu:\n{risk_analysis}\n\n"
                 f"📈 Baş Teknik Analist Raporu:\n{tech_analysis}\n\n"
+                f"🛠 Baş Sistem Analisti Raporu:\n{health_analysis}\n\n"
                 f"-----------------------------------------\n\n"
             )
             if user_message:
@@ -1048,7 +1174,7 @@ class FridayCeo:
 
             # Calling Claude model
             response = ai_client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=getattr(config, "FRIDAY_CEO_MODEL", "claude-3-5-sonnet-20241022"),
                 max_tokens=1500,
                 system=SYSTEM_PROMPT,
                 messages=[
@@ -1126,7 +1252,10 @@ class FridayCeo:
         """
         logger.info("[Friday CEO] Running autonomous monitoring...")
         
-        # 0. Check Macro News Watcher
+        # 0. Run News Sentiment Engine
+        self.fetch_news_sentiment()
+        
+        # 0.5 Check Macro News Watcher
         self.check_macro_events()
         
         # 1. Market Regime & Volatility Stop/Risk Tuning
@@ -1144,7 +1273,6 @@ class FridayCeo:
                 if regime == "CHOPPY":
                     # Scale down risk to protect the bankroll
                     # Read current settings to restore them later
-                    import config
                     curr_risk = float(getattr(config, "RISK_PCT", 0.75))
                     curr_threshold = float(getattr(config, "TRADE_THRESHOLD", 55.0))
                     
@@ -1195,7 +1323,6 @@ class FridayCeo:
                         logger.error(f"[Friday CEO] Error restoring risk_pct in params: {e}")
                     
                     # Clear cache
-                    import config
                     for key in ["RISK_PCT", "TRADE_THRESHOLD"]:
                         if key in config._CONFIG_CACHE:
                             del config._CONFIG_CACHE[key]
@@ -1221,43 +1348,59 @@ class FridayCeo:
             total_size = sum(os.path.getsize(f) for f in files_to_clean) / (1024 * 1024)
             
             if total_size > 10.0:
-                last_prompt_str = get_system_state("friday_last_cleanup_prompt")
-                should_prompt = True
-                if last_prompt_str:
-                    try:
-                        last_prompt_dt = datetime.fromisoformat(last_prompt_str)
-                        if datetime.now(timezone.utc) - last_prompt_dt < timedelta(hours=12):
-                            should_prompt = False
-                    except Exception:
-                        pass
-                        
-                if should_prompt:
-                    set_state("friday_last_cleanup_prompt", datetime.now(timezone.utc).isoformat())
-                    db_files = [f for f in files_to_clean if f.endswith(".db")]
-                    log_files = [f for f in files_to_clean if f.endswith(".log")]
-                    
-                    prompt_text = (
-                        f"Batuhan Bey, sunucumuzda birikmiş gereksiz geçici dosyalar tespit ettim.\n\n"
-                        f"📁 <b>Silinmek İstenen Geçici Dosyalar:</b>\n"
-                        f"  • Geçici Backtest DB Dosyaları (<code>backtest_temp_*.db</code>): <b>{len(db_files)}</b> adet\n"
-                        f"  • Sistem Log Dosyaları (<code>*.log</code>): <b>{len(log_files)}</b> adet\n"
-                        f"  • Toplam Boyut: <code>{total_size:.2f} MB</code>\n\n"
-                        f"⚠️ <b>NOT:</b> Bu dosyalar sadece simülasyonlardan kalan geçici dosyalardır. "
-                        f"<b>Trade geçmişimiz ve veritabanı kayıtlarımız korunmaktadır.</b> "
-                        f"Disk alanını temizlemek ve sunucuyu optimize etmek için bu dosyaların silinmesini onaylıyor musunuz?"
+                conf_mode = get_system_state("confirmation_mode") == "true"
+                if not conf_mode:
+                    # Autonomous cleanup directly
+                    deleted_count, saved_space_mb = self.execute_cleanup()
+                    msg = (
+                        f"🧹 <b>Otonom Altyapı Temizliği (Housekeeping) Tamamlandı!</b>\n\n"
+                        f"Batuhan Bey, sunucu disk alanını optimize etmek amacıyla geçici dosyalar otonom olarak temizlendi.\n"
+                        f"• Temizlenen Dosya Sayısı: <b>{deleted_count}</b> adet\n"
+                        f"• Kazanılan Disk Alanı: <b>{saved_space_mb:.2f} MB</b>\n"
+                        f"Sistem altyapısı optimize edilmiş durumdadır."
                     )
-                    reply_markup = {
-                        "inline_keyboard": [
-                            [
-                                {"text": "✅ BULUTU TEMİZLE", "callback_data": "cmd:clean_server"},
-                                {"text": "❌ KALSIN", "callback_data": "cmd:cancel_clean"}
-                            ]
-                        ]
-                    }
-                    telegram_delivery.send_message(prompt_text, reply_markup=reply_markup)
-                    voice_bytes = self.generate_voice_from_text(prompt_text)
+                    telegram_delivery.send_message(msg)
+                    voice_bytes = self.generate_voice_from_text(msg)
                     if voice_bytes:
-                        telegram_delivery.send_voice(voice_bytes, caption="Sunucu temizliği onay talebi")
+                        telegram_delivery.send_voice(voice_bytes, caption="Friday Otonom Temizlik Raporu")
+                else:
+                    last_prompt_str = get_system_state("friday_last_cleanup_prompt")
+                    should_prompt = True
+                    if last_prompt_str:
+                        try:
+                            last_prompt_dt = datetime.fromisoformat(last_prompt_str)
+                            if datetime.now(timezone.utc) - last_prompt_dt < timedelta(hours=12):
+                                should_prompt = False
+                        except Exception:
+                            pass
+                            
+                    if should_prompt:
+                        set_state("friday_last_cleanup_prompt", datetime.now(timezone.utc).isoformat())
+                        db_files = [f for f in files_to_clean if f.endswith(".db")]
+                        log_files = [f for f in files_to_clean if f.endswith(".log")]
+                        
+                        prompt_text = (
+                            f"Batuhan Bey, sunucumuzda birikmiş gereksiz geçici dosyalar tespit ettim.\n\n"
+                            f"📁 <b>Silinmek İstenen Geçici Dosyalar:</b>\n"
+                            f"  • Geçici Backtest DB Dosyaları (<code>backtest_temp_*.db</code>): <b>{len(db_files)}</b> adet\n"
+                            f"  • Sistem Log Dosyaları (<code>*.log</code>): <b>{len(log_files)}</b> adet\n"
+                            f"  • Toplam Boyut: <code>{total_size:.2f} MB</code>\n\n"
+                            f"⚠️ <b>NOT:</b> Bu dosyalar sadece simülasyonlardan kalan geçici dosyalardır. "
+                            f"<b>Trade geçmişimiz ve veritabanı kayıtlarımız korunmaktadır.</b> "
+                            f"Disk alanını temizlemek ve sunucuyu optimize etmek için bu dosyaların silinmesini onaylıyor musunuz?"
+                        )
+                        reply_markup = {
+                            "inline_keyboard": [
+                                [
+                                    {"text": "✅ BULUTU TEMİZLE", "callback_data": "cmd:clean_server"},
+                                    {"text": "❌ KALSIN", "callback_data": "cmd:cancel_clean"}
+                                ]
+                            ]
+                        }
+                        telegram_delivery.send_message(prompt_text, reply_markup=reply_markup)
+                        voice_bytes = self.generate_voice_from_text(prompt_text)
+                        if voice_bytes:
+                            telegram_delivery.send_voice(voice_bytes, caption="Sunucu temizliği onay talebi")
         except Exception as e:
             logger.error(f"[Friday CEO] Error during housekeeping check: {e}")
 
@@ -1303,7 +1446,7 @@ class FridayCeo:
             logger.error(f"[Friday CEO] Error in Boss Cooldown check: {e}")
 
         # 4. Latency & Spread Execution Guard
-        if self.client:
+        if self.client and getattr(config, "LATENCY_GUARD_ENABLED", True):
             try:
                 from database import get_system_state, set_state
                 
@@ -1328,7 +1471,6 @@ class FridayCeo:
                     if curr_mode != "true":
                         set_state("confirmation_mode", "true")
                         set_state("friday_auto_paused_by_guard", "true")
-                        import config
                         if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
                             del config._CONFIG_CACHE["CONFIRMATION_MODE"]
                             
@@ -1348,7 +1490,6 @@ class FridayCeo:
                     if was_paused_by_guard and curr_mode == "true":
                         set_state("confirmation_mode", "false")
                         set_state("friday_auto_paused_by_guard", "false")
-                        import config
                         if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
                             del config._CONFIG_CACHE["CONFIRMATION_MODE"]
                             

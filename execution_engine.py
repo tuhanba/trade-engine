@@ -190,19 +190,46 @@ class ExecutionEngine:
             except Exception as e:
                 logger.error(f"Error checking ML Online gating: {e}")
 
+        # Spread check simulation
+        if getattr(config, "PAPER_SPREAD_CHECK_ENABLED", False):
+            max_spread = getattr(config, "MAX_SPREAD_PCT", 0.15)
+            try:
+                from core.market_data import get_cached_ticker
+                cached_tick = get_cached_ticker(signal.symbol)
+                if cached_tick:
+                    bid = float(cached_tick.get('bid') or 0)
+                    ask = float(cached_tick.get('ask') or 0)
+                    if bid > 0 and ask > 0:
+                        spread_pct = (ask - bid) / bid * 100
+                        if spread_pct > max_spread:
+                            logger.warning(f"[Paper Slippage Guard] {signal.symbol} spread too high: {spread_pct:.3f}% > {max_spread}%. Rejecting trade.")
+                            return None
+            except Exception as e:
+                logger.debug(f"[Paper Slippage Guard] check failed: {e}")
+
         # Simulated price check for slippage (if get_current_price is available and different)
         current_p = get_current_price(signal.symbol) or signal.entry_price
         
-        # Calculate slippage against target signal entry price
-        slippage_val = 0.0
+        # Calculate raw slippage against target signal entry price
+        raw_slippage = 0.0
         if signal.entry_price > 0:
             if signal.side == "LONG":
-                slippage_val = (current_p - signal.entry_price) / signal.entry_price * 100.0
+                raw_slippage = (current_p - signal.entry_price) / signal.entry_price * 100.0
             else:
-                slippage_val = (signal.entry_price - current_p) / signal.entry_price * 100.0
+                raw_slippage = (signal.entry_price - current_p) / signal.entry_price * 100.0
         
-        # Ensure slippage is positive/realistic or 0
-        slippage_val = max(0.0, slippage_val)
+        raw_slippage = max(0.0, raw_slippage)
+        
+        # Simulate Limit-Chase order routing
+        max_chase_pct = float(getattr(config, "MAX_CHASE_PCT", 0.15))
+        if raw_slippage == 0.0:
+            slippage_val = 0.0
+        elif raw_slippage <= max_chase_pct:
+            slippage_val = raw_slippage
+        else:
+            # Filled partly at limit bound (max_chase_pct) and partly at market price
+            slippage_val = (max_chase_pct + raw_slippage) / 2.0
+            logger.info(f"[Limit Chase Simulation] {signal.symbol} raw slippage {raw_slippage:.3f}% capped to average fill slippage {slippage_val:.3f}%")
 
         # Initial exit state metadata'ya gömülür
         initial_state = TradeExitState(

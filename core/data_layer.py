@@ -85,6 +85,8 @@ class SignalData:
     market_regime: str = ""
     atr: float = 0.0
     telegram_status: str = ""
+    is_liquidity_sweep: bool = False
+    is_sfp: bool = False
     # ── ID alanı (deliver_signal dedupe için)
     id: Optional[str] = None
 
@@ -119,6 +121,8 @@ class SignalData:
         sig.leverage_suggestion = d.get("leverage_suggestion")
         sig.max_loss      = float(d.get("max_loss") or 0)
         sig.market_regime = d.get("market_regime", "NEUTRAL")
+        sig.is_liquidity_sweep = d.get("is_liquidity_sweep", False)
+        sig.is_sfp        = d.get("is_sfp", False)
         sig.metadata      = d.get("metadata", {})
         return sig
 

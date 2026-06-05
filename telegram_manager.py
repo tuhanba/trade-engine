@@ -135,9 +135,7 @@ class TelegramManager:
         text      = (msg.get("text") or "").strip()
         from_chat = str(msg.get("chat", {}).get("id", ""))
         from_user = str(msg.get("from", {}).get("id", "")) if msg.get("from") else ""
-        if not text.startswith("/"):
-            return
-            
+        
         is_authorized = False
         if self.chat_id:
             allowed_ids = [x.strip() for x in self.chat_id.split(",") if x.strip()]
@@ -145,12 +143,23 @@ class TelegramManager:
             
         if not is_authorized:
             return
-        parts = text.split()
-        if not parts:
+
+        if text.startswith("/"):
+            parts = text.split()
+            if not parts:
+                return
+            cmd = parts[0].lower().split("@")[0]
+            args = parts[1:]
+            logger.info("Komut: %s, Args: %s", cmd, args)
+        elif text.lower().startswith("friday"):
+            rest = text[6:].strip()
+            while rest and rest[0] in (",", ":", ";", " "):
+                rest = rest[1:].strip()
+            cmd = "/friday"
+            args = rest.split() if rest else []
+            logger.info("Friday Mention: %s, Args: %s", cmd, args)
+        else:
             return
-        cmd = parts[0].lower().split("@")[0]
-        args = parts[1:]
-        logger.info("Komut: %s, Args: %s", cmd, args)
 
         handlers = {
             "/start":   self._cmd_help,
@@ -413,6 +422,16 @@ class TelegramManager:
             self._cmd_human_on()
         elif action == "scalp":
             self._cmd_human_off()
+        elif action == "paper":
+            self._cmd_paper()
+        elif action == "live":
+            self._cmd_live()
+        elif action == "health":
+            self._cmd_health()
+        elif action == "daily":
+            self._cmd_daily()
+        elif action == "friday_voice":
+            self._cmd_friday_voice()
         elif action.startswith("close:"):
             trade_id_str = action[6:]
             self._cmd_close([trade_id_str])
@@ -658,11 +677,22 @@ class TelegramManager:
         if text:
             payload["text"] = text
         try:
-            requests.post(url, json=payload, timeout=_TIMEOUT)
+            resp = requests.post(url, json=payload, timeout=_TIMEOUT)
+            if resp.status_code != 200:
+                logger.warning(f"answerCallbackQuery HTTP Hatası: {resp.status_code} - Body: {resp.text}")
+            else:
+                resp_json = resp.json()
+                if not resp_json.get("ok"):
+                    logger.warning(f"answerCallbackQuery API Hatası: {resp_json}")
         except Exception as e:
             logger.warning(f"answerCallbackQuery hatası: {e}")
 
-    def _edit_message_text(self, text: str, message_id: int, reply_markup: Optional[dict] = None) -> bool:
+    def _edit_message_text(self, text: str, message_id: Optional[int], reply_markup: Optional[dict] = None) -> bool:
+        if not message_id:
+            # Fallback: message_id is None, send as a new message instead of editing
+            self.send_fn(text)
+            return True
+            
         active_chat = getattr(self._thread_local, "active_chat_id", None) or self.chat_id
         if active_chat and "," in active_chat:
             active_chat = active_chat.split(",")[0].strip()
@@ -751,12 +781,29 @@ class TelegramManager:
             "inline_keyboard": [
                 [
                     {"text": "📊 Durum", "callback_data": "cmd:status"},
-                    {"text": "📈 Açık İşlemler", "callback_data": "cmd:open"}
+                    {"text": "📈 Açık Pozisyonlar", "callback_data": "cmd:open"},
+                    {"text": "⚡ Günlük Kâr", "callback_data": "cmd:daily"}
                 ],
                 [
                     {"text": "⚙️ Ayarlar", "callback_data": "cmd:refresh_settings"},
+                    {"text": "🩺 Sistem Sağlığı", "callback_data": "cmd:health"},
+                    {"text": "📊 Isı Haritası", "callback_data": "cmd:heatmap_chart"}
+                ],
+                [
                     {"text": "🧠 İnsan Modu", "callback_data": "cmd:human"},
-                    {"text": "⚡ Scalp Modu", "callback_data": "cmd:scalp"}
+                    {"text": "⚔️ Scalp Modu", "callback_data": "cmd:scalp"}
+                ],
+                [
+                    {"text": "🧪 Paper Modu", "callback_data": "cmd:paper"},
+                    {"text": "🔥 CANLI Mod", "callback_data": "cmd:live"}
+                ],
+                [
+                    {"text": "⏸ Duraklat", "callback_data": "cmd:pause"},
+                    {"text": "▶️ Devam Et", "callback_data": "cmd:resume"}
+                ],
+                [
+                    {"text": "🗣 Friday Sesli Rapor", "callback_data": "cmd:friday_voice"},
+                    {"text": "🔍 Sistem Teşhisi", "callback_data": "cmd:diagnose_flow"}
                 ]
             ]
         }
@@ -803,7 +850,7 @@ class TelegramManager:
             "🔹 <code>/pause</code> — Piyasalar çok riskliyse botu duraklat. (Açık işlemler takip edilir, yeni işleme girilmez).\n"
             "🔹 <code>/resume</code> — Her şey yolundaysa botu tekrar ava çıkar.\n"
             "🔹 <code>/finish</code> — Mevcut işlemler kapandığı an botu tamamen uykuya al.\n\n"
-            "💡 <i>İpucu: Komutlara tıklayarak veya aşağıdaki butonları kullanarak işlem yapabilirsin!</i>",
+            "💡 <i>Kolaylık: Komutları yazmak yerine, aşağıdaki kontrol panelini tek tuşla tıklayarak sistemi doğrudan yönetebilirsin!</i>",
             reply_markup=self._get_help_markup()
         )
 
@@ -1691,6 +1738,7 @@ class TelegramManager:
             return
 
         user_msg = " ".join(args).strip()
+        self.send_fn("⏳ Friday analize başladı, lütfen bekleyin...")
         import threading
         threading.Thread(
             target=self.friday_ceo.evaluate_and_decide,

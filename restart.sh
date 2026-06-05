@@ -6,6 +6,10 @@
 
 set -e
 
+# Termius terminal kaymasını önlemek için ANSI animasyonlarını ve BuildKit progress bar'ı devre dışı bırakalım
+export COMPOSE_ANSI=never
+export BUILDKIT_PROGRESS=plain
+
 # Renkler
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
@@ -59,14 +63,14 @@ echo -e "${GREEN}✅ Host temizliği tamamlandı.${NC}"
 echo -e "\n${YELLOW}🔄 [5/5] Restarting and rebuilding Docker Containers...${NC}"
 if [ -f "docker-compose.yml" ]; then
     echo -e "   Docker konteynerleri durduruluyor..."
-    docker-compose down || docker compose down || true
+    docker-compose --ansi never down || docker compose --ansi never down || true
     
     echo -e "   Eski çakışan konteynerler temizleniyor..."
     docker stop aurvex_redis aurvex_engine aurvex_dashboard 2>/dev/null || true
     docker rm aurvex_redis aurvex_engine aurvex_dashboard 2>/dev/null || true
     
     echo -e "   Docker konteynerleri yeniden inşa ediliyor ve başlatılıyor..."
-    if docker-compose up -d --build || docker compose up -d --build; then
+    if docker-compose --ansi never up -d --build || docker compose --ansi never up -d --build; then
         echo -e "${GREEN}✅ Docker servisleri başarıyla başlatıldı!${NC}"
     else
         echo -e "${RED}❌ Docker başlatma başarısız oldu! Docker daemon çalışıyor mu?${NC}"

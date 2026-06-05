@@ -48,6 +48,9 @@ class AIDecisionService:
             sig.max_loss = risk_result["max_loss"]
             sig.status = "ready"
             
+            sig.is_liquidity_sweep = trigger_result.get("is_liquidity_sweep", False)
+            sig.is_sfp = trigger_result.get("is_sfp", False)
+            
             sig.metadata = {
                 "adx": trigger_result.get("adx", 0.0),
                 "rv": trigger_result.get("rv", 1.0),
@@ -71,9 +74,16 @@ class AIDecisionService:
                 "cvd_value": trigger_result.get("cvd_value", 0.0),
                 "cvd_slope": trigger_result.get("cvd_slope", 0.0),
                 "oi_change_pct": trigger_result.get("oi_change_pct", 0.0),
+                "is_liquidity_sweep": trigger_result.get("is_liquidity_sweep", False),
+                "is_sfp": trigger_result.get("is_sfp", False),
             }
             
             decision = await asyncio.to_thread(self.ai_engine.evaluate, sig)
+            
+            # Merge agent evaluation scores/votes into metadata
+            agent_data = decision.get("agent_data")
+            if agent_data and isinstance(agent_data, dict):
+                sig.metadata.update(agent_data)
             
             # yapay zeka Çoklu Ajan Konsensüs Kapısı (Consensus Gate)
             if decision["decision"] == "ALLOW":
@@ -91,12 +101,14 @@ class AIDecisionService:
             if candidate_id:
                 try:
                     from database import update_candidate_status
+                    import json
                     await asyncio.to_thread(
                         update_candidate_status,
                         candidate_id,
                         decision=decision["decision"],
                         reject_reason=decision["reason"],
-                        ai_score=decision["final_score"]
+                        ai_score=decision["final_score"],
+                        metadata=json.dumps(sig.metadata)
                     )
                 except Exception as db_e:
                     logger.error(f"[AIDecisionService] DB Update Error: {db_e}")

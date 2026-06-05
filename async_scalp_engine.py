@@ -290,7 +290,7 @@ class AsyncScalpEngine:
             await asyncio.sleep(10)
 
     async def _friday_ceo_loop(self):
-        """Run Friday CEO Agent loop every 12 hours."""
+        """Run Friday CEO Agent loop using dynamic interval."""
         # Initial startup delay (e.g. 5 minutes) to let bot collect statistics
         await asyncio.sleep(300)
         while True:
@@ -298,7 +298,8 @@ class AsyncScalpEngine:
                 await asyncio.to_thread(self.friday_ceo.evaluate_and_decide)
             except Exception as e:
                 logger.error(f"[Friday CEO Loop] Task failed: {e}")
-            await asyncio.sleep(43200) # 12 hours
+            interval = getattr(config, "FRIDAY_CEO_LOOP_INTERVAL", 3600)
+            await asyncio.sleep(max(60, interval))
 
     async def _friday_monitor_loop(self):
         """Run Friday CEO Autonomous Monitoring loop every 5 minutes."""
@@ -388,6 +389,17 @@ class AsyncScalpEngine:
                     applied = await asyncio.to_thread(apply_ghost_suggestions_v2)
                     if applied:
                         logger.info(f"[Ghost] Otonom optimizasyon uygulandı: {len(applied)} kural")
+                    
+                    # Run dynamic weight auto-tuning (Phase I Upgrade)
+                    try:
+                        from core.weight_tuner import tune_agent_weights
+                        logger.info("[Ghost] Otonom ajan ağırlıkları auto-tuning tetikleniyor...")
+                        tuned = await asyncio.to_thread(tune_agent_weights)
+                        if tuned:
+                            logger.info(f"[Ghost] Otonom ajan ağırlıkları güncellendi: {list(tuned.keys())}")
+                    except Exception as _wt_err:
+                        logger.error(f"[Ghost] Weight tuner execution error: {_wt_err}")
+                        
                     last_suggestion_time = now
 
                 # 3. İnaktivite Eşik Çürümesi (Threshold Decay)

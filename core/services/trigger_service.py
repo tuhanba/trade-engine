@@ -29,22 +29,30 @@ class TriggerService:
                 trend_confluence=trend_result.get("confluence_raw", 1)
             )
 
-            # Regime-Switching Filter: Choppy piyasada min A+ kalitesi şartı
+            # Regime-Switching Filter: Choppy piyasada kalite filtresi kontrolü
             try:
-                from database import get_market_regime
-                regime = await asyncio.to_thread(get_market_regime)
-                quality = trigger_result.get("quality", "C")
-                if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL") and quality not in ("S", "A+"):
-                    logger.info(f"[TriggerService] {symbol} rejected by Regime Filter: quality {quality} in CHOPPY market.")
-                    try:
-                        from database import save_signal_event
-                        await asyncio.to_thread(
-                            save_signal_event, signal_id, "REGIME_REJECTED",
-                            symbol=symbol, reject_reason=f"choppy_market_quality_{quality}"
-                        )
-                    except Exception:
-                        pass
-                    return
+                import config
+                if getattr(config, "REGIME_FILTER_ENABLED", True):
+                    from database import get_market_regime
+                    regime = await asyncio.to_thread(get_market_regime)
+                    quality = trigger_result.get("quality", "C")
+                    min_quality = getattr(config, "REGIME_FILTER_MIN_QUALITY_IN_CHOPPY", "A+")
+                    
+                    quality_order = ["C", "B", "A", "A+", "S"]
+                    if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
+                        q_idx = quality_order.index(quality) if quality in quality_order else -1
+                        min_idx = quality_order.index(min_quality) if min_quality in quality_order else -1
+                        if q_idx < min_idx:
+                            logger.info(f"[TriggerService] {symbol} rejected by Regime Filter: quality {quality} is below min {min_quality} in CHOPPY market.")
+                            try:
+                                from database import save_signal_event
+                                await asyncio.to_thread(
+                                    save_signal_event, signal_id, "REGIME_REJECTED",
+                                    symbol=symbol, reject_reason=f"choppy_market_quality_{quality}_below_{min_quality}"
+                                )
+                            except Exception:
+                                pass
+                            return
             except Exception as rex:
                 logger.debug(f"[TriggerService] Regime check failed: {rex}")
 

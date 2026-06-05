@@ -116,10 +116,22 @@ BREAKEVEN_OFFSET_PCT = _env_float("BREAKEVEN_OFFSET_PCT", 0.1)
 TRAILING_STOP_TYPE   = _env("TRAILING_STOP_TYPE", "atr")
 CONFIRMATION_MODE    = _env_bool("CONFIRMATION_MODE", False)
 CONFIRMATION_AUTO_EXECUTE_HIGH_QUALITY = _env_bool("CONFIRMATION_AUTO_EXECUTE_HIGH_QUALITY", True)
+CONFIRMATION_AUTO_EXECUTE_QUALITIES = _env("CONFIRMATION_AUTO_EXECUTE_QUALITIES", "S,A+,A").split(",")
+CONFIRMATION_AUTO_EXECUTE_SCORE = _env_float("CONFIRMATION_AUTO_EXECUTE_SCORE", 70.0)
+MACRO_GUARD_ENABLED = _env_bool("MACRO_GUARD_ENABLED", True)
+LATENCY_GUARD_ENABLED = _env_bool("LATENCY_GUARD_ENABLED", True)
+REGIME_FILTER_ENABLED = _env_bool("REGIME_FILTER_ENABLED", True)
+REGIME_FILTER_MIN_QUALITY_IN_CHOPPY = _env("REGIME_FILTER_MIN_QUALITY_IN_CHOPPY", "A+")
+ORDER_BOOK_WALL_FILTER_ENABLED = _env_bool("ORDER_BOOK_WALL_FILTER_ENABLED", True)
+FRIDAY_CEO_LOOP_INTERVAL = _env_int("FRIDAY_CEO_LOOP_INTERVAL", 3600)
+FRIDAY_CEO_MODEL = _env("FRIDAY_CEO_MODEL", "claude-3-5-sonnet-20241022")
+FRIDAY_SUBAGENT_MODEL = _env("FRIDAY_SUBAGENT_MODEL", "claude-3-5-haiku-20241022")
+
 
 # Otonom Kâr Kilitleme Kalkanı (Dynamic Profit Lock Settings)
 DAILY_PROFIT_LOCK_PCT  = _env_float("DAILY_PROFIT_LOCK_PCT", 3.0)
 WEEKLY_PROFIT_LOCK_PCT = _env_float("WEEKLY_PROFIT_LOCK_PCT", 10.0)
+MAX_SAME_DIRECTION     = _env_int("MAX_SAME_DIRECTION", 5)
 
 # Time Decay Stop Loss Settings
 TIME_DECAY_ENABLED                 = _env_bool("TIME_DECAY_ENABLED", True)
@@ -181,7 +193,7 @@ PAPER_TRACK_HORIZON_HOURS       = _env_float("PAPER_TRACK_HORIZON_HOURS", 6.0)
 
 # Trigger Engine
 ALLOWED_QUALITIES          = ["S", "A+", "A", "B", "C"]
-EXECUTABLE_QUALITIES       = _env("EXECUTABLE_QUALITIES", "S,A+,A,B,C").split(",")
+EXECUTABLE_QUALITIES       = _env("EXECUTABLE_QUALITIES", "S,A+,A,B,C,M").split(",")
 # London (08-12 UTC) + NY (13-17 UTC) = en aktif seanslar
 GOOD_HOURS_UTC             = list(range(8, 22))   # 08-21 UTC (NY kapanışına kadar)
 BAD_HOURS_UTC              = list(range(0, 6))    # 00-05 UTC (Asian close)
@@ -281,6 +293,14 @@ _DYNAMIC_PARAMS_MAP = {
     "WEEKLY_PROFIT_LOCK_PCT":         ("weekly_profit_lock_pct", float),
     "RSI_LIMIT":                      ("rsi_limit", float),
     "CVD_FILTER_VAL":                 ("cvd_filter_val", float),
+    "MACRO_GUARD_ENABLED":            ("macro_guard_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "LATENCY_GUARD_ENABLED":          ("latency_guard_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "REGIME_FILTER_ENABLED":          ("regime_filter_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "REGIME_FILTER_MIN_QUALITY_IN_CHOPPY": ("regime_filter_min_quality_in_choppy", str),
+    "ORDER_BOOK_WALL_FILTER_ENABLED": ("order_book_wall_filter_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "CONFIRMATION_AUTO_EXECUTE_SCORE": ("confirmation_auto_execute_score", float),
+    "FRIDAY_CEO_LOOP_INTERVAL":        ("friday_ceo_loop_interval", int),
+    "MAX_SAME_DIRECTION":              ("max_same_direction", int),
 }
 
 _AI_PARAMS_MAP = {
@@ -297,7 +317,7 @@ def __getattr__(name: str) -> Any:
     import time
     import sys
     
-    is_testing = "pytest" in sys.modules
+    is_testing = "pytest" in sys.modules or "unittest" in sys.modules
     now = time.time()
     
     if not is_testing and name in _CONFIG_CACHE:
