@@ -553,11 +553,11 @@ class AsyncScalpEngine:
             await asyncio.sleep(1800)  # Check every 30 minutes
 
     async def _db_maintenance_loop(self):
-        """Perform SQLite VACUUM and WAL checkpoint every 24 hours."""
+        """Perform SQLite VACUUM and WAL checkpoint every 12 hours."""
         from database import get_conn
         
         def _run_vacuum():
-            logger.info("[Maintenance] Starting daily SQLite maintenance...")
+            logger.info("[Maintenance] Starting semi-daily SQLite maintenance...")
             try:
                 with get_conn() as conn:
                     # 1. Prune signal_events older than 30 days
@@ -595,7 +595,7 @@ class AsyncScalpEngine:
                 logger.error(f"[Maintenance] Failed: {e}")
 
         while True:
-            await asyncio.sleep(86400) # 24h
+            await asyncio.sleep(43200) # 12h
             await asyncio.to_thread(_run_vacuum)
 
     async def _weekly_digest_loop(self):
