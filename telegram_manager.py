@@ -89,33 +89,45 @@ class TelegramManager:
     def _poll_loop(self):
         while self._running:
             try:
-                self._poll_once()
+                has_updates = self._poll_once()
+                if has_updates:
+                    time.sleep(0.1)  # Hızlı tepki için beklemeden tekrar tara
+                else:
+                    time.sleep(0.5)  # Boş döngüde kısa bekleme
             except Exception as e:
-                logger.debug("Poll hatasi: %s", e)
-            time.sleep(3)
+                logger.debug("Poll hatası: %s", e)
+                time.sleep(3.0)  # Bağlantı hatalarında koruma amaçlı bekleme
 
-    def _poll_once(self):
+    def _poll_once(self) -> bool:
         url = _POLL_URL.format(token=self.token)
         params = {"timeout": 5, "offset": self._last_update_id + 1, "limit": 10}
-        resp = requests.get(url, params=params, timeout=_TIMEOUT)
-        if resp.status_code != 200:
-            return
-        data = resp.json()
-        if not data.get("ok"):
-            return
-        for update in data.get("result", []):
-            uid = update.get("update_id", 0)
-            if uid > self._last_update_id:
-                self._last_update_id = uid
-                # Offset'i DB'ye kaydet — restart güvenliği
-                try:
-                    import database as _db
-                    _db.set_state("tg_last_update_id", str(uid))
-                except Exception:
-                    pass
-            else:
-                continue  # eski update, atla
-            self._handle_update(update)
+        try:
+            resp = requests.get(url, params=params, timeout=_TIMEOUT)
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            if not data.get("ok"):
+                return False
+            updates = data.get("result", [])
+            if not updates:
+                return False
+            for update in updates:
+                uid = update.get("update_id", 0)
+                if uid > self._last_update_id:
+                    self._last_update_id = uid
+                    # Offset'i DB'ye kaydet — restart güvenliği
+                    try:
+                        import database as _db
+                        _db.set_state("tg_last_update_id", str(uid))
+                    except Exception:
+                        pass
+                else:
+                    continue  # eski update, atla
+                self._handle_update(update)
+            return True
+        except Exception as e:
+            logger.debug("Poll single call error: %s", e)
+            return False
 
     def _handle_update(self, update: dict):
         if "callback_query" in update:
