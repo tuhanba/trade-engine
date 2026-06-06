@@ -200,3 +200,74 @@ def test_dynamic_weights_in_decision_engine():
          
          res = classify_signal(sig, context)
          assert res.score_adjusted == 80.0
+
+
+def test_signal_based_ghost_learning_sgd_update():
+    from datetime import datetime, timezone
+    from core.ghost_learning import _simulate_single_ghost
+    
+    ghost_record = {
+        "id": 999,
+        "coin": "BTCUSDT",
+        "side": "LONG",
+        "entry_price": 100.0,
+        "stop_loss": 90.0,
+        "take_profit": 120.0,
+        "trigger_type": "breakout",
+        "reject_reason": "VETO",
+        "rsi": 60.0,
+        "cvd_slope": 0.5,
+        "metadata": json.dumps({
+            "adx": 25.0,
+            "rv": 1.2,
+            "rsi5": 60.0,
+            "rsi1": 55.0,
+            "funding_favorable": 1.0,
+            "bb_width_pct": 0.05,
+            "ob_ratio": 1.5,
+            "volume_m": 500000.0,
+        })
+    }
+    
+    mock_client = MagicMock()
+    now_dt = datetime.now(timezone.utc)
+    
+    with patch("database.save_ghost_result") as mock_save_result, \
+         patch("core.online_learning.update_online_model") as mock_update_model:
+             
+         # 1. Test TP Hit -> should result in WIN outcome and call update_online_model with 1
+         _simulate_single_ghost(ghost_record, mock_client, now_dt, prices={"BTCUSDT": 125.0})
+         
+         mock_save_result.assert_called_once()
+         args, kwargs = mock_save_result.call_args
+         assert args[1]["virtual_outcome"] == "WIN"
+         
+         mock_update_model.assert_called_once()
+         features_arg, outcome_arg = mock_update_model.call_args[0]
+         assert outcome_arg == 1
+         assert features_arg["rsi5"] == 60.0
+         assert features_arg["symbol"] == "BTCUSDT"
+
+    # Reset and test SL Hit -> LOSS outcome and update_online_model with 0
+    with patch("database.save_ghost_result") as mock_save_result, \
+         patch("core.online_learning.update_online_model") as mock_update_model:
+             
+         _simulate_single_ghost(ghost_record, mock_client, now_dt, prices={"BTCUSDT": 85.0})
+         
+         args, kwargs = mock_save_result.call_args
+         assert args[1]["virtual_outcome"] == "LOSS"
+         
+         mock_update_model.assert_called_once()
+         features_arg, outcome_arg = mock_update_model.call_args[0]
+         assert outcome_arg == 0
+         
+    # Test reject_reason == "ALLOW" -> should NOT call update_online_model
+    ghost_record_allow = dict(ghost_record)
+    ghost_record_allow["reject_reason"] = "ALLOW"
+    
+    with patch("database.save_ghost_result") as mock_save_result, \
+         patch("core.online_learning.update_online_model") as mock_update_model:
+             
+         _simulate_single_ghost(ghost_record_allow, mock_client, now_dt, prices={"BTCUSDT": 125.0})
+         
+         mock_update_model.assert_not_called()

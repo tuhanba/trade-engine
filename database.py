@@ -318,6 +318,7 @@ CREATE TABLE IF NOT EXISTS ghost_signals (
     simulated       INTEGER DEFAULT 0,
     rsi             REAL DEFAULT 50.0,
     cvd_slope       REAL DEFAULT 0.0,
+    metadata        TEXT DEFAULT '{}',
     created_at      TEXT DEFAULT (datetime('now'))
 )
 """
@@ -479,6 +480,7 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("atr",           "REAL DEFAULT 0"),
         ("final_score",   "REAL DEFAULT 0"),
         ("market_regime", "TEXT DEFAULT 'NEUTRAL'"),
+        ("metadata",      "TEXT DEFAULT '{}'"),
     ],
     "ghost_results": [
         ("exit_price", "REAL DEFAULT 0"),
@@ -2235,12 +2237,19 @@ def update_paper_result(result_id: int, updates: dict):
 
 def save_ghost_signal(data: dict) -> int:
     """ghost_signals tablosuna yeni kayıt ekler, id döner."""
+    import json
+    metadata_val = data.get("metadata", {})
+    if isinstance(metadata_val, dict):
+        metadata_str = json.dumps(metadata_val)
+    else:
+        metadata_str = str(metadata_val)
+
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO ghost_signals
                (coin, symbol, side, direction, timeframe, entry_price, stop_loss, take_profit, tp1, tp2, tp3, atr, final_score, market_regime,
-                confidence, reject_reason, trigger_type, simulated, rsi, cvd_slope)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                confidence, reject_reason, trigger_type, simulated, rsi, cvd_slope, metadata)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)""",
             (
                 data.get("coin") or data.get("symbol", ""),
                 data.get("symbol", ""),
@@ -2261,6 +2270,7 @@ def save_ghost_signal(data: dict) -> int:
                 data.get("trigger_type", "unknown"),
                 float(data.get("rsi", 50.0)),
                 float(data.get("cvd_slope", 0.0)),
+                metadata_str,
             )
         )
         return cur.lastrowid or 0

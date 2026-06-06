@@ -186,6 +186,38 @@ def _simulate_single_ghost(ghost: dict, client, now: datetime, prices: dict = No
         ghost_id, symbol, side, outcome, pnl_r
     )
 
+    # ── SGD Online Learner update ──────────────────────────────────────
+    if outcome in ("WIN", "LOSS") and ghost.get("reject_reason") != "ALLOW":
+        try:
+            import json
+            from core.online_learning import update_online_model
+            
+            metadata_raw = ghost.get("metadata")
+            features = {}
+            if metadata_raw:
+                try:
+                    features = json.loads(metadata_raw)
+                except Exception:
+                    pass
+            
+            # Ensure key fields are present in features
+            features.update({
+                "side": side,
+                "symbol": symbol,
+                "rsi5": float(ghost.get("rsi") or 50.0),
+                "cvd_slope": float(ghost.get("cvd_slope") or 0.0),
+            })
+            
+            outcome_val = 1 if outcome == "WIN" else 0
+            update_online_model(features, outcome_val)
+            logger.info(
+                "[Ghost Learning] Online model incrementally updated for ghost#%d (%s) outcome=%s",
+                ghost_id, symbol, outcome
+            )
+        except Exception as _update_err:
+            logger.warning("[Ghost Learning] Failed to update online model from ghost result: %s", _update_err)
+    # ─────────────────────────────────────────────────────────────────
+
 
 def get_pattern_analysis(min_count: int = 5, days: int = 30) -> list:
     """

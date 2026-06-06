@@ -1425,27 +1425,42 @@ def classify_signal(
     )
 
     # ── Ghost Learning hook ───────────────────────────────────────────
-    # VETO veya WATCH kararında ghost_signals'a kaydet (tüm çağırıcılar için)
-    if result.decision in (SignalDecision.VETO.value, SignalDecision.WATCH.value):
-        try:
-            from core.ghost_learning import maybe_ghost_log
-            maybe_ghost_log(
-                {
-                    "symbol":       signal.symbol,
-                    "direction":    signal.side,
-                    "entry":        signal.entry_price,
-                    "sl":           signal.stop_loss,
-                    "tp1":          getattr(signal, "tp1", None) or 0,
-                    "confidence":   result.confidence,
-                    "trigger_type": getattr(signal, "trigger_type", None) or getattr(signal, "setup_quality", None) or "UNKNOWN",
-                    "final_score":  result.score_adjusted,
-                    "rsi":          getattr(signal, "rsi5", None) or (signal.metadata.get("rsi5") if signal.metadata else None) or 50.0,
-                    "cvd_slope":    (signal.metadata.get("cvd_slope") if signal.metadata else None) or 0.0,
-                },
-                reason=result.decision,
-            )
-        except Exception as _ghost_err:
-            logger.debug("[classify_signal] ghost log atlandı: %s", _ghost_err)
+    # Tüm kararlarda ghost_signals'a kaydet (tüm çağırıcılar için)
+    try:
+        from core.ghost_learning import maybe_ghost_log
+        metadata_dict = {}
+        if getattr(signal, "metadata", None) and isinstance(signal.metadata, dict):
+            metadata_dict.update(signal.metadata)
+        metadata_dict.update({
+            "adx": getattr(signal, "adx", None) or metadata_dict.get("adx", 0.0),
+            "rsi5": getattr(signal, "rsi5", None) or getattr(signal, "rsi5", None) or metadata_dict.get("rsi5", 50.0),
+            "rsi1": getattr(signal, "rsi1", None) or metadata_dict.get("rsi1", 50.0),
+            "cvd_slope": metadata_dict.get("cvd_slope", 0.0),
+            "oi_change_pct": metadata_dict.get("oi_change_pct", 0.0),
+            "volume_m": metadata_dict.get("volume_m", 0.0),
+            "final_score": adjusted_score,
+            "setup_quality": getattr(signal, "setup_quality", "B"),
+            "side": signal.side,
+            "symbol": signal.symbol,
+        })
+        maybe_ghost_log(
+            {
+                "symbol":       signal.symbol,
+                "direction":    signal.side,
+                "entry":        signal.entry_price,
+                "sl":           signal.stop_loss,
+                "tp1":          getattr(signal, "tp1", None) or 0,
+                "confidence":   result.confidence,
+                "trigger_type": getattr(signal, "trigger_type", None) or getattr(signal, "setup_quality", None) or "UNKNOWN",
+                "final_score":  result.score_adjusted,
+                "rsi":          getattr(signal, "rsi5", None) or metadata_dict.get("rsi5") or 50.0,
+                "cvd_slope":    metadata_dict.get("cvd_slope") or 0.0,
+                "metadata":     metadata_dict,
+            },
+            reason=result.decision,
+        )
+    except Exception as _ghost_err:
+        logger.debug("[classify_signal] ghost log atlandı: %s", _ghost_err)
     # ─────────────────────────────────────────────────────────────────
 
     return return_decision(result)
