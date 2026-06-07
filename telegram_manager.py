@@ -95,7 +95,7 @@ class TelegramManager:
                 else:
                     time.sleep(0.5)  # Boş döngüde kısa bekleme
             except Exception as e:
-                logger.debug("Poll hatası: %s", e)
+                logger.error("Poll hatası: %s", e, exc_info=True)
                 time.sleep(3.0)  # Bağlantı hatalarında koruma amaçlı bekleme
 
     def _poll_once(self) -> bool:
@@ -104,9 +104,11 @@ class TelegramManager:
         try:
             resp = requests.get(url, params=params, timeout=_TIMEOUT)
             if resp.status_code != 200:
+                logger.warning("Telegram getUpdates HTTP hatası: %s - %s", resp.status_code, resp.text)
                 return False
             data = resp.json()
             if not data.get("ok"):
+                logger.warning("Telegram getUpdates API hatası: %s", data)
                 return False
             updates = data.get("result", [])
             if not updates:
@@ -126,7 +128,7 @@ class TelegramManager:
                 self._handle_update(update)
             return True
         except Exception as e:
-            logger.debug("Poll single call error: %s", e)
+            logger.warning("Telegram getUpdates çağrısı başarısız: %s", e)
             return False
 
     def _handle_update(self, update: dict):
@@ -154,6 +156,9 @@ class TelegramManager:
             is_authorized = (from_chat in allowed_ids) or (from_user in allowed_ids)
             
         if not is_authorized:
+            is_cmd_or_mention = text.startswith("/") or text.lower().startswith("friday")
+            if is_cmd_or_mention:
+                logger.warning(f"[TelegramManager] Yetkisiz komut/mention engellendi. Chat: {from_chat}, User: {from_user}, Text: {text[:50]}")
             return
 
         if text.startswith("/"):
