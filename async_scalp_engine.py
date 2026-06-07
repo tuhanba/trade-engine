@@ -38,7 +38,29 @@ logger = logging.getLogger("ax.async_engine")
 class AsyncScalpEngine:
     def __init__(self):
         self.market_data = AsyncMarketDataService(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
-        self.client = Client(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
+        # Robust Client initialization with fallback API endpoints
+        self.client = None
+        api_endpoints = [
+            'https://api.binance.com/api',
+            'https://api1.binance.com/api',
+            'https://api2.binance.com/api',
+            'https://api3.binance.com/api'
+        ]
+        import binance.client
+        for url in api_endpoints:
+            try:
+                binance.client.Client.API_URL = url
+                logger.info(f"[Engine] Attempting to initialize Client with endpoint: {url}")
+                self.client = Client(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
+                logger.info(f"[Engine] Client successfully initialized with endpoint: {url}")
+                break
+            except Exception as e:
+                logger.warning(f"[Engine] Failed to connect using endpoint {url}: {e}")
+        
+        if self.client is None:
+            logger.error("[Engine] All Binance API endpoints failed to connect. Bypassing ping to allow paper trading boot...")
+            binance.client.Client.ping = lambda self: {}
+            self.client = Client(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
         self._last_trade_opened_at = time.time()
 
     async def start(self):
