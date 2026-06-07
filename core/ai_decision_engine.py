@@ -1046,11 +1046,13 @@ def classify_signal(
     scorer = AdaptiveScorer(ghost)
     
     is_paper = False
+    bypass_shields = True
     try:
         import config
         is_paper = (getattr(config, "EXECUTION_MODE", "paper") == "paper")
+        bypass_shields = is_paper or getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
     except Exception:
-        is_paper = True
+        bypass_shields = True
 
     votes_to_broadcast = {}
 
@@ -1217,7 +1219,7 @@ def classify_signal(
         
         reason_msg = "Consensus VETO | " + " | ".join(veto_reasons)
         logger.info(f"[AI Consensus] VETO issued for {signal.symbol}: {reason_msg}")
-        if not is_paper:
+        if not bypass_shields:
             return return_decision(AIDecisionResult(
                 decision=SignalDecision.VETO.value,
                 reason=reason_msg,
@@ -1225,7 +1227,7 @@ def classify_signal(
                 score_adjusted=adjusted_score
             ))
         else:
-            logger.info(f"[Paper Bypass] AI Consensus VETO bypassed for {signal.symbol}: {reason_msg}")
+            logger.info(f"[Bypass] AI Consensus VETO bypassed for {signal.symbol}: {reason_msg}")
 
     # ── Portföy Korelasyon Kalkanı (Faz 5) ──────────────────────────
     try:
@@ -1235,16 +1237,16 @@ def classify_signal(
         if same_direction_count >= 3:
             # 3'ten fazla aynı yönde pozisyon var, risk yarıya düşürülmeli veya VETO verilmeli
             if adjusted_score < 75:
-                if not is_paper:
+                if not bypass_shields:
                     return return_decision(AIDecisionResult(
                         decision=SignalDecision.VETO.value,
                         reason=f"Korelasyon Kalkanı: Zaten {same_direction_count} adet {signal.side} pozisyon açık",
                         confidence=0.8,
                     ))
                 else:
-                    logger.info(f"[Paper Bypass] Correlation Shield VETO bypassed for {signal.symbol}.")
+                    logger.info(f"[Bypass] Correlation Shield VETO bypassed for {signal.symbol}.")
             else:
-                if not is_paper:
+                if not bypass_shields:
                     # Skor iyiyse riski düşürtüp izin ver
                     signal.risk_pct *= 0.5
                     signal.position_size = round(signal.position_size * 0.5, 6)
@@ -1262,16 +1264,16 @@ def classify_signal(
         # Aşırı korku varsa LONG işlemlere kısıtlama
         if fng_val < 25 and signal.side == "LONG":
             if adjusted_score < 40:
-                if not is_paper:
+                if not bypass_shields:
                     return return_decision(AIDecisionResult(
                         decision=SignalDecision.VETO.value,
                         reason=f"Macro Kalkanı: Piyasa Aşırı Korku seviyesinde (FNG={fng_val}). LONG işlemi reddedildi.",
                         confidence=0.9,
                     ))
                 else:
-                    logger.info(f"[Paper Bypass] Macro Sentiment LONG VETO bypassed for {signal.symbol}.")
+                    logger.info(f"[Bypass] Macro Sentiment LONG VETO bypassed for {signal.symbol}.")
             else:
-                if not is_paper:
+                if not bypass_shields:
                     signal.risk_pct *= 0.5 # Riski yarıya düşür
                     signal.position_size = round(signal.position_size * 0.5, 6)
                     signal.notional_size = round(signal.notional_size * 0.5, 4)
@@ -1280,16 +1282,16 @@ def classify_signal(
         # Aşırı coşku varsa SHORT işlemlere kısıtlama
         elif fng_val > 75 and signal.side == "SHORT":
             if adjusted_score < 40:
-                if not is_paper:
+                if not bypass_shields:
                     return return_decision(AIDecisionResult(
                         decision=SignalDecision.VETO.value,
                         reason=f"Macro Kalkanı: Piyasa Aşırı Açgözlülük seviyesinde (FNG={fng_val}). SHORT işlemi reddedildi.",
                         confidence=0.9,
                     ))
                 else:
-                    logger.info(f"[Paper Bypass] Macro Sentiment SHORT VETO bypassed for {signal.symbol}.")
+                    logger.info(f"[Bypass] Macro Sentiment SHORT VETO bypassed for {signal.symbol}.")
             else:
-                if not is_paper:
+                if not bypass_shields:
                     signal.risk_pct *= 0.5
                     signal.position_size = round(signal.position_size * 0.5, 6)
                     signal.notional_size = round(signal.notional_size * 0.5, 4)
@@ -1316,7 +1318,7 @@ def classify_signal(
         if is_scalp_mode and setup_quality in ("A", "B", "C") and confluence >= 1:
             logger.debug("[Regime] CHOPPY'de Scalp Modu istisnası: A/B kalite + Confluence kabul edildi.")
         elif setup_quality not in ("S", "A+", "A", "B"):
-            if not is_paper:
+            if not bypass_shields:
                 return return_decision(AIDecisionResult(
                     decision=SignalDecision.VETO.value,
                     reason=f"CHOPPY piyasa — {setup_quality} kalite yetersiz (min A+)",
@@ -1324,7 +1326,7 @@ def classify_signal(
                     score_adjusted=adjusted_score,
                 ))
             else:
-                logger.info(f"[Paper Bypass] Choppy Market Quality Filter VETO bypassed for {signal.symbol}.")
+                logger.info(f"[Bypass] Choppy Market Quality Filter VETO bypassed for {signal.symbol}.")
     elif (regime == "BULLISH" or (regime in ("TRENDING_HIGH_VOL", "TRENDING_LOW_VOL") and ctx.get("market_trend") == "bullish")) and side_upper == "SHORT":
         adjusted_score = round(adjusted_score * 0.88, 1)
         logger.debug("[Regime] BULLISH/TRENDING_UP + SHORT → score *0.88 → %.1f", adjusted_score)
@@ -1412,7 +1414,7 @@ def classify_signal(
         confidence = 0.35
 
     else:
-        if not is_paper:
+        if not bypass_shields:
             decision = SignalDecision.VETO.value
             reason = f"Ayarlanmış score düşük: {adjusted_score:.1f}"
             confidence = 0.7
