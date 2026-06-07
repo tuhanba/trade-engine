@@ -134,7 +134,8 @@ class ExecutionService:
                 is_high_quality = sig.setup_quality in conf_qualities or sig.final_score >= conf_score
                 auto_exec_high  = getattr(config, "CONFIRMATION_AUTO_EXECUTE_HIGH_QUALITY", True)
                 
-                if getattr(config, "CONFIRMATION_MODE", False) and not (is_high_quality and auto_exec_high):
+                is_paper = (getattr(config, "EXECUTION_MODE", "paper") == "paper")
+                if getattr(config, "CONFIRMATION_MODE", False) and not is_paper and not (is_high_quality and auto_exec_high):
                     if not candidate_id:
                         try:
                             from database import get_conn

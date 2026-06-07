@@ -61,7 +61,7 @@ C. İNAKTİVİTE KORUMASI VE THRESHOLD DECAY:
 💬 3. İLETİŞİM VE PERSONA KURALLARI:
 1. Son derece zeki, yetkin, resmi ve profesyonel bir finans lideri gibi konuş. Samimi, saygılı ve iş odaklı ol.
 2. Kullanıcıya hitap ederken kesinlikle "kanka", "boss", "canım boss'um" gibi kelimeler kullanma. Her zaman "Batuhan Bey" diyerek hitap et.
-3. Raporlarını mutlaka gelişmiş markdown tabloları ve sayısal kantitatif metrikler (CVD slope, GMM rejim, Pearson, L2 Wall) kullanarak sun.
+3. Raporlarını son derece sade, görsel, profesyonel ve kısa tut. Kesinlikle iç yönetim kurulu üyelerinin (CIO, CTA, CRO, CHO) kendi arasındaki uzun tartışma diyaloglarını, konuşma metinlerini veya rapor detaylarını cevabında listeleme! Sen sadece nihai CEO kararını, kısa ve öz bir durum özetini (2-3 cümle), pürüzsüz bir markdown tablosu ile ana metrikleri (GMM Rejim, CVD slope, Pearson, L2 Wall vb.) ve varsa otonom olarak uygulanan kararları/aksiyonları göster.
 4. Kesinlikle Türkçe konuşacaksın.
 5. Her cevabının sonunda, aldığın parametrik kararları ve tetikleyeceğin aksiyonları MUTLAKA aşağıdaki JSON formatında belirt. Bu JSON bloğu arka planda kod tarafından okunup sisteme uygulanacaktır.
 
@@ -1114,20 +1114,15 @@ class FridayCeo:
             # ── Multi-Agent Debate ──
             risk_prompt = (
                 "Sen Aurvex AI Trade Engine sisteminin Baş Risk Yöneticisisin (Chief Risk Officer).\n"
-                "Görevin, güncel sistem durumunu inceleyerek muhafazakar ve risk odaklı bir değerlendirme yapmaktır.\n"
-                "Portföy VaR seviyelerini, açık pozisyonları, Kelly kriterini ve market rejimini inceleyerek risk analizi raporu yaz.\n"
-                "Kararlarında korumacı ol."
+                "Sistem telemetrisini incele ve en kritik risk bulgularını maksimum 3-4 maddede, son derece kısa ve öz olarak yaz. Giriş/gelişme/sonuç cümleleri kurma."
             )
             tech_prompt = (
                 "Sen Aurvex AI Trade Engine sisteminin Baş Teknik Analistisin.\n"
-                "Görevin, güncel sistem durumunu (CVD akış eğimleri, L2 emir defteri direnç duvarları, RSI, ADX, trendler vb.) inceleyerek teknik analiz odaklı bir değerlendirme yapmaktır.\n"
-                "Trend gücünü, L2 Wall derinliğini, CVD eğimini ve OI değişimlerini inceleyerek teknik rapor yaz."
+                "CVD, L2 Wall, trend ve hacim durumunu incele ve teknik analiz özetini maksimum 3-4 maddede, son derece kısa ve öz olarak yaz. Giriş/gelişme/sonuç cümleleri kurma."
             )
             health_prompt = (
                 "Sen Aurvex AI Trade Engine sisteminin Baş Sistem ve Altyapı Analistisin (Chief Health Officer - CHO).\n"
-                "Görevin; veritabanı boyutunu, sunucu temizlik (housekeeping) ihtiyaçlarını, ağ gecikmelerini (latency), "
-                "ve arka plan yardımcı servislerin (Watchdog, ML Loop, Tuner, Self-Healing) çalışma durumunu analiz etmektir.\n"
-                "Sistem telemetrisini inceleyerek altyapı kararlılığı, temizlik ve çalışma zamanı optimizasyonları için öneriler yaz."
+                "DB boyutu, sunucu disk alanı ve gecikmeleri incele, bulgularını maksimum 3-4 maddede, son derece kısa ve öz olarak yaz. Giriş/gelişme/sonuç cümleleri kurma."
             )
             
             # ── Concurrent Multi-Agent Debate ──
@@ -1137,7 +1132,7 @@ class FridayCeo:
                 try:
                     return ai_client.messages.create(
                         model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-haiku-4-5-20251001"),
-                        max_tokens=400,
+                        max_tokens=250,
                         system=risk_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
                     )
@@ -1145,7 +1140,7 @@ class FridayCeo:
                     logger.warning(f"[Friday CEO] Subagent risk failed, forcing Haiku V2: {sub_err}")
                     return ai_client.messages.create(
                         model="claude-haiku-4-5-20251001",
-                        max_tokens=400,
+                        max_tokens=250,
                         system=risk_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
                     )
@@ -1154,7 +1149,7 @@ class FridayCeo:
                 try:
                     return ai_client.messages.create(
                         model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-haiku-4-5-20251001"),
-                        max_tokens=400,
+                        max_tokens=250,
                         system=tech_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
                     )
@@ -1162,7 +1157,7 @@ class FridayCeo:
                     logger.warning(f"[Friday CEO] Subagent tech failed, forcing Haiku V2: {sub_err}")
                     return ai_client.messages.create(
                         model="claude-haiku-4-5-20251001",
-                        max_tokens=400,
+                        max_tokens=250,
                         system=tech_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
                     )
@@ -1171,7 +1166,7 @@ class FridayCeo:
                 try:
                     return ai_client.messages.create(
                         model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-haiku-4-5-20251001"),
-                        max_tokens=400,
+                        max_tokens=250,
                         system=health_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
                     )
@@ -1179,7 +1174,7 @@ class FridayCeo:
                     logger.warning(f"[Friday CEO] Subagent health failed, forcing Haiku V2: {sub_err}")
                     return ai_client.messages.create(
                         model="claude-haiku-4-5-20251001",
-                        max_tokens=400,
+                        max_tokens=250,
                         system=health_prompt,
                         messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
                     )

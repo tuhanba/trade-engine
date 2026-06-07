@@ -1044,6 +1044,13 @@ def classify_signal(
     ctx = context or {}
     ghost = _get_ghost_manager()
     scorer = AdaptiveScorer(ghost)
+    
+    is_paper = False
+    try:
+        import config
+        is_paper = (getattr(config, "EXECUTION_MODE", "paper") == "paper")
+    except Exception:
+        is_paper = True
 
     votes_to_broadcast = {}
 
@@ -1210,12 +1217,15 @@ def classify_signal(
         
         reason_msg = "Consensus VETO | " + " | ".join(veto_reasons)
         logger.info(f"[AI Consensus] VETO issued for {signal.symbol}: {reason_msg}")
-        return return_decision(AIDecisionResult(
-            decision=SignalDecision.VETO.value,
-            reason=reason_msg,
-            confidence=0.9,
-            score_adjusted=adjusted_score
-        ))
+        if not is_paper:
+            return return_decision(AIDecisionResult(
+                decision=SignalDecision.VETO.value,
+                reason=reason_msg,
+                confidence=0.9,
+                score_adjusted=adjusted_score
+            ))
+        else:
+            logger.info(f"[Paper Bypass] AI Consensus VETO bypassed for {signal.symbol}: {reason_msg}")
 
     # ── Portföy Korelasyon Kalkanı (Faz 5) ──────────────────────────
     try:
@@ -1225,17 +1235,21 @@ def classify_signal(
         if same_direction_count >= 3:
             # 3'ten fazla aynı yönde pozisyon var, risk yarıya düşürülmeli veya VETO verilmeli
             if adjusted_score < 75:
-                return return_decision(AIDecisionResult(
-                    decision=SignalDecision.VETO.value,
-                    reason=f"Korelasyon Kalkanı: Zaten {same_direction_count} adet {signal.side} pozisyon açık",
-                    confidence=0.8,
-                ))
+                if not is_paper:
+                    return return_decision(AIDecisionResult(
+                        decision=SignalDecision.VETO.value,
+                        reason=f"Korelasyon Kalkanı: Zaten {same_direction_count} adet {signal.side} pozisyon açık",
+                        confidence=0.8,
+                    ))
+                else:
+                    logger.info(f"[Paper Bypass] Correlation Shield VETO bypassed for {signal.symbol}.")
             else:
-                # Skor iyiyse riski düşürtüp izin ver
-                signal.risk_pct *= 0.5
-                signal.position_size = round(signal.position_size * 0.5, 6)
-                signal.notional_size = round(signal.notional_size * 0.5, 4)
-                signal.max_loss = round(signal.max_loss * 0.5, 4)
+                if not is_paper:
+                    # Skor iyiyse riski düşürtüp izin ver
+                    signal.risk_pct *= 0.5
+                    signal.position_size = round(signal.position_size * 0.5, 6)
+                    signal.notional_size = round(signal.notional_size * 0.5, 4)
+                    signal.max_loss = round(signal.max_loss * 0.5, 4)
     except Exception as e:
         logger.debug(f"[AI] Korelasyon kalkanı atlandı: {e}")
 
@@ -1248,30 +1262,38 @@ def classify_signal(
         # Aşırı korku varsa LONG işlemlere kısıtlama
         if fng_val < 25 and signal.side == "LONG":
             if adjusted_score < 40:
-                return return_decision(AIDecisionResult(
-                    decision=SignalDecision.VETO.value,
-                    reason=f"Macro Kalkanı: Piyasa Aşırı Korku seviyesinde (FNG={fng_val}). LONG işlemi reddedildi.",
-                    confidence=0.9,
-                ))
+                if not is_paper:
+                    return return_decision(AIDecisionResult(
+                        decision=SignalDecision.VETO.value,
+                        reason=f"Macro Kalkanı: Piyasa Aşırı Korku seviyesinde (FNG={fng_val}). LONG işlemi reddedildi.",
+                        confidence=0.9,
+                    ))
+                else:
+                    logger.info(f"[Paper Bypass] Macro Sentiment LONG VETO bypassed for {signal.symbol}.")
             else:
-                signal.risk_pct *= 0.5 # Riski yarıya düşür
-                signal.position_size = round(signal.position_size * 0.5, 6)
-                signal.notional_size = round(signal.notional_size * 0.5, 4)
-                signal.max_loss = round(signal.max_loss * 0.5, 4)
+                if not is_paper:
+                    signal.risk_pct *= 0.5 # Riski yarıya düşür
+                    signal.position_size = round(signal.position_size * 0.5, 6)
+                    signal.notional_size = round(signal.notional_size * 0.5, 4)
+                    signal.max_loss = round(signal.max_loss * 0.5, 4)
                 
         # Aşırı coşku varsa SHORT işlemlere kısıtlama
         elif fng_val > 75 and signal.side == "SHORT":
             if adjusted_score < 40:
-                return return_decision(AIDecisionResult(
-                    decision=SignalDecision.VETO.value,
-                    reason=f"Macro Kalkanı: Piyasa Aşırı Açgözlülük seviyesinde (FNG={fng_val}). SHORT işlemi reddedildi.",
-                    confidence=0.9,
-                ))
+                if not is_paper:
+                    return return_decision(AIDecisionResult(
+                        decision=SignalDecision.VETO.value,
+                        reason=f"Macro Kalkanı: Piyasa Aşırı Açgözlülük seviyesinde (FNG={fng_val}). SHORT işlemi reddedildi.",
+                        confidence=0.9,
+                    ))
+                else:
+                    logger.info(f"[Paper Bypass] Macro Sentiment SHORT VETO bypassed for {signal.symbol}.")
             else:
-                signal.risk_pct *= 0.5
-                signal.position_size = round(signal.position_size * 0.5, 6)
-                signal.notional_size = round(signal.notional_size * 0.5, 4)
-                signal.max_loss = round(signal.max_loss * 0.5, 4)
+                if not is_paper:
+                    signal.risk_pct *= 0.5
+                    signal.position_size = round(signal.position_size * 0.5, 6)
+                    signal.notional_size = round(signal.notional_size * 0.5, 4)
+                    signal.max_loss = round(signal.max_loss * 0.5, 4)
     except Exception as e:
         logger.debug(f"[AI] Macro kalkanı atlandı: {e}")
 
@@ -1294,12 +1316,15 @@ def classify_signal(
         if is_scalp_mode and setup_quality in ("A", "B", "C") and confluence >= 1:
             logger.debug("[Regime] CHOPPY'de Scalp Modu istisnası: A/B kalite + Confluence kabul edildi.")
         elif setup_quality not in ("S", "A+", "A", "B"):
-            return return_decision(AIDecisionResult(
-                decision=SignalDecision.VETO.value,
-                reason=f"CHOPPY piyasa — {setup_quality} kalite yetersiz (min A+)",
-                confidence=0.85,
-                score_adjusted=adjusted_score,
-            ))
+            if not is_paper:
+                return return_decision(AIDecisionResult(
+                    decision=SignalDecision.VETO.value,
+                    reason=f"CHOPPY piyasa — {setup_quality} kalite yetersiz (min A+)",
+                    confidence=0.85,
+                    score_adjusted=adjusted_score,
+                ))
+            else:
+                logger.info(f"[Paper Bypass] Choppy Market Quality Filter VETO bypassed for {signal.symbol}.")
     elif (regime == "BULLISH" or (regime in ("TRENDING_HIGH_VOL", "TRENDING_LOW_VOL") and ctx.get("market_trend") == "bullish")) and side_upper == "SHORT":
         adjusted_score = round(adjusted_score * 0.88, 1)
         logger.debug("[Regime] BULLISH/TRENDING_UP + SHORT → score *0.88 → %.1f", adjusted_score)
@@ -1387,9 +1412,19 @@ def classify_signal(
         confidence = 0.35
 
     else:
-        decision = SignalDecision.VETO.value
-        reason = f"Ayarlanmış score düşük: {adjusted_score:.1f}"
-        confidence = 0.7
+        if not is_paper:
+            decision = SignalDecision.VETO.value
+            reason = f"Ayarlanmış score düşük: {adjusted_score:.1f}"
+            confidence = 0.7
+        else:
+            if adjusted_score >= 35.0:
+                decision = SignalDecision.ALLOW.value
+                reason = f"Score yeterli (Paper Boost): {adjusted_score:.1f} (ham={signal.score:.1f})"
+                confidence = min(0.5 + adjusted_score / 150, 0.95)
+            else:
+                decision = SignalDecision.WATCH.value
+                reason = f"Orta score (Paper Boost): {adjusted_score:.1f} – izleme"
+                confidence = 0.35
 
     # Ghost başarı bonusu
     if ghost_stats["ghost_winrate"] >= 65 and ghost_stats["total"] >= 15:  # min 15 sample
