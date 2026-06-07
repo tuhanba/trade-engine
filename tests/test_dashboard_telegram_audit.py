@@ -93,11 +93,11 @@ class TestDashboardTelegramAudit(unittest.TestCase):
 
     def test_friday_ceo_quant_prompt_upgrade(self):
         """Verify Friday CEO prompt contains professional quantitative metrics."""
-        self.assertIn("GMM (Gaussian Mixture Model)", SYSTEM_PROMPT)
+        self.assertIn("Gaussian Mixture Model (GMM)", SYSTEM_PROMPT)
         self.assertIn("Pearson korelasyon matrisi", SYSTEM_PROMPT)
-        self.assertIn("CVD (Cumulative Volume Delta)", SYSTEM_PROMPT)
+        self.assertIn("Cumulative Volume Delta (CVD)", SYSTEM_PROMPT)
         self.assertIn("L2 Wall", SYSTEM_PROMPT)
-        self.assertIn("markdown tabloları", SYSTEM_PROMPT)
+        self.assertIn("markdown tablosu", SYSTEM_PROMPT)
 
     def test_diagnose_command_telegram_output(self):
         """Verify the new /diagnose & /teshis Telegram commands return system diagnosis logs."""

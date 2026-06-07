@@ -458,15 +458,17 @@ class RiskEngine:
                 return {"valid": False, "score": 0, "risk_reject_reason": "duplicate_symbol"}
 
             # Boss Cooldown Gate
-            cooldown_until_str = database.get_system_state("friday_boss_cooldown_until")
-            if cooldown_until_str and cooldown_until_str != "-":
-                try:
-                    from datetime import datetime, timezone
-                    cooldown_dt = datetime.fromisoformat(cooldown_until_str)
-                    if datetime.now(timezone.utc) < cooldown_dt:
-                        return {"valid": False, "score": 0, "risk_reject_reason": "friday_boss_cooldown"}
-                except Exception:
-                    pass
+            is_paper = getattr(config, "EXECUTION_MODE", "paper") == "paper"
+            if not is_paper:
+                cooldown_until_str = database.get_system_state("friday_boss_cooldown_until")
+                if cooldown_until_str and cooldown_until_str != "-":
+                    try:
+                        from datetime import datetime, timezone
+                        cooldown_dt = datetime.fromisoformat(cooldown_until_str)
+                        if datetime.now(timezone.utc) < cooldown_dt:
+                            return {"valid": False, "score": 0, "risk_reject_reason": "friday_boss_cooldown"}
+                    except Exception:
+                        pass
 
             # Macro News Watcher Gate
             macro_paused_str = database.get_system_state("friday_macro_paused")
@@ -474,27 +476,27 @@ class RiskEngine:
                 return {"valid": False, "score": 0, "risk_reject_reason": "macro_news_watcher_paused"}
 
             # Sector Guard (Maximum 2 open trades per sector)
-            current_sector = get_coin_sector(symbol)
-            if current_sector != "OTHER":
-                same_sector_count = 0
-                for t in open_trades:
-                    if get_coin_sector(t.get("symbol", "")) == current_sector:
-                        same_sector_count += 1
-                if same_sector_count >= 2:
-                    return {"valid": False, "score": 0, "risk_reject_reason": f"sector_limit_reached_{current_sector}"}
+            if not is_paper:
+                current_sector = get_coin_sector(symbol)
+                if current_sector != "OTHER":
+                    same_sector_count = 0
+                    for t in open_trades:
+                        if get_coin_sector(t.get("symbol", "")) == current_sector:
+                            same_sector_count += 1
+                    if same_sector_count >= 2:
+                        return {"valid": False, "score": 0, "risk_reject_reason": f"sector_limit_reached_{current_sector}"}
 
-            is_paper = getattr(config, "EXECUTION_MODE", "paper") == "paper"
             if not is_paper and not check_daily_loss_limit(balance, "live"):
                 return {"valid": False, "score": 0, "risk_reject_reason": "daily_loss_limit"}
 
-            if not check_coin_cooldown(symbol):
+            if not is_paper and not check_coin_cooldown(symbol):
                 return {"valid": False, "score": 0, "risk_reject_reason": "coin_cooldown"}
 
-            if not check_correlated_exposure(symbol, direction, open_trades):
+            if not is_paper and not check_correlated_exposure(symbol, direction, open_trades):
                 return {"valid": False, "score": 0, "risk_reject_reason": "directional_correlation_blocked"}
 
             # L2 Order Book Wall Guard Check
-            if getattr(config, "ORDER_BOOK_WALL_FILTER_ENABLED", True):
+            if getattr(config, "ORDER_BOOK_WALL_FILTER_ENABLED", True) and not is_paper:
                 is_blocked, wall_reason = self.check_order_book_wall(symbol, direction, entry)
                 if is_blocked:
                     return {"valid": False, "score": 0, "risk_reject_reason": wall_reason}
@@ -602,13 +604,23 @@ class RiskEngine:
                         tp2_r = max(1.5, tp2_r * 0.8)
                         tp3_r = max(2.5, tp3_r * 0.8)
                     
-                    # OTONOM KALİTE GATING: CHOPPY piyasada S, A+, A kalitelerine izin ver (gevşetildi)
-                    if quality not in ("S", "A+", "A"):
-                        return {"valid": False, "score": 0, "risk_reject_reason": "choppy_market_quality_gate"}
-                    # OTONOM SKOR GATING: CHOPPY piyasada eşiği 5 puan artır
-                    required_score = float(getattr(config, "TRADE_THRESHOLD", 55.0)) + 5.0
-                    if score > 0.0 and score < required_score:
-                        return {"valid": False, "score": 0, "risk_reject_reason": "choppy_market_score_gate"}
+                    # OTONOM KALİTE GATING: CHOPPY piyasada izin verilen kaliteleri config'den oku
+                    min_q_choppy = getattr(config, "REGIME_FILTER_MIN_QUALITY_IN_CHOPPY", "A")
+                    quality_order = ["C", "B", "A", "A+", "S"]
+                    allowed_qualities = quality_order[quality_order.index(min_q_choppy):] if min_q_choppy in quality_order else ["S", "A+", "A"]
+                    
+                    if not is_paper:
+                        if quality not in allowed_qualities:
+                            return {"valid": False, "score": 0, "risk_reject_reason": "choppy_market_quality_gate"}
+                        # OTONOM SKOR GATING: CHOPPY piyasada eşiği 5 puan artır
+                        required_score = float(getattr(config, "TRADE_THRESHOLD", 55.0)) + 5.0
+                        if score > 0.0 and score < required_score:
+                            return {"valid": False, "score": 0, "risk_reject_reason": "choppy_market_score_gate"}
+                    else:
+                        # Paper mode: relax allowed quality to B and above, ignore score gate
+                        paper_allowed = ["S", "A+", "A", "B"]
+                        if quality not in paper_allowed:
+                            return {"valid": False, "score": 0, "risk_reject_reason": "choppy_market_quality_gate_paper"}
                 elif regime in ("BULLISH", "BEARISH", "TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"):
                     # Trend piyasasında runner'ı uzat
                     is_trending_dir = (

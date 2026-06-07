@@ -87,11 +87,16 @@ class AIDecisionService:
             
             # yapay zeka Çoklu Ajan Konsensüs Kapısı (Consensus Gate)
             if decision["decision"] == "ALLOW":
-                passed, reason = self._check_consensus(sig)
-                if not passed:
-                    logger.info(f"[Consensus Gate] Trade on {symbol} vetoed by consensus agents: {reason}")
-                    decision["decision"] = "VETO"
-                    decision["reason"] = reason
+                import config
+                is_paper = (getattr(config, "EXECUTION_MODE", "paper") == "paper")
+                if not is_paper:
+                    passed, reason = self._check_consensus(sig)
+                    if not passed:
+                        logger.info(f"[Consensus Gate] Trade on {symbol} vetoed by consensus agents: {reason}")
+                        decision["decision"] = "VETO"
+                        decision["reason"] = reason
+                else:
+                    logger.info(f"[Paper Bypass] Consensus Gate check bypassed for {symbol}.")
             
             sig.final_score = decision["final_score"]
             sig.confidence = decision["confidence"]

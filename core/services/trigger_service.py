@@ -40,19 +40,23 @@ class TriggerService:
                     
                     quality_order = ["C", "B", "A", "A+", "S"]
                     if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
-                        q_idx = quality_order.index(quality) if quality in quality_order else -1
-                        min_idx = quality_order.index(min_quality) if min_quality in quality_order else -1
-                        if q_idx < min_idx:
-                            logger.info(f"[TriggerService] {symbol} rejected by Regime Filter: quality {quality} is below min {min_quality} in CHOPPY market.")
-                            try:
-                                from database import save_signal_event
-                                await asyncio.to_thread(
-                                    save_signal_event, signal_id, "REGIME_REJECTED",
-                                    symbol=symbol, reject_reason=f"choppy_market_quality_{quality}_below_{min_quality}"
-                                )
-                            except Exception:
-                                pass
-                            return
+                        is_paper = (getattr(config, "EXECUTION_MODE", "paper") == "paper")
+                        if not is_paper:
+                            q_idx = quality_order.index(quality) if quality in quality_order else -1
+                            min_idx = quality_order.index(min_quality) if min_quality in quality_order else -1
+                            if q_idx < min_idx:
+                                logger.info(f"[TriggerService] {symbol} rejected by Regime Filter: quality {quality} is below min {min_quality} in CHOPPY market.")
+                                try:
+                                    from database import save_signal_event
+                                    await asyncio.to_thread(
+                                        save_signal_event, signal_id, "REGIME_REJECTED",
+                                        symbol=symbol, reject_reason=f"choppy_market_quality_{quality}_below_{min_quality}"
+                                    )
+                                except Exception:
+                                    pass
+                                return
+                        else:
+                            logger.info(f"[Paper Bypass] TriggerService Regime Filter check bypassed for {symbol}.")
             except Exception as rex:
                 logger.debug(f"[TriggerService] Regime check failed: {rex}")
 
