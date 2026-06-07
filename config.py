@@ -131,6 +131,7 @@ ORDER_BOOK_WALL_FILTER_ENABLED = _env_bool("ORDER_BOOK_WALL_FILTER_ENABLED", Tru
 FRIDAY_CEO_LOOP_INTERVAL = _env_int("FRIDAY_CEO_LOOP_INTERVAL", 3600)
 FRIDAY_CEO_MODEL = _env("FRIDAY_CEO_MODEL", "claude-sonnet-4-6")
 FRIDAY_SUBAGENT_MODEL = _env("FRIDAY_SUBAGENT_MODEL", "claude-haiku-4-5-20251001")
+FRIDAY_VOICE_REPORTS_ENABLED = _env_bool("FRIDAY_VOICE_REPORTS_ENABLED", False)
 
 
 # Otonom Kâr Kilitleme Kalkanı (Dynamic Profit Lock Settings)
@@ -306,6 +307,7 @@ _DYNAMIC_PARAMS_MAP = {
     "ORDER_BOOK_WALL_FILTER_ENABLED": ("order_book_wall_filter_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
     "CONFIRMATION_AUTO_EXECUTE_SCORE": ("confirmation_auto_execute_score", float),
     "FRIDAY_CEO_LOOP_INTERVAL":        ("friday_ceo_loop_interval", int),
+    "FRIDAY_VOICE_REPORTS_ENABLED":    ("friday_voice_reports_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
     "MAX_SAME_DIRECTION":              ("max_same_direction", int),
 }
 

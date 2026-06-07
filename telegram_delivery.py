@@ -643,6 +643,9 @@ def send_message(text: str, parse_mode: str = "HTML", reply_markup: Optional[dic
 
 def send_voice(voice_bytes: bytes, caption: Optional[str] = None) -> bool:
     """Sends a voice message to Telegram."""
+    if not getattr(config, "FRIDAY_VOICE_REPORTS_ENABLED", False):
+        logger.debug("[Telegram] Sesli rapor devre dışı — atlanıyor.")
+        return False
     token = config.TELEGRAM_BOT_TOKEN
     chat_id = config.TELEGRAM_CHAT_ID
     if not token or not chat_id:
