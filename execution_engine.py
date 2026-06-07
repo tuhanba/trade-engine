@@ -181,12 +181,19 @@ class ExecutionEngine:
                     
                 from core.online_learning import get_learner
                 learner = get_learner()
-                if learner.trained and prob < min_threshold:
-                    logger.warning(
-                        f"[ML Online Gate] Trade rejected for {signal.symbol}: "
-                        f"Online win probability ({prob:.2%}) is below gating threshold ({min_threshold:.2%})"
-                    )
-                    return None
+                if learner.trained:
+                    if learner.n_samples >= 30:
+                        if prob < min_threshold:
+                            logger.warning(
+                                f"[ML Online Gate] Trade rejected for {signal.symbol}: "
+                                f"Online win probability ({prob:.2%}) is below gating threshold ({min_threshold:.2%})"
+                            )
+                            return None
+                    else:
+                        logger.info(
+                            f"[ML Online Gate] Model warming up (Samples: {learner.n_samples}/30). "
+                            f"Allowing trade with predicted win probability {prob:.2%}."
+                        )
             except Exception as e:
                 logger.error(f"Error checking ML Online gating: {e}")
 

@@ -54,6 +54,15 @@ from core.ai_decision_engine import AIDecisionEngine
 from execution_engine import ExecutionEngine
 import core.ghost_learning
 
+# Early monkeypatch online model path for backtesting isolation
+import core.online_learning
+core.online_learning.MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "core",
+    "backtest_sgd_online_model.pkl"
+)
+core.online_learning._learner_instance = None
+
 # Monkey patch modules to use simulated datetime
 database.datetime = SimulatedDatetime
 import core.data_layer
@@ -173,7 +182,8 @@ def save_ghost_signal_sim(signal: dict, reason: str) -> int:
             "mfe": 0.0,
             "mae": 0.0,
             "created_time": current_sim_time,
-            "pattern_type": signal.get("trigger_type") or signal.get("setup_quality") or signal.get("quality", "unknown")
+            "pattern_type": signal.get("trigger_type") or signal.get("setup_quality") or signal.get("quality", "unknown"),
+            "metadata": signal.get("metadata") or {}
         }
         return ghost_id
     except Exception as e:
@@ -203,6 +213,20 @@ class GhostBacktestRunner:
                 os.remove("backtest_temp.db")
             except Exception as e:
                 logger.warning(f"Could not delete backtest_temp.db: {e}")
+                
+        # Setup clean online model path for backtest
+        import core.online_learning
+        core.online_learning.MODEL_PATH = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "core",
+            "backtest_sgd_online_model.pkl"
+        )
+        core.online_learning._learner_instance = None
+        if os.path.exists(core.online_learning.MODEL_PATH):
+            try:
+                os.remove(core.online_learning.MODEL_PATH)
+            except Exception as e:
+                logger.warning(f"Could not delete temporary online model: {e}")
         
         database.init_db()
         database.init_paper_account()
@@ -354,6 +378,14 @@ class GhostBacktestRunner:
                             conn.execute("UPDATE ghost_results SET simulated_at = ? WHERE ghost_id = ?",
                                          (current_sim_time.isoformat(), g_id))
                         active_ghosts.pop(g_id, None)
+                        # Train online model
+                        metadata = ghost.get("metadata")
+                        if metadata:
+                            try:
+                                from core.online_learning import update_online_model
+                                update_online_model(metadata, 0)
+                            except Exception as e:
+                                logger.warning(f"Failed to update online model for ghost {g_id}: {e}")
                     elif high >= tp:
                         pnl_r = round((tp - entry) / risk, 2)
                         database.save_ghost_result(g_id, {
@@ -367,6 +399,14 @@ class GhostBacktestRunner:
                             conn.execute("UPDATE ghost_results SET simulated_at = ? WHERE ghost_id = ?",
                                          (current_sim_time.isoformat(), g_id))
                         active_ghosts.pop(g_id, None)
+                        # Train online model
+                        metadata = ghost.get("metadata")
+                        if metadata:
+                            try:
+                                from core.online_learning import update_online_model
+                                update_online_model(metadata, 1)
+                            except Exception as e:
+                                logger.warning(f"Failed to update online model for ghost {g_id}: {e}")
                 else:  # SHORT
                     ghost["mae"] = max(ghost["mae"], (high - entry) / risk)
                     ghost["mfe"] = max(ghost["mfe"], (entry - low) / risk)
@@ -383,6 +423,14 @@ class GhostBacktestRunner:
                             conn.execute("UPDATE ghost_results SET simulated_at = ? WHERE ghost_id = ?",
                                          (current_sim_time.isoformat(), g_id))
                         active_ghosts.pop(g_id, None)
+                        # Train online model
+                        metadata = ghost.get("metadata")
+                        if metadata:
+                            try:
+                                from core.online_learning import update_online_model
+                                update_online_model(metadata, 0)
+                            except Exception as e:
+                                logger.warning(f"Failed to update online model for ghost {g_id}: {e}")
                     elif low <= tp:
                         pnl_r = round((entry - tp) / risk, 2)
                         database.save_ghost_result(g_id, {
@@ -396,6 +444,14 @@ class GhostBacktestRunner:
                             conn.execute("UPDATE ghost_results SET simulated_at = ? WHERE ghost_id = ?",
                                          (current_sim_time.isoformat(), g_id))
                         active_ghosts.pop(g_id, None)
+                        # Train online model
+                        metadata = ghost.get("metadata")
+                        if metadata:
+                            try:
+                                from core.online_learning import update_online_model
+                                update_online_model(metadata, 1)
+                            except Exception as e:
+                                logger.warning(f"Failed to update online model for ghost {g_id}: {e}")
 
             # 4. Check candidates & scanner triggers every 5 minutes
             if step_minutes % 5 == 0:
@@ -757,6 +813,20 @@ def apply_to_prod_db(min_confidence="MEDIUM"):
     logger.info(f"Otonom update finished: {len(applied)} overrides applied in production coin configs.")
     for change in applied:
         logger.info(f"  Applied override: {change}")
+
+    # 4. Copy temporary model file to production path
+    import shutil
+    import core.online_learning
+    prod_model_path = os.path.join(
+        os.path.dirname(core.online_learning.__file__),
+        "sgd_online_model.pkl"
+    )
+    if os.path.exists(core.online_learning.MODEL_PATH):
+        try:
+            shutil.copy2(core.online_learning.MODEL_PATH, prod_model_path)
+            logger.info(f"Successfully copied online model to production at: {prod_model_path}")
+        except Exception as e:
+            logger.error(f"Failed to copy online model to production: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description="Ghost Learning Backtesting Engine")

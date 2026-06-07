@@ -23,6 +23,21 @@ class TestPhaseGQuantum(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         database.init_db()
+        import core.online_learning
+        cls.original_model_path = core.online_learning.MODEL_PATH
+        core.online_learning.MODEL_PATH = "test_sgd_online_model.pkl"
+        core.online_learning._learner_instance = None
+
+    @classmethod
+    def tearDownClass(cls):
+        import core.online_learning
+        core.online_learning.MODEL_PATH = cls.original_model_path
+        core.online_learning._learner_instance = None
+        if os.path.exists("test_sgd_online_model.pkl"):
+            try:
+                os.remove("test_sgd_online_model.pkl")
+            except Exception:
+                pass
 
     def setUp(self):
         with database.get_conn() as conn:
@@ -148,6 +163,7 @@ class TestPhaseGQuantum(unittest.TestCase):
         from core.online_learning import get_learner
         learner = get_learner()
         learner.trained = True
+        learner.n_samples = 35
         mock_predict.return_value = 0.30  # 30% win prob (low, < 45% threshold)
         
         engine = ExecutionEngine()
