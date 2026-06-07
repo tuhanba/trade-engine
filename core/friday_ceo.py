@@ -1327,11 +1327,12 @@ class FridayCeo:
                 
                 # Check environment mode
                 environment = getattr(config, "EXECUTION_MODE", "paper")
+                bypass_shields = (environment == "paper") or getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
                 
                 if "CHOPPY" in regime:
-                    if environment == "paper":
-                        # Paper mode: Be extremely aggressive in Choppy!
-                        logger.info("[Friday CEO] Choppy market detected in Paper mode. Enforcing aggressive scaling.")
+                    if bypass_shields:
+                        # Paper/Bypass mode: Be extremely aggressive in Choppy!
+                        logger.info("[Friday CEO] Choppy market detected in Paper/Bypass mode. Enforcing aggressive scaling.")
                         set_state("risk_pct", "1.5")
                         set_state("trade_threshold", "45.0")
                         set_state("regime_filter_min_quality_in_choppy", "A")
@@ -1349,9 +1350,11 @@ class FridayCeo:
                             if key in config._CONFIG_CACHE:
                                 del config._CONFIG_CACHE[key]
                                 
+                        mode_desc = "Paper trading" if environment == "paper" else "Bypass Live"
+                        risk_desc = "sermaye riski sıfırdır" if environment == "paper" else "canlı bypass kalkanları aktiftir"
                         msg = (
-                            "Batuhan Bey, piyasada yoğun dalgalanma (CHOPPY) tespit ettim. ⚠️\n\n"
-                            "Paper trading modunda olduğumuz için sermaye riski sıfırdır. "
+                            f"Batuhan Bey, piyasada yoğun dalgalanma (CHOPPY) tespit ettim. ⚠️\n\n"
+                            f"{mode_desc} modunda olduğumuz için {risk_desc}. "
                             "Yapay zekanın daha agresif öğrenmesi ve kâr üretmesini sağlamak amacıyla "
                             "otonom olarak işlem eşik puanını <b>45.0</b> seviyesine çektim, "
                             "kasa risk yüzdemizi ise <b>%1.50</b> seviyesine yükselttim. Fırsatları otonom avlamaya devam ediyoruz! ⚔️"
@@ -1397,9 +1400,9 @@ class FridayCeo:
                     # Restore previous settings
                     from database import get_system_state
                     
-                    if environment == "paper":
-                        # Paper mode returning to Trending/Neutral: Still aggressive!
-                        logger.info("[Friday CEO] Market regime returning to trending in Paper mode. Enforcing standard aggressive parameters.")
+                    if bypass_shields:
+                        # Paper/Bypass mode returning to Trending/Neutral: Still aggressive!
+                        logger.info("[Friday CEO] Market regime returning to trending in Paper/Bypass mode. Enforcing standard aggressive parameters.")
                         set_state("risk_pct", "1.5")
                         set_state("trade_threshold", "45.0")
                         
@@ -1416,9 +1419,10 @@ class FridayCeo:
                             if key in config._CONFIG_CACHE:
                                 del config._CONFIG_CACHE[key]
                                 
+                        mode_desc = "Paper trading" if environment == "paper" else "Bypass Live"
                         msg = (
                             "Batuhan Bey, piyasadaki aşırı oynaklık ve dalgalı rejim sona erdi. Piyasa rejimimiz normale döndü. ✨\n\n"
-                            "Paper trading modunda maksimum kârı avlamaya devam etmek için "
+                            f"{mode_desc} modunda maksimum kârı avlamaya devam etmek için "
                             "risk yüzdemizi <b>%1.50</b> ve işlem giriş eşiğimizi <b>45.0</b> seviyesinde sabit tuttum. "
                             "Botumuz tam kapasiteyle çalışmaya devam ediyor."
                         )
