@@ -204,6 +204,11 @@ class TelegramManager:
             "/paper":   self._cmd_paper,
             "/live":    self._cmd_live,
             "/close":   self._cmd_close,
+            "/force":   self._cmd_force,
+            "/ac":      self._cmd_force,
+            "/approve": self._cmd_force,
+            "/ignore":  self._cmd_ignore,
+            "/veto":    self._cmd_ignore,
             "/set":     self._cmd_set,
             "/export":  self._cmd_export,
             "/ml":      self._cmd_ml,
@@ -217,7 +222,7 @@ class TelegramManager:
         handler = handlers.get(cmd)
         if handler:
             try:
-                if cmd in ("/close", "/set", "/friday"):
+                if cmd in ("/close", "/set", "/friday", "/force", "/ac", "/approve", "/ignore", "/veto"):
                     handler(args)
                 else:
                     handler()
@@ -785,7 +790,11 @@ class TelegramManager:
                 {"command": "diagnose", "description": "Sistem derin teşhis ve analiz raporu"},
                 {"command": "teshis", "description": "Sistem derin teşhis ve analiz raporu"},
                 {"command": "friday_voice", "description": "Friday'dan sesli durum raporu alır"},
-                {"command": "friday_ses", "description": "Friday'dan sesli durum raporu alır"}
+                {"command": "friday_ses", "description": "Friday'dan sesli durum raporu alır"},
+                {"command": "force", "description": "Watchlist/Veto adayını manuel olarak zorla açar"},
+                {"command": "ac", "description": "Watchlist/Veto adayını manuel olarak zorla açar"},
+                {"command": "ignore", "description": "Adayı veto eder / yoksayar"},
+                {"command": "veto", "description": "Adayı veto eder / yoksayar"}
             ]
         }
         try:
@@ -874,6 +883,8 @@ class TelegramManager:
             "🔹 <code>/settings</code> — İnteraktif ayarlar panelini açar.\n"
             "🔹 <code>/set [key] [val]</code> — Dinamik parametre değiştirir (Örn: <code>/set trade_threshold 55.0</code>).\n"
             "🔹 <code>/close [id]</code> — Belirtilen ID'ye sahip açık pozisyonu anında kapatır.\n"
+            "🔹 <code>/force [id]</code> veya <code>/ac [id]</code> — Watchlist / Veto adayını manuel olarak zorla açar.\n"
+            "🔹 <code>/ignore [id]</code> veya <code>/veto [id]</code> — Adayı veto eder / yoksayar.\n"
             "🔹 <code>/human</code> — İnsan Modu: Az ama öz, sadece en kaliteli sinyallere girer (A+/S).\n"
             "🔹 <code>/scalp</code> — Scalp Modu: Piyasayı agresif tarar, çok işleme girer ve hızlı çıkar.\n"
             "🔹 <code>/paper</code> — Sanal Para Modu: Kendi sanal kasasıyla risksiz işlem açar.\n"
@@ -1293,6 +1304,117 @@ class TelegramManager:
         except Exception as e:
             logger.exception("Manual close error:")
             self.send_fn(f"❌ Kapatma hatası: {e}")
+
+    def _cmd_force(self, args: list):
+        if not args:
+            self.send_fn("Zorla açılacak aday ID'sini belirtin. Örnek: <code>/force 351</code> veya <code>/ac 351</code>")
+            return
+        try:
+            candidate_id = int(args[0])
+        except ValueError:
+            self.send_fn("Geçersiz aday ID. ID sayı olmalıdır.")
+            return
+
+        import json
+        import database as _db
+        from core.data_layer import SignalData
+
+        cand = _db.get_candidate_by_id(candidate_id)
+        if not cand:
+            self.send_fn(f"❌ Aday #{candidate_id} bulunamadı.")
+            return
+            
+        if cand.get("decision") == "EXECUTED":
+            self.send_fn(f"⚠️ Aday #{candidate_id} zaten işleme sokulmuş.")
+            return
+            
+        self.send_fn(f"⏳ Aday #{candidate_id} ({cand.get('symbol')}) için zorla trade açılıyor...")
+        
+        try:
+            sig = SignalData()
+            sig.symbol = cand.get("symbol")
+            sig.side = cand.get("side") or cand.get("direction") or "LONG"
+            sig.direction = cand.get("direction") or cand.get("side") or "LONG"
+            sig.entry_price = cand.get("entry_price") or cand.get("entry") or 0.0
+            sig.stop_loss = cand.get("stop_loss") or cand.get("sl") or 0.0
+            sig.tp1 = cand.get("tp1") or 0.0
+            sig.tp2 = cand.get("tp2") or 0.0
+            sig.tp3 = cand.get("tp3") or 0.0
+            sig.setup_quality = cand.get("setup_quality") or "B"
+            sig.final_score = cand.get("final_score") or cand.get("score") or 0.0
+            sig.confidence = 0.8
+            sig.reason = "Manual Force Trade (Command)"
+            sig.source = "telegram_force_cmd"
+            sig.leverage_suggestion = cand.get("leverage_suggestion") or cand.get("leverage") or 10
+            sig.max_loss = cand.get("max_loss") or cand.get("risk_amount") or 0.0
+            sig.risk_percent = cand.get("risk_pct") or 1.0
+            
+            meta_str = cand.get("metadata", "{}")
+            if isinstance(meta_str, str):
+                try:
+                    sig.metadata = json.loads(meta_str)
+                except Exception:
+                    sig.metadata = {}
+            else:
+                sig.metadata = meta_str or {}
+                
+            # Open Trade
+            trade_id = None
+            if config.EXECUTION_MODE == "live":
+                from core.live_execution import LiveExecutionEngine
+                engine = LiveExecutionEngine()
+                trade_id = engine.open_live_trade(sig)
+            else:
+                from execution_engine import ExecutionEngine
+                engine = ExecutionEngine()
+                trade_id = engine.process_signal(sig)
+                
+            if trade_id:
+                _db.update_candidate_status(candidate_id, decision="EXECUTED", linked_trade_id=trade_id)
+                try:
+                    _db.save_signal_event(candidate_id, "EXECUTED", symbol=sig.symbol, reject_reason=f"Forced manual trade via command trade_id={trade_id}")
+                except Exception:
+                    pass
+                
+                # Notify open
+                trade_dict = _db.get_trade_by_id(trade_id)
+                if trade_dict:
+                    from telegram_delivery import format_trade_open
+                    msg_text = format_trade_open(dict(trade_dict))
+                    self.send_fn(msg_text)
+                else:
+                    self.send_fn(f"✅ Trade #{trade_id} başarıyla açıldı!")
+            else:
+                self.send_fn("❌ Trade açılamadı (Engine trade_id dönmedi).")
+        except Exception as e:
+            logger.exception("Force command open error:")
+            self.send_fn(f"❌ Force open hatası: {e}")
+
+    def _cmd_ignore(self, args: list):
+        if not args:
+            self.send_fn("Yoksayılacak / Veto edilecek aday ID'sini belirtin. Örnek: <code>/ignore 351</code> veya <code>/veto 351</code>")
+            return
+        try:
+            candidate_id = int(args[0])
+        except ValueError:
+            self.send_fn("Geçersiz aday ID. ID sayı olmalıdır.")
+            return
+
+        import database as _db
+        cand = _db.get_candidate_by_id(candidate_id)
+        if not cand:
+            self.send_fn(f"❌ Aday #{candidate_id} bulunamadı.")
+            return
+            
+        try:
+            _db.update_candidate_status(candidate_id, decision="VETOED", reject_reason="Manually vetoed via command")
+            try:
+                _db.save_signal_event(candidate_id, "VETOED", symbol=cand.get("symbol"), reject_reason="Manually vetoed via command")
+            except Exception:
+                pass
+            self.send_fn(f"🚫 Aday #{candidate_id} ({cand.get('symbol')}) manüel olarak iptal edildi (veto).")
+        except Exception as e:
+            self.send_fn(f"❌ Veto etme hatası: {e}")
 
     def _cmd_set(self, args: list):
         if not args or len(args) < 2:
