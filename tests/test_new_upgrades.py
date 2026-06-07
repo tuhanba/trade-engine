@@ -436,7 +436,8 @@ def test_friday_voice_generation():
     """Verify that FridayCeo generate_voice_from_text works and generates valid bytes."""
     from core.friday_ceo import FridayCeo
     ceo = FridayCeo()
-    voice_bytes = ceo.generate_voice_from_text("Merhaba Boss, her şey yolunda.")
+    with patch("config.FRIDAY_VOICE_REPORTS_ENABLED", True):
+        voice_bytes = ceo.generate_voice_from_text("Merhaba Boss, her şey yolunda.")
     assert voice_bytes is not None
     assert len(voice_bytes) > 0
     assert isinstance(voice_bytes, bytes)
@@ -669,7 +670,8 @@ def test_friday_edge_tts_voice_generation():
         async def stream(self):
             yield {"type": "audio", "data": b"mocked_edge_tts_bytes"}
 
-    with patch("edge_tts.Communicate", side_effect=AsyncCommunicateMock) as mock_comm:
+    with patch("edge_tts.Communicate", side_effect=AsyncCommunicateMock) as mock_comm, \
+         patch("config.FRIDAY_VOICE_REPORTS_ENABLED", True):
         ceo = FridayCeo()
         voice = ceo.generate_voice_from_text("Tatlı ses tonu deneme.")
 
@@ -687,7 +689,8 @@ def test_friday_voice_fallback_to_gtts():
     orig_init = aiohttp.TCPConnector.__init__
 
     with patch("edge_tts.Communicate", side_effect=Exception("Connection failed")), \
-         patch("gtts.gTTS") as mock_gtts:
+         patch("gtts.gTTS") as mock_gtts, \
+         patch("config.FRIDAY_VOICE_REPORTS_ENABLED", True):
 
         def mock_write(fp):
             fp.write(b"mocked_gtts_bytes")

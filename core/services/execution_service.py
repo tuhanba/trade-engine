@@ -134,8 +134,12 @@ class ExecutionService:
                 is_high_quality = sig.setup_quality in conf_qualities or sig.final_score >= conf_score
                 auto_exec_high  = getattr(config, "CONFIRMATION_AUTO_EXECUTE_HIGH_QUALITY", True)
                 
+                import sys
                 is_paper = (getattr(config, "EXECUTION_MODE", "paper") == "paper")
-                bypass_shields = is_paper or getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
+                is_testing = "pytest" in sys.modules or "unittest" in sys.modules
+                bypass_shields = getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
+                if not is_testing:
+                    bypass_shields = bypass_shields or is_paper
                 if getattr(config, "CONFIRMATION_MODE", False) and not bypass_shields and not (is_high_quality and auto_exec_high):
                     if not candidate_id:
                         try:

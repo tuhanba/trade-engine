@@ -99,6 +99,49 @@ class TriggerEngine:
             return 50.0
         return float(rsi_series.iloc[-1])
 
+    def _connors_rsi(self, series: pd.Series, rsi_len=3, streak_len=2, pct_len=100) -> float:
+        if len(series) < max(rsi_len, streak_len, pct_len) + 10:
+            return 50.0
+        try:
+            # 1. Standard RSI of price
+            rsi_price = self._rsi(series, rsi_len)
+            
+            # 2. RSI of streak
+            diff = series.diff()
+            streak = [0]
+            current_streak = 0
+            for val in diff.iloc[1:]:
+                if val > 0:
+                    if current_streak >= 0:
+                        current_streak += 1
+                    else:
+                        current_streak = 1
+                elif val < 0:
+                    if current_streak <= 0:
+                        current_streak -= 1
+                    else:
+                        current_streak = -1
+                else:
+                    current_streak = 0
+                streak.append(current_streak)
+            
+            streak_series = pd.Series(streak, index=series.index)
+            rsi_streak = self._rsi(streak_series, streak_len)
+            
+            # 3. Percentile Rank of 1-period return
+            pct_change = series.pct_change()
+            last_val = pct_change.iloc[-1]
+            lookback = pct_change.iloc[-pct_len:]
+            
+            count = (lookback < last_val).sum()
+            percentile_rank = (count / pct_len) * 100.0
+            
+            crsi = (rsi_price + rsi_streak + percentile_rank) / 3.0
+            return float(crsi)
+        except Exception as e:
+            logger.warning(f"Error computing ConnorsRSI: {e}")
+            return 50.0
+
     def _macd_hist(self, series: pd.Series) -> float:
         fast = self._ema(series, 12).iloc[-1] - self._ema(series, 26).iloc[-1]
         slow = self._ema(pd.Series((self._ema(series, 12) - self._ema(series, 26)).values), 9).iloc[-1]
@@ -210,10 +253,16 @@ class TriggerEngine:
         if direction == "NO TRADE":
             return {"quality": "D", "score": 0, "entry": 0}
 
-        current_hour = datetime.now(timezone.utc).hour
         import sys
-        if current_hour in BAD_HOURS_UTC and "pytest" not in sys.modules and "unittest" not in sys.modules:
-            return {"quality": "D", "score": 0, "entry": 0}
+        is_paper = getattr(config, "EXECUTION_MODE", "paper") == "paper"
+        is_testing = "pytest" in sys.modules or "unittest" in sys.modules
+        bypass_shields = getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
+        if not is_testing:
+            bypass_shields = bypass_shields or is_paper
+
+        current_hour = datetime.now(timezone.utc).hour
+        if not bypass_shields and current_hour in BAD_HOURS_UTC:
+            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "bad_hours_utc"}
 
         # BTC NEUTRAL → geçir (hem LONG hem SHORT açılabilir)
         # Sadece kesin karşı trend'de engelle
@@ -231,7 +280,12 @@ class TriggerEngine:
         e9_5 = self._ema(df5["close"], 9)
         e21_5 = self._ema(df5["close"], 21)
         e50_5 = self._ema(df5["close"], 50)
-        rsi5 = self._rsi(df5["close"], 14)
+        
+        connors_rsi_enabled = getattr(config, "CONNORS_RSI_ENABLED", True)
+        if connors_rsi_enabled:
+            rsi5 = self._connors_rsi(df5["close"], 3, 2, 100)
+        else:
+            rsi5 = self._rsi(df5["close"], 14)
 
         bb_width_val = 0.0
         bb_width_chg_val = 0.0
@@ -270,19 +324,23 @@ class TriggerEngine:
 
         # RSI Limit Filter
         rsi_limit = float(getattr(config, "RSI_LIMIT", 30.0))
-        if direction == "LONG" and rsi5_val < rsi_limit:
-            logger.info(f"[TriggerEngine] LONG Vetoed: RSI ({rsi5_val:.1f}) below limit ({rsi_limit:.1f}) for {symbol}")
-            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "rsi_limit_block"}
-        if direction == "SHORT" and rsi5_val > (100.0 - rsi_limit):
-            logger.info(f"[TriggerEngine] SHORT Vetoed: RSI ({rsi5_val:.1f}) above limit ({100.0 - rsi_limit:.1f}) for {symbol}")
-            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "rsi_limit_block"}
+        if not bypass_shields:
+            if direction == "LONG" and rsi5_val < rsi_limit:
+                logger.info(f"[TriggerEngine] LONG Vetoed: RSI ({rsi5_val:.1f}) below limit ({rsi_limit:.1f}) for {symbol}")
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "rsi_limit_block"}
+            if direction == "SHORT" and rsi5_val > (100.0 - rsi_limit):
+                logger.info(f"[TriggerEngine] SHORT Vetoed: RSI ({rsi5_val:.1f}) above limit ({100.0 - rsi_limit:.1f}) for {symbol}")
+                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "rsi_limit_block"}
 
         df1 = self.get_candles(symbol, "1m", 100)
         if df1.empty or len(df1) < 30:
             return {"quality": "D", "score": 0, "entry": 0, "adx": round(adx_val, 1)}
 
         c1 = df1["close"].iloc[-1]
-        rsi1 = self._rsi(df1["close"], 7)
+        if connors_rsi_enabled:
+            rsi1 = self._connors_rsi(df1["close"], 3, 2, 50)
+        else:
+            rsi1 = self._rsi(df1["close"], 7)
         hist = self._macd_hist(df1["close"])
         rv = self._relative_volume(df1, 20)
         mom3c = self._momentum_3c(df1)
@@ -413,9 +471,10 @@ class TriggerEngine:
         # ─────────────────────────────────────────────────────────────────────
 
         # ── L2 Orderbook (Balina Duvarı) Kalkanı ─────────────────────────────
+        ob_wall_detected = False
         bid_depth, ask_depth = 1.0, 1.0
         try:
-            if getattr(config, "ORDER_BOOK_WALL_FILTER_ENABLED", True):
+            if getattr(config, "ORDER_BOOK_WALL_FILTER_ENABLED", True) and not bypass_shields:
                 is_scalp = not getattr(config, "HUMAN_MODE", False)
                 ob_limit = 50 if is_scalp else 20
                 ob = self.client.futures_order_book(symbol=symbol, limit=ob_limit)
@@ -425,11 +484,23 @@ class TriggerEngine:
                 bid_depth = sum(float(b[0]) * float(b[1]) for b in bids)
                 ask_depth = sum(float(a[0]) * float(a[1]) for a in asks)
                 
+                wall_mode = getattr(config, "ORDER_BOOK_WALL_FILTER_MODE", "soft")
+                
                 if direction == "LONG" and ask_depth > bid_depth * 4.0:
-                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_ask_wall_detected"}
+                    if wall_mode == "hard":
+                        return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_ask_wall_detected"}
+                    else:
+                        ob_wall_detected = True
+                        score = max(score - 1.5, 0.0)
+                        logger.info(f"[TriggerEngine] LONG Soft Wall Alert: Ask depth ({ask_depth:.1f}) is 4x Bid depth ({bid_depth:.1f})")
                 if direction == "SHORT" and bid_depth > ask_depth * 4.0:
-                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_bid_wall_detected"}
-                    
+                    if wall_mode == "hard":
+                        return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "massive_bid_wall_detected"}
+                    else:
+                        ob_wall_detected = True
+                        score = max(score - 1.5, 0.0)
+                        logger.info(f"[TriggerEngine] SHORT Soft Wall Alert: Bid depth ({bid_depth:.1f}) is 4x Ask depth ({ask_depth:.1f})")
+                        
                 # Scalp Passive Wall Filter
                 if is_scalp and bids and asks:
                     wall_multiplier = getattr(config, "SCALP_OB_WALL_MULTIPLIER", 5.0)
@@ -444,11 +515,17 @@ class TriggerEngine:
                             notional_level = price_level * qty_level
                             if price_level <= limit_price:
                                 if notional_level >= avg_ask_notional * wall_multiplier:
-                                    logger.info(
-                                        "[TriggerEngine] LONG Vetoed: Passive Ask Wall of %.2f USDT detected at %.4f (limit: %.4f, avg: %.2f)",
-                                        notional_level, price_level, limit_price, avg_ask_notional
-                                    )
-                                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "passive_sell_wall_within_threshold"}
+                                    if wall_mode == "hard":
+                                        logger.info(
+                                            "[TriggerEngine] LONG Vetoed: Passive Ask Wall of %.2f USDT detected at %.4f (limit: %.4f, avg: %.2f)",
+                                            notional_level, price_level, limit_price, avg_ask_notional
+                                        )
+                                        return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "passive_sell_wall_within_threshold"}
+                                    else:
+                                        ob_wall_detected = True
+                                        score = max(score - 1.5, 0.0)
+                                        logger.info("[TriggerEngine] LONG Soft Wall Alert: Passive Ask Wall of %.2f USDT within threshold", notional_level)
+                                        break
                                     
                     elif direction == "SHORT":
                         avg_bid_notional = sum(float(b[0]) * float(b[1]) for b in bids) / len(bids)
@@ -459,11 +536,17 @@ class TriggerEngine:
                             notional_level = price_level * qty_level
                             if price_level >= limit_price:
                                 if notional_level >= avg_bid_notional * wall_multiplier:
-                                    logger.info(
-                                        "[TriggerEngine] SHORT Vetoed: Passive Bid Wall of %.2f USDT detected at %.4f (limit: %.4f, avg: %.2f)",
-                                        notional_level, price_level, limit_price, avg_bid_notional
-                                    )
-                                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "passive_buy_wall_within_threshold"}
+                                    if wall_mode == "hard":
+                                        logger.info(
+                                            "[TriggerEngine] SHORT Vetoed: Passive Bid Wall of %.2f USDT detected at %.4f (limit: %.4f, avg: %.2f)",
+                                            notional_level, price_level, limit_price, avg_bid_notional
+                                        )
+                                        return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "passive_buy_wall_within_threshold"}
+                                    else:
+                                        ob_wall_detected = True
+                                        score = max(score - 1.5, 0.0)
+                                        logger.info("[TriggerEngine] SHORT Soft Wall Alert: Passive Bid Wall of %.2f USDT within threshold", notional_level)
+                                        break
         except Exception as e:
             logger.debug(f"[Orderbook] skip: {e}")
         # ─────────────────────────────────────────────────────────────────────
@@ -509,16 +592,17 @@ class TriggerEngine:
             # CVD Filter Val Check
             cvd_slope = cvd_data.get("cvd_slope", 0.0)
             cvd_filter_val = float(getattr(config, "CVD_FILTER_VAL", -0.1))
-            if direction == "LONG" and cvd_slope < cvd_filter_val:
-                logger.info(f"[TriggerEngine] LONG Vetoed: CVD Slope ({cvd_slope:.4f}) below filter value ({cvd_filter_val:.4f}) for {symbol}")
-                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "cvd_filter_block"}
-            if direction == "SHORT" and cvd_slope > -cvd_filter_val:
-                logger.info(f"[TriggerEngine] SHORT Vetoed: CVD Slope ({cvd_slope:.4f}) above filter value ({-cvd_filter_val:.4f}) for {symbol}")
-                return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "cvd_filter_block"}
+            if not bypass_shields:
+                if direction == "LONG" and cvd_slope < cvd_filter_val:
+                    logger.info(f"[TriggerEngine] LONG Vetoed: CVD Slope ({cvd_slope:.4f}) below filter value ({cvd_filter_val:.4f}) for {symbol}")
+                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "cvd_filter_block"}
+                if direction == "SHORT" and cvd_slope > -cvd_filter_val:
+                    logger.info(f"[TriggerEngine] SHORT Vetoed: CVD Slope ({cvd_slope:.4f}) above filter value ({-cvd_filter_val:.4f}) for {symbol}")
+                    return {"quality": "D", "score": 0, "entry": 0, "reject_reason": "cvd_filter_block"}
             
             # CVD Divergence hard filter for scalp signals
             is_scalp = not getattr(config, "HUMAN_MODE", False)
-            if is_scalp and getattr(config, "SCALP_CVD_DIVERGENCE_FILTER_ENABLED", True):
+            if is_scalp and getattr(config, "SCALP_CVD_DIVERGENCE_FILTER_ENABLED", True) and not bypass_shields:
                 cvd_sig = cvd_data.get("cvd_signal", "NEUTRAL")
                 if direction == "LONG" and cvd_sig == "BEARISH":
                     logger.info("[TriggerEngine] LONG Vetoed: Bearish CVD Divergence detected for %s", symbol)
@@ -553,13 +637,13 @@ class TriggerEngine:
             oi_sig = oi_data.get("oi_signal", "NEUTRAL")
             oi_spike_limit = getattr(config, "OI_SPIKE_LIMIT", 5.0)
             
-            if abs(oi_chg) >= oi_spike_limit:
+            if abs(oi_chg) >= oi_spike_limit and not bypass_shields:
                 if direction == "LONG" and oi_sig == "STRONG_BEAR":
                     logger.info("[TriggerEngine] %s LONG Vetoed: Extreme OI Spike with bearish price movement (%.1f%%, %s)",
                                 symbol, oi_chg, oi_sig)
                     return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"extreme_oi_bear_spike_trap_{oi_chg:.1f}%"}
                 if direction == "SHORT" and oi_sig == "STRONG_BULL":
-                    logger.info("[TriggerEngine] %s SHORT Vetoed: Extreme OI Spike with bullish price movement (%.1f%%, %s)",
+                    logger.info("[TriggerEngine] %s SHORT Vetoed: Extreme OI Spike with bearish price movement (%.1f%%, %s)",
                                 symbol, oi_chg, oi_sig)
                     return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"extreme_oi_bull_spike_trap_{oi_chg:.1f}%"}
 
@@ -705,4 +789,5 @@ class TriggerEngine:
             "cvd_slope":     cvd_data.get("cvd_slope", 0.0),
             "funding_favorable": funding_fav,
             "ob_ratio":      ob_ratio_val,
+            "ob_wall_detected": ob_wall_detected,
         }

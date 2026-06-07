@@ -94,6 +94,29 @@ class RiskService:
                 except Exception:
                     pass
 
+                # Log as ghost signal if cooldown rejected
+                if reject_reason in ("coin_cooldown", "friday_boss_cooldown") or "cooldown" in reject_reason:
+                    try:
+                        from core.ghost_learning import maybe_ghost_log
+                        sig_to_log = {
+                            "symbol": symbol,
+                            "direction": trend_result.get("direction", "LONG"),
+                            "entry": _entry,
+                            "sl": trigger_result.get("stop_loss") or trigger_result.get("sl") or 0.0,
+                            "tp1": trigger_result.get("tp1") or 0.0,
+                            "tp2": trigger_result.get("tp2") or 0.0,
+                            "tp3": trigger_result.get("tp3") or 0.0,
+                            "confidence": float(tradeability_score or 50) / 100.0,
+                            "trigger_type": trigger_result.get("quality", "C"),
+                            "final_score": tradeability_score or 50.0,
+                            "market_regime": trend_result.get("market_trend", "NEUTRAL"),
+                            "rsi": trigger_result.get("rsi5") or 50.0,
+                            "cvd_slope": trigger_result.get("cvd_slope") or 0.0,
+                        }
+                        await asyncio.to_thread(maybe_ghost_log, sig_to_log, reason=f"SKIPPED_BY_{reject_reason.upper()}")
+                    except Exception as _e:
+                        logger.debug(f"[RiskService] Ghost logging error: {_e}")
+
                 return  # pipeline durdu
 
             # PASS: bir sonraki aşamaya geç

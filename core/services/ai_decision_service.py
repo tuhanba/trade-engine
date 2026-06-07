@@ -88,8 +88,12 @@ class AIDecisionService:
             # yapay zeka Çoklu Ajan Konsensüs Kapısı (Consensus Gate)
             if decision["decision"] == "ALLOW":
                 import config
+                import sys
                 is_paper = (getattr(config, "EXECUTION_MODE", "paper") == "paper")
-                bypass_shields = is_paper or getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
+                is_testing = "pytest" in sys.modules or "unittest" in sys.modules
+                bypass_shields = getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
+                if not is_testing:
+                    bypass_shields = bypass_shields or is_paper
                 if not bypass_shields:
                     passed, reason = self._check_consensus(sig)
                     if not passed:

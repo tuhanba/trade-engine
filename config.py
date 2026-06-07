@@ -128,10 +128,20 @@ BYPASS_LIVE_RISK_SHIELDS = _env_bool("BYPASS_LIVE_RISK_SHIELDS", False)
 REGIME_FILTER_ENABLED = _env_bool("REGIME_FILTER_ENABLED", True)
 REGIME_FILTER_MIN_QUALITY_IN_CHOPPY = _env("REGIME_FILTER_MIN_QUALITY_IN_CHOPPY", "A+")
 ORDER_BOOK_WALL_FILTER_ENABLED = _env_bool("ORDER_BOOK_WALL_FILTER_ENABLED", True)
+CONNORS_RSI_ENABLED          = _env_bool("CONNORS_RSI_ENABLED", True)
+ORDER_BOOK_WALL_FILTER_MODE  = _env("ORDER_BOOK_WALL_FILTER_MODE", "hard")
+REGIME_STABILIZATION_PERIODS = _env_int("REGIME_STABILIZATION_PERIODS", 3)
 FRIDAY_CEO_LOOP_INTERVAL = _env_int("FRIDAY_CEO_LOOP_INTERVAL", 3600)
 FRIDAY_CEO_MODEL = _env("FRIDAY_CEO_MODEL", "claude-sonnet-4-6")
 FRIDAY_SUBAGENT_MODEL = _env("FRIDAY_SUBAGENT_MODEL", "claude-haiku-4-5-20251001")
 FRIDAY_VOICE_REPORTS_ENABLED = _env_bool("FRIDAY_VOICE_REPORTS_ENABLED", False)
+GHOST_WARMUP_ENABLED          = _env_bool("GHOST_WARMUP_ENABLED", False)
+GHOST_WARMUP_MIN_WIN_RATE     = _env_float("GHOST_WARMUP_MIN_WIN_RATE", 0.55)
+GHOST_WARMUP_TRADES_LOOKBACK  = _env_int("GHOST_WARMUP_TRADES_LOOKBACK", 10)
+DYNAMIC_KELLY_ENABLED         = _env_bool("DYNAMIC_KELLY_ENABLED", False)
+DYNAMIC_KELLY_LOOKBACK_DAYS   = _env_int("DYNAMIC_KELLY_LOOKBACK_DAYS", 7)
+CHANDELIER_EXIT_ENABLED       = _env_bool("CHANDELIER_EXIT_ENABLED", False)
+CHANDELIER_ATR_MULT           = _env_float("CHANDELIER_ATR_MULT", 3.0)
 
 
 # Otonom Kâr Kilitleme Kalkanı (Dynamic Profit Lock Settings)
@@ -309,6 +319,16 @@ _DYNAMIC_PARAMS_MAP = {
     "FRIDAY_CEO_LOOP_INTERVAL":        ("friday_ceo_loop_interval", int),
     "FRIDAY_VOICE_REPORTS_ENABLED":    ("friday_voice_reports_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
     "MAX_SAME_DIRECTION":              ("max_same_direction", int),
+    "CONNORS_RSI_ENABLED":             ("connors_rsi_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "ORDER_BOOK_WALL_FILTER_MODE":     ("order_book_wall_filter_mode", str),
+    "REGIME_STABILIZATION_PERIODS":    ("regime_stabilization_periods", int),
+    "GHOST_WARMUP_ENABLED":             ("ghost_warmup_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "GHOST_WARMUP_MIN_WIN_RATE":        ("ghost_warmup_min_win_rate", float),
+    "GHOST_WARMUP_TRADES_LOOKBACK":     ("ghost_warmup_trades_lookback", int),
+    "DYNAMIC_KELLY_ENABLED":            ("dynamic_kelly_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "DYNAMIC_KELLY_LOOKBACK_DAYS":      ("dynamic_kelly_lookback_days", int),
+    "CHANDELIER_EXIT_ENABLED":          ("chandelier_exit_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "CHANDELIER_ATR_MULT":              ("chandelier_atr_mult", float),
 }
 
 _AI_PARAMS_MAP = {

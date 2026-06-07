@@ -2313,6 +2313,39 @@ def save_ghost_result(ghost_id: int, data: dict) -> None:
         )
 
 
+def get_ghost_warmup_win_rate(symbol: str = None, lookback: int = 10) -> tuple[float, int]:
+    """
+    Son simulated ghost trade'lerin win rate'ini hesaplar.
+    symbol None ise global, yoksa o coine ozel hesaplar.
+    Dönen değer: (win_rate, count). (win_rate, 0.0 ile 1.0 arasındadır)
+    """
+    query = """
+        SELECT r.virtual_outcome
+        FROM ghost_results r
+        JOIN ghost_signals g ON r.ghost_id = g.id
+        WHERE r.virtual_outcome IN ('WIN', 'LOSS')
+    """
+    params = []
+    if symbol:
+        query += " AND (g.symbol = ? OR g.coin = ?)"
+        params.extend([symbol, symbol])
+    query += " ORDER BY r.id DESC LIMIT ?"
+    params.append(lookback)
+
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(query, params).fetchall()
+            outcomes = [r[0] for r in rows]
+            if not outcomes:
+                return 0.0, 0
+            wins = outcomes.count('WIN')
+            total = len(outcomes)
+            return wins / total, total
+    except Exception as e:
+        logger.error(f"Error calculating ghost warmup win rate for {symbol}: {e}")
+        return 0.0, 0
+
+
 def get_ghost_pattern_stats(min_count: int = 5, days: int = 30) -> list:
     """
     Pattern analizi: trigger_type × coin bazında ghost WR ve avg R döner.
@@ -2608,7 +2641,36 @@ def get_market_regime() -> str:
 
 
 def set_market_regime(regime: str) -> None:
-    """Piyasa rejimini Redis + SQLite'a yazar."""
+    """Piyasa rejimini Redis + SQLite'a yazar (rejim stabilizasyon filtresi ile)."""
+    import config
+    try:
+        stab_periods = int(getattr(config, "REGIME_STABILIZATION_PERIODS", 3))
+        if stab_periods > 1:
+            current_regime = get_market_regime()
+            if regime != current_regime:
+                proposed = get_system_state("proposed_market_regime", default="")
+                count = int(get_system_state("proposed_market_regime_count", default="0"))
+                
+                if proposed == regime:
+                    count += 1
+                else:
+                    proposed = regime
+                    count = 1
+                
+                if count < stab_periods:
+                    update_system_state("proposed_market_regime", proposed)
+                    update_system_state("proposed_market_regime_count", str(count))
+                    logger.debug(f"[Regime Stabilization] Proposed regime change to {regime} ignored (consecutive count: {count}/{stab_periods})")
+                    return
+                else:
+                    update_system_state("proposed_market_regime", "")
+                    update_system_state("proposed_market_regime_count", "0")
+            else:
+                update_system_state("proposed_market_regime", "")
+                update_system_state("proposed_market_regime_count", "0")
+    except Exception as e:
+        logger.warning("[Regime Stabilization] Error in stabilization filter: %s", e)
+
     try:
         from core import redis_state
         redis_state.set("market_regime", regime)
