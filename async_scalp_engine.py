@@ -653,7 +653,16 @@ async def main():
         _shutdown_event.set()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, shutdown_signal)
+        try:
+            loop.add_signal_handler(sig, shutdown_signal)
+        except NotImplementedError:
+            try:
+                def _handle_sig(signum, frame):
+                    logger.info(f"[Shutdown] Signal {signum} received — triggering graceful shutdown...")
+                    loop.call_soon_threadsafe(_shutdown_event.set)
+                signal.signal(sig, _handle_sig)
+            except Exception as _sig_err:
+                logger.warning(f"Could not register signal handler for {sig}: {_sig_err}")
 
     # Engine'i başlat (kurulumu tamamla)
     try:
