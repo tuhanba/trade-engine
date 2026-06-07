@@ -98,7 +98,7 @@ except Exception:
     pass
 
 # Mock daily risk governor limits to match simulation date
-def mock_check_daily_loss_limit(balance):
+def mock_check_daily_loss_limit(balance, environment="live"):
     try:
         sim_today_str = current_sim_time.strftime("%Y-%m-%d")
         with database.get_conn() as conn:

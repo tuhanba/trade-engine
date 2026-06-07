@@ -59,7 +59,7 @@ class SimulatedDatetime(real_datetime):
             return real_datetime.utcnow()
         return current_sim_time
 
-def mock_check_daily_loss_limit(balance):
+def mock_check_daily_loss_limit(balance, environment="live"):
     try:
         sim_today_str = current_sim_time.strftime("%Y-%m-%d")
         with database.get_conn() as conn:
