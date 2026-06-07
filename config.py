@@ -16,7 +16,11 @@ except ImportError:
 
 logger = logging.getLogger("ax.config")
 
-def _env(key, default=""): return os.getenv(key, default).strip()
+def _env(key, default=""):
+    val = os.getenv(key, default).strip()
+    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+        val = val[1:-1].strip()
+    return val
 def _env_bool(key, default=False):
     v = os.getenv(key, "").strip().lower()
     if not v:

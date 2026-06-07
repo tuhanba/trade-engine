@@ -20,8 +20,8 @@ class TelegramManager:
     def __init__(self, send_fn: Callable[[str], bool], friday_ceo=None):
         self.send_fn        = send_fn
         self.friday_ceo    = friday_ceo
-        self.token          = config.TELEGRAM_BOT_TOKEN
-        self.chat_id        = str(config.TELEGRAM_CHAT_ID)
+        self.token          = str(config.TELEGRAM_BOT_TOKEN).replace('"', '').replace("'", "").strip()
+        self.chat_id        = str(config.TELEGRAM_CHAT_ID).replace('"', '').replace("'", "").strip()
         self.is_paused      = False
         self.is_finish_mode = False
         self.human_mode     = False
@@ -230,11 +230,15 @@ class TelegramManager:
         cb_id = cb_query.get("id")
         data = cb_query.get("data", "")
         
+        logger.info(f"[Telegram Callback] Received query. ID: {cb_id}, Data: {data}")
+        
         # Safely parse message to prevent AttributeError
         msg = cb_query.get("message") or {}
         msg_id = msg.get("message_id")
         from_chat = str(msg.get("chat", {}).get("id", ""))
         from_user = str(cb_query.get("from", {}).get("id", ""))
+        
+        logger.info(f"[Telegram Callback] Details - Msg ID: {msg_id}, Chat: {from_chat}, User: {from_user}")
         
         # Determine active chat ID for any edit/reply actions
         active_chat = from_chat or from_user
@@ -246,28 +250,35 @@ class TelegramManager:
         self._thread_local.active_chat_id = active_chat
         
         is_authorized = False
+        allowed_ids = []
         if self.chat_id:
-            allowed_ids = [x.strip() for x in self.chat_id.split(",") if x.strip()]
+            cleaned_chat_id = self.chat_id.replace('"', '').replace("'", "").strip()
+            allowed_ids = [x.strip() for x in cleaned_chat_id.split(",") if x.strip()]
             is_authorized = (from_chat in allowed_ids) or (from_user in allowed_ids)
             
+        logger.info(f"[Telegram Callback] Auth Check - Allowed: {allowed_ids}, Authorized: {is_authorized}")
+            
         if not is_authorized:
-            logger.warning(f"Yetkisiz callback query engellendi. Chat: {from_chat}, User: {from_user}, Data: {data}")
+            logger.warning(f"[Telegram Callback] Yetkisiz callback query engellendi. Chat: {from_chat}, User: {from_user}, Data: {data}. Allowed: {allowed_ids}")
             self._answer_callback_query(cb_id, "Yetkisiz sohbet veya kullanıcı.")
             return
             
-        logger.info(f"Callback query: {data} (Chat: {from_chat}, User: {from_user})")
-        
         if not data.startswith("cmd:"):
+            logger.warning(f"[Telegram Callback] Command doesn't start with cmd: {data}")
             self._answer_callback_query(cb_id, "Bilinmeyen işlem.")
             return
             
         action = data[4:]
+        logger.info(f"[Telegram Callback] Executing action: {action}")
+        
+        # Acknowledge query immediately to remove the Telegram loading spinner
         self._answer_callback_query(cb_id, "İşlem alınıyor...")
         
         try:
             self._execute_callback_action(action, msg, msg_id, from_chat, from_user)
+            logger.info(f"[Telegram Callback] Action {action} executed successfully")
         except Exception as ex:
-            logger.exception(f"Callback query processing error for action {action}:")
+            logger.exception(f"[Telegram Callback] Callback query processing error for action {action}:")
             if msg_id:
                 self._edit_message_text(f"❌ <b>İşlem hatası ({action}):</b> {ex}", msg_id, None)
             else:
@@ -693,8 +704,10 @@ class TelegramManager:
         payload = {"callback_query_id": callback_query_id}
         if text:
             payload["text"] = text
+        logger.info(f"[Telegram] Sending answerCallbackQuery for ID: {callback_query_id}")
         try:
             resp = requests.post(url, json=payload, timeout=_TIMEOUT)
+            logger.info(f"[Telegram] answerCallbackQuery response status: {resp.status_code}")
             if resp.status_code != 200:
                 logger.warning(f"answerCallbackQuery HTTP Hatası: {resp.status_code} - Body: {resp.text}")
             else:
@@ -723,8 +736,10 @@ class TelegramManager:
         }
         if reply_markup:
             payload["reply_markup"] = reply_markup
+        logger.info(f"[Telegram] Sending editMessageText to chat {active_chat}, msg {message_id}")
         try:
             resp = requests.post(url, json=payload, timeout=_TIMEOUT)
+            logger.info(f"[Telegram] editMessageText response status: {resp.status_code}")
             return resp.status_code == 200
         except Exception as e:
             logger.warning(f"editMessageText hatası: {e}")

@@ -96,6 +96,12 @@ actions içine şu komutları ekleyebilirsin:
 - "BACKUP_MODEL": Mevcut sgd_online_model.pkl durumunu yedekler (core/backups/).
 - "ROLLBACK_MODEL": ML modelini en son stabil yedeklenen haline geri döndürür.
 İhtiyaç yoksa actions listesi boş kalabilir).
+
+📊 4. PAPER TRADING AGRESİF HEDEFLEME KURALLARI (ZORUNLU):
+- Paper (sanal bakiye) modunda çalışırken, kasayı büyütme ve öğrenim istatistikleri toplama hızımızı en üst düzeye çıkarmak için son derece agresif, mantıklı ve kazanma odaklı davranmalısın.
+- Eğer 'execution_mode' değeri 'paper' ise: 'trade_threshold' değerini 45.0 ila 48.0 aralığında tutmalısın (asla daha yüksek değil). 'risk_pct' değerini ise 1.5 veya 2.0 yapmalısın. 'max_open_trades' parametresini 6 veya 7'ye yükseltmelisin.
+- 'confirmation_mode' değerini kesinlikle 'false' tutmalısın, böylece işlemler onay beklemeden otonom olarak akar.
+- Risk süzgeçlerini daraltıp işlemleri engellemek yerine (risk veto), riski küçülterek veya otonom filtreleri gevşeterek sistemin sürekli aktif ve dinamik kalmasını sağla.
 """
 
 STATIC_MACRO_EVENTS = [
@@ -1324,74 +1330,138 @@ class FridayCeo:
                 logger.info(f"[Friday CEO] Market regime changed from {last_regime} to {regime}")
                 set_state("friday_last_regime", regime)
                 
-                if regime == "CHOPPY":
-                    # Scale down risk to protect the bankroll
-                    # Read current settings to restore them later
-                    curr_risk = float(getattr(config, "RISK_PCT", 0.75))
-                    curr_threshold = float(getattr(config, "TRADE_THRESHOLD", 55.0))
-                    
-                    # Store previous parameters if not already in CHOPPY mode
-                    set_state("friday_pre_choppy_risk", str(curr_risk))
-                    set_state("friday_pre_choppy_threshold", str(curr_threshold))
-                    
-                    # Apply defensive mode: risk_pct -> 0.5, trade_threshold -> 65.0
-                    set_state("risk_pct", "0.5")
-                    set_state("trade_threshold", "65.0")
-                    try:
-                        conn = sqlite3.connect(self.db_path, timeout=5)
-                        conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (0.5,))
-                        conn.commit()
-                        conn.close()
-                    except Exception as e:
-                        logger.error(f"[Friday CEO] Error updating risk_pct in params: {e}")
-                    
-                    # Clear cache
-                    for key in ["RISK_PCT", "TRADE_THRESHOLD"]:
-                        if key in config._CONFIG_CACHE:
-                            del config._CONFIG_CACHE[key]
-                            
-                    msg = (
-                        "Batuhan Bey, piyasada yoğun oynaklık ve dalgalı (CHOPPY) rejim tespit ettim! ⚠️\n\n"
-                        "Sermayeyi korumak amacıyla risk seviyemizi otonom olarak <b>%0.50</b> seviyesine çektim ve "
-                        "işlem giriş eşiğimizi <b>65.0</b>'a yükselttim. Kasa güvenliği en üst düzeye getirilmiştir."
-                    )
-                    telegram_delivery.send_message(msg)
-                    voice_bytes = self.generate_voice_from_text(msg)
-                    if voice_bytes:
-                        telegram_delivery.send_voice(voice_bytes, caption="Friday Otonom Risk Koruma Kalkanı")
+                # Check environment mode
+                environment = getattr(config, "EXECUTION_MODE", "paper")
+                
+                if "CHOPPY" in regime:
+                    if environment == "paper":
+                        # Paper mode: Be extremely aggressive in Choppy!
+                        logger.info("[Friday CEO] Choppy market detected in Paper mode. Enforcing aggressive scaling.")
+                        set_state("risk_pct", "1.5")
+                        set_state("trade_threshold", "45.0")
+                        set_state("regime_filter_min_quality_in_choppy", "A")
                         
-                elif last_regime == "CHOPPY":
+                        try:
+                            conn = sqlite3.connect(self.db_path, timeout=5)
+                            conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (1.5,))
+                            conn.commit()
+                            conn.close()
+                        except Exception as e:
+                            logger.error(f"[Friday CEO] Error updating risk_pct in params: {e}")
+                            
+                        # Clear cache
+                        for key in ["RISK_PCT", "TRADE_THRESHOLD", "REGIME_FILTER_MIN_QUALITY_IN_CHOPPY"]:
+                            if key in config._CONFIG_CACHE:
+                                del config._CONFIG_CACHE[key]
+                                
+                        msg = (
+                            "Batuhan Bey, piyasada yoğun dalgalanma (CHOPPY) tespit ettim. ⚠️\n\n"
+                            "Paper trading modunda olduğumuz için sermaye riski sıfırdır. "
+                            "Yapay zekanın daha agresif öğrenmesi ve kâr üretmesini sağlamak amacıyla "
+                            "otonom olarak işlem eşik puanını <b>45.0</b> seviyesine çektim, "
+                            "kasa risk yüzdemizi ise <b>%1.50</b> seviyesine yükselttim. Fırsatları otonom avlamaya devam ediyoruz! ⚔️"
+                        )
+                        telegram_delivery.send_message(msg)
+                        voice_bytes = self.generate_voice_from_text(msg)
+                        if voice_bytes:
+                            telegram_delivery.send_voice(voice_bytes, caption="Friday Otonom Paper Optimizasyonu")
+                    else:
+                        # Live mode: Scale down risk to protect the bankroll
+                        curr_risk = float(getattr(config, "RISK_PCT", 0.75))
+                        curr_threshold = float(getattr(config, "TRADE_THRESHOLD", 55.0))
+                        
+                        set_state("friday_pre_choppy_risk", str(curr_risk))
+                        set_state("friday_pre_choppy_threshold", str(curr_threshold))
+                        
+                        set_state("risk_pct", "0.5")
+                        set_state("trade_threshold", "65.0")
+                        try:
+                            conn = sqlite3.connect(self.db_path, timeout=5)
+                            conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (0.5,))
+                            conn.commit()
+                            conn.close()
+                        except Exception as e:
+                            logger.error(f"[Friday CEO] Error updating risk_pct in params: {e}")
+                        
+                        # Clear cache
+                        for key in ["RISK_PCT", "TRADE_THRESHOLD"]:
+                            if key in config._CONFIG_CACHE:
+                                del config._CONFIG_CACHE[key]
+                                
+                        msg = (
+                            "Batuhan Bey, piyasada yoğun oynaklık ve dalgalı (CHOPPY) rejim tespit ettim! ⚠️\n\n"
+                            "Sermayeyi korumak amacıyla risk seviyemizi otonom olarak <b>%0.50</b> seviyesine çektim ve "
+                            "işlem giriş eşiğimizi <b>65.0</b>'a yükselttim. Kasa güvenliği en üst düzeye getirilmiştir."
+                        )
+                        telegram_delivery.send_message(msg)
+                        voice_bytes = self.generate_voice_from_text(msg)
+                        if voice_bytes:
+                            telegram_delivery.send_voice(voice_bytes, caption="Friday Otonom Risk Koruma Kalkanı")
+                            
+                elif "CHOPPY" in last_regime:
                     # Restore previous settings
                     from database import get_system_state
-                    prev_risk = get_system_state("friday_pre_choppy_risk") or "0.75"
-                    prev_threshold = get_system_state("friday_pre_choppy_threshold") or "55.0"
                     
-                    set_state("risk_pct", prev_risk)
-                    set_state("trade_threshold", prev_threshold)
-                    try:
-                        conn = sqlite3.connect(self.db_path, timeout=5)
-                        conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (float(prev_risk),))
-                        conn.commit()
-                        conn.close()
-                    except Exception as e:
-                        logger.error(f"[Friday CEO] Error restoring risk_pct in params: {e}")
-                    
-                    # Clear cache
-                    for key in ["RISK_PCT", "TRADE_THRESHOLD"]:
-                        if key in config._CONFIG_CACHE:
-                            del config._CONFIG_CACHE[key]
+                    if environment == "paper":
+                        # Paper mode returning to Trending/Neutral: Still aggressive!
+                        logger.info("[Friday CEO] Market regime returning to trending in Paper mode. Enforcing standard aggressive parameters.")
+                        set_state("risk_pct", "1.5")
+                        set_state("trade_threshold", "45.0")
+                        
+                        try:
+                            conn = sqlite3.connect(self.db_path, timeout=5)
+                            conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (1.5,))
+                            conn.commit()
+                            conn.close()
+                        except Exception as e:
+                            logger.error(f"[Friday CEO] Error updating risk_pct in params: {e}")
                             
-                    msg = (
-                        f"Batuhan Bey, piyasadaki aşırı oynaklık ve dalgalı rejim sona erdi, "
-                        f"rejim normale döndü. ✨\n\n"
-                        f"Risk oranımızı tekrar eski değeri olan <b>%{float(prev_risk)*100:.1f}</b> seviyesine ve "
-                        f"işlem giriş eşiğimizi <b>{prev_threshold}</b> seviyesine çektim. "
-                        f"Sinyal arama taramaları olağan parametrelerle sürdürülüyor."
-                    )
-                    telegram_delivery.send_message(msg)
-                    voice_bytes = self.generate_voice_from_text(msg)
-                    if voice_bytes:
-                        telegram_delivery.send_voice(voice_bytes, caption="Friday Otonom Risk Modu Güncellemesi")
+                        # Clear cache
+                        for key in ["RISK_PCT", "TRADE_THRESHOLD"]:
+                            if key in config._CONFIG_CACHE:
+                                del config._CONFIG_CACHE[key]
+                                
+                        msg = (
+                            "Batuhan Bey, piyasadaki aşırı oynaklık ve dalgalı rejim sona erdi. Piyasa rejimimiz normale döndü. ✨\n\n"
+                            "Paper trading modunda maksimum kârı avlamaya devam etmek için "
+                            "risk yüzdemizi <b>%1.50</b> ve işlem giriş eşiğimizi <b>45.0</b> seviyesinde sabit tuttum. "
+                            "Botumuz tam kapasiteyle çalışmaya devam ediyor."
+                        )
+                        telegram_delivery.send_message(msg)
+                        voice_bytes = self.generate_voice_from_text(msg)
+                        if voice_bytes:
+                            telegram_delivery.send_voice(voice_bytes, caption="Friday Otonom Paper Modu Güncellemesi")
+                    else:
+                        # Live mode: restore previous settings
+                        prev_risk = get_system_state("friday_pre_choppy_risk") or "0.75"
+                        prev_threshold = get_system_state("friday_pre_choppy_threshold") or "55.0"
+                        
+                        set_state("risk_pct", prev_risk)
+                        set_state("trade_threshold", prev_threshold)
+                        try:
+                            conn = sqlite3.connect(self.db_path, timeout=5)
+                            conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (float(prev_risk),))
+                            conn.commit()
+                            conn.close()
+                        except Exception as e:
+                            logger.error(f"[Friday CEO] Error restoring risk_pct in params: {e}")
+                        
+                        # Clear cache
+                        for key in ["RISK_PCT", "TRADE_THRESHOLD"]:
+                            if key in config._CONFIG_CACHE:
+                                del config._CONFIG_CACHE[key]
+                                
+                        msg = (
+                            f"Batuhan Bey, piyasadaki aşırı oynaklık ve dalgalı rejim sona erdi, "
+                            f"rejim normale döndü. ✨\n\n"
+                            f"Risk oranımızı tekrar eski değeri olan <b>%{float(prev_risk)*100:.1f}</b> seviyesine ve "
+                            f"işlem giriş eşiğimizi <b>{prev_threshold}</b> seviyesine çektim. "
+                            f"Sinyal arama taramaları olağan parametrelerle sürdürülüyor."
+                        )
+                        telegram_delivery.send_message(msg)
+                        voice_bytes = self.generate_voice_from_text(msg)
+                        if voice_bytes:
+                            telegram_delivery.send_voice(voice_bytes, caption="Friday Otonom Risk Modu Güncellemesi")
         except Exception as e:
             logger.error(f"[Friday CEO] Error monitoring market regime: {e}")
             
