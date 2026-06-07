@@ -124,6 +124,7 @@ CONFIRMATION_AUTO_EXECUTE_QUALITIES = _env("CONFIRMATION_AUTO_EXECUTE_QUALITIES"
 CONFIRMATION_AUTO_EXECUTE_SCORE = _env_float("CONFIRMATION_AUTO_EXECUTE_SCORE", 70.0)
 MACRO_GUARD_ENABLED = _env_bool("MACRO_GUARD_ENABLED", True)
 LATENCY_GUARD_ENABLED = _env_bool("LATENCY_GUARD_ENABLED", True)
+BYPASS_LIVE_RISK_SHIELDS = _env_bool("BYPASS_LIVE_RISK_SHIELDS", False)
 REGIME_FILTER_ENABLED = _env_bool("REGIME_FILTER_ENABLED", True)
 REGIME_FILTER_MIN_QUALITY_IN_CHOPPY = _env("REGIME_FILTER_MIN_QUALITY_IN_CHOPPY", "A+")
 ORDER_BOOK_WALL_FILTER_ENABLED = _env_bool("ORDER_BOOK_WALL_FILTER_ENABLED", True)
@@ -299,6 +300,7 @@ _DYNAMIC_PARAMS_MAP = {
     "CVD_FILTER_VAL":                 ("cvd_filter_val", float),
     "MACRO_GUARD_ENABLED":            ("macro_guard_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
     "LATENCY_GUARD_ENABLED":          ("latency_guard_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
+    "BYPASS_LIVE_RISK_SHIELDS":       ("bypass_live_risk_shields", lambda v: v.strip().lower() in ("true", "1", "yes")),
     "REGIME_FILTER_ENABLED":          ("regime_filter_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
     "REGIME_FILTER_MIN_QUALITY_IN_CHOPPY": ("regime_filter_min_quality_in_choppy", str),
     "ORDER_BOOK_WALL_FILTER_ENABLED": ("order_book_wall_filter_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),

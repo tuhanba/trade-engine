@@ -41,7 +41,8 @@ class TriggerService:
                     quality_order = ["C", "B", "A", "A+", "S"]
                     if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
                         is_paper = (getattr(config, "EXECUTION_MODE", "paper") == "paper")
-                        if not is_paper:
+                        bypass_shields = is_paper or getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
+                        if not bypass_shields:
                             q_idx = quality_order.index(quality) if quality in quality_order else -1
                             min_idx = quality_order.index(min_quality) if min_quality in quality_order else -1
                             if q_idx < min_idx:
@@ -56,7 +57,7 @@ class TriggerService:
                                     pass
                                 return
                         else:
-                            logger.info(f"[Paper Bypass] TriggerService Regime Filter check bypassed for {symbol}.")
+                            logger.info(f"[Bypass] TriggerService Regime Filter check bypassed for {symbol}.")
             except Exception as rex:
                 logger.debug(f"[TriggerService] Regime check failed: {rex}")
 

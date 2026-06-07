@@ -135,7 +135,8 @@ class ExecutionService:
                 auto_exec_high  = getattr(config, "CONFIRMATION_AUTO_EXECUTE_HIGH_QUALITY", True)
                 
                 is_paper = (getattr(config, "EXECUTION_MODE", "paper") == "paper")
-                if getattr(config, "CONFIRMATION_MODE", False) and not is_paper and not (is_high_quality and auto_exec_high):
+                bypass_shields = is_paper or getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
+                if getattr(config, "CONFIRMATION_MODE", False) and not bypass_shields and not (is_high_quality and auto_exec_high):
                     if not candidate_id:
                         try:
                             from database import get_conn

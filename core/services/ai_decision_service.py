@@ -89,14 +89,15 @@ class AIDecisionService:
             if decision["decision"] == "ALLOW":
                 import config
                 is_paper = (getattr(config, "EXECUTION_MODE", "paper") == "paper")
-                if not is_paper:
+                bypass_shields = is_paper or getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
+                if not bypass_shields:
                     passed, reason = self._check_consensus(sig)
                     if not passed:
                         logger.info(f"[Consensus Gate] Trade on {symbol} vetoed by consensus agents: {reason}")
                         decision["decision"] = "VETO"
                         decision["reason"] = reason
                 else:
-                    logger.info(f"[Paper Bypass] Consensus Gate check bypassed for {symbol}.")
+                    logger.info(f"[Bypass] Consensus Gate check bypassed for {symbol}.")
             
             sig.final_score = decision["final_score"]
             sig.confidence = decision["confidence"]
