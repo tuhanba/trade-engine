@@ -634,12 +634,20 @@ class FridayCeo:
 
     def scan_unnecessary_files(self) -> list[str]:
         """Scans the project root directory for unnecessary files: backtest_temp_*.db and *.log."""
+        import time
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         unnecessary = []
         try:
+            now = time.time()
             for item in os.listdir(base_dir):
                 item_path = os.path.join(base_dir, item)
                 if os.path.isfile(item_path):
+                    # Skip files modified within the last 1 hour to protect active runs
+                    try:
+                        if now - os.path.getmtime(item_path) < 3600:
+                            continue
+                    except Exception:
+                        pass
                     if item.startswith("backtest_temp_") and item.endswith(".db"):
                         unnecessary.append(item_path)
                     elif item.endswith(".log"):
