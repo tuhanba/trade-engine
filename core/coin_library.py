@@ -318,15 +318,22 @@ def _save_coin_profile(symbol: str, profile: dict):
         from database import get_conn
         with get_conn() as conn:
             now = profile["updated_at"]
-            # DB primary key: "coin" (not "symbol")
+            # Fetch existing config to merge and preserve YZ overrides
+            row = conn.execute(
+                "SELECT config_json FROM coin_configs WHERE coin = ?", (symbol,)
+            ).fetchone()
+            existing = json.loads(row[0]) if row and row[0] else {}
+            existing.update(profile)
+            
+            config_str = json.dumps(existing, ensure_ascii=False)
             conn.execute("""
                 UPDATE coin_configs SET config_json=?, updated_at=? WHERE coin=?
-            """, (json.dumps(profile), now, symbol))
+            """, (config_str, now, symbol))
             if conn.rowcount == 0:
                 conn.execute("""
                     INSERT INTO coin_configs (coin, config_json, updated_at)
                     VALUES (?, ?, ?)
-                """, (symbol, json.dumps(profile), now))
+                """, (symbol, config_str, now))
     except Exception as e:
         logger.debug(f"[CoinLib] Profile save {symbol}: {e}")
 

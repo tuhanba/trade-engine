@@ -208,11 +208,14 @@ class GhostBacktestRunner:
         self.max_open = max_open
         
         # Setup Database
-        if os.path.exists("backtest_temp.db"):
-            try:
-                os.remove("backtest_temp.db")
-            except Exception as e:
-                logger.warning(f"Could not delete backtest_temp.db: {e}")
+        self.db_path = config.DB_PATH
+        for suffix in ["", "-wal", "-shm"]:
+            p = self.db_path + suffix
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception as e:
+                    logger.warning(f"Could not delete {p}: {e}")
                 
         # Setup clean online model path for backtest
         import core.online_learning
@@ -757,13 +760,17 @@ The following suggestions have been computed based on pattern success (e.g. WR >
         print(f"Saved premium report to: {output_path}")
         print("=" * 60)
 
-def apply_to_prod_db(min_confidence="MEDIUM"):
-    logger.info(f"Syncing suggestions from backtest_temp.db to production DB at: {PROD_DB_PATH}")
+def apply_to_prod_db(temp_db_path, min_confidence="MEDIUM"):
+    import core.ghost_learning
+    import core.online_learning
+    import shutil
+    
+    logger.info(f"Syncing suggestions from {temp_db_path} to production DB at: {PROD_DB_PATH}")
     if not os.path.exists(PROD_DB_PATH):
         logger.error(f"Production database not found at {PROD_DB_PATH}!")
         return
         
-    temp_conn = sqlite3.connect("backtest_temp.db")
+    temp_conn = sqlite3.connect(temp_db_path)
     prod_conn = sqlite3.connect(PROD_DB_PATH)
     
     # 1. Fetch suggestions from temp DB
@@ -815,8 +822,6 @@ def apply_to_prod_db(min_confidence="MEDIUM"):
         logger.info(f"  Applied override: {change}")
 
     # 4. Copy temporary model file to production path
-    import shutil
-    import core.online_learning
     prod_model_path = os.path.join(
         os.path.dirname(core.online_learning.__file__),
         "sgd_online_model.pkl"
@@ -866,15 +871,18 @@ def main():
     runner.run()
     runner.compile_report(args.output)
     
+    temp_db_path = runner.db_path
     if args.apply_to_prod:
-        apply_to_prod_db(min_confidence=args.min_confidence)
+        apply_to_prod_db(temp_db_path, min_confidence=args.min_confidence)
         
     # Delete temporary database after use to keep workspace clean
-    if os.path.exists("backtest_temp.db"):
-        try:
-            os.remove("backtest_temp.db")
-        except Exception:
-            pass
+    for suffix in ["", "-wal", "-shm"]:
+        p = temp_db_path + suffix
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     main()
