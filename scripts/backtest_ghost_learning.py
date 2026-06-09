@@ -286,8 +286,17 @@ class GhostBacktestRunner:
         import scripts.backtest_system
         scripts.backtest_system.current_sim_time = current_sim_time
         
+        last_touch = time.perf_counter()
+        
         step_minutes = 0
         while current_sim_time <= self.end_time:
+            # Touch database file to update mtime and prevent friday_ceo cleanup during long runs
+            if time.perf_counter() - last_touch > 60:
+                try:
+                    os.utime(self.db_path, None)
+                except Exception as e:
+                    logger.warning(f"Failed to touch db file {self.db_path}: {e}")
+                last_touch = time.perf_counter()
             # 1. Update real open trades using 1m candles
             open_trades = database.get_open_trades()
             for t_dict in open_trades:

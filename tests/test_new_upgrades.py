@@ -448,10 +448,10 @@ def test_friday_server_housekeeping():
     from core.friday_ceo import FridayCeo
     import core.friday_ceo
     import os
+    import time
     
     ceo = FridayCeo()
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(core.friday_ceo.__file__)))
-    
     
     # Create test dummy files
     temp_db_path = os.path.join(base_dir, "backtest_temp_9999.db")
@@ -461,6 +461,11 @@ def test_friday_server_housekeeping():
         f.write("dummy db content")
     with open(temp_log_path, "w") as f:
         f.write("dummy log content")
+        
+    # Set mtime to past (older than 24 hours) to bypass active protection check
+    past_time = time.time() - 90000
+    os.utime(temp_db_path, (past_time, past_time))
+    os.utime(temp_log_path, (past_time, past_time))
         
     try:
         # Scan and ensure they are found

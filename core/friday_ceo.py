@@ -642,9 +642,9 @@ class FridayCeo:
             for item in os.listdir(base_dir):
                 item_path = os.path.join(base_dir, item)
                 if os.path.isfile(item_path):
-                    # Skip files modified within the last 1 hour to protect active runs
+                    # Skip files modified within the last 24 hours to protect active runs
                     try:
-                        if now - os.path.getmtime(item_path) < 3600:
+                        if now - os.path.getmtime(item_path) < 86400:
                             continue
                     except Exception:
                         pass

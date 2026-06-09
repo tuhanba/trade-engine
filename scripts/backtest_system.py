@@ -523,6 +523,7 @@ class BacktestRunner:
         self.end_time = end_time
         self.initial_balance = initial_balance
         self.progress_cb = progress_cb
+        self.db_path = config.DB_PATH
         
         # Setup Database
         if os.path.exists(config.DB_PATH):
@@ -590,10 +591,19 @@ class BacktestRunner:
         global current_sim_time
         current_sim_time = self.start_time
         
+        last_touch = time.perf_counter()
+        
         # Step through in 1-minute increments
         step_minutes = 0
         total_steps = int((self.end_time - self.start_time).total_seconds() / 60) + 1
         while current_sim_time <= self.end_time:
+            # Touch database file to update mtime and prevent friday_ceo cleanup during long runs
+            if time.perf_counter() - last_touch > 60:
+                try:
+                    os.utime(self.db_path, None)
+                except Exception as e:
+                    logger.warning(f"Failed to touch db file {self.db_path}: {e}")
+                last_touch = time.perf_counter()
             # 1. Update prices of open trades and check exits using 1m high/low candles
             open_trades = database.get_open_trades()
             for t_dict in open_trades:
