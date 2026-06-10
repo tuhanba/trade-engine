@@ -881,6 +881,8 @@ def main():
                         help="Minimum confidence level of suggestions to apply to production")
     parser.add_argument("--live-emulation", action="store_true", 
                         help="Enable live protection shields (clutch, latency, etc.) during backtest. Default is False (paper backtest mode).")
+    parser.add_argument("--persist-db", action="store_true", 
+                        help="Do not delete the temporary backtest database after execution")
     args = parser.parse_args()
 
     symbols = [s.strip().upper() for s in args.symbols.split(",")]
@@ -911,13 +913,16 @@ def main():
         apply_to_prod_db(temp_db_path, min_confidence=args.min_confidence)
         
     # Delete temporary database after use to keep workspace clean
-    for suffix in ["", "-wal", "-shm"]:
-        p = temp_db_path + suffix
-        if os.path.exists(p):
-            try:
-                os.remove(p)
-            except Exception:
-                pass
+    if args.persist_db:
+        logger.info(f"Persisting backtest database as requested. Database path: {temp_db_path}")
+    else:
+        for suffix in ["", "-wal", "-shm"]:
+            p = temp_db_path + suffix
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
 
 if __name__ == "__main__":
     main()

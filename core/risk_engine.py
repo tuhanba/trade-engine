@@ -505,7 +505,7 @@ class RiskEngine:
             from core.accounting import calculate_position_size, calculate_rr as _calc_rr
             import database
 
-            quality_mult = {"S": 2.0, "A+": 1.5, "A": 1.0, "B": 0.5, "M": 0.5}.get(quality, 0)
+            quality_mult = {"S": 2.0, "A+": 1.5, "A": 1.0, "B": 0.5, "C": 0.25, "M": 0.5}.get(quality, 0)
             if quality_mult == 0:
                 return {"valid": False, "score": 0, "risk_reject_reason": f"quality_{quality}_blocked"}
 

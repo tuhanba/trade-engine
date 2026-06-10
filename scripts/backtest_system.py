@@ -1116,6 +1116,8 @@ def main():
     parser.add_argument("--offline", action="store_true", help="Run in offline mode using synthetic data")
     parser.add_argument("--live-emulation", action="store_true", 
                         help="Enable live protection shields (clutch, latency, etc.) during backtest. Default is False (paper backtest mode).")
+    parser.add_argument("--persist-db", action="store_true", 
+                        help="Do not delete the temporary backtest database after execution")
     args = parser.parse_args()
 
     symbols = [s.strip().upper() for s in args.symbols.split(",")]
@@ -1140,7 +1142,9 @@ def main():
     runner.generate_report(args.output)
     
     # Delete temporary database after use to keep workspace clean
-    if os.path.exists(config.DB_PATH):
+    if args.persist_db:
+        logger.info(f"Persisting backtest database as requested. Database path: {config.DB_PATH}")
+    elif os.path.exists(config.DB_PATH):
         try:
             os.remove(config.DB_PATH)
         except Exception:
