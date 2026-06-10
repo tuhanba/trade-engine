@@ -135,6 +135,144 @@ class FridayCeo:
         self.db_path = db_path or config.DB_PATH
         self.dynamic_events = []
         
+    def _generate_text(self, provider: str, system_prompt: str, user_prompt: str, model_type: str = "subagent") -> str:
+        if provider == "anthropic":
+            api_key = getattr(config, "ANTHROPIC_API_KEY", "")
+            import anthropic
+            ai_client = anthropic.Anthropic(api_key=api_key)
+            model = getattr(config, "FRIDAY_CEO_MODEL" if model_type == "ceo" else "FRIDAY_SUBAGENT_MODEL", 
+                            "claude-sonnet-4-6" if model_type == "ceo" else "claude-haiku-4-5-20251001")
+            try:
+                response = ai_client.messages.create(
+                    model=model,
+                    max_tokens=1500 if model_type == "ceo" else 250,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}]
+                )
+                return response.content[0].text.strip()
+            except Exception as e:
+                logger.warning(f"[Friday CEO] Anthropic primary model failed: {e}")
+                fallback_model = "claude-haiku-4-5-20251001"
+                response = ai_client.messages.create(
+                    model=fallback_model,
+                    max_tokens=1500 if model_type == "ceo" else 250,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}]
+                )
+                return response.content[0].text.strip()
+
+        elif provider == "gemini":
+            api_key = getattr(config, "GEMINI_API_KEY", "")
+            if not api_key:
+                raise ValueError("GEMINI_API_KEY is not configured.")
+            model = getattr(config, "GEMINI_MODEL_CEO" if model_type == "ceo" else "GEMINI_MODEL_SUBAGENT", "gemini-1.5-flash")
+            
+            import urllib.request
+            import json
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            headers = {"Content-Type": "application/json"}
+            
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": user_prompt}
+                        ]
+                    }
+                ],
+                "systemInstruction": {
+                    "parts": [
+                        {"text": system_prompt}
+                    ]
+                },
+                "generationConfig": {
+                    "temperature": 0.2,
+                }
+            }
+            if model_type == "ceo":
+                payload["generationConfig"]["responseMimeType"] = "application/json"
+                
+            req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=15) as response:
+                res_data = json.loads(response.read().decode("utf-8"))
+                text = res_data["candidates"][0]["content"]["parts"][0]["text"]
+                return text.strip()
+
+        elif provider == "ollama":
+            api_base = getattr(config, "OLLAMA_API_BASE", "http://localhost:11434/v1")
+            model = getattr(config, "OLLAMA_MODEL_CEO" if model_type == "ceo" else "OLLAMA_MODEL_SUBAGENT", "llama3")
+            
+            import urllib.request
+            import json
+            url = f"{api_base.rstrip('/')}/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.2
+            }
+            if model_type == "ceo":
+                payload["response_format"] = {"type": "json_object"}
+                
+            req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=30) as response:
+                res_data = json.loads(response.read().decode("utf-8"))
+                text = res_data["choices"][0]["message"]["content"]
+                return text.strip()
+                
+        else:
+            raise ValueError(f"Unknown LLM provider: {provider}")
+
+    def _call_offline_rules(self, ctx: dict, user_message: Optional[str] = None) -> str:
+        """Rule-based decision maker for Friday when no LLM API is available."""
+        trade_threshold = ctx["config"]["trade_threshold"]
+        risk_pct = ctx["config"]["risk_pct"]
+        market_regime = ctx.get("market_regime", "NEUTRAL")
+        today_pnl = ctx.get("today_pnl", 0.0)
+        
+        actions = []
+        parameters = {}
+        
+        # Simple heuristics
+        if ctx.get("today_losses", 0) >= 3:
+            parameters["risk_pct"] = max(0.25, risk_pct - 0.25)
+            actions.append("RETRAIN")
+            
+        if ctx.get("today_trades", 0) == 0:
+            parameters["trade_threshold"] = max(35.0, trade_threshold - 1.0)
+            
+        if ctx.get("db_size_mb", 0.0) > 50.0:
+            actions.append("SELF_HEALING")
+            
+        # Build reply text
+        if user_message:
+            reply = (
+                f"Batuhan Bey, <b>çevrimdışı (kural tabanlı) yönetim modunda</b> mesajınızı aldım: <i>\"{user_message}\"</i>\n\n"
+                f"Şu an sistemde aktif bir LLM API anahtarı (Gemini/Claude) tanımlı olmadığı için kararları kural tabanlı motorumuzla otonom alıyorum. "
+                f"Sistem koruma kalkanlarımız ve dinamik parametre optimizasyonumuz aktiftir.\n\n"
+                f"📊 <b>Anlık Telemetri:</b>\n"
+                f"• Piyasa Rejimi: <code>{market_regime}</code>\n"
+                f"• Günlük İşlem: <code>{ctx.get('today_trades', 0)}</code> (Kazanılan: {ctx.get('today_wins', 0)}, Kaybedilen: {ctx.get('today_losses', 0)})\n"
+                f"• Günlük PnL: <code>${today_pnl:+.2f}</code>\n"
+                f"• Parametreler: Risk=<code>%{risk_pct*100:.1f}</code> | Eşik=<code>{trade_threshold:.1f}</code>"
+            )
+        else:
+            reply = (
+                f"Batuhan Bey, periyodik durum kontrolü tamamlandı (Çevrimdışı Kural Tabanlı CEO Modu). ⚙️\n\n"
+                f"Mevcut piyasa rejimi (<code>{market_regime}</code>) ve günlük performans süzgeci doğrultusunda kasa ayarlarını optimize ettim."
+            )
+            
+        decisions = {
+            "parameters": parameters,
+            "actions": actions
+        }
+        
+        return reply + "\n\n```json\n" + json.dumps(decisions, indent=2) + "\n```"
+
     def fetch_news_sentiment(self) -> float:
         """
         Fetches crypto news RSS feed, scans headlines, calculates sentiment score between -1.0 and +1.0.
@@ -1106,150 +1244,76 @@ class FridayCeo:
                         telegram_delivery.send_voice(voice_bytes)
                 return empty_msg
 
-        api_key = getattr(config, "ANTHROPIC_API_KEY", "")
-        if not api_key:
-            err_msg = (
-                "⚠️ <b>Friday CEO Çevrimdışı</b>\n\n"
-                "Batuhan Bey, Anthropic API anahtarınız (<code>ANTHROPIC_API_KEY</code>) tanımlı olmadığı için bağlantı kurulamıyor. "
-                "Lütfen <code>.env</code> dosyasına geçerli bir anahtar ekleyin; yönetim modülünü hemen aktif hale getirebilirim."
-            )
-            if send_telegram:
-                telegram_delivery.send_message(err_msg)
-            return err_msg
+        # Determine the provider
+        provider = getattr(config, "FRIDAY_LLM_PROVIDER", "auto").lower()
+        if provider == "auto":
+            if getattr(config, "GEMINI_API_KEY", ""):
+                provider = "gemini"
+            elif getattr(config, "ANTHROPIC_API_KEY", ""):
+                provider = "anthropic"
+            elif getattr(config, "OLLAMA_API_BASE", ""):
+                provider = "ollama"
+            else:
+                provider = "offline"
 
         ctx = self.get_system_context()
 
+        # ── Multi-Agent Debate ──
+        risk_prompt = (
+            "Sen Aurvex AI Trade Engine sisteminin Baş Risk Yöneticisisin (Chief Risk Officer).\n"
+            "Sistem telemetrisini incele ve en kritik risk bulgularını maksimum 3-4 maddede, son derece kısa ve öz olarak yaz. Giriş/gelişme/sonuç cümleleri kurma."
+        )
+        tech_prompt = (
+            "Sen Aurvex AI Trade Engine sisteminin Baş Teknik Analistisin.\n"
+            "CVD, L2 Wall, trend ve hacim durumunu incele ve teknik analiz özetini maksimum 3-4 maddede, son derece kısa ve öz olarak yaz. Giriş/gelişme/sonuç cümleleri kurma."
+        )
+        health_prompt = (
+            "Sen Aurvex AI Trade Engine sisteminin Baş Sistem ve Altyapı Analistisin (Chief Health Officer - CHO).\n"
+            "DB boyutu, sunucu disk alanı ve gecikmeleri incele, bulgularını maksimum 3-4 maddede, son derece kısa ve öz olarak yaz. Giriş/gelişme/sonuç cümleleri kurma."
+        )
+
         try:
-            import anthropic
-            ai_client = anthropic.Anthropic(api_key=api_key)
-            
-            # ── Multi-Agent Debate ──
-            risk_prompt = (
-                "Sen Aurvex AI Trade Engine sisteminin Baş Risk Yöneticisisin (Chief Risk Officer).\n"
-                "Sistem telemetrisini incele ve en kritik risk bulgularını maksimum 3-4 maddede, son derece kısa ve öz olarak yaz. Giriş/gelişme/sonuç cümleleri kurma."
-            )
-            tech_prompt = (
-                "Sen Aurvex AI Trade Engine sisteminin Baş Teknik Analistisin.\n"
-                "CVD, L2 Wall, trend ve hacim durumunu incele ve teknik analiz özetini maksimum 3-4 maddede, son derece kısa ve öz olarak yaz. Giriş/gelişme/sonuç cümleleri kurma."
-            )
-            health_prompt = (
-                "Sen Aurvex AI Trade Engine sisteminin Baş Sistem ve Altyapı Analistisin (Chief Health Officer - CHO).\n"
-                "DB boyutu, sunucu disk alanı ve gecikmeleri incele, bulgularını maksimum 3-4 maddede, son derece kısa ve öz olarak yaz. Giriş/gelişme/sonuç cümleleri kurma."
-            )
-            
-            # ── Concurrent Multi-Agent Debate ──
-            import concurrent.futures
-
-            def _fetch_risk():
-                try:
-                    return ai_client.messages.create(
-                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-haiku-4-5-20251001"),
-                        max_tokens=250,
-                        system=risk_prompt,
-                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
-                    )
-                except Exception as sub_err:
-                    logger.warning(f"[Friday CEO] Subagent risk failed, forcing Haiku V2: {sub_err}")
-                    return ai_client.messages.create(
-                        model="claude-haiku-4-5-20251001",
-                        max_tokens=250,
-                        system=risk_prompt,
-                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
-                    )
-
-            def _fetch_tech():
-                try:
-                    return ai_client.messages.create(
-                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-haiku-4-5-20251001"),
-                        max_tokens=250,
-                        system=tech_prompt,
-                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
-                    )
-                except Exception as sub_err:
-                    logger.warning(f"[Friday CEO] Subagent tech failed, forcing Haiku V2: {sub_err}")
-                    return ai_client.messages.create(
-                        model="claude-haiku-4-5-20251001",
-                        max_tokens=250,
-                        system=tech_prompt,
-                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
-                    )
-
-            def _fetch_health():
-                try:
-                    return ai_client.messages.create(
-                        model=getattr(config, "FRIDAY_SUBAGENT_MODEL", "claude-haiku-4-5-20251001"),
-                        max_tokens=250,
-                        system=health_prompt,
-                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
-                    )
-                except Exception as sub_err:
-                    logger.warning(f"[Friday CEO] Subagent health failed, forcing Haiku V2: {sub_err}")
-                    return ai_client.messages.create(
-                        model="claude-haiku-4-5-20251001",
-                        max_tokens=250,
-                        system=health_prompt,
-                        messages=[{"role": "user", "content": f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```"}]
-                    )
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                future_risk = executor.submit(_fetch_risk)
-                future_tech = executor.submit(_fetch_tech)
-                future_health = executor.submit(_fetch_health)
-                
-                try:
-                    res_risk = future_risk.result(timeout=10)
-                    risk_analysis = res_risk.content[0].text.strip()
-                except Exception as e:
-                    risk_analysis = f"Risk analizi başarısız: {e}"
-                    
-                try:
-                    res_tech = future_tech.result(timeout=10)
-                    tech_analysis = res_tech.content[0].text.strip()
-                except Exception as e:
-                    tech_analysis = f"Teknik analiz başarısız: {e}"
-
-                try:
-                    res_health = future_health.result(timeout=10)
-                    health_analysis = res_health.content[0].text.strip()
-                except Exception as e:
-                    health_analysis = f"Sistem altyapı analizi başarısız: {e}"
-                
-            user_prompt = (
-                f"Güncel Sistem Durumu:\n"
-                f"```json\n{json.dumps(ctx, indent=2)}\n```\n\n"
-                f"--- AJAN TARTIŞMASI VE ANALİZ RAPORLARI ---\n\n"
-                f"👥 Baş Risk Yöneticisi Raporu:\n{risk_analysis}\n\n"
-                f"📈 Baş Teknik Analist Raporu:\n{tech_analysis}\n\n"
-                f"🛠 Baş Sistem Analisti Raporu:\n{health_analysis}\n\n"
-                f"-----------------------------------------\n\n"
-            )
-            if user_message:
-                user_prompt += f"Kullanıcıdan Gelen Mesaj: \"{user_message}\"\n\nLütfen bu analizleri sentezle, Batuhan Bey'in talebine cevap ver ve son CEO kararını al."
+            if provider == "offline":
+                reply_text = self._call_offline_rules(ctx, user_message)
             else:
-                user_prompt += "Bu periyodik sistem kontrolün. Lütfen bu analizleri sentezle, son CEO kararını al ve genel durum özetini ilet."
+                # ── Concurrent Multi-Agent Debate ──
+                import concurrent.futures
+                
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    future_risk = executor.submit(lambda: self._generate_text(provider, risk_prompt, f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```", "subagent"))
+                    future_tech = executor.submit(lambda: self._generate_text(provider, tech_prompt, f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```", "subagent"))
+                    future_health = executor.submit(lambda: self._generate_text(provider, health_prompt, f"Güncel Sistem Durumu:\n```json\n{json.dumps(ctx, indent=2)}\n```", "subagent"))
+                    
+                    try:
+                        risk_analysis = future_risk.result(timeout=15)
+                    except Exception as e:
+                        risk_analysis = f"Risk analizi başarısız: {e}"
+                        
+                    try:
+                        tech_analysis = future_tech.result(timeout=15)
+                    except Exception as e:
+                        tech_analysis = f"Teknik analiz başarısız: {e}"
 
-            # Calling Claude model with automatic fallback if the configured model is not accessible
-            try:
-                response = ai_client.messages.create(
-                    model=getattr(config, "FRIDAY_CEO_MODEL", "claude-sonnet-4-6"),
-                    max_tokens=1500,
-                    system=SYSTEM_PROMPT,
-                    messages=[
-                        {"role": "user", "content": user_prompt}
-                    ]
+                    try:
+                        health_analysis = future_health.result(timeout=15)
+                    except Exception as e:
+                        health_analysis = f"Sistem altyapı analizi başarısız: {e}"
+                    
+                user_prompt = (
+                    f"Güncel Sistem Durumu:\n"
+                    f"```json\n{json.dumps(ctx, indent=2)}\n```\n\n"
+                    f"--- AJAN TARTIŞMASI VE ANALİZ RAPORLARI ---\n\n"
+                    f"👥 Baş Risk Yöneticisi Raporu:\n{risk_analysis}\n\n"
+                    f"📈 Baş Teknik Analist Raporu:\n{tech_analysis}\n\n"
+                    f"🛠 Baş Sistem Analisti Raporu:\n{health_analysis}\n\n"
+                    f"-----------------------------------------\n\n"
                 )
-            except Exception as e:
-                logger.warning(f"[Friday CEO] Primary model failed, falling back to Claude 3.5 Haiku V2: {e}")
-                response = ai_client.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=1500,
-                    system=SYSTEM_PROMPT,
-                    messages=[
-                        {"role": "user", "content": user_prompt}
-                    ]
-                )
-            
-            reply_text = response.content[0].text
+                if user_message:
+                    user_prompt += f"Kullanıcıdan Gelen Mesaj: \"{user_message}\"\n\nLütfen bu analizleri sentezle, Batuhan Bey'in talebine cevap ver ve son CEO kararını al."
+                else:
+                    user_prompt += "Bu periyodik sistem kontrolün. Lütfen bu analizleri sentezle, son CEO kararını al ve genel durum özetini ilet."
+
+                reply_text = self._generate_text(provider, SYSTEM_PROMPT, user_prompt, "ceo")
             
             # Parse decisions JSON block
             decisions = self._parse_decisions(reply_text)

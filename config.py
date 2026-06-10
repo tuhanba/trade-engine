@@ -64,6 +64,9 @@ TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = _env("TELEGRAM_CHAT_ID")
 SECRET_KEY         = _env("SECRET_KEY", "ax_secret_prod_2026")
 ANTHROPIC_API_KEY  = _env("ANTHROPIC_API_KEY")
+GEMINI_API_KEY     = _env("GEMINI_API_KEY")
+OLLAMA_API_BASE    = _env("OLLAMA_API_BASE", "http://localhost:11434/v1")
+FRIDAY_LLM_PROVIDER = _env("FRIDAY_LLM_PROVIDER", "auto")
 
 # Risk & Compounding
 AUTO_COMPOUNDING           = _env_bool("AUTO_COMPOUNDING", True)
