@@ -81,6 +81,7 @@ class TestScalpFilters(unittest.TestCase):
              patch('core.oi_tracker.OITracker.analyze', return_value={"oi_signal": "NEUTRAL", "oi_score_bonus": 0.0}), \
              patch.object(config, 'HUMAN_MODE', False), \
              patch.object(config, 'MIN_ADX_5M', 0.0), \
+             patch.object(config, 'ORDER_BOOK_WALL_FILTER_MODE', 'hard'), \
              patch.object(config, 'SCALP_OB_WALL_MULTIPLIER', 5.0), \
              patch.object(config, 'SCALP_OB_WALL_PCT', 0.002):
              
@@ -141,6 +142,7 @@ class TestScalpFilters(unittest.TestCase):
              patch('core.oi_tracker.OITracker.analyze', return_value={"oi_signal": "NEUTRAL", "oi_score_bonus": 0.0}), \
              patch.object(config, 'HUMAN_MODE', False), \
              patch.object(config, 'MIN_ADX_5M', 0.0), \
+             patch.object(config, 'ORDER_BOOK_WALL_FILTER_MODE', 'hard'), \
              patch.object(config, 'SCALP_OB_WALL_MULTIPLIER', 5.0), \
              patch.object(config, 'SCALP_OB_WALL_PCT', 0.002):
              

@@ -696,8 +696,8 @@ class RiskEngine:
                             if score > 0.0 and score < required_score:
                                 return {"valid": False, "score": 0, "risk_reject_reason": "choppy_market_score_gate"}
                         else:
-                            # Paper mode/Bypass mode: relax allowed quality to B and above, ignore score gate
-                            paper_allowed = ["S", "A+", "A", "B"]
+                            # Paper mode/Bypass mode: relax allowed quality to C and above, ignore score gate
+                            paper_allowed = ["S", "A+", "A", "B", "C"]
                             if quality not in paper_allowed:
                                 return {"valid": False, "score": 0, "risk_reject_reason": "choppy_market_quality_gate_paper"}
                 elif regime in ("BULLISH", "BEARISH", "TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"):

@@ -203,6 +203,7 @@ def test_choppy_regime_gating():
     
     with patch("database.get_market_regime", return_value="CHOPPY"), \
          patch("database.get_open_trades", return_value=[]), \
+         patch("config.REGIME_FILTER_MIN_QUALITY_IN_CHOPPY", "A+"), \
          patch("config.TRADE_THRESHOLD", 55.0):
          
         # 1. Quality gate test: B quality should be rejected
@@ -1086,6 +1087,7 @@ def test_liquidity_sweep_detector():
          patch("core.ml_signal_scorer.score_signal", return_value=80.0), \
          patch("config.HUMAN_MODE", False), \
          patch("config.SCALP_CVD_DIVERGENCE_FILTER_ENABLED", False), \
+         patch("core.trigger_engine.BAD_HOURS_UTC", []), \
          patch("core.cvd_engine.CVDEngine.analyze", return_value={"cvd_signal": "BULLISH", "cvd_score_bonus": 1.0, "cvd_divergence": False, "cvd_slope": 1.0}):
          
         # Analyze LONG signal

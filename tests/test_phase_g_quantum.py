@@ -198,6 +198,7 @@ class TestPhaseGQuantum(unittest.TestCase):
              patch('core.cvd_engine.CVDEngine.analyze', return_value={"cvd_slope": 1.0, "cvd_signal": "BULLISH", "cvd_score_bonus": 1.0, "cvd_value": 100.0}), \
              patch('core.oi_tracker.OITracker.analyze', return_value={"oi_signal": "BULLISH", "oi_score_bonus": 1.0, "oi_change_pct": 1.0}), \
              patch('core.macro_filter.MacroFilter.get_24h_funding_trend', return_value={"bias": "NEUTRAL", "avg_rate": 0.0001}), \
+             patch('core.trigger_engine.BAD_HOURS_UTC', []), \
              patch('core.macro_filter.MacroFilter.get_8h_funding_average', return_value={"bias": "NEUTRAL", "avg_rate": 0.0001}):
             res = engine.analyze("BTCUSDT", "LONG", btc_trend="BULLISH")
             

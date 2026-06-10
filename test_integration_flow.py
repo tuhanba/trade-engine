@@ -367,41 +367,42 @@ class TestIntegrationFlow(unittest.TestCase):
         client_mock = MagicMock()
         svc = TriggerService(client_mock)
         
-        # A quality B setup in CHOPPY market should be rejected (only S or A+ allowed)
-        svc.trigger_engine.analyze = MagicMock(return_value={
-            "entry_price": 100.0, "stop_loss": 98.0, "tp1": 103.0, 
-            "quality": "B", "score": 70.0
-        })
-        
-        # Mock event publishing
-        with patch.object(event_bus, 'publish') as mock_publish:
-            event = Event(type=EventType.TREND_CHECKED, payload={
-                "symbol": "BTCUSDT", "signal_id": 999, "tradeability_score": 80.0,
-                "trend_result": {"direction": "LONG", "btc_trend": "BULLISH", "confluence_raw": 1}
+        with patch.object(config, 'REGIME_FILTER_MIN_QUALITY_IN_CHOPPY', 'A+'):
+            # A quality B setup in CHOPPY market should be rejected (only S or A+ allowed)
+            svc.trigger_engine.analyze = MagicMock(return_value={
+                "entry_price": 100.0, "stop_loss": 98.0, "tp1": 103.0, 
+                "quality": "B", "score": 70.0
             })
-            asyncio.run(svc.handle_trend_checked(event))
             
-            # Since quality B setup is rejected, TREND_CHECKED shouldn't propagate to TRIGGER_CHECKED event
-            mock_publish.assert_not_called()
-            
-        # A quality A+ setup in CHOPPY market should pass
-        svc.trigger_engine.analyze = MagicMock(return_value={
-            "entry_price": 100.0, "stop_loss": 98.0, "tp1": 103.0, 
-            "quality": "A+", "score": 85.0
-        })
-        
-        with patch.object(event_bus, 'publish') as mock_publish:
-            event = Event(type=EventType.TREND_CHECKED, payload={
-                "symbol": "BTCUSDT", "signal_id": 1000, "tradeability_score": 80.0,
-                "trend_result": {"direction": "LONG", "btc_trend": "BULLISH", "confluence_raw": 1}
+            # Mock event publishing
+            with patch.object(event_bus, 'publish') as mock_publish:
+                event = Event(type=EventType.TREND_CHECKED, payload={
+                    "symbol": "BTCUSDT", "signal_id": 999, "tradeability_score": 80.0,
+                    "trend_result": {"direction": "LONG", "btc_trend": "BULLISH", "confluence_raw": 1}
+                })
+                asyncio.run(svc.handle_trend_checked(event))
+                
+                # Since quality B setup is rejected, TREND_CHECKED shouldn't propagate to TRIGGER_CHECKED event
+                mock_publish.assert_not_called()
+                
+            # A quality A+ setup in CHOPPY market should pass
+            svc.trigger_engine.analyze = MagicMock(return_value={
+                "entry_price": 100.0, "stop_loss": 98.0, "tp1": 103.0, 
+                "quality": "A+", "score": 85.0
             })
-            asyncio.run(svc.handle_trend_checked(event))
             
-            # Assert event was published
-            mock_publish.assert_called_once()
-            pub_event = mock_publish.call_args[0][0]
-            self.assertEqual(pub_event.type, EventType.TRIGGER_CHECKED)
-            self.assertEqual(pub_event.payload["symbol"], "BTCUSDT")
+            with patch.object(event_bus, 'publish') as mock_publish:
+                event = Event(type=EventType.TREND_CHECKED, payload={
+                    "symbol": "BTCUSDT", "signal_id": 1000, "tradeability_score": 80.0,
+                    "trend_result": {"direction": "LONG", "btc_trend": "BULLISH", "confluence_raw": 1}
+                })
+                asyncio.run(svc.handle_trend_checked(event))
+                
+                # Assert event was published
+                mock_publish.assert_called_once()
+                pub_event = mock_publish.call_args[0][0]
+                self.assertEqual(pub_event.type, EventType.TRIGGER_CHECKED)
+                self.assertEqual(pub_event.payload["symbol"], "BTCUSDT")
 
 if __name__ == '__main__':
     unittest.main()
