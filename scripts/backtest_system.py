@@ -517,13 +517,17 @@ class MockBinanceClient:
 # ── Simulation Runner ─────────────────────────────────────────────────────────
 
 class BacktestRunner:
-    def __init__(self, symbols, start_time, end_time, initial_balance=2000.0, proxy=None, offline=False, progress_cb=None):
+    def __init__(self, symbols, start_time, end_time, initial_balance=2000.0, proxy=None, offline=False, progress_cb=None, live_emulation=False):
         self.symbols = symbols
         self.start_time = start_time
         self.end_time = end_time
         self.initial_balance = initial_balance
         self.progress_cb = progress_cb
         self.db_path = config.DB_PATH
+        
+        # Store original configs to restore later (avoid test leak)
+        self._orig_execution_mode = getattr(config, "EXECUTION_MODE", "paper")
+        self._orig_bypass_shields = getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
         
         # Setup Database
         if os.path.exists(config.DB_PATH):
@@ -534,6 +538,18 @@ class BacktestRunner:
         
         database.init_db()
         database.init_paper_account()
+        
+        # Configure execution mode and live shields in DB to prevent caching/leak issues
+        if live_emulation:
+            database.update_system_state("tg_execution_mode", "live")
+            database.update_system_state("bypass_live_risk_shields", "false")
+            config.EXECUTION_MODE = "live"
+            config.BYPASS_LIVE_RISK_SHIELDS = False
+        else:
+            database.update_system_state("tg_execution_mode", "paper")
+            database.update_system_state("bypass_live_risk_shields", "true")
+            config.EXECUTION_MODE = "paper"
+            config.BYPASS_LIVE_RISK_SHIELDS = True
         
         # Set Custom Initial Balance
         with database.get_conn() as conn:
@@ -582,6 +598,13 @@ class BacktestRunner:
         return trade and trade["status"].lower() != "closed"
 
     def run(self):
+        try:
+            self._run_internal()
+        finally:
+            config.EXECUTION_MODE = self._orig_execution_mode
+            config.BYPASS_LIVE_RISK_SHIELDS = self._orig_bypass_shields
+
+    def _run_internal(self):
         logger.info(f"Starting simulation from {self.start_time} to {self.end_time}...")
         logger.info(f"Symbols in simulation: {self.symbols}")
         # Print loaded candle count statistics
@@ -1091,6 +1114,8 @@ def main():
     parser.add_argument("--output", type=str, default="backtest_report.md", help="Path to save markdown report")
     parser.add_argument("--proxy", type=str, default=None, help="HTTP/HTTPS proxy URL (e.g. http://127.0.0.1:7890)")
     parser.add_argument("--offline", action="store_true", help="Run in offline mode using synthetic data")
+    parser.add_argument("--live-emulation", action="store_true", 
+                        help="Enable live protection shields (clutch, latency, etc.) during backtest. Default is False (paper backtest mode).")
     args = parser.parse_args()
 
     symbols = [s.strip().upper() for s in args.symbols.split(",")]
@@ -1108,7 +1133,8 @@ def main():
         end_time=end_time,
         initial_balance=args.balance,
         proxy=args.proxy,
-        offline=args.offline
+        offline=args.offline,
+        live_emulation=args.live_emulation
     )
     runner.run()
     runner.generate_report(args.output)

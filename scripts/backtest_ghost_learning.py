@@ -199,13 +199,17 @@ core.ghost_learning.simulate_pending_ghosts = lambda *args, **kwargs: 0
 core.ghost_learning.process_pending_results = lambda *args, **kwargs: 0
 
 class GhostBacktestRunner:
-    def __init__(self, symbols, start_time, end_time, initial_balance=2000.0, proxy=None, offline=False, cooldown_mins=30, max_open=3):
+    def __init__(self, symbols, start_time, end_time, initial_balance=2000.0, proxy=None, offline=False, cooldown_mins=30, max_open=3, live_emulation=False):
         self.symbols = symbols
         self.start_time = start_time
         self.end_time = end_time
         self.initial_balance = initial_balance
         self.cooldown_mins = cooldown_mins
         self.max_open = max_open
+        
+        # Store original configs to restore later (avoid test leak)
+        self._orig_execution_mode = getattr(config, "EXECUTION_MODE", "paper")
+        self._orig_bypass_shields = getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
         
         # Setup Database
         self.db_path = config.DB_PATH
@@ -233,6 +237,18 @@ class GhostBacktestRunner:
         
         database.init_db()
         database.init_paper_account()
+        
+        # Configure execution mode and live shields in DB to prevent caching/leak issues
+        if live_emulation:
+            database.update_system_state("tg_execution_mode", "live")
+            database.update_system_state("bypass_live_risk_shields", "false")
+            config.EXECUTION_MODE = "live"
+            config.BYPASS_LIVE_RISK_SHIELDS = False
+        else:
+            database.update_system_state("tg_execution_mode", "paper")
+            database.update_system_state("bypass_live_risk_shields", "true")
+            config.EXECUTION_MODE = "paper"
+            config.BYPASS_LIVE_RISK_SHIELDS = True
         
         # Set Custom Initial Balance
         with database.get_conn() as conn:
@@ -278,6 +294,13 @@ class GhostBacktestRunner:
         return trade and trade["status"].lower() != "closed"
 
     def run(self):
+        try:
+            self._run_internal()
+        finally:
+            config.EXECUTION_MODE = self._orig_execution_mode
+            config.BYPASS_LIVE_RISK_SHIELDS = self._orig_bypass_shields
+
+    def _run_internal(self):
         logger.info(f"Starting Ghost simulation from {self.start_time} to {self.end_time}...")
         
         global current_sim_time
@@ -856,6 +879,8 @@ def main():
     parser.add_argument("--apply-to-prod", action="store_true", help="Apply optimization results directly to production database")
     parser.add_argument("--min-confidence", type=str, default="MEDIUM", choices=["LOW", "MEDIUM", "HIGH"], 
                         help="Minimum confidence level of suggestions to apply to production")
+    parser.add_argument("--live-emulation", action="store_true", 
+                        help="Enable live protection shields (clutch, latency, etc.) during backtest. Default is False (paper backtest mode).")
     args = parser.parse_args()
 
     symbols = [s.strip().upper() for s in args.symbols.split(",")]
@@ -875,7 +900,8 @@ def main():
         proxy=args.proxy,
         offline=args.offline,
         cooldown_mins=args.cooldown,
-        max_open=args.max_open
+        max_open=args.max_open,
+        live_emulation=args.live_emulation
     )
     runner.run()
     runner.compile_report(args.output)
