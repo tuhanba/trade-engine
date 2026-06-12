@@ -1418,7 +1418,9 @@ def classify_signal(
     reason = f"Adjusted score: {adjusted_score}"
     confidence = 0.4
 
-    effective_trade_threshold = 35.0 if bypass_shields else trade_threshold
+    effective_trade_threshold = max(35.0, trade_threshold - 10.0) if bypass_shields else trade_threshold
+    logger.info("[Threshold] effective=%.1f trade_threshold=%.1f bypass_shields=%s source=ai_decision",
+                effective_trade_threshold, trade_threshold, bypass_shields)
 
     if adjusted_score >= effective_trade_threshold:
         decision = SignalDecision.ALLOW.value
@@ -1515,55 +1517,59 @@ def classify_signal(
 # ── Ghost learning summary ────────────────────────────────────────────
 
 def get_learning_summary() -> dict:
-    """Tüm ghost learning istatistiklerini döner."""
-    ghost = _get_ghost_manager()
+    """Tüm ghost learning istatistiklerini döner (ghost_results tablosundan)."""
     try:
-        with _open_db(ghost.db_path, timeout=15) as conn:
-            total = conn.execute(
-                "SELECT COUNT(*) FROM signal_candidates"
-            ).fetchone()[0]
-            tp_hits = conn.execute(
-                "SELECT COUNT(*) FROM signal_candidates WHERE status='TP_HIT'"
-            ).fetchone()[0]
-            sl_hits = conn.execute(
-                "SELECT COUNT(*) FROM signal_candidates WHERE status='SL_HIT'"
-            ).fetchone()[0]
-            pending = total - tp_hits - sl_hits
+        from database import open_db as _open_db2, get_conn as _get_conn
+        with _get_conn() as conn:
+            row = conn.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN r.virtual_outcome='WIN'  THEN 1 ELSE 0 END) as tp_hits,
+                    SUM(CASE WHEN r.virtual_outcome='LOSS' THEN 1 ELSE 0 END) as sl_hits,
+                    AVG(r.virtual_pnl_r) as avg_r
+                FROM ghost_signals g
+                JOIN ghost_results r ON g.id = r.ghost_id
+                WHERE r.virtual_outcome IN ('WIN', 'LOSS')
+            """).fetchone()
 
-            # En başarılı semboller
-            top_symbols = conn.execute(
-                """
-                SELECT symbol,
-                    SUM(CASE WHEN status='TP_HIT' THEN 1 ELSE 0 END) as wins,
-                    SUM(CASE WHEN status='SL_HIT' THEN 1 ELSE 0 END) as losses,
+            pending = conn.execute(
+                "SELECT COUNT(*) FROM ghost_signals WHERE simulated=0"
+            ).fetchone()[0] or 0
+
+            top_symbols = conn.execute("""
+                SELECT g.symbol,
+                    SUM(CASE WHEN r.virtual_outcome='WIN'  THEN 1 ELSE 0 END) as wins,
+                    SUM(CASE WHEN r.virtual_outcome='LOSS' THEN 1 ELSE 0 END) as losses,
                     COUNT(*) as total
-                FROM signal_candidates
-                WHERE status IN ('TP_HIT', 'SL_HIT')
-                GROUP BY symbol
+                FROM ghost_signals g
+                JOIN ghost_results r ON g.id = r.ghost_id
+                WHERE r.virtual_outcome IN ('WIN', 'LOSS')
+                GROUP BY g.symbol
                 HAVING total >= 3
                 ORDER BY wins * 1.0 / total DESC
                 LIMIT 10
-                """
-            ).fetchall()
+            """).fetchall()
 
-            return {
-                "total_candidates": total,
-                "tp_hits": tp_hits,
-                "sl_hits": sl_hits,
-                "pending": pending,
-                "ghost_winrate": round(
-                    tp_hits / (tp_hits + sl_hits) * 100, 1
-                ) if (tp_hits + sl_hits) > 0 else 0.0,
-                "top_symbols": [
-                    {
-                        "symbol": r["symbol"],
-                        "wins": r["wins"],
-                        "losses": r["losses"],
-                        "winrate": round(r["wins"] / r["total"] * 100, 1),
-                    }
-                    for r in top_symbols
-                ],
-            }
+        tp_hits = int(row[1] or 0) if row else 0
+        sl_hits = int(row[2] or 0) if row else 0
+        total   = int(row[0] or 0) if row else 0
+        return {
+            "total_candidates": total,
+            "tp_hits":          tp_hits,
+            "sl_hits":          sl_hits,
+            "pending":          pending,
+            "avg_r":            round(float(row[3] or 0), 3) if row else 0.0,
+            "ghost_winrate":    round(tp_hits / (tp_hits + sl_hits) * 100, 1) if (tp_hits + sl_hits) > 0 else 0.0,
+            "top_symbols": [
+                {
+                    "symbol":  r["symbol"],
+                    "wins":    r["wins"],
+                    "losses":  r["losses"],
+                    "winrate": round(r["wins"] / r["total"] * 100, 1),
+                }
+                for r in top_symbols
+            ],
+        }
     except Exception as exc:
         logger.error("Learning summary hatası: %s", exc)
         return {

@@ -1,11 +1,10 @@
 """
-core/services/scanner_service.py — Scanner Aşaması v6.0
+core/services/scanner_service.py — Scanner Aşaması v6.1
 
 Değişiklikler:
-  - Her döngü sonunda pipeline_scanned ve pipeline_eligible sayaçlarını
-    bot_status'a yaz (Dashboard funnel için gerçek veri).
-  - Eligible + Watch olan coinleri event bus'a ilet (değişmedi).
-  - Open trade'lerle aynı sembolü geçme (değişmedi).
+  - KILL_SWITCH_ACTIVATED: scanner pause (not stop) — scans resume on deactivation
+  - KILL_SWITCH_DEACTIVATED: resumes scan loop
+  - Dashboard funnel counters written to bot_status
 """
 
 import logging
@@ -23,18 +22,27 @@ class ScannerService:
         self.scanner  = AsyncMarketScanner()
         self.interval = interval_seconds
         self._running = False
+        self._paused  = False
         self._scan_count = 0
         event_bus.subscribe(EventType.KILL_SWITCH_ACTIVATED, self.handle_kill_switch)
+        event_bus.subscribe(EventType.KILL_SWITCH_DEACTIVATED, self.handle_kill_switch_deactivated)
 
     async def handle_kill_switch(self, event: Event):
-        logger.critical("[ScannerService] KILL SWITCH — scanner durduruluyor.")
-        self.stop()
+        logger.critical("[ScannerService] KILL SWITCH — scanner duraklatılıyor (paused).")
+        self._paused = True
+
+    async def handle_kill_switch_deactivated(self, event: Event):
+        logger.info("[ScannerService] Kill switch kaldırıldı — scanner devam ediyor.")
+        self._paused = False
 
     async def start(self):
         self._running = True
         logger.info("[ScannerService] Başladı (interval=%ds)", self.interval)
 
         while self._running:
+            if self._paused:
+                await asyncio.sleep(30)
+                continue
             try:
                 open_trades  = await asyncio.to_thread(get_open_trades)
                 open_symbols = {t["symbol"] for t in open_trades}
@@ -56,7 +64,7 @@ class ScannerService:
                 for c in eligible:
                     await event_bus.publish(Event(type=EventType.SCANNED, payload=c))
 
-                # Dashboard funnel sayaçları — gerçek veri
+                # Dashboard funnel sayaçları
                 try:
                     from database import update_bot_status
                     await asyncio.to_thread(

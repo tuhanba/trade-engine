@@ -184,11 +184,14 @@ class ExecutionEngine:
                 if learner.trained:
                     if learner.n_samples >= 30:
                         if prob < min_threshold:
-                            logger.warning(
-                                f"[ML Online Gate] Trade rejected for {signal.symbol}: "
-                                f"Online win probability ({prob:.2%}) is below gating threshold ({min_threshold:.2%})"
+                            logger.info(
+                                f"[ML Online Gate] Risk reduced for {signal.symbol}: "
+                                f"win prob ({prob:.2%}) < threshold ({min_threshold:.2%}). Scaling risk 0.5x."
                             )
-                            return None
+                            signal.risk_pct = (getattr(signal, 'risk_pct', 1.0) or 1.0) * 0.5
+                            signal.position_size = (getattr(signal, 'position_size', 0) or 0) * 0.5
+                            signal.notional_size = (getattr(signal, 'notional_size', 0) or 0) * 0.5
+                            signal.max_loss = (getattr(signal, 'max_loss', 0) or 0) * 0.5
                     else:
                         logger.info(
                             f"[ML Online Gate] Model warming up (Samples: {learner.n_samples}/30). "
@@ -615,7 +618,41 @@ class ExecutionEngine:
 
         # Apply dynamic cooldown after close
         set_dynamic_cooldown(trade, total_pnl)
-        # ─────────────────────────────────────────────────────────────
+
+        # ── Online Model Update (real trade outcome) ─────────────────────
+        try:
+            from core.online_learning import update_online_model as _uom
+            _meta = {}
+            try:
+                import json as _json
+                _meta_raw = trade.get("metadata", "{}")
+                if _meta_raw and isinstance(_meta_raw, str):
+                    _meta = _json.loads(_meta_raw)
+            except Exception:
+                pass
+            _feats = {
+                "symbol": trade.get("symbol", ""),
+                "adx": _meta.get("adx", 0),
+                "rv": _meta.get("rv", 1.0),
+                "rsi5": _meta.get("rsi5", 50),
+                "rsi1": _meta.get("rsi1", 50),
+                "funding_favorable": _meta.get("funding_favorable", 1),
+                "bb_width_pct": _meta.get("bb_width_pct", 0),
+                "direction": trade.get("direction") or trade.get("side", "LONG"),
+                "hold_minutes": trade.get("hold_minutes", 0),
+                "bb_width_chg": _meta.get("bb_width_chg", 0),
+                "momentum_3c": _meta.get("momentum_3c", 0),
+                "prev_result": _meta.get("prev_result", "NONE"),
+                "funding_rate": _meta.get("funding_rate", 0),
+                "cvd_value": _meta.get("cvd_value", 0),
+                "oi_change_pct": _meta.get("oi_change_pct", 0),
+            }
+            _outcome_val = 1 if total_pnl > 0 else 0
+            _uom(_feats, _outcome_val)
+            logger.debug("[ML Online] Real trade closure update: %s outcome=%s", trade.get("symbol"), _outcome_val)
+        except Exception as _ol_err:
+            logger.debug("[ML Online] close_trade update failed: %s", _ol_err)
+        # ─────────────────────────────────────────────────────────────────
 
     # ── Sinyal işleme ────────────────────────────────────────────
 
@@ -881,19 +918,13 @@ def _check_trade(client, t: dict) -> bool:
             if event_manager: event_manager.broadcast_live_update(get_open_trades())
             if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), t.get("realized_pnl", 0) + pnl_tp1)
             try:
-                import asyncio as _asyncio
                 from core.event_bus import event_bus as _ebus
                 from core.event_types import Event as _Event, EventType as _ET
-                _loop = _asyncio.get_event_loop()
-                if _loop and _loop.is_running():
-                    _asyncio.run_coroutine_threadsafe(
-                        _ebus.publish(_Event(type=_ET.TP_OR_SL_TRIGGERED, payload={
-                            "trade_id": trade_id, "symbol": symbol,
-                            "direction": direction, "level": "TP1",
-                            "price": tp1, "pnl": pnl_tp1,
-                        })),
-                        _loop
-                    )
+                _ebus.publish_sync(_Event(type=_ET.TP_OR_SL_TRIGGERED, payload={
+                    "trade_id": trade_id, "symbol": symbol,
+                    "direction": direction, "level": "TP1",
+                    "price": tp1, "pnl": pnl_tp1,
+                }))
             except Exception as _ev_err:
                 logger.debug("TP1 event publish hatası: %s", _ev_err)
 
@@ -924,19 +955,13 @@ def _check_trade(client, t: dict) -> bool:
             if event_manager: event_manager.broadcast_live_update(get_open_trades())
             if event_manager: event_manager.broadcast_pnl_update(get_paper_balance(), t.get("unrealized_pnl", 0), realized)
             try:
-                import asyncio as _asyncio
                 from core.event_bus import event_bus as _ebus
                 from core.event_types import Event as _Event, EventType as _ET
-                _loop = _asyncio.get_event_loop()
-                if _loop and _loop.is_running():
-                    _asyncio.run_coroutine_threadsafe(
-                        _ebus.publish(_Event(type=_ET.TP_OR_SL_TRIGGERED, payload={
-                            "trade_id": trade_id, "symbol": symbol,
-                            "direction": direction, "level": "TP2",
-                            "price": tp2, "pnl": pnl_tp2,
-                        })),
-                        _loop
-                    )
+                _ebus.publish_sync(_Event(type=_ET.TP_OR_SL_TRIGGERED, payload={
+                    "trade_id": trade_id, "symbol": symbol,
+                    "direction": direction, "level": "TP2",
+                    "price": tp2, "pnl": pnl_tp2,
+                }))
             except Exception as _ev_err:
                 logger.debug("TP2 event publish hatası: %s", _ev_err)
             logger.info(f"[Execution] TP2 #{trade_id} {symbol} +{pnl_tp2:.3f}$ → RUNNER trail={new_trail:.6f}")
@@ -1186,9 +1211,8 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
 
     result = "WIN" if net_pnl > 0 else "LOSS"
 
-    # ── TRADE_CLOSED Event Bus Publish (Bug #3) ──────────────────────────────
+    # ── TRADE_CLOSED Event Bus Publish (publish_sync — thread-safe) ──────────
     try:
-        import asyncio as _asyncio
         from core.event_bus import event_bus as _ebus
         from core.event_types import Event as _Event, EventType as _ET
         _entry_p = float(t.get("entry") or t.get("entry_price") or 1)
@@ -1199,21 +1223,17 @@ def _finalize(trade_id: int, close_price: float, net_pnl: float,
             _qty_p = float(t.get("qty") or t.get("quantity") or 0)
             _risk_usd = _qty_p * _sl_dist if _qty_p > 0 else _sl_dist
         _r_mult = round(net_pnl / _risk_usd, 3) if _risk_usd > 0 else 0
-        _loop = _asyncio.get_event_loop()
-        if _loop and _loop.is_running():
-            _asyncio.run_coroutine_threadsafe(
-                _ebus.publish(_Event(type=_ET.TRADE_CLOSED, payload={
-                    "trade_id":      trade_id,
-                    "symbol":        t["symbol"],
-                    "direction":     t.get("direction", "LONG"),
-                    "net_pnl":       net_pnl,
-                    "reason":        reason,
-                    "r_multiple":    _r_mult,
-                    "balance_after": database.get_active_balance(),
-                    "duration":      f"{hold_min:.0f}dk",
-                })),
-                _loop
-            )
+        _ebus.publish_sync(_Event(type=_ET.TRADE_CLOSED, payload={
+            "trade_id":      trade_id,
+            "symbol":        t["symbol"],
+            "direction":     t.get("direction", "LONG"),
+            "net_pnl":       net_pnl,
+            "reason":        reason,
+            "r_multiple":    _r_mult,
+            "source":        "execution_engine",
+            "balance_after": database.get_active_balance(),
+            "duration":      f"{hold_min:.0f}dk",
+        }))
     except Exception as _ev_err:
         logger.debug("TRADE_CLOSED event publish hatası: %s", _ev_err)
 
