@@ -16,6 +16,49 @@ from datetime import datetime, timezone, timedelta
 logger = logging.getLogger(__name__)
 
 
+# ── DB Yazım Hatası Sayacı (Faz 1.4 — disk dolu / DB locked senaryosu) ───────
+# NEDEN: update_bot_status art arda hata alıyorsa (disk dolu, DB kilitli,
+# bozulma) sistem sessizce kör uçuşa geçer — heartbeat yazılamaz, dashboard
+# bayat veri gösterir. 5 ardışık hatada Telegram'a KRİTİK uyarı atılır;
+# uyarı tek seferlik gönderilir (spam yok), başarılı yazım sayacı sıfırlar.
+_DB_WRITE_FAILURES = 0
+_DB_FAILURE_ALERT_SENT = False
+DB_FAILURE_ALERT_THRESHOLD = 5
+
+
+def report_db_write_failure(context: str = "") -> int:
+    """Ardışık DB yazım hatası bildirir. Eşik aşılırsa Telegram KRİTİK uyarısı atar."""
+    global _DB_WRITE_FAILURES, _DB_FAILURE_ALERT_SENT
+    _DB_WRITE_FAILURES += 1
+    logger.warning("[Watchdog] DB yazım hatası %d/%d (%s)",
+                   _DB_WRITE_FAILURES, DB_FAILURE_ALERT_THRESHOLD, context)
+    if _DB_WRITE_FAILURES >= DB_FAILURE_ALERT_THRESHOLD and not _DB_FAILURE_ALERT_SENT:
+        _DB_FAILURE_ALERT_SENT = True
+        msg = (
+            "🚨 <b>KRİTİK: Veritabanı Yazım Hatası</b> 🚨\n\n"
+            f"<code>update_bot_status</code> art arda {_DB_WRITE_FAILURES} kez başarısız oldu.\n"
+            f"Son bağlam: <code>{context[:200]}</code>\n\n"
+            "Olası sebepler: disk dolu, DB kilitli (locked) veya dosya bozulması.\n"
+            "Heartbeat yazılamıyor — dashboard verisi bayatlamış olabilir. Acil kontrol gerekli."
+        )
+        try:
+            from telegram_delivery import send_message
+            send_message(msg)
+            logger.critical("[Watchdog] DB yazım hatası KRİTİK uyarısı Telegram'a gönderildi.")
+        except Exception as tg_err:
+            logger.critical("[Watchdog] KRİTİK: DB yazılamıyor VE Telegram uyarısı da gönderilemedi: %s", tg_err)
+    return _DB_WRITE_FAILURES
+
+
+def report_db_write_success() -> None:
+    """Başarılı DB yazımı — ardışık hata sayacını ve uyarı bayrağını sıfırlar."""
+    global _DB_WRITE_FAILURES, _DB_FAILURE_ALERT_SENT
+    if _DB_WRITE_FAILURES:
+        logger.info("[Watchdog] DB yazımı düzeldi (%d hatadan sonra) — sayaç sıfırlandı.", _DB_WRITE_FAILURES)
+    _DB_WRITE_FAILURES = 0
+    _DB_FAILURE_ALERT_SENT = False
+
+
 class SystemWatchdog:
     """7/24 çalışma için sistem izleme ve otomatik recovery."""
 
@@ -51,9 +94,11 @@ class SystemWatchdog:
                 db_size = os.path.getsize(self.db_path) / (1024 * 1024)
 
             # DB connectivity check
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
             db_ok = False
             try:
-                with sqlite3.connect(self.db_path, timeout=5) as conn:
+                from database import open_db
+                with open_db(self.db_path, timeout=5) as conn:
                     conn.execute("SELECT 1").fetchone()
                 db_ok = True
             except Exception:
@@ -74,7 +119,9 @@ class SystemWatchdog:
     def _check_db_health(self) -> bool:
         """DB sağlık kontrolü — WAL temizleme dahil."""
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+            from database import open_db
+            with open_db(self.db_path, timeout=10) as conn:
                 # WAL checkpoint — DB boyutunu kontrol altında tut
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
@@ -102,7 +149,9 @@ class SystemWatchdog:
     def _generate_daily_report(self) -> str:
         """Günlük performans raporu oluştur."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+            from database import open_db
+            with open_db(self.db_path) as conn:
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
                 # Bugünkü trade'ler

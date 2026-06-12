@@ -84,7 +84,25 @@ class ExecutionEngine:
         Returns: trade_id veya None
         """
         start_time = time.time()
-        
+
+        # 0. Fiyat Tazeliği Guard'ı (Faz 1.4)
+        # NEDEN: WS 10 dk koparsa _PRICE_CACHE donar ve get_current_price bayat
+        # fiyatı tercih eder — gerçek piyasadan kopuk girişe yol açar. Cache'te
+        # kayıt VARSA ve 120 sn'den eskiyse trade AÇILMAZ. Cache'te hiç yoksa
+        # (REST yolu / backtest) engelleme yapılmaz.
+        try:
+            from core.market_data import get_price_age
+            max_age = float(getattr(config, "PRICE_MAX_AGE_SEC", 120))
+            price_age = get_price_age(signal.symbol)
+            if price_age is not None and price_age > max_age:
+                logger.warning(
+                    "[Price Freshness Guard] %s reddedildi: fiyat %.0f sn bayat (limit %.0f sn) — WS akışı kopmuş olabilir.",
+                    signal.symbol, price_age, max_age,
+                )
+                return None
+        except Exception as _fg_err:
+            logger.debug(f"[Price Freshness Guard] kontrol atlandı: {_fg_err}")
+
         # Get active positions
         open_trades = database.get_open_trades()
         open_symbols = [t["symbol"] for t in open_trades]
