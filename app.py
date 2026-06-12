@@ -36,6 +36,7 @@ except ImportError:
         def emit(self, *a, **kw): pass
         def run(self, app, **kw):
             kw.pop("log_output", None)
+            kw.pop("allow_unsafe_werkzeug", None)
             app.run(**kw)
 
 import config
@@ -49,7 +50,12 @@ N8N_AVAILABLE = False
 
 app = Flask(__name__)
 app.secret_key = getattr(config, "SECRET_KEY", "ax_secret_2026")
-socketio = SocketIO(app, cors_allowed_origins="*")
+# NEDEN (Faz 1.5): async_mode açıkça "threading" — eventlet kuruluyken
+# flask-socketio onu otomatik seçiyordu. Eventlet deprecated + monkey-patch
+# yan etkileri kararlılık riski. threading modu Werkzeug + simple-websocket
+# ile WS transport'u korur; mevcut socketio.emit çağrıları aynen çalışır.
+# (eventlet paketi 1 hafta production gözlemi sonrası requirements'tan kalkacak.)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # ── IP Whitelist ──────────────────────────────────────────────────────
 # Varsayılan: devre dışı (boş string veya ALLOWED_IPS env var set edilmemiş)
@@ -1743,6 +1749,10 @@ def main():
         port=config.FLASK_PORT,
         debug=False,
         log_output=False,
+        # NEDEN (Faz 1.5): threading modunda flask-socketio Werkzeug kullanır ve
+        # bu bayrak olmadan production'da başlamayı reddeder (RuntimeError).
+        # Tek kullanıcılı, Docker arkasındaki dashboard için bilinçli tercih.
+        allow_unsafe_werkzeug=True,
     )
 
 
