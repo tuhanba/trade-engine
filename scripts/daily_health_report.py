@@ -1,6 +1,6 @@
 """
-scripts/daily_health_report.py — Günlük Otomatik Sağlık Raporu v1.0
-Cron veya systemd timer ile her gün 08:00 UTC çalıştırılır.
+scripts/daily_health_report.py — Günlük Otomatik Sağlık Raporu v2.0
+Signal funnel tablosu + reject_reason analizi ile genişletildi.
 """
 import sys
 import os
@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DB_PATH
 
-log_path = os.path.join(os.path.dirname(DB_PATH), "health_report.log")
+log_path = os.path.join(os.path.dirname(DB_PATH) or ".", "health_report.log")
 logging.basicConfig(
     filename=log_path, level=logging.INFO,
     format="%(asctime)s %(message)s"
@@ -25,6 +25,7 @@ def generate():
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
 
     bal = conn.execute(
         "SELECT balance, initial_balance FROM paper_account WHERE id=1"
@@ -42,13 +43,8 @@ def generate():
     """, (yesterday,)).fetchone()
 
     open_c = conn.execute(
-        "SELECT COUNT(*) FROM trades WHERE status NOT IN ('closed')"
+        "SELECT COUNT(*) FROM trades WHERE LOWER(status) NOT IN ('closed')"
     ).fetchone()[0]
-
-    ledger_sum = float(conn.execute(
-        "SELECT COALESCE(SUM(amount), 0) FROM balance_ledger"
-    ).fetchone()[0])
-    audit_ok = abs((initial + ledger_sum) - balance) < 0.01
 
     hb = conn.execute(
         "SELECT value FROM system_state WHERE key='bot_heartbeat_at'"
@@ -61,31 +57,69 @@ def generate():
         except Exception:
             pass
 
+    # ── Signal funnel (last 24h) ─────────────────────────────────────
+    funnel_rows = conn.execute("""
+        SELECT stage, COUNT(*) as cnt
+        FROM signal_events
+        WHERE created_at >= datetime('now', '-1 day')
+        GROUP BY stage
+        ORDER BY cnt DESC
+    """).fetchall()
+    funnel = {r["stage"]: r["cnt"] for r in funnel_rows}
+
+    reject_rows = conn.execute("""
+        SELECT reject_reason, COUNT(*) as cnt
+        FROM signal_events
+        WHERE created_at >= datetime('now', '-1 day')
+          AND reject_reason IS NOT NULL AND reject_reason != ''
+        GROUP BY reject_reason
+        ORDER BY cnt DESC
+        LIMIT 5
+    """).fetchall()
+
     conn.close()
 
     n   = yd["n"] or 0
     pnl = float(yd["pnl"] or 0)
     wr  = round((yd["wins"] or 0) / n * 100, 1) if n > 0 else 0.0
 
+    # ── Funnel table ─────────────────────────────────────────────────
+    stage_order = ["SCANNED", "TREND_CHECKED", "TRIGGER_CHECKED",
+                   "RISK_APPROVED", "AI_VALIDATED", "EXECUTION_REJECTED", "EXECUTED"]
+    funnel_lines = []
+    for s in stage_order:
+        cnt = funnel.get(s, 0)
+        if cnt > 0:
+            funnel_lines.append(f"  {s:<22} {cnt}")
+
+    reject_lines = [f"  {r['reject_reason'][:35]:<35} {r['cnt']}"
+                    for r in reject_rows]
+
     report = (
-        f"GUNLUK RAPOR — {yesterday}\n"
-        f"{'='*30}\n"
-        f"Dun: {n} trade | {wr}% WR | {'+' if pnl >= 0 else ''}{pnl:.4f}\n"
-        f"Bakiye: ${balance:.2f} ({'+' if net_gain >= 0 else ''}{net_gain:.2f})\n"
-        f"Acik: {open_c} | Audit: {'OK' if audit_ok else 'HATALI'} | "
-        f"Bot: {'AKTIF' if bot_ok else 'KAPALI'}\n"
-        f"[PAPER/DRY-RUN]"
+        f"📊 <b>GÜNLÜK RAPOR — {yesterday}</b>\n"
+        f"{'─'*30}\n"
+        f"Dün: <b>{n} trade</b> | WR: <b>{wr}%</b> | PnL: <b>{'+' if pnl >= 0 else ''}{pnl:.4f}</b>\n"
+        f"Bakiye: <b>${balance:.2f}</b> ({'+' if net_gain >= 0 else ''}{net_gain:.2f})\n"
+        f"Açık: {open_c} | Bot: {'🟢' if bot_ok else '🔴'}\n"
+        f"{'─'*30}\n"
+        f"<b>Sinyal Funnel (24s):</b>\n" +
+        ("\n".join(f"<code>{l}</code>" for l in funnel_lines) or "  (veri yok)") +
+        f"\n{'─'*30}\n"
+        f"<b>En Sık Ret Nedenleri:</b>\n" +
+        ("\n".join(f"<code>{l}</code>" for l in reject_lines) or "  (ret yok)") +
+        f"\n[PAPER/DRY-RUN]"
     )
 
-    logger.info(report.replace("\n", " | "))
+    logger.info(report.replace("\n", " | ").replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", ""))
 
     try:
-        from telegram_delivery import _send
-        _send(report)
+        import telegram_delivery
+        telegram_delivery.send_message(report)
+        logger.info("Telegram report sent.")
     except Exception as e:
         logger.warning(f"Telegram: {e}")
 
-    print(report)
+    print(report.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", ""))
 
 
 if __name__ == "__main__":

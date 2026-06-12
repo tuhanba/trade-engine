@@ -67,6 +67,8 @@ ANTHROPIC_API_KEY  = _env("ANTHROPIC_API_KEY")
 GEMINI_API_KEY     = _env("GEMINI_API_KEY")
 OLLAMA_API_BASE    = _env("OLLAMA_API_BASE", "http://localhost:11434/v1")
 FRIDAY_LLM_PROVIDER = _env("FRIDAY_LLM_PROVIDER", "auto")
+FRIDAY_LLM_MODE = _env("FRIDAY_LLM_MODE", "offline")  # offline | report_only | full
+FRIDAY_LLM_DAILY_BUDGET = int(_env("FRIDAY_LLM_DAILY_BUDGET", "5"))
 
 # Risk & Compounding
 AUTO_COMPOUNDING           = _env_bool("AUTO_COMPOUNDING", True)
@@ -381,17 +383,7 @@ def __getattr__(name: str) -> Any:
             except Exception:
                 pass
         elif name == "TRADE_THRESHOLD":
-            try:
-                import database
-                regime = database.get_market_regime()
-                if regime == "TRENDING_HIGH_VOL":
-                    val = val - 2.0
-                elif regime == "CHOPPY_HIGH_VOL":
-                    val = val + 5.0
-                elif regime == "CHOPPY_LOW_VOL":
-                    val = val + 3.0
-            except Exception:
-                pass
+            pass  # Regime adjustment removed — Friday manages threshold directly
 
     if not is_testing:
         _CONFIG_CACHE[name] = (val, now + _CONFIG_CACHE_TTL)

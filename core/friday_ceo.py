@@ -135,6 +135,23 @@ class FridayCeo:
         self.db_path = db_path or config.DB_PATH
         self.dynamic_events = []
         
+    def _apply_param_with_clamp(self, key: str, value: float, actor: str = "friday", reason: str = "") -> float:
+        """Apply a parameter change with clamping and audit logging."""
+        import database as _db
+        CLAMP_RULES = {
+            "trade_threshold": (40.0, 70.0),
+            "risk_pct": (0.25, 1.5),
+        }
+        if key in CLAMP_RULES:
+            lo, hi = CLAMP_RULES[key]
+            clamped = max(lo, min(hi, value))
+            if clamped != value:
+                logger.info("[Friday] %s clamped: %.2f → %.2f (range [%.1f, %.1f])", key, value, clamped, lo, hi)
+                reason = (reason + " clamped").strip()
+                value = clamped
+        _db.set_state(key, str(value), actor=actor, reason=reason)
+        return value
+
     def _generate_text(self, provider: str, system_prompt: str, user_prompt: str, model_type: str = "subagent") -> str:
         if provider == "anthropic":
             api_key = getattr(config, "ANTHROPIC_API_KEY", "")
@@ -1244,16 +1261,48 @@ class FridayCeo:
                         telegram_delivery.send_voice(voice_bytes)
                 return empty_msg
 
-        # Determine the provider
-        provider = getattr(config, "FRIDAY_LLM_PROVIDER", "auto").lower()
-        if provider == "auto":
-            if getattr(config, "GEMINI_API_KEY", ""):
-                provider = "gemini"
-            elif getattr(config, "ANTHROPIC_API_KEY", ""):
-                provider = "anthropic"
-            elif getattr(config, "OLLAMA_API_BASE", ""):
-                provider = "ollama"
-            else:
+        # Check LLM mode and daily budget
+        llm_mode = getattr(config, "FRIDAY_LLM_MODE", "offline").lower()
+        llm_budget = int(getattr(config, "FRIDAY_LLM_DAILY_BUDGET", 5))
+
+        if llm_mode == "offline":
+            provider = "offline"
+        else:
+            # Check daily call budget
+            try:
+                import database as _db
+                calls_today = int(_db.get_state("friday_llm_calls_today") or "0")
+                if calls_today >= llm_budget:
+                    logger.warning(
+                        "[Friday] LLM günlük bütçe aşıldı (%d/%d). offline moda geçiliyor.",
+                        calls_today, llm_budget
+                    )
+                    if calls_today == llm_budget:
+                        try:
+                            import telegram_delivery
+                            telegram_delivery.send_message(
+                                f"ℹ️ <b>Friday LLM günlük bütçeye ulaştı</b> ({llm_budget} çağrı). "
+                                f"Gece yarısı sıfırlanacak."
+                            )
+                        except Exception:
+                            pass
+                        _db.set_state("friday_llm_calls_today", str(calls_today + 1))
+                    provider = "offline"
+                else:
+                    _db.set_state("friday_llm_calls_today", str(calls_today + 1))
+                    # Determine the provider
+                    provider = getattr(config, "FRIDAY_LLM_PROVIDER", "auto").lower()
+                    if provider == "auto":
+                        if getattr(config, "GEMINI_API_KEY", ""):
+                            provider = "gemini"
+                        elif getattr(config, "ANTHROPIC_API_KEY", ""):
+                            provider = "anthropic"
+                        elif getattr(config, "OLLAMA_API_BASE", ""):
+                            provider = "ollama"
+                        else:
+                            provider = "offline"
+            except Exception as _budget_err:
+                logger.debug("[Friday] Budget check failed: %s", _budget_err)
                 provider = "offline"
 
         ctx = self.get_system_context()
