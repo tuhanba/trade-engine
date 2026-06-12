@@ -99,11 +99,111 @@ actions içine şu komutları ekleyebilirsin:
 - "ROLLBACK_MODEL": ML modelini en son stabil yedeklenen haline geri döndürür.
 İhtiyaç yoksa actions listesi boş kalabilir).
 
+NOT: Eğer sana araç (function calling) tanımları sunulmuşsa, kararlarını JSON bloğu yerine ARAÇ ÇAĞRILARIYLA bildir (set_param, pause_trading, resume_trading, set_coin_cooldown, send_report, request_restart, no_action). Tek turda en fazla 3 araç çağrısı yapabilirsin. Hiçbir değişiklik gerekmiyorsa no_action(reason) çağır.
+
+🧾 3.5 KARAR GÜNLÜĞÜ VE SONUÇ SKORLARI:
+Sistem context'indeki "recent_decisions" alanı geçmiş kararlarını ve 72 saatlik sonuç skorlarını (outcome_score: -1.0 kötü … +1.0 iyi) içerir.
+Geçmiş kararlarının sonuç skorlarını incele. outcome_score < 0 olan karar tiplerini tekrarlamadan önce gerekçeni güçlendir.
+
 📊 4. DİNAMİK AUTONOMY VE RISK BYPASS KURALLARI (ZORUNLU):
 - Paper (sanal bakiye) modunda veya Live modda `BYPASS_LIVE_RISK_SHIELDS` parametresi aktifken, kasayı büyütme hızımızı en üst duyaya çıkarmak için son derece agresif, mantıklı ve kazanma odaklı davranmalısın.
 - Bu modlarda 'trade_threshold' değerini 45.0 ila 48.0 aralığında tutmalı (asla daha yüksek değil), 'risk_pct' değerini ise 1.5 veya 2.0 yapmalı ve 'confirmation_mode' değerini kesinlikle 'false' tutmalısın, böylece işlemler onay beklemeden otonom olarak akar.
 - Risk süzgeçlerini daraltıp işlemleri engellemek yerine, filtreleri otonom olarak gevşeterek sistemin sürekli aktif ve dinamik kalmasını sağla.
 - Acil sistemik arızalar veya bağlantı kopmaları hariç, veto/onay engellerini aşarak kararı sisteme bırak."""
+
+# ── Friday Function Calling Araç Şemaları (Faz 2.2) ─────────────────────────
+# NEDEN: _parse_decisions serbest metinden JSON ayıklıyor — kırılgan ve
+# halüsinasyona açık. Yapılandırılmış araç çağrıları (Gemini/Anthropic tools)
+# karar formatını garanti eder. Dönen çağrılar _execute_decisions'taki MEVCUT
+# clamp/guard mantığından geçer — guard bypass YOK.
+FRIDAY_TOOL_DEFS = [
+    {
+        "name": "set_param",
+        "description": (
+            "Dinamik trading parametresini değiştirir. YALNIZCA bilinen dinamik "
+            "parametre key'leri kabul edilir (örn. trade_threshold, risk_pct, "
+            "max_open_trades, confirmation_mode). Bilinmeyen key reddedilir."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Parametre adı (örn. trade_threshold)"},
+                "value": {"type": "string", "description": "Yeni değer (string olarak, örn. '53.0')"},
+                "reason": {"type": "string", "description": "Değişikliğin kısa gerekçesi"},
+            },
+            "required": ["key", "value", "reason"],
+        },
+    },
+    {
+        "name": "pause_trading",
+        "description": "Otonom işlemleri duraklatır (onay modunu açar).",
+        "parameters": {
+            "type": "object",
+            "properties": {"reason": {"type": "string", "description": "Duraklatma gerekçesi"}},
+            "required": ["reason"],
+        },
+    },
+    {
+        "name": "resume_trading",
+        "description": "Otonom işlemleri yeniden başlatır (onay modunu kapatır).",
+        "parameters": {
+            "type": "object",
+            "properties": {"reason": {"type": "string", "description": "Başlatma gerekçesi"}},
+            "required": ["reason"],
+        },
+    },
+    {
+        "name": "set_coin_cooldown",
+        "description": "Belirli bir coin'i geçici olarak işlem dışı bırakır (cooldown).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Coin sembolü (örn. SOLUSDT)"},
+                "minutes": {"type": "number", "description": "Cooldown süresi dakika (5-1440)"},
+                "reason": {"type": "string", "description": "Cooldown gerekçesi"},
+            },
+            "required": ["symbol", "minutes", "reason"],
+        },
+    },
+    {
+        "name": "send_report",
+        "description": "Batuhan Bey'e Telegram üzerinden kısa durum raporu/notu iletir.",
+        "parameters": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "Rapor metni"}},
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "request_restart",
+        "description": (
+            "Bir servisin yeniden başlatılması GEREKTİĞİNİ kayda geçirir. "
+            "Restart'ı Friday YAPMAZ — Docker restart policy + watchdog yapar; "
+            "bu araç yalnızca karar günlüğüne yazar ve Batuhan Bey'i bilgilendirir."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "service": {"type": "string", "description": "Servis adı (engine/dashboard/redis)"},
+                "reason": {"type": "string", "description": "Restart gerekçesi"},
+            },
+            "required": ["service", "reason"],
+        },
+    },
+    {
+        "name": "no_action",
+        "description": "Bu turda hiçbir değişiklik gerekmediğini bildirir (NOOP).",
+        "parameters": {
+            "type": "object",
+            "properties": {"reason": {"type": "string", "description": "Neden aksiyon gerekmedi"}},
+            "required": ["reason"],
+        },
+    },
+]
+
+# NEDEN: Kontrolsüz karar yağmurunu engeller — tek turda en fazla 3 araç çağrısı
+# uygulanır, fazlası loglanıp düşürülür (plan 2.2 kuralı).
+MAX_TOOL_CALLS_PER_TURN = 3
 
 STATIC_MACRO_EVENTS = [
     # 2026 CPI (usually 13:30 UTC / 8:30 AM EST)
@@ -153,21 +253,46 @@ class FridayCeo:
         _db.set_state(key, str(value), actor=actor, reason=reason)
         return value
 
-    def _generate_text(self, provider: str, system_prompt: str, user_prompt: str, model_type: str = "subagent") -> str:
+    def _generate_text(self, provider: str, system_prompt: str, user_prompt: str, model_type: str = "subagent", tools: Optional[list] = None):
+        """LLM çağrısı yapar.
+
+        tools=None  → str döner (mevcut davranış, geriye dönük uyumlu).
+        tools=[...] → (text, tool_calls) tuple döner; tool_calls =
+                      [{"name": str, "args": dict}, ...] (Faz 2.2 function calling).
+        """
         if provider == "anthropic":
             api_key = getattr(config, "ANTHROPIC_API_KEY", "")
             import anthropic
             ai_client = anthropic.Anthropic(api_key=api_key)
-            model = getattr(config, "FRIDAY_CEO_MODEL" if model_type == "ceo" else "FRIDAY_SUBAGENT_MODEL", 
+            model = getattr(config, "FRIDAY_CEO_MODEL" if model_type == "ceo" else "FRIDAY_SUBAGENT_MODEL",
                             "claude-sonnet-4-6" if model_type == "ceo" else "claude-haiku-4-5-20251001")
+            # NEDEN (Faz 2.2): Aynı araç şeması Anthropic formatına çevrilir
+            # (input_schema); offline_rules fallback'i etkilenmez.
+            kwargs = {}
+            if tools:
+                kwargs["tools"] = [
+                    {"name": t["name"], "description": t["description"], "input_schema": t["parameters"]}
+                    for t in tools
+                ]
+
+            def _extract_anthropic(response):
+                text_parts, tool_calls = [], []
+                for block in response.content:
+                    btype = getattr(block, "type", "")
+                    if btype == "text":
+                        text_parts.append(block.text)
+                    elif btype == "tool_use":
+                        tool_calls.append({"name": block.name, "args": dict(block.input or {})})
+                return "\n".join(text_parts).strip(), tool_calls
+
             try:
                 response = ai_client.messages.create(
                     model=model,
                     max_tokens=1500 if model_type == "ceo" else 250,
                     system=system_prompt,
-                    messages=[{"role": "user", "content": user_prompt}]
+                    messages=[{"role": "user", "content": user_prompt}],
+                    **kwargs,
                 )
-                return response.content[0].text.strip()
             except Exception as e:
                 logger.warning(f"[Friday CEO] Anthropic primary model failed: {e}")
                 fallback_model = "claude-haiku-4-5-20251001"
@@ -175,21 +300,23 @@ class FridayCeo:
                     model=fallback_model,
                     max_tokens=1500 if model_type == "ceo" else 250,
                     system=system_prompt,
-                    messages=[{"role": "user", "content": user_prompt}]
+                    messages=[{"role": "user", "content": user_prompt}],
+                    **kwargs,
                 )
-                return response.content[0].text.strip()
+            text, tool_calls = _extract_anthropic(response)
+            return (text, tool_calls) if tools is not None else text
 
         elif provider == "gemini":
             api_key = getattr(config, "GEMINI_API_KEY", "")
             if not api_key:
                 raise ValueError("GEMINI_API_KEY is not configured.")
             model = getattr(config, "GEMINI_MODEL_CEO" if model_type == "ceo" else "GEMINI_MODEL_SUBAGENT", "gemini-1.5-flash")
-            
+
             import urllib.request
             import json
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             headers = {"Content-Type": "application/json"}
-            
+
             payload = {
                 "contents": [
                     {
@@ -207,14 +334,32 @@ class FridayCeo:
                     "temperature": 0.2,
                 }
             }
-            if model_type == "ceo":
+            if tools:
+                # NEDEN (Faz 2.2): Gemini function calling — yapılandırılmış karar.
+                # responseMimeType=application/json tools ile birlikte KULLANILMAZ
+                # (Gemini API kısıtı); araç çağrıları zaten yapılandırılmıştır.
+                payload["tools"] = [{
+                    "functionDeclarations": [
+                        {"name": t["name"], "description": t["description"], "parameters": t["parameters"]}
+                        for t in tools
+                    ]
+                }]
+            elif model_type == "ceo":
                 payload["generationConfig"]["responseMimeType"] = "application/json"
-                
+
             req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=15) as response:
                 res_data = json.loads(response.read().decode("utf-8"))
-                text = res_data["candidates"][0]["content"]["parts"][0]["text"]
-                return text.strip()
+                parts = res_data["candidates"][0]["content"].get("parts", [])
+                text_parts, tool_calls = [], []
+                for part in parts:
+                    if part.get("text"):
+                        text_parts.append(part["text"])
+                    fc = part.get("functionCall")
+                    if fc:
+                        tool_calls.append({"name": fc.get("name", ""), "args": dict(fc.get("args") or {})})
+                text = "\n".join(text_parts).strip()
+                return (text, tool_calls) if tools is not None else text
 
         elif provider == "ollama":
             api_base = getattr(config, "OLLAMA_API_BASE", "http://localhost:11434/v1")
@@ -239,9 +384,11 @@ class FridayCeo:
             req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=30) as response:
                 res_data = json.loads(response.read().decode("utf-8"))
-                text = res_data["choices"][0]["message"]["content"]
-                return text.strip()
-                
+                text = res_data["choices"][0]["message"]["content"].strip()
+                # NEDEN: Ollama'da function calling desteklenmiyor — tools istense
+                # de boş çağrı listesi döner; çağıran _parse_decisions'a düşer.
+                return (text, []) if tools is not None else text
+
         else:
             raise ValueError(f"Unknown LLM provider: {provider}")
 
@@ -645,6 +792,17 @@ class FridayCeo:
             ctx["market_regime"] = "NEUTRAL"
             logger.warning(f"[Friday CEO] Context regime error: {e}")
 
+        # 5. Friday karar günlüğü özeti (Faz 2.1)
+        # NEDEN: Friday geçmiş kararlarının sonuç skorlarını (outcome_score)
+        # her karar turunda görür — negatif skorlu karar tiplerini tekrarlamadan
+        # önce gerekçesini güçlendirmesi system prompt ile talimatlandırıldı.
+        try:
+            from core import friday_decisions
+            ctx["recent_decisions"] = friday_decisions.summarize_for_context(10)
+        except Exception as e:
+            ctx["recent_decisions"] = []
+            logger.debug(f"[Friday CEO] Context recent_decisions error: {e}")
+
         return ctx
 
     def _parse_decisions(self, text: str) -> dict:
@@ -686,14 +844,89 @@ class FridayCeo:
                 logger.error(f"[Friday CEO] Final JSON parse error: {e2}. Raw content tried: {json_candidate[:200]}")
                 return {}
 
-    def _execute_decisions(self, decisions: dict) -> list[str]:
-        """Applies dynamic settings updates and triggers background actions."""
+    def _tool_calls_to_decisions(self, tool_calls: list) -> dict:
+        """Function calling çağrılarını _execute_decisions'ın karar formatına çevirir (Faz 2.2).
+
+        Guard'lar BYPASS EDİLMEZ: set_param çıktısı mevcut clamp/guard yolundan
+        geçer; yalnızca _DYNAMIC_PARAMS_MAP'teki key'ler kabul edilir.
+        """
+        from config import _DYNAMIC_PARAMS_MAP
+        decisions = {
+            "parameters": {}, "actions": [], "cooldowns": [],
+            "reports": [], "restarts": [], "param_reasons": {},
+        }
+        if not tool_calls:
+            return decisions
+        if len(tool_calls) > MAX_TOOL_CALLS_PER_TURN:
+            logger.warning(
+                "[Friday CEO] %d araç çağrısı geldi — limit %d, fazlası düşürüldü: %s",
+                len(tool_calls), MAX_TOOL_CALLS_PER_TURN,
+                [c.get("name") for c in tool_calls[MAX_TOOL_CALLS_PER_TURN:]],
+            )
+            tool_calls = tool_calls[:MAX_TOOL_CALLS_PER_TURN]
+
+        for call in tool_calls:
+            name = str(call.get("name") or "").lower()
+            args = call.get("args") or {}
+            reason = str(args.get("reason") or "")
+            if name == "set_param":
+                key = str(args.get("key") or "").strip()
+                # NEDEN: bilinmeyen key = reddet + logla (plan 2.2 kuralı) —
+                # LLM halüsinasyonuyla rastgele state key'i yazılmasını engeller.
+                if key.upper() not in _DYNAMIC_PARAMS_MAP:
+                    logger.warning("[Friday CEO] set_param REDDEDİLDİ — bilinmeyen key: %r", key)
+                    continue
+                decisions["parameters"][key] = args.get("value")
+                decisions["param_reasons"][key.upper()] = reason
+            elif name == "pause_trading":
+                decisions["actions"].append("PAUSE")
+                decisions["param_reasons"]["PAUSE"] = reason
+            elif name == "resume_trading":
+                decisions["actions"].append("RESUME")
+                decisions["param_reasons"]["RESUME"] = reason
+            elif name == "set_coin_cooldown":
+                decisions["cooldowns"].append({
+                    "symbol": str(args.get("symbol") or "").upper(),
+                    "minutes": args.get("minutes", 30),
+                    "reason": reason,
+                })
+            elif name == "send_report":
+                decisions["reports"].append(str(args.get("text") or ""))
+            elif name == "request_restart":
+                decisions["restarts"].append({
+                    "service": str(args.get("service") or "engine"),
+                    "reason": reason,
+                })
+            elif name == "no_action":
+                decisions["noop_reason"] = reason or "no_action"
+            else:
+                logger.warning("[Friday CEO] Bilinmeyen araç çağrısı yok sayıldı: %r", name)
+        return decisions
+
+    def _execute_decisions(self, decisions: dict, reasoning: str = "", ctx: Optional[dict] = None) -> list[str]:
+        """Applies dynamic settings updates and triggers background actions.
+
+        Faz 2.1: Uygulanan HER karar core.friday_decisions günlüğüne yazılır
+        (decision_type, eski/yeni değer, gerekçe, karar anı context özeti).
+        """
         applied_msgs = []
         if not decisions:
             return applied_msgs
-            
+
         import database
-        
+        from core import friday_decisions as _fd
+
+        # NEDEN: Snapshot karar başına değil tur başına bir kez hazırlanır —
+        # ctx çağırandan gelir (evaluate_and_decide zaten hesapladı); yoksa boş.
+        snapshot = _fd.build_ctx_snapshot(ctx) if ctx else {}
+        param_reasons = decisions.get("param_reasons") or {}
+
+        def _log(decision_type, param_key=None, old=None, new=None, why=""):
+            _fd.log_decision(
+                decision_type, param_key=param_key, old_value=old, new_value=new,
+                reasoning=(why or reasoning), ctx_snapshot=snapshot,
+            )
+
         # 1. Apply parameters changes
         params = decisions.get("parameters", {})
         for key, val in params.items():
@@ -702,15 +935,18 @@ class FridayCeo:
             if key_upper in _DYNAMIC_PARAMS_MAP:
                 db_key, cast_fn = _DYNAMIC_PARAMS_MAP[key_upper]
                 try:
+                    old_value = database.get_state(db_key)
                     casted_val = cast_fn(str(val))
                     if key_upper in ("TRADE_THRESHOLD", "RISK_PCT"):
-                        self._apply_param_with_clamp(db_key, float(casted_val), actor="friday", reason="llm_decision")
+                        casted_val = self._apply_param_with_clamp(db_key, float(casted_val), actor="friday", reason="llm_decision")
                     else:
                         database.set_state(db_key, str(casted_val), actor="friday", reason="llm_decision")
                     # Clear config cache
                     if key_upper in config._CONFIG_CACHE:
                         del config._CONFIG_CACHE[key_upper]
                     applied_msgs.append(f"⚙️ <b>{key_upper}</b> → <code>{casted_val}</code>")
+                    _log("SET_PARAM", param_key=db_key, old=old_value, new=casted_val,
+                         why=param_reasons.get(key_upper, ""))
                 except Exception as e:
                     logger.error(f"[Friday CEO] Update param {key_upper} error: {e}")
             elif key_upper in _AI_PARAMS_MAP:
@@ -718,31 +954,45 @@ class FridayCeo:
                 try:
                     casted_val = cast_fn(str(val))
                     # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+                    old_value = None
                     with database.open_db(self.db_path, timeout=5) as conn:
+                        try:
+                            row = conn.execute(f"SELECT {db_col} FROM params WHERE id = 1").fetchone()
+                            old_value = row[0] if row else None
+                        except Exception:
+                            pass
                         conn.execute(f"UPDATE params SET {db_col} = ?, updated_at = datetime('now') WHERE id = 1", (casted_val,))
                         conn.commit()
                     # Clear config cache
                     if key_upper in config._CONFIG_CACHE:
                         del config._CONFIG_CACHE[key_upper]
                     applied_msgs.append(f"⚙️ <b>{key_upper}</b> → <code>{casted_val}</code>")
+                    _log("SET_PARAM", param_key=db_col, old=old_value, new=casted_val,
+                         why=param_reasons.get(key_upper, ""))
                 except Exception as e:
                     logger.error(f"[Friday CEO] Update AI param {key_upper} error: {e}")
-                    
+
         # 2. Run specific action triggers
         actions = decisions.get("actions", [])
         for action in actions:
             action_upper = action.upper()
             if action_upper == "PAUSE":
+                old_mode = database.get_state("confirmation_mode")
                 database.set_state("confirmation_mode", "true")
                 if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
                     del config._CONFIG_CACHE["CONFIRMATION_MODE"]
                 applied_msgs.append("⏸ <b>Oto-İşlem Duraklatıldı</b> (Onay modu aktif edildi)")
-                
+                _log("PAUSE", param_key="confirmation_mode", old=old_mode, new="true",
+                     why=param_reasons.get("PAUSE", ""))
+
             elif action_upper == "RESUME":
+                old_mode = database.get_state("confirmation_mode")
                 database.set_state("confirmation_mode", "false")
                 if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
                     del config._CONFIG_CACHE["CONFIRMATION_MODE"]
                 applied_msgs.append("▶️ <b>Oto-İşlem Başlatıldı</b> (Onay modu kapatıldı)")
+                _log("RESUME", param_key="confirmation_mode", old=old_mode, new="false",
+                     why=param_reasons.get("RESUME", ""))
                 
             elif action_upper == "RETRAIN":
                 try:
@@ -805,7 +1055,61 @@ class FridayCeo:
                 except Exception as e:
                     logger.error(f"[Friday CEO] Action ROLLBACK_MODEL failed: {e}")
                     applied_msgs.append(f"⏮ <b>ML Model Geri Yükleme Hatası</b> (Hata: {e})")
-                    
+
+        # NEDEN (Faz 2.1): PAUSE/RESUME yukarıda ayrıntılı loglanıyor; kalan
+        # aksiyon tipleri (RETRAIN/TUNER/...) burada tek satırla günlüğe yazılır.
+        for action in actions:
+            if str(action).upper() not in ("PAUSE", "RESUME"):
+                _log(str(action).upper())
+
+        # 3. Coin cooldown kararları (Faz 2.2 function calling: set_coin_cooldown)
+        for cd in decisions.get("cooldowns", []) or []:
+            try:
+                symbol = str(cd.get("symbol") or "").upper().strip()
+                if not symbol:
+                    continue
+                # NEDEN: Guard — LLM'in aşırı uzun/kısa cooldown halüsinasyonuna
+                # karşı 5 dk - 24 saat aralığına clamp edilir.
+                minutes = int(float(cd.get("minutes") or 30))
+                minutes = max(5, min(1440, minutes))
+                database.set_coin_cooldown_redis(symbol, minutes)
+                # SQLite kalıcılık (restart sonrası da geçerli kalsın)
+                until = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
+                try:
+                    with database.open_db(self.db_path, timeout=5) as conn:
+                        conn.execute(
+                            "INSERT OR REPLACE INTO coin_cooldown (symbol, until) VALUES (?, ?)",
+                            (symbol, until),
+                        )
+                        conn.commit()
+                except Exception as _cd_db_err:
+                    logger.debug(f"[Friday CEO] coin_cooldown SQLite yazımı atlandı: {_cd_db_err}")
+                applied_msgs.append(f"❄️ <b>{symbol}</b> {minutes} dk cooldown'a alındı")
+                _log("COOLDOWN", param_key=symbol, new=str(minutes), why=cd.get("reason", ""))
+            except Exception as e:
+                logger.error(f"[Friday CEO] Cooldown kararı uygulanamadı: {e}")
+
+        # 4. Rapor kararları (send_report) — metin final mesaja eklenir
+        for report_text in decisions.get("reports", []) or []:
+            if report_text:
+                applied_msgs.append(f"📝 {str(report_text)[:500]}")
+
+        # 5. Restart talepleri (request_restart) — Faz 2.3 kuralı:
+        # NEDEN: Friday container içinden docker restart ÇAĞIRMAZ — restart'ı
+        # Docker restart policy + watchdog yapar. Burada yalnızca karar
+        # günlüğüne yazılır ve Batuhan Bey bilgilendirilir.
+        for rs in decisions.get("restarts", []) or []:
+            service = str(rs.get("service") or "engine")
+            applied_msgs.append(
+                f"🔁 <b>Restart Talebi Kaydedildi:</b> <code>{service}</code> "
+                f"(restart'ı Docker policy/watchdog yürütür)"
+            )
+            _log("RESTART", param_key=service, why=rs.get("reason", ""))
+
+        # 6. NOOP (no_action) — bilinçli "değişiklik yok" kararı da günlüğe girer
+        if decisions.get("noop_reason"):
+            _log("NOOP", why=str(decisions.get("noop_reason")))
+
         return applied_msgs
 
     def scan_unnecessary_files(self) -> list[str]:
@@ -1335,6 +1639,7 @@ class FridayCeo:
         )
 
         try:
+            tool_calls = []
             if provider == "offline":
                 reply_text = self._call_offline_rules(ctx, user_message)
             else:
@@ -1375,17 +1680,30 @@ class FridayCeo:
                 else:
                     user_prompt += "Bu periyodik sistem kontrolün. Lütfen bu analizleri sentezle, son CEO kararını al ve genel durum özetini ilet."
 
-                reply_text = self._generate_text(provider, SYSTEM_PROMPT, user_prompt, "ceo")
-            
-            # Parse decisions JSON block
-            decisions = self._parse_decisions(reply_text)
-            
+                # NEDEN (Faz 2.2): CEO kararı function calling ile alınır —
+                # serbest metin JSON ayıklamaya göre kırılganlık ve halüsinasyon
+                # riski çok daha düşük. Araç çağrısı dönmezse mevcut
+                # _parse_decisions yolu fallback olarak aynen çalışır.
+                if provider in ("gemini", "anthropic"):
+                    reply_text, tool_calls = self._generate_text(
+                        provider, SYSTEM_PROMPT, user_prompt, "ceo", tools=FRIDAY_TOOL_DEFS
+                    )
+                else:
+                    reply_text = self._generate_text(provider, SYSTEM_PROMPT, user_prompt, "ceo")
+
+            # Parse decisions: önce araç çağrıları, yoksa JSON bloğu (fallback)
+            if provider != "offline" and tool_calls:
+                decisions = self._tool_calls_to_decisions(tool_calls)
+            else:
+                decisions = self._parse_decisions(reply_text)
+
             # Strip the JSON block from final message to clean up output
             clean_reply = re.sub(r"```json\s*\{.*?\}\s*```", "", reply_text, flags=re.DOTALL).strip()
             clean_reply = re.sub(r"\{[\s\S]*?\}", "", clean_reply).strip()  # Fallback cleanup
-            
+
             # Execute decisions (updates configurations & triggers training)
-            applied_changes = self._execute_decisions(decisions)
+            # Faz 2.1: gerekçe (LLM cevabının ilk 500 char'ı) + context karar günlüğüne gider
+            applied_changes = self._execute_decisions(decisions, reasoning=clean_reply[:500], ctx=ctx)
             
             # Combine reply with applied changes notification
             final_message = clean_reply
@@ -1803,6 +2121,380 @@ class FridayCeo:
                     telegram_delivery.send_voice(voice_bytes, caption="Friday Acil Durum Kalkanı")
         except Exception as e:
             logger.error(f"[Friday CEO] Error during Emergency Clutch check: {e}")
+
+        # 7. SysAdmin Tespit→Aksiyon Kuralları (Faz 2.3)
+        try:
+            self._run_sysadmin_checks()
+        except Exception as e:
+            logger.error(f"[Friday CEO] SysAdmin checks failed: {e}")
+
+    # ── Faz 2.3 — Otonom SysAdmin Tespit→Aksiyon Kuralları ──────────────────
+
+    def _heartbeat_age_seconds(self) -> Optional[float]:
+        """bot_status.heartbeat kaydının yaşını saniye cinsinden döner (yoksa None)."""
+        try:
+            from database import get_bot_status
+            hb = get_bot_status("heartbeat") or {}
+            val = hb.get("value") or ""
+            if not val:
+                return None
+            hb_dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+            if hb_dt.tzinfo is None:
+                hb_dt = hb_dt.replace(tzinfo=timezone.utc)
+            return max(0.0, (datetime.now(timezone.utc) - hb_dt).total_seconds())
+        except Exception:
+            return None
+
+    def _alert_recently_sent(self, state_key: str, cooldown_minutes: int) -> bool:
+        """Spam koruması: state_key'deki son uyarı zamanı cooldown içindeyse True."""
+        from database import get_system_state
+        last_str = get_system_state(state_key, default="")
+        if not last_str or last_str == "-":
+            return False
+        try:
+            last_dt = datetime.fromisoformat(last_str)
+            return (datetime.now(timezone.utc) - last_dt) < timedelta(minutes=cooldown_minutes)
+        except Exception:
+            return False
+
+    def _run_sysadmin_checks(self):
+        """Faz 2.3 tespit→aksiyon kuralları. Her aksiyon friday_decisions'a loglanır.
+
+        1. Sinyal kuraklığı: 2 saattir signal_events boş AMA heartbeat canlı
+           → diagnose_data_flow raporu Telegram'a.
+        2. Hata fırtınası: bot.log son 15 dk'da aynı ERROR ≥10 kez → KRİTİK uyarı
+           (+ LLM varsa kısa teşhis notu).
+        3. Heartbeat ölümü: heartbeat > 120 sn bayat → bildirim + RESTART kaydı.
+           NEDEN: Friday docker restart ÇAĞIRMAZ — restart'ı Docker policy +
+           watchdog yapar; Friday yalnızca raporlar ve kararı günlüğe yazar.
+        4. Drawdown eskalasyonu: günlük PnL ≤ -DRAWDOWN_DEFENSIVE_PCT
+           → pause_trading + durum raporu (günde 1 kez).
+        """
+        from database import get_system_state, set_state
+        from core import friday_decisions as _fd
+        now = datetime.now(timezone.utc)
+
+        # ── 1. Sinyal Kuraklığı ──
+        try:
+            hb_age = self._heartbeat_age_seconds()
+            two_h_ago = (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+            with database.open_db(self.db_path, timeout=5) as conn:
+                ev_cnt = conn.execute(
+                    "SELECT COUNT(*) FROM signal_events WHERE created_at >= ?", (two_h_ago,)
+                ).fetchone()[0]
+            if ev_cnt == 0 and hb_age is not None and hb_age < 120:
+                if not self._alert_recently_sent("friday_last_drought_alert", cooldown_minutes=120):
+                    set_state("friday_last_drought_alert", now.isoformat())
+                    diag = self.diagnose_data_flow()
+                    msg = (
+                        "🚨 <b>ANOMALİ • Sinyal Kuraklığı</b>\n"
+                        "Son 2 saattir pipeline'a hiç sinyal düşmedi (scanner heartbeat canlı ✓).\n\n"
+                        + diag + "\n\n/teshis ile tam rapor"
+                    )
+                    telegram_delivery.send_message(msg)
+                    _fd.log_decision("REPORT", param_key="signal_drought",
+                                     reasoning="2 saattir signal_events boş, heartbeat canlı — veri akışı teşhisi gönderildi")
+        except Exception as e:
+            logger.error(f"[Friday CEO] Sinyal kuraklığı kontrolü hatası: {e}")
+
+        # ── 2. Hata Fırtınası ──
+        try:
+            storm_line, storm_count = self._detect_error_storm(minutes=15, threshold=10)
+            if storm_line and not self._alert_recently_sent("friday_last_errorstorm_alert", cooldown_minutes=60):
+                set_state("friday_last_errorstorm_alert", now.isoformat())
+                diagnosis = ""
+                try:
+                    # LLM varsa hata özetini yorumlat (teşhis notu) — yoksa sessizce atla
+                    llm_provider = ""
+                    if getattr(config, "GEMINI_API_KEY", ""):
+                        llm_provider = "gemini"
+                    elif getattr(config, "ANTHROPIC_API_KEY", ""):
+                        llm_provider = "anthropic"
+                    if llm_provider and getattr(config, "FRIDAY_LLM_MODE", "offline").lower() != "offline":
+                        diagnosis = self._generate_text(
+                            llm_provider,
+                            "Sen bir trading sistemi SRE uzmanısın. Verilen hata satırını 1-2 cümlede Türkçe teşhis et.",
+                            f"Son 15 dakikada {storm_count} kez tekrarlanan hata:\n{storm_line[:500]}",
+                            "subagent",
+                        )
+                except Exception as _diag_err:
+                    logger.debug(f"[Friday CEO] Hata fırtınası LLM teşhisi atlandı: {_diag_err}")
+                msg = (
+                    "🚨 <b>KRİTİK • Hata Fırtınası</b>\n"
+                    f"Aynı ERROR satırı son 15 dk'da <b>{storm_count}</b> kez tekrarlandı:\n"
+                    f"<code>{storm_line[:300]}</code>"
+                )
+                if diagnosis:
+                    msg += f"\n\n🩺 <b>Friday Teşhisi:</b> {diagnosis[:400]}"
+                telegram_delivery.send_message(msg)
+                _fd.log_decision("REPORT", param_key="error_storm", new=str(storm_count),
+                                 reasoning=f"Tekrarlanan hata: {storm_line[:200]}")
+        except Exception as e:
+            logger.error(f"[Friday CEO] Hata fırtınası kontrolü hatası: {e}")
+
+        # ── 3. Heartbeat Ölümü ──
+        # NOT: Bu kontrol engine süreci İÇİNDE koşar — süreç tamamen donarsa bu
+        # da koşamaz; o senaryoyu dashboard health_check + Docker healthcheck
+        # yakalar. Burası heartbeat YAZIM yolunun (DB) öldüğü durumu yakalar.
+        try:
+            hb_age = self._heartbeat_age_seconds()
+            if hb_age is not None and hb_age > 120:
+                if not self._alert_recently_sent("friday_last_hbdeath_alert", cooldown_minutes=30):
+                    set_state("friday_last_hbdeath_alert", now.isoformat())
+                    msg = (
+                        "🚨 <b>KRİTİK • Heartbeat Bayat</b>\n"
+                        f"Engine heartbeat'i <b>{hb_age:.0f} sn</b>'dir güncellenmiyor (limit 120 sn).\n"
+                        "Engine yanıt vermiyor olabilir — Docker restart policy devreye girecek. "
+                        "Restart kararı günlüğe kaydedildi; Friday restart ÇAĞIRMAZ."
+                    )
+                    telegram_delivery.send_message(msg)
+                    _fd.log_decision("RESTART", param_key="engine",
+                                     reasoning=f"heartbeat {hb_age:.0f} sn bayat — Docker policy restart bekleniyor")
+        except Exception as e:
+            logger.error(f"[Friday CEO] Heartbeat kontrolü hatası: {e}")
+
+        # ── 4. Drawdown Eskalasyonu ──
+        try:
+            today_str = now.strftime("%Y-%m-%d")
+            if get_system_state("friday_drawdown_pause_date", default="") != today_str:
+                environment = getattr(config, "EXECUTION_MODE", "paper")
+                with database.open_db(self.db_path, timeout=5) as conn:
+                    row = conn.execute(
+                        "SELECT SUM(net_pnl) FROM trades "
+                        "WHERE DATE(close_time) = ? AND status = 'closed' AND environment = ?",
+                        (today_str, environment),
+                    ).fetchone()
+                    today_pnl = float(row[0] or 0.0)
+                    bal_row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+                    balance = float(bal_row[0] or 0.0) if bal_row else 0.0
+                dd_limit = float(getattr(config, "DRAWDOWN_DEFENSIVE_PCT", 5.0))
+                base = balance - today_pnl  # gün başı yaklaşık bakiye
+                today_pnl_pct = (today_pnl / base * 100.0) if base > 0 else 0.0
+                if today_pnl_pct <= -dd_limit:
+                    set_state("friday_drawdown_pause_date", today_str)
+                    old_mode = get_system_state("confirmation_mode")
+                    set_state("confirmation_mode", "true", actor="friday", reason="drawdown_escalation")
+                    if "CONFIRMATION_MODE" in config._CONFIG_CACHE:
+                        del config._CONFIG_CACHE["CONFIRMATION_MODE"]
+                    msg = (
+                        "🛑 <b>Drawdown Eskalasyonu — İşlemler Duraklatıldı</b>\n"
+                        f"Günlük PnL <b>%{today_pnl_pct:.2f}</b> (${today_pnl:+.2f}) savunma eşiğini "
+                        f"(-%{dd_limit:.1f}) aştı.\n"
+                        f"Bakiye: <code>${balance:,.2f}</code>\n"
+                        "Otonom işlemler onay moduna alındı. /resume ile devam ettirebilirsiniz."
+                    )
+                    telegram_delivery.send_message(msg)
+                    voice_bytes = self.generate_voice_from_text(msg)
+                    if voice_bytes:
+                        telegram_delivery.send_voice(voice_bytes, caption="Friday Drawdown Koruması")
+                    _fd.log_decision("PAUSE", param_key="confirmation_mode", old_value=old_mode, new_value="true",
+                                     reasoning=f"Günlük PnL %{today_pnl_pct:.2f} ≤ -%{dd_limit:.1f} (drawdown eskalasyonu)")
+        except Exception as e:
+            logger.error(f"[Friday CEO] Drawdown eskalasyon kontrolü hatası: {e}")
+
+    def _detect_error_storm(self, minutes: int = 15, threshold: int = 10) -> tuple[Optional[str], int]:
+        """logs/bot.log'da son N dk'da aynı ERROR satırının tekrarını sayar.
+
+        Returns: (en_cok_tekrarlanan_hata_satiri | None, tekrar_sayisi)
+        """
+        try:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            log_path = os.path.join(base_dir, getattr(config, "LOG_DIR", "logs"), "bot.log")
+            if not os.path.exists(log_path):
+                return None, 0
+            # NEDEN: Dev log dosyasının tamamını okumak yerine son ~256KB yeterli
+            # (15 dk penceresi için fazlasıyla geniş).
+            with open(log_path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - 262144))
+                tail = f.read().decode("utf-8", errors="replace")
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+            counts: dict = {}
+            for line in tail.splitlines():
+                if "ERROR" not in line:
+                    continue
+                # Format: "2026-06-12 21:00:00,123 [ERROR] ..." — timestamp ilk 19 char
+                try:
+                    ts = datetime.strptime(line[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                    if ts < cutoff:
+                        continue
+                except Exception:
+                    continue  # timestamp'siz satır (traceback devamı) sayılmaz
+                # Mesaj gövdesi: timestamp + ms kısmı atılır → aynı hata aynı imza
+                msg_body = line[24:].strip() if len(line) > 24 else line.strip()
+                counts[msg_body] = counts.get(msg_body, 0) + 1
+            if not counts:
+                return None, 0
+            top_line, top_count = max(counts.items(), key=lambda kv: kv[1])
+            if top_count >= threshold:
+                return top_line, top_count
+            return None, 0
+        except Exception as e:
+            logger.debug(f"[Friday CEO] error storm tarama hatası: {e}")
+            return None, 0
+
+    # ── Faz 2.4 — Sabah Brifingi ─────────────────────────────────────────────
+
+    def generate_morning_briefing(self) -> str:
+        """Sabah brifingi metnini şablona oturtarak üretir (Faz 2.4 / Faz 5 şablonu).
+
+        Dünün performansı + sistem durumu + son 24h Friday kararları +
+        Ghost özeti + günün tek cümlelik planı.
+        """
+        from core import friday_decisions as _fd
+        now = datetime.now(timezone.utc)
+        environment = getattr(config, "EXECUTION_MODE", "paper")
+        gun_adlari = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+        ay_adlari = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"]
+        tarih = f"{now.day} {ay_adlari[now.month - 1]} {gun_adlari[now.weekday()]}"
+
+        # Dünün metrikleri
+        yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        n_trades = wins = losses = 0
+        pnl_sum = r_sum = 0.0
+        balance = 0.0
+        dd_pct = 0.0
+        try:
+            with database.open_db(self.db_path, timeout=5) as conn:
+                rows = conn.execute(
+                    "SELECT net_pnl, risk_usd, r_multiple FROM trades "
+                    "WHERE DATE(close_time) = ? AND status = 'closed' AND environment = ?",
+                    (yesterday, environment),
+                ).fetchall()
+                n_trades = len(rows)
+                for r in rows:
+                    pnl = float(r["net_pnl"] or 0.0)
+                    pnl_sum += pnl
+                    if pnl > 0:
+                        wins += 1
+                    else:
+                        losses += 1
+                    rm = float(r["r_multiple"] or 0.0)
+                    if rm == 0.0 and float(r["risk_usd"] or 0.0) > 0:
+                        rm = pnl / float(r["risk_usd"])
+                    r_sum += rm
+                bal_row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+                balance = float(bal_row[0] or 0.0) if bal_row else 0.0
+                # 30 günlük tepe bakiyeden düşüş (drawdown)
+                peak_row = conn.execute(
+                    "SELECT MAX(balance_after) FROM balance_ledger WHERE created_at >= ?",
+                    ((now - timedelta(days=30)).isoformat(),),
+                ).fetchone()
+                peak = float(peak_row[0] or 0.0) if peak_row else 0.0
+                if peak > 0 and balance > 0:
+                    dd_pct = min(0.0, (balance - peak) / peak * 100.0)
+        except Exception as e:
+            logger.error(f"[Friday CEO] Sabah brifingi metrik hatası: {e}")
+
+        # Sistem canlılığı (heartbeat yaşı) — yalan 'uptime %100' yazmak yerine dürüst gösterge
+        hb_age = self._heartbeat_age_seconds()
+        if hb_age is not None and hb_age < 120:
+            sistem_str = f"🟢 Canlı (hb {hb_age:.0f}sn)"
+        elif hb_age is not None:
+            sistem_str = f"🔴 Heartbeat {hb_age:.0f}sn bayat"
+        else:
+            sistem_str = "⚪ Heartbeat verisi yok"
+
+        regime = "NEUTRAL"
+        try:
+            from database import get_market_regime
+            regime = get_market_regime() or "NEUTRAL"
+        except Exception:
+            pass
+        regime_note = "temkinli mod" if "CHOPPY" in regime else ("trend takibi" if "TREND" in regime else "nötr mod")
+
+        # Son 24h Friday kararları özeti
+        karar_lines = []
+        try:
+            for d in _fd.get_recent_decisions(10):
+                created = str(d.get("created_at") or "")
+                try:
+                    if datetime.fromisoformat(created) < now - timedelta(hours=24):
+                        continue
+                except Exception:
+                    continue
+                change = ""
+                if d.get("param_key"):
+                    change = f" {d['param_key']} {d.get('old_value')}→{d.get('new_value')}"
+                score = d.get("outcome_score")
+                score_str = f" (skor: {score:+.1f} {'✓' if score >= 0 else '✗'})" if score is not None else ""
+                karar_lines.append(f"{d.get('decision_type')}{change}{score_str}")
+        except Exception:
+            pass
+        kararlar_str = "; ".join(karar_lines[:3]) if karar_lines else "değişiklik yok"
+
+        # Ghost özeti: son 24h uygulanan öneri + 7 günlük sanal WR
+        ghost_applied = 0
+        ghost_wr = None
+        try:
+            with database.open_db(self.db_path, timeout=5) as conn:
+                ghost_applied = conn.execute(
+                    "SELECT COUNT(*) FROM ghost_suggestions WHERE applied = 1 AND created_at >= ?",
+                    ((now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S"),),
+                ).fetchone()[0]
+                row = conn.execute(
+                    "SELECT SUM(CASE WHEN virtual_outcome='WIN' THEN 1 ELSE 0 END), COUNT(*) "
+                    "FROM ghost_results WHERE virtual_outcome IN ('WIN','LOSS') AND simulated_at >= ?",
+                    ((now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S"),),
+                ).fetchone()
+                if row and row[1]:
+                    ghost_wr = row[0] / row[1] * 100.0
+        except Exception:
+            pass
+        ghost_str = f"{ghost_applied} öneri uygulandı"
+        if ghost_wr is not None:
+            ghost_str += f", sanal WR {ghost_wr:.0f}%"
+
+        # Günün planı — LLM varsa tek cümle, yoksa kural tabanlı
+        plan_sentence = ""
+        try:
+            llm_provider = ""
+            if getattr(config, "GEMINI_API_KEY", ""):
+                llm_provider = "gemini"
+            elif getattr(config, "ANTHROPIC_API_KEY", ""):
+                llm_provider = "anthropic"
+            if llm_provider and getattr(config, "FRIDAY_LLM_MODE", "offline").lower() != "offline":
+                plan_sentence = self._generate_text(
+                    llm_provider,
+                    "Sen trading sistemi CEO'su Friday'sin. TEK kısa cümleyle (maks 15 kelime) bugünün planını Türkçe söyle.",
+                    f"Rejim: {regime}. Dün: {n_trades} işlem, PnL ${pnl_sum:+.2f}. Drawdown: %{dd_pct:.1f}.",
+                    "subagent",
+                ).strip()
+        except Exception as _plan_err:
+            logger.debug(f"[Friday CEO] Plan cümlesi LLM'den alınamadı: {_plan_err}")
+        if not plan_sentence:
+            if "CHOPPY" in regime:
+                plan_sentence = "Dalgalı rejimde seçici kalıp yüksek kaliteli kurulumları bekliyorum."
+            elif pnl_sum < 0:
+                plan_sentence = "Dünün kaybını telafi için aceleci davranmadan disiplinli devam ediyorum."
+            else:
+                plan_sentence = "Mevcut momentumu koruyarak planlı işlem akışına devam ediyorum."
+
+        wl_str = f"{wins}W-{losses}L" if n_trades else "işlem yok"
+        return (
+            f"☀️ <b>GÜNAYDIN BOSS — {tarih}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"Dün: {n_trades} işlem • {wl_str} • ${pnl_sum:+.2f} ({r_sum:+.1f}R)\n"
+            f"Bakiye: <code>${balance:,.2f}</code> • DD: %{dd_pct:.1f} • Sistem: {sistem_str}\n"
+            f"Rejim: <code>{regime}</code> → {regime_note}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 Kararlarım (24h): {kararlar_str}\n"
+            f"👻 Ghost: {ghost_str}\n"
+            f"🎯 Bugünkü plan: {plan_sentence}"
+        )
+
+    def send_morning_brief(self) -> str:
+        """Sabah brifingini üretir, Telegram'a (opsiyonel sesli not ile) gönderir."""
+        brief = self.generate_morning_briefing()
+        try:
+            telegram_delivery.send_message(brief)
+            voice_bytes = self.generate_voice_from_text(brief)
+            if voice_bytes:
+                telegram_delivery.send_voice(voice_bytes, caption="Friday Sabah Brifingi")
+        except Exception as e:
+            logger.error(f"[Friday CEO] Sabah brifingi gönderilemedi: {e}")
+        return brief
 
 
 

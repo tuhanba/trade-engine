@@ -752,6 +752,15 @@ def init_db() -> None:
                 created_at    TEXT DEFAULT (datetime('now'))
             )
         """)
+        # NEDEN (Faz 2.1): Friday karar günlüğü — şema tek kaynaktan
+        # (core/friday_decisions.FRIDAY_DECISIONS_DDL) gelir; migration
+        # scripti de aynı sabiti kullanır (kopya sapması olmaz).
+        try:
+            from core.friday_decisions import FRIDAY_DECISIONS_DDL, FRIDAY_DECISIONS_INDEX_DDL
+            conn.execute(FRIDAY_DECISIONS_DDL)
+            conn.execute(FRIDAY_DECISIONS_INDEX_DDL)
+        except Exception as _fd_err:
+            logger.warning(f"friday_decisions tablosu oluşturulamadı: {_fd_err}")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS adaptive_stats (
                 id          TEXT PRIMARY KEY,

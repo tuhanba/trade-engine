@@ -182,6 +182,10 @@ class AsyncScalpEngine:
             self.friday_ceo = FridayCeo(self.client)
             asyncio.create_task(self._friday_ceo_loop())
             asyncio.create_task(self._friday_monitor_loop())
+            # Faz 2.1: Karar günlüğü sonuç takibi (saatte bir outcome doldurur)
+            asyncio.create_task(self._friday_outcome_loop())
+            # Faz 2.4: Sabah brifingi (06:00 UTC / 09:00 TR, idempotent)
+            asyncio.create_task(self._friday_morning_brief_loop())
         except Exception as e:
             logger.error(f"Friday CEO başlatılamadı: {e}")
 
@@ -339,6 +343,46 @@ class AsyncScalpEngine:
             except Exception as e:
                 logger.error(f"[Friday Monitor Loop] Task failed: {e}")
             await asyncio.sleep(300) # 5 minutes
+
+    async def _friday_outcome_loop(self):
+        """Faz 2.1: friday_decisions outcome doldurma döngüsü (saatte bir).
+
+        NEDEN: Karar günlüğü ancak sonuçlarla (24h/72h PnL-WR-expectancy delta)
+        birleşince hesap verebilirlik üretir; outcome_score Friday'in bir
+        sonraki karar context'ine geri beslenir.
+        """
+        await asyncio.sleep(600)  # açılışta 10 dk bekle — DB/akış otursun
+        while True:
+            try:
+                from core.friday_decisions import fill_pending_outcomes
+                filled = await asyncio.to_thread(fill_pending_outcomes)
+                if filled:
+                    logger.info(f"[FridayOutcome] {filled} karar outcome'u dolduruldu.")
+            except Exception as e:
+                logger.error(f"[FridayOutcome] Döngü hatası: {e}")
+            await asyncio.sleep(3600)  # 1 saat
+
+    async def _friday_morning_brief_loop(self):
+        """Faz 2.4: Sabah brifingi — her gün 06:00 UTC (09:00 TR).
+
+        _weekly_digest_loop kalıbı örnek alındı: 10 dk'da bir kontrol,
+        last_morning_brief_date state key'i ile idempotent (çifte gönderim yok).
+        """
+        from database import get_system_state, update_system_state
+        from datetime import datetime, timezone
+        while True:
+            try:
+                now = datetime.now(timezone.utc)
+                if now.hour == 6 and self.friday_ceo:
+                    today_str = now.strftime("%Y-%m-%d")
+                    last_sent = get_system_state("last_morning_brief_date", default="")
+                    if last_sent != today_str:
+                        logger.info("[MorningBrief] Sabah brifingi oluşturuluyor ve gönderiliyor...")
+                        await asyncio.to_thread(self.friday_ceo.send_morning_brief)
+                        await asyncio.to_thread(update_system_state, "last_morning_brief_date", today_str)
+            except Exception as e:
+                logger.error(f"[MorningBrief] Hata oluştu: {e}")
+            await asyncio.sleep(600)  # 10 dakikada bir kontrol
 
     async def stop(self):
         logger.info("Stopping engine...")
