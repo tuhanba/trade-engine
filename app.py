@@ -425,14 +425,11 @@ def api_settings_update():
         
         if key in _DYNAMIC_PARAMS_MAP:
             db_key, cast_fn = _DYNAMIC_PARAMS_MAP[key]
-            with get_conn() as conn:
-                conn.execute(
-                    "INSERT OR REPLACE INTO system_state (key, value) VALUES (?, ?)",
-                    (db_key, str(val))
-                )
-                conn.commit()
+            # NEDEN (Faz 1.1): system_state yazımı tek noktadan geçer —
+            # update_system_state hem SQLite hem Redis cfg cache'ini günceller.
+            database.update_system_state(db_key, str(val))
             db_updated = True
-            
+
         elif key in _AI_PARAMS_MAP:
             db_col, cast_fn = _AI_PARAMS_MAP[key]
             with get_conn() as conn:
@@ -446,12 +443,8 @@ def api_settings_update():
                     conn.commit()
                     db_updated = True
         else:
-            with get_conn() as conn:
-                conn.execute(
-                    "INSERT OR REPLACE INTO system_state (key, value) VALUES (?, ?)",
-                    (key, str(val))
-                )
-                conn.commit()
+            # NEDEN (Faz 1.1): tek yazım noktası — Redis senkronu dahil.
+            database.update_system_state(key, str(val))
             db_updated = True
             
         if db_updated:
@@ -483,30 +476,21 @@ def api_config_update():
         if key not in allowed_keys:
             return jsonify({"ok": False, "error": f"Unauthorized configuration parameter: {key}"}), 403
         
-        # Save to SQLite system_state table
-        with get_conn() as conn:
-            conn.execute("""
-                INSERT INTO system_state (key, value, updated_at)
-                VALUES (?, ?, datetime('now'))
-                ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
-            """, (key, str(value), str(value)))
-            
-            # If we updated tg_execution_mode, also write to bot_status key 'tg_execution_mode' for fallback
-            if key == "tg_execution_mode":
+        # NEDEN (Faz 1.1): system_state yazımı tek noktadan geçer —
+        # update_system_state hem SQLite hem Redis cfg cache'ini günceller.
+        database.update_system_state(key, str(value))
+
+        # If we updated tg_execution_mode/tg_human_mode, also write to bot_status for fallback
+        if key in ("tg_execution_mode", "tg_human_mode"):
+            with get_conn() as conn:
                 conn.execute("""
                     INSERT INTO bot_status (key, value, updated_at)
                     VALUES (?, ?, datetime('now'))
                     ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
                 """, (key, str(value), str(value)))
-            elif key == "tg_human_mode":
-                conn.execute("""
-                    INSERT INTO bot_status (key, value, updated_at)
-                    VALUES (?, ?, datetime('now'))
-                    ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
-                """, (key, str(value), str(value)))
-                
-            conn.commit()
-            
+                conn.commit()
+
+
         logger.info(f"[Config] Updated config '{key}' to '{value}' via Dashboard API")
         return jsonify({"ok": True, "message": f"Successfully updated {key} to {value}"})
     except Exception as e:
@@ -1726,6 +1710,20 @@ def api_friday_chat():
 
 def main():
     """DB'yi hazırla ve Flask server'ı başlat."""
+    # NEDEN (Faz 1.1): Dashboard süreci de system_state yazar (/api/settings).
+    # Redis init edilmezse update_system_state'in cfg senkronu no-op kalır ve
+    # engine süreci Redis'ten bayat parametre okur. Engine ile aynı init akışı.
+    if getattr(config, "REDIS_ENABLED", True):
+        try:
+            from core import redis_state
+            redis_state.init(
+                host=config.REDIS_HOST,
+                port=config.REDIS_PORT,
+                db=config.REDIS_DB,
+                password=config.REDIS_PASSWORD,
+            )
+        except Exception as _re:
+            logger.warning("Redis başlatılamadı: %s — SQLite fallback aktif", _re)
     database.init_db()
     database.migrate_db()
     logger.info(

@@ -134,16 +134,13 @@ class AsyncScalpEngine:
             self._last_trade_opened_at = time.time()
             logger.info("[ThresholdDecay] Trade opened event received. Resetting inactivity decay tracker.")
             try:
-                from database import get_conn
                 import config
                 base_thr = getattr(config, "_STATIC_DEFAULTS", {}).get("TRADE_THRESHOLD", 55.0)
-                with get_conn() as conn:
-                    conn.execute("""
-                        INSERT INTO system_state (key, value, updated_at)
-                        VALUES ('trade_threshold', ?, datetime('now'))
-                        ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
-                    """, (str(base_thr), str(base_thr)))
-                    conn.commit()
+                # NEDEN (Faz 1.1): trade_threshold dinamik bir cfg parametresi —
+                # doğrudan SQL yazımı Redis cfg cache'ini bayatlatır. Tek yazım
+                # noktası update_system_state (SQLite → Redis senkronu).
+                from database import update_system_state
+                update_system_state("trade_threshold", str(base_thr))
                 logger.info(f"[ThresholdDecay] Reset trade_threshold in system_state to baseline: {base_thr:.1f}")
             except Exception as _e:
                 logger.debug(f"[ThresholdDecay] Failed to reset threshold in DB: {_e}")
@@ -376,14 +373,10 @@ class AsyncScalpEngine:
 
     def _update_trade_threshold_in_db(self, new_val: float):
         try:
-            from database import get_conn
-            with get_conn() as conn:
-                conn.execute("""
-                    INSERT INTO system_state (key, value, updated_at)
-                    VALUES ('trade_threshold', ?, datetime('now'))
-                    ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
-                """, (str(new_val), str(new_val)))
-                conn.commit()
+            # NEDEN (Faz 1.1): trade_threshold dinamik bir cfg parametresi —
+            # tek yazım noktası update_system_state (SQLite → Redis senkronu).
+            from database import update_system_state
+            update_system_state("trade_threshold", str(new_val))
         except Exception as e:
             logger.error(f"[ThresholdDecay] DB update error: {e}")
 

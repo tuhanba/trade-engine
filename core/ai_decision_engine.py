@@ -371,12 +371,24 @@ class AIDecisionEngine:
                     ),
                 )
                 # system_state tablosuna da yaz (dinamik config için)
+                # NEDEN: update_system_state'e yönlendirilmedi çünkü bu sınıf
+                # testlerde özel db_path (:memory:) ile kullanılıyor; o fonksiyon
+                # daima config.DB_PATH'e yazar. SQLite yazımı yerelde kalır,
+                # Redis cfg senkronu aşağıda ayrıca yapılır (Faz 1.1).
                 conn.execute("""
                     INSERT INTO system_state (key, value, updated_at)
                     VALUES ('trade_threshold', ?, datetime('now'))
                     ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
                 """, (str(new_threshold), str(new_threshold)))
                 conn.commit()
+            try:
+                import config as _cfg
+                if self.db_path == _cfg.DB_PATH:
+                    # NEDEN: Redis cfg cache'i bayat kalmasın — prod DB'ye yazıldıysa senkronla.
+                    from core import redis_state
+                    redis_state.set_param("trade_threshold", str(new_threshold))
+            except Exception:
+                pass
             logger.info(
                 f"[AI] TRADE_THRESHOLD {old_threshold:.1f} -> {new_threshold:.1f} "
                 f"(ghost_wr={gwr:.1%} n={total})"

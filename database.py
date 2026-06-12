@@ -2612,33 +2612,45 @@ _AUDITED_KEYS = {"trade_threshold", "risk_pct", "regime_filter_min_quality_in_ch
 
 def set_state(key: str, value: str, actor: str = "system", reason: str = ""):
     try:
-        with get_conn() as conn:
-            if key in _AUDITED_KEYS:
-                try:
+        if key in _AUDITED_KEYS:
+            try:
+                with get_conn() as conn:
                     row = conn.execute("SELECT value FROM system_state WHERE key = ?", (key,)).fetchone()
                     old_value = row[0] if row else ""
                     conn.execute("""
                         INSERT INTO param_audit (key, old_value, new_value, actor, reason)
                         VALUES (?, ?, ?, ?, ?)
                     """, (key, old_value, value, actor, reason))
-                except Exception as audit_e:
-                    logger.warning(f"[DB] param_audit write failed: {audit_e}")
-            conn.execute("""
-                INSERT INTO system_state (key, value, updated_at)
-                VALUES (?, ?, datetime('now'))
-                ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')
-            """, (key, value, value))
+            except Exception as audit_e:
+                logger.warning(f"[DB] param_audit write failed: {audit_e}")
+        # NEDEN: system_state yazımı TEK fonksiyondan geçer (update_system_state)
+        # — hem SQLite hem Redis cfg cache'i orada senkronlanır (Faz 1.1).
+        update_system_state(key, value)
     except Exception as e:
         logger.warning(f"[DB] set_state hatası: {e}")
 
 
 def update_system_state(key: str, value: str):
+    """system_state'e yazar — TEK yetkili yazım noktası (Faz 1.1).
+
+    NEDEN: Yazma sırası ÖNCE SQLite (kalıcılık/SSoT) → SONRA Redis (cfg:{key}
+    write-through cache). Başka hiçbir yerde system_state'e doğrudan yazılmamalı;
+    aksi halde Redis'teki kalıcı cfg key'i bayatlar ve config.__getattr__
+    okuyucuları eski değeri görür.
+    """
     with get_conn() as conn:
         conn.execute("""
             INSERT INTO system_state (key, value, updated_at)
             VALUES (?, ?, datetime('now'))
             ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
         """, (key, value, value))
+    try:
+        from core import redis_state
+        redis_state.set_param(key, value)
+    except Exception:
+        # Redis senkronu başarısız olsa bile SQLite yazımı geçerli —
+        # redis_state.set_param kendi self-heal kuyruğunu yönetir.
+        pass
 
 
 def get_system_state(key: str, default="-") -> str:

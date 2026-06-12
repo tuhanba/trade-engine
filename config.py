@@ -393,19 +393,41 @@ def __getattr__(name: str) -> Any:
 def _read_dynamic_param_from_db(name: str) -> Any:
     import sqlite3
     import time
-    
+
     max_retries = 5
     base_delay = 0.05
-    
+
     if name in _DYNAMIC_PARAMS_MAP:
         db_key, cast_fn = _DYNAMIC_PARAMS_MAP[name]
+
+        # 1) Redis-first (Faz 1.1)
+        # NEDEN: Ghost loop 12 sn'de bir, execution monitoring 1 sn'de bir bu
+        # yoldan geçiyor — her okumada SQLite bağlantısı açmak lock baskısının
+        # ana kaynağıydı. Redis'te varsa SQLite'a HİÇ gidilmez.
+        try:
+            from core import redis_state
+            raw = redis_state.get_param(db_key)
+            if raw is not None:
+                return cast_fn(raw)
+        except Exception:
+            pass  # Redis sorunlu → aşağıdaki SQLite fallback aynen çalışır
+
+        # 2) SQLite fallback + read-repair
+        # NEDEN (Faz 1.2): doğrudan sqlite3.connect yerine database.get_conn()
+        # kullanılır — WAL/busy_timeout pragma'ları tek noktadan yönetilir.
         for attempt in range(max_retries):
             try:
-                conn = sqlite3.connect(DB_PATH, timeout=30.0)
-                conn.row_factory = sqlite3.Row
-                row = conn.execute("SELECT value FROM system_state WHERE key = ?", (db_key,)).fetchone()
-                conn.close()
+                import database
+                with database.get_conn() as conn:
+                    row = conn.execute("SELECT value FROM system_state WHERE key = ?", (db_key,)).fetchone()
                 if row and row["value"] is not None:
+                    try:
+                        from core import redis_state
+                        # NEDEN: read-repair — miss sonrası Redis'e kalıcı yaz,
+                        # sonraki okumalar SQLite'a inmesin.
+                        redis_state.set_param(db_key, row["value"])
+                    except Exception:
+                        pass
                     return cast_fn(row["value"])
                 break
             except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
@@ -419,10 +441,10 @@ def _read_dynamic_param_from_db(name: str) -> Any:
         db_col, cast_fn = _AI_PARAMS_MAP[name]
         for attempt in range(max_retries):
             try:
-                conn = sqlite3.connect(DB_PATH, timeout=30.0)
-                conn.row_factory = sqlite3.Row
-                row = conn.execute("SELECT * FROM params ORDER BY id DESC LIMIT 1").fetchone()
-                conn.close()
+                # NEDEN (Faz 1.2): database.get_conn() — WAL pragma disiplini.
+                import database
+                with database.get_conn() as conn:
+                    row = conn.execute("SELECT * FROM params ORDER BY id DESC LIMIT 1").fetchone()
                 if row and row[db_col] is not None:
                     return cast_fn(row[db_col])
                 break
