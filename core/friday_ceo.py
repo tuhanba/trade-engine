@@ -1282,7 +1282,6 @@ class FridayCeo:
                     )
                     if calls_today == llm_budget:
                         try:
-                            import telegram_delivery
                             telegram_delivery.send_message(
                                 f"ℹ️ <b>Friday LLM günlük bütçeye ulaştı</b> ({llm_budget} çağrı). "
                                 f"Gece yarısı sıfırlanacak."

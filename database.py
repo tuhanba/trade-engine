@@ -2614,12 +2614,15 @@ def set_state(key: str, value: str, actor: str = "system", reason: str = ""):
     try:
         with get_conn() as conn:
             if key in _AUDITED_KEYS:
-                row = conn.execute("SELECT value FROM system_state WHERE key = ?", (key,)).fetchone()
-                old_value = row[0] if row else ""
-                conn.execute("""
-                    INSERT INTO param_audit (key, old_value, new_value, actor, reason)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (key, old_value, value, actor, reason))
+                try:
+                    row = conn.execute("SELECT value FROM system_state WHERE key = ?", (key,)).fetchone()
+                    old_value = row[0] if row else ""
+                    conn.execute("""
+                        INSERT INTO param_audit (key, old_value, new_value, actor, reason)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (key, old_value, value, actor, reason))
+                except Exception as audit_e:
+                    logger.warning(f"[DB] param_audit write failed: {audit_e}")
             conn.execute("""
                 INSERT INTO system_state (key, value, updated_at)
                 VALUES (?, ?, datetime('now'))
