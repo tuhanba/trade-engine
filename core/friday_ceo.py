@@ -555,19 +555,30 @@ class FridayCeo:
             return None
 
     def get_system_context(self) -> dict:
-        """Gathers extensive system telemetry for Friday to make decision."""
+        """Gathers extensive system telemetry for Friday to make decision.
+
+        P1 BUG FIX: Önceden tek dev try bloğu vardı; trades sorgusu hata
+        verirse config / market_regime / balance hiç dolmuyor ve Friday
+        kör karar veriyordu. Artık her bölüm bağımsız try/except içinde —
+        bir bölüm çökse bile diğerleri her zaman dolar.
+        """
         ctx = {}
+
+        # 1. DB size
         try:
-            # 1. DB size
             db_size_mb = 0.0
             if os.path.exists(self.db_path):
                 db_size_mb = os.path.getsize(self.db_path) / (1024 * 1024)
             ctx["db_size_mb"] = round(db_size_mb, 2)
-            
-            # 2. Daily summary metrics
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            environment = getattr(config, "EXECUTION_MODE", "paper")
-            
+        except Exception as e:
+            ctx["db_size_mb"] = 0.0
+            logger.warning(f"[Friday CEO] Context db_size error: {e}")
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        environment = getattr(config, "EXECUTION_MODE", "paper")
+
+        # 2. Daily summary metrics + balance + open trades
+        try:
             conn = sqlite3.connect(self.db_path, timeout=5)
             try:
                 row = conn.execute("""
@@ -602,8 +613,18 @@ class FridayCeo:
                 ]
             finally:
                 conn.close()
-                
-            # 3. Active parameters
+        except Exception as e:
+            ctx.setdefault("today_trades", 0)
+            ctx.setdefault("today_wins", 0)
+            ctx.setdefault("today_losses", 0)
+            ctx.setdefault("today_pnl", 0.0)
+            ctx.setdefault("balance", 0.0)
+            ctx.setdefault("open_trades", [])
+            ctx["error"] = str(e)
+            logger.error(f"[Friday CEO] Context trade metrics error: {e}")
+
+        # 3. Active parameters — DB hatasından bağımsız HER ZAMAN doldurulur
+        try:
             ctx["config"] = {
                 "trade_threshold": float(getattr(config, "TRADE_THRESHOLD", 55.0)),
                 "telegram_threshold": float(getattr(config, "TELEGRAM_THRESHOLD", 35.0)),
@@ -616,15 +637,18 @@ class FridayCeo:
                 "daily_profit_lock_pct": float(getattr(config, "DAILY_PROFIT_LOCK_PCT", 3.0)),
                 "weekly_profit_lock_pct": float(getattr(config, "WEEKLY_PROFIT_LOCK_PCT", 10.0)),
             }
-            
-            # 4. Market regime
+        except Exception as e:
+            ctx["config"] = {}
+            logger.warning(f"[Friday CEO] Context config error: {e}")
+
+        # 4. Market regime
+        try:
             from database import get_market_regime
             ctx["market_regime"] = get_market_regime()
-            
         except Exception as e:
-            ctx["error"] = str(e)
-            logger.error(f"[Friday CEO] Context collection error: {e}")
-            
+            ctx["market_regime"] = "NEUTRAL"
+            logger.warning(f"[Friday CEO] Context regime error: {e}")
+
         return ctx
 
     def _parse_decisions(self, text: str) -> dict:

@@ -153,7 +153,8 @@ class TestPhaseGQuantum(unittest.TestCase):
     @patch('core.online_learning.SGDOnlineLearner.predict_proba')
     @patch('core.portfolio_risk.get_klines')
     def test_ml_online_gating(self, mock_klines, mock_predict):
-        """Verify that online learner win probability below threshold rejects paper trades."""
+        """Verify that low online win probability SCALES RISK 0.5x (current design)
+        instead of rejecting the trade outright (old behaviour)."""
         from core.data_layer import SignalData
         from execution_engine import ExecutionEngine
         
@@ -168,19 +169,24 @@ class TestPhaseGQuantum(unittest.TestCase):
         
         engine = ExecutionEngine()
         sig = SignalData(symbol="BTCUSDT", side="LONG", entry_price=50000.0, stop_loss=49500.0, leverage=10)
+        sig.risk_pct = 1.0
         
-        # Should return None (rejected)
-        trade_id = engine.open_paper_trade(sig)
-        self.assertIsNone(trade_id)
-        
-        # Setup mock learner to return high probability
-        mock_predict.return_value = 0.70  # 70% win prob (high)
-        # Mock database insertion to avoid database lock issues in tests
-        with patch('database.create_trade', return_value=123):
-            # Because it is high probability, it should proceed
+        # GÜNCEL DAVRANIŞ: trade reddedilmez, riski 0.5x ölçeklenir
+        with patch('database.create_trade', return_value=122):
             with patch('execution_engine.get_current_price', return_value=50000.0):
                 trade_id = engine.open_paper_trade(sig)
                 self.assertIsNotNone(trade_id)
+        self.assertAlmostEqual(getattr(sig, "risk_pct", 1.0), 0.5, places=4)
+        
+        # Setup mock learner to return high probability — risk DOKUNULMAZ
+        mock_predict.return_value = 0.70  # 70% win prob (high)
+        sig2 = SignalData(symbol="BTCUSDT", side="LONG", entry_price=50000.0, stop_loss=49500.0, leverage=10)
+        sig2.risk_pct = 1.0
+        with patch('database.create_trade', return_value=123):
+            with patch('execution_engine.get_current_price', return_value=50000.0):
+                trade_id = engine.open_paper_trade(sig2)
+                self.assertIsNotNone(trade_id)
+        self.assertAlmostEqual(getattr(sig2, "risk_pct", 1.0), 1.0, places=4)
 
     @patch('core.redis_feature_store.set_features')
     def test_redis_features_caching(self, mock_set_features):

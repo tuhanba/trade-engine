@@ -1,3 +1,12 @@
+# AurvexAI — Production docker-compose
+# Eklenenler: log rotasyonu (json-file max-size), redis healthcheck +
+# depends_on condition, redis restart dayanıklılığı.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
 services:
   # 0. Redis
   redis:
@@ -6,6 +15,12 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   # 1. Trade Engine
   engine:
@@ -21,7 +36,9 @@ services:
     environment:
       - TZ=UTC
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "python", "health_check.py", "--fast", "--role", "engine"]
       interval: 1m
@@ -42,8 +59,11 @@ services:
     environment:
       - TZ=UTC
     depends_on:
-      - engine
-      - redis
+      engine:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "python", "health_check.py", "--fast", "--role", "dashboard"]
       interval: 1m

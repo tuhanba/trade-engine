@@ -13,6 +13,7 @@ class EventBus:
         self._queue = None
         self._running = False
         self._task = None
+        self._loop = None  # P0 FIX: ana event loop referansı (publish_sync için)
 
     def subscribe(self, event_type: EventType, callback: Callable[[Event], Awaitable[None]]):
         if callback not in self._subscribers[event_type]:
@@ -29,10 +30,21 @@ class EventBus:
             await self._queue.put(event)
 
     def publish_sync(self, event: Event):
-        """Thread-safe way to publish events from synchronous code."""
+        """Thread-safe way to publish events from synchronous code.
+
+        P0 BUG FIX: asyncio.get_running_loop() worker thread'lerde
+        (asyncio.to_thread içinden çağrıldığında) RuntimeError fırlatır.
+        execution_engine._finalize() bu yoldan çalıştığı için
+        TRADE_CLOSED ve TP_OR_SL_TRIGGERED eventleri sessizce kayboluyordu
+        (kapanış Telegram bildirimleri hiç gitmiyordu).
+        Çözüm: start() anında yakalanan ana loop referansı kullanılır.
+        """
         if self._queue and self._running:
             try:
-                loop = asyncio.get_running_loop()
+                loop = self._loop
+                if loop is None or loop.is_closed():
+                    # Fallback: ana loop yoksa çağıran thread'in loop'unu dene
+                    loop = asyncio.get_running_loop()
                 loop.call_soon_threadsafe(self._queue.put_nowait, event)
             except Exception as e:
                 logger.error(f"Error in publish_sync: {e}")
@@ -65,6 +77,7 @@ class EventBus:
     async def start(self):
         if not self._running:
             self._queue = asyncio.Queue()
+            self._loop = asyncio.get_running_loop()  # P0 FIX: ana loop'u yakala
             self._running = True
             self._task = asyncio.create_task(self._process_events())
             logger.info("EventBus started")

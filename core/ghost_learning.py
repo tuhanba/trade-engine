@@ -187,7 +187,13 @@ def _simulate_single_ghost(ghost: dict, client, now: datetime, prices: dict = No
     )
 
     # ── SGD Online Learner update ──────────────────────────────────────
-    if outcome in ("WIN", "LOSS"):
+    # P1 BUG FIX: reject_reason == "ALLOW" olan kayıtlar gerçek trade'e
+    # dönüşen sinyallerdir. Bunlar zaten gerçek trade kapanışında
+    # update_online_model() ile öğreniliyor; burada da öğrenmek aynı
+    # sonucun modeli İKİ KEZ güncellemesine (double-learning bias) yol
+    # açıyordu. Sadece gerçekten reddedilmiş (ghost) sinyaller öğrenilir.
+    _reject_reason = str(ghost.get("reject_reason") or "").upper()
+    if outcome in ("WIN", "LOSS") and _reject_reason != "ALLOW":
         try:
             import json
             from core.online_learning import update_online_model
