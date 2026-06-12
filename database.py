@@ -28,6 +28,7 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(config.DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA cache_size=-64000")  # 64MB cache (negatif = KB)
@@ -41,6 +42,7 @@ def get_conn() -> Generator[sqlite3.Connection, None, None]:
     conn = sqlite3.connect(config.DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
     try:
@@ -65,6 +67,7 @@ def open_db(db_path: str | None = None, timeout: int = 15) -> Generator[sqlite3.
     conn = sqlite3.connect(path, timeout=timeout, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA cache_size=-64000")
     try:
@@ -842,6 +845,17 @@ def init_db() -> None:
                 key        TEXT PRIMARY KEY,
                 value      TEXT DEFAULT '',
                 updated_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS param_audit (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts        TEXT DEFAULT (datetime('now')),
+                key       TEXT NOT NULL,
+                old_value TEXT DEFAULT '',
+                new_value TEXT NOT NULL,
+                actor     TEXT DEFAULT 'system',
+                reason    TEXT DEFAULT ''
             )
         """)
         conn.execute("""
@@ -2594,9 +2608,18 @@ def get_state(key: str) -> str:
         return None
 
 
-def set_state(key: str, value: str):
+_AUDITED_KEYS = {"trade_threshold", "risk_pct", "regime_filter_min_quality_in_choppy", "confirmation_mode"}
+
+def set_state(key: str, value: str, actor: str = "system", reason: str = ""):
     try:
         with get_conn() as conn:
+            if key in _AUDITED_KEYS:
+                row = conn.execute("SELECT value FROM system_state WHERE key = ?", (key,)).fetchone()
+                old_value = row[0] if row else ""
+                conn.execute("""
+                    INSERT INTO param_audit (key, old_value, new_value, actor, reason)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (key, old_value, value, actor, reason))
             conn.execute("""
                 INSERT INTO system_state (key, value, updated_at)
                 VALUES (?, ?, datetime('now'))

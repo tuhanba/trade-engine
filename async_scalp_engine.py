@@ -24,13 +24,21 @@ from telegram_manager import TelegramManager
 import telegram_delivery
 
 os.makedirs("logs", exist_ok=True)
+_log_dir = os.environ.get("LOG_DIR", "logs")
+os.makedirs(_log_dir, exist_ok=True)
+_log_file = os.path.join(_log_dir, "bot.log")
+
+from logging.handlers import RotatingFileHandler as _RFH
+_file_handler = _RFH(_log_file, maxBytes=20 * 1024 * 1024, backupCount=3, encoding="utf-8")
+_file_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s"))
+
 logging.basicConfig(
     level=logging.INFO,
     force=True,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("db/bot.log" if os.path.exists("db") else "bot.log", encoding="utf-8")
+        _file_handler,
     ]
 )
 logger = logging.getLogger("ax.async_engine")

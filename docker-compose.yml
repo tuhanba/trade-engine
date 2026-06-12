@@ -1,7 +1,5 @@
-version: '3.8'
-
 services:
-  # 0. Redis (Sıcak Veri Deposu)
+  # 0. Redis
   redis:
     image: redis:alpine
     container_name: aurvex_redis
@@ -9,32 +7,34 @@ services:
     ports:
       - "6379:6379"
 
-  # 1. Trade Engine (Botun Kalbi)
+  # 1. Trade Engine
   engine:
     build: .
     container_name: aurvex_engine
     restart: unless-stopped
     command: python async_scalp_engine.py
+    env_file: .env
     volumes:
       - ./:/app
     ports:
-      - "8000:8000"  # Prometheus metrik portu
+      - "8000:8000"
     environment:
       - TZ=UTC
     depends_on:
       - redis
     healthcheck:
-      test: ["CMD", "python", "health_check.py"]
+      test: ["CMD", "python", "health_check.py", "--fast", "--role", "engine"]
       interval: 1m
-      timeout: 10s
+      timeout: 30s
       retries: 3
 
-  # 2. Web Dashboard (Flask Arayüzü)
+  # 2. Web Dashboard
   dashboard:
     build: .
     container_name: aurvex_dashboard
     restart: unless-stopped
     command: python app.py
+    env_file: .env
     volumes:
       - ./:/app
     ports:
@@ -45,8 +45,7 @@ services:
       - engine
       - redis
     healthcheck:
-      test: ["CMD", "python", "health_check.py"]
+      test: ["CMD", "python", "health_check.py", "--fast", "--role", "dashboard"]
       interval: 1m
-      timeout: 10s
+      timeout: 30s
       retries: 3
-
