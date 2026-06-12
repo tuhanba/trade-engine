@@ -59,56 +59,58 @@ class MLSignalScorer:
     def _load_training_data(self):
         """Pattern memory tablosundan genişletilmiş eğitim verisi çeker."""
         try:
-            conn = sqlite3.connect(config.DB_PATH)
-            c = conn.cursor()
-            
-            # Veri kalitesi güvencesi: Sadece sağlıklı verileri al
-            c.execute("""
-                SELECT
-                    adx, rv, rsi5, rsi1, funding_favorable,
-                    bb_width_pct, ob_ratio, volume_m,
-                    COALESCE(btc_trend, 'NEUTRAL') as btc_trend,
-                    COALESCE(direction, 'LONG') as direction,
-                    COALESCE(session, 'OFF') as session,
-                    COALESCE(hold_minutes, 0) as hold_minutes,
-                    COALESCE(partial_exit, 0) as partial_exit,
-                    symbol,
-                    result,
-                    created_at,
-                    COALESCE(bb_width_chg, 0) as bb_width_chg,
-                    COALESCE(momentum_3c, 0) as momentum_3c,
-                    COALESCE(prev_result, 'NONE') as prev_result,
-                    COALESCE(funding_rate, 0) as funding_rate,
-                    COALESCE(cvd_value, 0) as cvd_value,
-                    COALESCE(oi_change_pct, 0) as oi_change_pct
-                FROM pattern_memory
-                WHERE result IN ('WIN','LOSS')
-                  AND rsi5 IS NOT NULL
-                  AND rsi1 IS NOT NULL
-                  AND adx IS NOT NULL
-                ORDER BY id DESC
-                LIMIT 1000
-            """)
-            rows = c.fetchall()
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db —
+            # doğrudan sqlite3.connect lock baskısı yaratıyordu.
+            from database import open_db
+            with open_db(config.DB_PATH) as conn:
+                c = conn.cursor()
 
-            # Coin bazlı istatistikler
-            c.execute("""
-                SELECT symbol,
-                       COUNT(*) as total,
-                       SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins
-                FROM pattern_memory
-                WHERE result IN ('WIN','LOSS')
-                GROUP BY symbol
-            """)
-            for row in c.fetchall():
-                sym, total, wins = row
-                self.coin_stats[sym] = {
-                    "total": total or 0,
-                    "wins": wins or 0,
-                    "win_rate": (wins or 0) / max(total, 1)
-                }
+                # Veri kalitesi güvencesi: Sadece sağlıklı verileri al
+                c.execute("""
+                    SELECT
+                        adx, rv, rsi5, rsi1, funding_favorable,
+                        bb_width_pct, ob_ratio, volume_m,
+                        COALESCE(btc_trend, 'NEUTRAL') as btc_trend,
+                        COALESCE(direction, 'LONG') as direction,
+                        COALESCE(session, 'OFF') as session,
+                        COALESCE(hold_minutes, 0) as hold_minutes,
+                        COALESCE(partial_exit, 0) as partial_exit,
+                        symbol,
+                        result,
+                        created_at,
+                        COALESCE(bb_width_chg, 0) as bb_width_chg,
+                        COALESCE(momentum_3c, 0) as momentum_3c,
+                        COALESCE(prev_result, 'NONE') as prev_result,
+                        COALESCE(funding_rate, 0) as funding_rate,
+                        COALESCE(cvd_value, 0) as cvd_value,
+                        COALESCE(oi_change_pct, 0) as oi_change_pct
+                    FROM pattern_memory
+                    WHERE result IN ('WIN','LOSS')
+                      AND rsi5 IS NOT NULL
+                      AND rsi1 IS NOT NULL
+                      AND adx IS NOT NULL
+                    ORDER BY id DESC
+                    LIMIT 1000
+                """)
+                rows = c.fetchall()
 
-            conn.close()
+                # Coin bazlı istatistikler
+                c.execute("""
+                    SELECT symbol,
+                           COUNT(*) as total,
+                           SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins
+                    FROM pattern_memory
+                    WHERE result IN ('WIN','LOSS')
+                    GROUP BY symbol
+                """)
+                for row in c.fetchall():
+                    sym, total, wins = row
+                    self.coin_stats[sym] = {
+                        "total": total or 0,
+                        "wins": wins or 0,
+                        "win_rate": (wins or 0) / max(total, 1)
+                    }
+
             return rows
         except sqlite3.OperationalError as e:
             if "no such table: pattern_memory" in str(e):

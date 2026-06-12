@@ -25,9 +25,10 @@ def tune_agent_weights(db_path: str = "") -> dict:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
         
         # 1. Fetch resolved candidates with metadata
+        # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+        from database import open_db
         candidates = []
-        with sqlite3.connect(path, timeout=10) as conn:
-            conn.row_factory = sqlite3.Row
+        with open_db(path, timeout=10) as conn:
             rows = conn.execute("""
                 SELECT symbol, side, metadata, market_regime, status, linked_trade_id
                 FROM signal_candidates
@@ -160,7 +161,11 @@ def tune_agent_weights(db_path: str = "") -> dict:
                 }
                 
                 # Save optimized weights to system state
-                with sqlite3.connect(path, timeout=10) as conn_write:
+                # NEDEN: update_system_state'e yönlendirilmedi — bu fonksiyon
+                # testlerde özel db_path ile çağrılıyor ve weight_* key'leri
+                # dinamik config parametresi değil (Redis cfg senkronu gerekmez).
+                # Bağlantı disiplini için database.open_db kullanılır (Faz 1.2).
+                with open_db(path, timeout=10) as conn_write:
                     conn_write.execute("""
                         INSERT INTO system_state (key, value, updated_at)
                         VALUES (?, ?, datetime('now'))

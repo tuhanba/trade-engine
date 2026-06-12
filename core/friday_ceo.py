@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import config
+import database
 import telegram_delivery
 
 logger = logging.getLogger("ax.friday")
@@ -492,14 +493,11 @@ class FridayCeo:
             import io
             
             # Fetch balance ledger history
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            try:
-                conn.row_factory = sqlite3.Row
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+            with database.open_db(self.db_path, timeout=5) as conn:
                 rows = conn.execute(
                     "SELECT balance_after, created_at FROM balance_ledger ORDER BY id ASC"
                 ).fetchall()
-            finally:
-                conn.close()
                 
             balances = []
             dates = []
@@ -579,8 +577,8 @@ class FridayCeo:
 
         # 2. Daily summary metrics + balance + open trades
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            try:
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+            with database.open_db(self.db_path, timeout=5) as conn:
                 row = conn.execute("""
                     SELECT COUNT(*), 
                            SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END),
@@ -611,8 +609,6 @@ class FridayCeo:
                         "entry": r[3], "sl": r[4], "tp1": r[5], "pnl": r[6]
                     } for r in open_rows
                 ]
-            finally:
-                conn.close()
         except Exception as e:
             ctx.setdefault("today_trades", 0)
             ctx.setdefault("today_wins", 0)
@@ -721,12 +717,10 @@ class FridayCeo:
                 db_col, cast_fn = _AI_PARAMS_MAP[key_upper]
                 try:
                     casted_val = cast_fn(str(val))
-                    conn = sqlite3.connect(self.db_path, timeout=5)
-                    try:
+                    # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+                    with database.open_db(self.db_path, timeout=5) as conn:
                         conn.execute(f"UPDATE params SET {db_col} = ?, updated_at = datetime('now') WHERE id = 1", (casted_val,))
                         conn.commit()
-                    finally:
-                        conn.close()
                     # Clear config cache
                     if key_upper in config._CONFIG_CACHE:
                         del config._CONFIG_CACHE[key_upper]
@@ -1006,22 +1000,20 @@ class FridayCeo:
         # 2. Record counts
         open_cnt = 0
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            try:
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+            with database.open_db(self.db_path, timeout=5) as conn:
                 open_cnt = conn.execute("SELECT COUNT(*) FROM trades WHERE status != 'closed'").fetchone()[0]
                 closed_cnt = conn.execute("SELECT COUNT(*) FROM trades WHERE status = 'closed'").fetchone()[0]
                 signals_cnt = conn.execute("SELECT COUNT(*) FROM signal_candidates").fetchone()[0]
-                
+
                 # Check execution mode
                 mode_row = conn.execute("SELECT value FROM bot_status WHERE key='tg_execution_mode'").fetchone()
                 db_mode = mode_row[0] if mode_row else "Tanımsız"
-                
+
                 report.append(f"  • Aktif Sinyaller: <code>{signals_cnt}</code>")
                 report.append(f"  • Açık İşlemler: <code>{open_cnt}</code>")
                 report.append(f"  • Kapanmış İşlemler: <code>{closed_cnt}</code>")
                 report.append(f"  • Veritabanı Çalışma Modu: <code>{db_mode}</code>")
-            finally:
-                conn.close()
         except Exception as e:
             report.append(f"  • DB Erişim Hatası: <code>{e}</code>")
             
@@ -1060,8 +1052,8 @@ class FridayCeo:
     def generate_veto_summary(self) -> str:
         """Queries database signal_events for AI vetoed and risk rejected signals in the last 24 hours."""
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            try:
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+            with database.open_db(self.db_path, timeout=5) as conn:
                 # Get events from last 24 hours
                 yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
                 rows = conn.execute("""
@@ -1070,18 +1062,18 @@ class FridayCeo:
                     WHERE created_at >= ? AND stage IN ('AI_VETOED', 'RISK_REJECTED')
                     GROUP BY symbol, stage
                 """, (yesterday,)).fetchall()
-                
+
                 if not rows:
                     return (
                         "Batuhan Bey, son 24 saat içinde yapay zeka süzgecine takılarak "
                         "veto edilen tehlikeli bir sinyal tespit edilmedi. "
                         "Tüm sistem stabil ve kontrol altındadır."
                     )
-                
+
                 total_vetoes = sum(r[2] for r in rows)
                 symbols = list(set(r[1].replace("USDT", "") for r in rows))
                 symbols_str = ", ".join(symbols)
-                
+
                 report = (
                     f"Batuhan Bey, son 24 saat içinde sermayemizi korumak amacıyla toplam "
                     f"<b>{total_vetoes}</b> adet riskli sinyal girişimini engelledim. 🛡️\n\n"
@@ -1090,8 +1082,6 @@ class FridayCeo:
                     f"Kasa yönetimini ve sermaye korumasını en üst düzeyde sürdürüyorum."
                 )
                 return report
-            finally:
-                conn.close()
         except Exception as e:
             logger.error(f"[Friday CEO] Error generating veto summary: {e}")
             return "Batuhan Bey, koruma loglarını incelerken teknik bir hatayla karşılaşıldı ancak sermaye kontrol altındadır."
@@ -1102,33 +1092,30 @@ class FridayCeo:
             today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             environment = getattr(config, "EXECUTION_MODE", "paper")
             
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            conn.row_factory = sqlite3.Row
-            try:
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+            with database.open_db(self.db_path, timeout=5) as conn:
                 row = conn.execute("""
-                    SELECT COUNT(*), 
+                    SELECT COUNT(*),
                            SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END),
                            SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END),
                            SUM(net_pnl)
                      FROM trades
                      WHERE DATE(close_time) = ? AND status = 'closed' AND environment = ?
                 """, (today_str, environment)).fetchone()
-                
+
                 total_trades = row[0] or 0
                 wins = row[1] or 0
                 losses = row[2] or 0
                 net_pnl = float(row[3] or 0.0)
-                
+
                 # Fetch veto count today
                 veto_row = conn.execute("""
                     SELECT COUNT(*) FROM signal_events
                     WHERE DATE(created_at) = ? AND stage IN ('RISK_REJECTED', 'AI_VETOED')
                 """, (today_str,)).fetchone()
                 veto_cnt = veto_row[0] or 0
-                
-            finally:
-                conn.close()
-                
+
+
             win_rate = (wins / total_trades * 100.0) if total_trades > 0 else 0.0
             
             # Fetch GMM, CVD, Pearson and L2 Wall
@@ -1406,14 +1393,12 @@ class FridayCeo:
             # Automatically append a brief veto summary once a day in periodic checks
             if not user_message:
                 try:
-                    conn = sqlite3.connect(self.db_path, timeout=5)
-                    try:
+                    # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+                    with database.open_db(self.db_path, timeout=5) as conn:
                         yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
                         veto_cnt = conn.execute("SELECT COUNT(*) FROM signal_events WHERE created_at >= ? AND stage IN ('AI_VETOED', 'RISK_REJECTED')", (yesterday,)).fetchone()[0]
                         if veto_cnt > 0:
                             final_message += f"\n\n🛡️ <b>Son 24 saatte engellenen tehlikeli sinyal sayısı:</b> <code>{veto_cnt}</code>"
-                    finally:
-                        conn.close()
                 except Exception:
                     pass
             
@@ -1494,10 +1479,10 @@ class FridayCeo:
                         set_state("regime_filter_min_quality_in_choppy", "A", actor="friday", reason="choppy_paper_mode")
                         
                         try:
-                            conn = sqlite3.connect(self.db_path, timeout=5)
-                            conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (1.5,))
-                            conn.commit()
-                            conn.close()
+                            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+                            with database.open_db(self.db_path, timeout=5) as conn:
+                                conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (1.5,))
+                                conn.commit()
                         except Exception as e:
                             logger.error(f"[Friday CEO] Error updating risk_pct in params: {e}")
                             
@@ -1530,10 +1515,10 @@ class FridayCeo:
                         self._apply_param_with_clamp("risk_pct", 0.5, actor="friday", reason="choppy_live_protection")
                         self._apply_param_with_clamp("trade_threshold", 65.0, actor="friday", reason="choppy_live_protection")
                         try:
-                            conn = sqlite3.connect(self.db_path, timeout=5)
-                            conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (0.5,))
-                            conn.commit()
-                            conn.close()
+                            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+                            with database.open_db(self.db_path, timeout=5) as conn:
+                                conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (0.5,))
+                                conn.commit()
                         except Exception as e:
                             logger.error(f"[Friday CEO] Error updating risk_pct in params: {e}")
                         
@@ -1586,10 +1571,10 @@ class FridayCeo:
                         self._apply_param_with_clamp("risk_pct", float(prev_risk), actor="friday", reason="choppy_ended_live_restore")
                         self._apply_param_with_clamp("trade_threshold", float(prev_threshold), actor="friday", reason="choppy_ended_live_restore")
                         try:
-                            conn = sqlite3.connect(self.db_path, timeout=5)
-                            conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (float(prev_risk),))
-                            conn.commit()
-                            conn.close()
+                            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+                            with database.open_db(self.db_path, timeout=5) as conn:
+                                conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (float(prev_risk),))
+                                conn.commit()
                         except Exception as e:
                             logger.error(f"[Friday CEO] Error restoring risk_pct in params: {e}")
                         
@@ -1691,17 +1676,16 @@ class FridayCeo:
                     pass
             
             if not in_cooldown:
-                conn = sqlite3.connect(self.db_path, timeout=5)
-                conn.row_factory = sqlite3.Row
-                try:
+                # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+                with database.open_db(self.db_path, timeout=5) as conn:
                     rows = conn.execute(
                         "SELECT net_pnl FROM trades WHERE status = 'closed' ORDER BY close_time DESC LIMIT 3"
                     ).fetchall()
-                    
+
                     if len(rows) == 3 and all(float(r["net_pnl"] or 0) <= 0 for r in rows):
                         cooldown_until = datetime.now(timezone.utc) + timedelta(hours=2)
                         set_state("friday_boss_cooldown_until", cooldown_until.isoformat())
-                        
+
                         msg = (
                             "Batuhan Bey, son 3 işlemimiz maalesef zararla sonuçlandı.\n\n"
                             "Sermaye yapısını ve sistem stabilitesini korumak amacıyla otonom işlemleri <b>2 saatliğine</b> durdurdum "
@@ -1711,8 +1695,6 @@ class FridayCeo:
                         voice_bytes = self.generate_voice_from_text(msg)
                         if voice_bytes:
                             telegram_delivery.send_voice(voice_bytes, caption="Friday Boss Cooldown Aktif")
-                finally:
-                    conn.close()
         except Exception as e:
             logger.error(f"[Friday CEO] Error in Boss Cooldown check: {e}")
 

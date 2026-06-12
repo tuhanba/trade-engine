@@ -51,9 +51,11 @@ class SystemWatchdog:
                 db_size = os.path.getsize(self.db_path) / (1024 * 1024)
 
             # DB connectivity check
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
             db_ok = False
             try:
-                with sqlite3.connect(self.db_path, timeout=5) as conn:
+                from database import open_db
+                with open_db(self.db_path, timeout=5) as conn:
                     conn.execute("SELECT 1").fetchone()
                 db_ok = True
             except Exception:
@@ -74,7 +76,9 @@ class SystemWatchdog:
     def _check_db_health(self) -> bool:
         """DB sağlık kontrolü — WAL temizleme dahil."""
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+            from database import open_db
+            with open_db(self.db_path, timeout=10) as conn:
                 # WAL checkpoint — DB boyutunu kontrol altında tut
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
@@ -102,7 +106,9 @@ class SystemWatchdog:
     def _generate_daily_report(self) -> str:
         """Günlük performans raporu oluştur."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+            from database import open_db
+            with open_db(self.db_path) as conn:
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
                 # Bugünkü trade'ler

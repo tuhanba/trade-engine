@@ -20,15 +20,15 @@ def get_closed_trades() -> list:
     """Fetch closed trades from the database for simulation."""
     trades = []
     try:
-        conn = sqlite3.connect(config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute("""
-            SELECT symbol, direction, entry, sl, realized_pnl, net_pnl, qty, final_score, mfe, mae
-            FROM trades
-            WHERE status = 'closed' AND entry > 0
-        """)
-        trades = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+        from database import open_db
+        with open_db(config.DB_PATH) as conn:
+            cursor = conn.execute("""
+                SELECT symbol, direction, entry, sl, realized_pnl, net_pnl, qty, final_score, mfe, mae
+                FROM trades
+                WHERE status = 'closed' AND entry > 0
+            """)
+            trades = [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logger.error(f"[Tuner] Error fetching closed trades: {e}")
     return trades
@@ -104,21 +104,23 @@ def optimize_parameters():
         logger.info(f"[Tuner] Optimization finished. Best simulated PnL: {best_value:.4f} USD. Parameters: {best_params}")
 
         # Update in database
-        conn = sqlite3.connect(config.DB_PATH)
+        # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
         try:
-            # Update params table (ID = 1)
-            conn.execute("""
-                UPDATE params SET
-                    sl_atr_mult = ?,
-                    tp_atr_mult = ?,
-                    updated_at = datetime('now')
-                WHERE id = 1
-            """, (best_params["sl_atr_mult"], best_params["tp_atr_mult"]))
-            conn.commit()
-            
+            from database import open_db
+            with open_db(config.DB_PATH) as conn:
+                # Update params table (ID = 1)
+                conn.execute("""
+                    UPDATE params SET
+                        sl_atr_mult = ?,
+                        tp_atr_mult = ?,
+                        updated_at = datetime('now')
+                    WHERE id = 1
+                """, (best_params["sl_atr_mult"], best_params["tp_atr_mult"]))
+                conn.commit()
+
             # Update system_state for trade_threshold
             update_system_state("trade_threshold", str(round(best_params["trade_threshold"], 1)))
-            
+
             logger.info("[Tuner] Successfully saved optimized parameters to the database.")
 
             # Emit WebSocket broadcast to refresh the dashboard
@@ -132,8 +134,6 @@ def optimize_parameters():
 
         except Exception as db_err:
             logger.error(f"[Tuner] Database write error: {db_err}")
-        finally:
-            conn.close()
 
     except Exception as opt_err:
         logger.error(f"[Tuner] Optuna optimization failed: {opt_err}")
@@ -145,18 +145,19 @@ def check_win_rate_and_trigger_opt(db_path: str) -> bool:
     Returns True if the win rate is below 50%.
     """
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute("""
-            SELECT net_pnl, realized_pnl
-            FROM trades
-            WHERE status = 'closed'
-            ORDER BY id DESC
-            LIMIT 20
-        """)
-        rows = [dict(r) for r in cursor.fetchall()]
-        conn.close()
-        
+        # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+        from database import open_db
+        with open_db(db_path) as conn:
+            cursor = conn.execute("""
+                SELECT net_pnl, realized_pnl
+                FROM trades
+                WHERE status = 'closed'
+                ORDER BY id DESC
+                LIMIT 20
+            """)
+            rows = [dict(r) for r in cursor.fetchall()]
+
+
         if len(rows) < 20:
             logger.debug(f"[Tuner] Not enough closed trades to check win-rate (found {len(rows)}/20).")
             return False
@@ -173,16 +174,16 @@ def check_win_rate_and_trigger_opt(db_path: str) -> bool:
 def get_simulated_ghosts(db_path: str) -> list:
     """Fetch simulated ghosts for optimization."""
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute("""
-            SELECT g.direction, g.side, g.rsi, g.cvd_slope, r.virtual_pnl_r
-            FROM ghost_signals g
-            JOIN ghost_results r ON g.id = r.ghost_id
-            WHERE r.virtual_outcome IN ('WIN', 'LOSS')
-        """)
-        rows = [dict(r) for r in cursor.fetchall()]
-        conn.close()
+        # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+        from database import open_db
+        with open_db(db_path) as conn:
+            cursor = conn.execute("""
+                SELECT g.direction, g.side, g.rsi, g.cvd_slope, r.virtual_pnl_r
+                FROM ghost_signals g
+                JOIN ghost_results r ON g.id = r.ghost_id
+                WHERE r.virtual_outcome IN ('WIN', 'LOSS')
+            """)
+            rows = [dict(r) for r in cursor.fetchall()]
         return rows
     except Exception as e:
         logger.error(f"[Tuner] Error fetching simulated ghosts: {e}")

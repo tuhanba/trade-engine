@@ -172,7 +172,11 @@ class CoinLibrary:
     def _update_db_universe(self, symbols: List[str]):
         """Veritabanındaki aktif coin listesini günceller."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db.
+            # Eski "with sqlite3.connect(...)" çıkışta otomatik commit yapıyordu;
+            # open_db yapmaz — commit açıkça çağrılır.
+            from database import open_db
+            with open_db(self.db_path) as conn:
                 conn.execute("CREATE TABLE IF NOT EXISTS active_universe (symbol TEXT PRIMARY KEY, last_updated REAL)")
                 conn.execute("DELETE FROM active_universe")
                 ts = time.time()
@@ -180,13 +184,16 @@ class CoinLibrary:
                     "INSERT INTO active_universe (symbol, last_updated) VALUES (?, ?)",
                     [(s, ts) for s in symbols]
                 )
+                conn.commit()
         except Exception as e:
             logger.error(f"DB evren güncelleme hatası: {e}")
 
     def get_active_universe(self) -> List[str]:
         """Veritabanından veya önbellekten aktif evreni döner."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+            from database import open_db
+            with open_db(self.db_path) as conn:
                 rows = conn.execute("SELECT symbol FROM active_universe").fetchall()
                 return [r[0] for r in rows]
         except Exception:

@@ -42,8 +42,9 @@ class AsyncMarketScanner:
 
     def _get_cooldown_coins(self) -> set:
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
+            from database import open_db
+            with open_db(self.db_path) as conn:
                 rows = conn.execute(
                     "SELECT symbol FROM coin_profiles WHERE danger_score > 0.8"
                 ).fetchall()
