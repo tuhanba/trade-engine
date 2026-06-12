@@ -1655,8 +1655,11 @@ def update_bot_status(key: str, value: str) -> None:
             pass
 
     now = datetime.now(timezone.utc).isoformat()
-    conn = get_connection()
+    conn = None
     try:
+        # NEDEN (Faz 1.4): get_connection() da try içinde — disk dolu/bozulma
+        # durumunda bağlantı açılışı bile patlayabilir; çağıranı düşürmemeli.
+        conn = get_connection()
         conn.execute(
             """
             INSERT INTO bot_status (key, value, updated_at)
@@ -1666,10 +1669,24 @@ def update_bot_status(key: str, value: str) -> None:
             (key, value, now),
         )
         conn.commit()
+        # NEDEN (Faz 1.4): başarılı yazım watchdog'un ardışık hata sayacını sıfırlar.
+        try:
+            from core.watchdog import report_db_write_success
+            report_db_write_success()
+        except Exception:
+            pass
     except Exception as exc:
         logger.error("Bot status güncellenemedi [%s]: %s", key, exc)
+        # NEDEN (Faz 1.4): art arda 5 hata = disk dolu / DB locked şüphesi —
+        # watchdog sayacı eşikte Telegram'a KRİTİK uyarı atar.
+        try:
+            from core.watchdog import report_db_write_failure
+            report_db_write_failure(f"update_bot_status[{key}]: {exc}")
+        except Exception:
+            pass
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 def get_bot_status(key: Optional[str] = None) -> dict:

@@ -88,10 +88,26 @@ def get_klines(
 
 # ── Güncel fiyat ve ticker önbelleği ────────────────────────────────
 _PRICE_CACHE = {}
+# NEDEN (Faz 1.4): WebSocket koptuğunda _PRICE_CACHE donar ama get_current_price
+# cache'i tercih ettiği için bayat fiyat sessizce kullanılırdı. Her fiyat
+# güncellemesinin zamanı tutulur ki bayatlık (örn. >120 sn) tespit edilebilsin.
+_PRICE_CACHE_TS = {}
 _TICKER_CACHE = {}
 
 def set_cached_price(symbol: str, price: float):
     _PRICE_CACHE[symbol] = price
+    _PRICE_CACHE_TS[symbol] = time.time()
+
+def get_price_age(symbol: str) -> Optional[float]:
+    """Sembolün cache'teki fiyatının yaşını saniye cinsinden döner.
+
+    None = sembol cache'te hiç yok (WS verisi gelmemiş — REST yolu kullanılır,
+    bayatlık riski yok). Sayı = son WS güncellemesinden bu yana geçen saniye.
+    """
+    ts = _PRICE_CACHE_TS.get(symbol)
+    if ts is None:
+        return None
+    return max(0.0, time.time() - ts)
 
 def set_cached_ticker(symbol: str, ticker_data: dict):
     _TICKER_CACHE[symbol] = ticker_data
