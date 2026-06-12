@@ -216,6 +216,7 @@ class TelegramManager:
             "/friday": self._cmd_friday,
             "/friday_voice": self._cmd_friday_voice,
             "/friday_ses":   self._cmd_friday_voice,
+            "/friday_log":   self._cmd_friday_log,
             "/diagnose": self._cmd_diagnose,
             "/teshis":   self._cmd_diagnose,
         }
@@ -1904,7 +1905,7 @@ class TelegramManager:
         if not self.friday_ceo:
             self.send_fn("⚠️ <b>Friday CEO Aktif Değil</b>\n\nBatuhan Bey, Friday CEO modülü henüz başlatılmadı. Lütfen botun çalıştığından emin olun!")
             return
-            
+
         self.send_fn("⏳ Friday CEO sesli raporunu hazırlıyor, lütfen bekleyin...")
         import threading
         threading.Thread(
@@ -1912,4 +1913,29 @@ class TelegramManager:
             args=("sesli rapor oku",),
             daemon=True
         ).start()
+
+    def _cmd_friday_log(self):
+        """Son 10 Friday otonom aksiyonunu param_audit'ten gösterir."""
+        try:
+            import database as _db
+            with _db.get_conn() as conn:
+                rows = conn.execute("""
+                    SELECT ts, key, old_value, new_value, actor, reason
+                    FROM param_audit
+                    WHERE actor='friday'
+                    ORDER BY id DESC LIMIT 10
+                """).fetchall()
+            if not rows:
+                self.send_fn("📋 <b>Friday Log</b>\n\nHenüz Friday'den otonom parametre değişikliği yok.")
+                return
+            lines = ["📋 <b>Friday Otonom Aksiyon Logu (son 10)</b>"]
+            for r in rows:
+                lines.append(
+                    f"<code>{r['ts'][:16]}</code> | <b>{r['key']}</b>: "
+                    f"{r['old_value']} → <b>{r['new_value']}</b>"
+                    + (f" <i>({r['reason']})</i>" if r['reason'] else "")
+                )
+            self.send_fn("\n".join(lines))
+        except Exception as e:
+            self.send_fn(f"⚠️ Friday log alınamadı: {e}")
 

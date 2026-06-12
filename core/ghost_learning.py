@@ -187,7 +187,7 @@ def _simulate_single_ghost(ghost: dict, client, now: datetime, prices: dict = No
     )
 
     # ── SGD Online Learner update ──────────────────────────────────────
-    if outcome in ("WIN", "LOSS") and ghost.get("reject_reason") != "ALLOW":
+    if outcome in ("WIN", "LOSS"):
         try:
             import json
             from core.online_learning import update_online_model
@@ -745,8 +745,8 @@ def calculate_dynamic_ghost_weight() -> float:
 
 def get_ghost_learning_stats() -> dict:
     """
-    Ghost learning istatistiklerini döndür (v1 uyumluluk).
-    AI karar motorunun coin profil hesabında kullanılır.
+    Ghost learning istatistiklerini döndür.
+    ghost_results tablosundan (v2.0) WIN/LOSS sayılarını okur.
     """
     try:
         from database import get_conn
@@ -754,27 +754,37 @@ def get_ghost_learning_stats() -> dict:
             row = conn.execute("""
                 SELECT
                     COUNT(*) as total,
-                    SUM(CASE WHEN hit_tp=1 THEN 1 ELSE 0 END) as wins,
-                    SUM(CASE WHEN hit_stop_first=1 THEN 1 ELSE 0 END) as losses,
-                    SUM(CASE WHEN skip_decision_correct=1 THEN 1 ELSE 0 END) as correct_skips,
-                    AVG(max_favorable_excursion) as avg_mfe,
-                    AVG(max_adverse_excursion) as avg_mae
-                FROM paper_results
-                WHERE status IN ('finalized', 'completed')
+                    SUM(CASE WHEN r.virtual_outcome='WIN'  THEN 1 ELSE 0 END) as wins,
+                    SUM(CASE WHEN r.virtual_outcome='LOSS' THEN 1 ELSE 0 END) as losses,
+                    AVG(r.virtual_mfe) as avg_mfe,
+                    AVG(r.virtual_mae) as avg_mae
+                FROM ghost_signals g
+                JOIN ghost_results r ON g.id = r.ghost_id
+                WHERE r.virtual_outcome IN ('WIN', 'LOSS')
             """).fetchone()
 
-        if not row:
-            return {}
+            correct_skips = conn.execute(
+                "SELECT COUNT(*) FROM paper_results WHERE skip_decision_correct=1"
+            ).fetchone()[0] or 0
+
+        if not row or (row[0] or 0) == 0:
+            return {
+                "total": 0, "ghost_wins": 0, "ghost_losses": 0,
+                "ghost_win_rate": 0, "correct_skips": correct_skips,
+                "avg_mfe": 0.0, "avg_mae": 0.0,
+                "weight": GHOST_WEIGHT, "dynamic_weight": calculate_dynamic_ghost_weight(),
+            }
 
         total = row[0] or 0
+        wins  = row[1] or 0
         return {
             "total":          total,
-            "ghost_wins":     row[1] or 0,
+            "ghost_wins":     wins,
             "ghost_losses":   row[2] or 0,
-            "ghost_win_rate": round((row[1] or 0) / total, 4) if total > 0 else 0,
-            "correct_skips":  row[3] or 0,
-            "avg_mfe":        round(float(row[4] or 0), 4),
-            "avg_mae":        round(float(row[5] or 0), 4),
+            "ghost_win_rate": round(wins / total, 4) if total > 0 else 0,
+            "correct_skips":  correct_skips,
+            "avg_mfe":        round(float(row[3] or 0), 4),
+            "avg_mae":        round(float(row[4] or 0), 4),
             "weight":         GHOST_WEIGHT,
             "dynamic_weight": calculate_dynamic_ghost_weight(),
         }

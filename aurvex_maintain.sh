@@ -534,6 +534,10 @@ elif [ "$CRON_GHOST" -eq 0 ] || [ "$CRON_NIGHTLY" -eq 0 ] || [ "$CRON_MAINTAIN" 
     info "Eksik cron'lar için: bash aurvex_maintain.sh --fix"
 fi
 
+# --- Backtest temp DB cleanup (>24h old) ---
+find /home/user/trade-engine -maxdepth 1 -name "backtest_temp_*.db" -mtime +1 -delete 2>/dev/null || true
+echo "[Maintain] Backtest temp cleanup done."
+
 # ═══════════════════════════════════════════════════════
 sep "SONUÇ"
 # ═══════════════════════════════════════════════════════

@@ -135,6 +135,23 @@ class FridayCeo:
         self.db_path = db_path or config.DB_PATH
         self.dynamic_events = []
         
+    def _apply_param_with_clamp(self, key: str, value: float, actor: str = "friday", reason: str = "") -> float:
+        """Apply a parameter change with clamping and audit logging."""
+        import database as _db
+        CLAMP_RULES = {
+            "trade_threshold": (40.0, 70.0),
+            "risk_pct": (0.25, 1.5),
+        }
+        if key in CLAMP_RULES:
+            lo, hi = CLAMP_RULES[key]
+            clamped = max(lo, min(hi, value))
+            if clamped != value:
+                logger.info("[Friday] %s clamped: %.2f → %.2f (range [%.1f, %.1f])", key, value, clamped, lo, hi)
+                reason = (reason + " clamped").strip()
+                value = clamped
+        _db.set_state(key, str(value), actor=actor, reason=reason)
+        return value
+
     def _generate_text(self, provider: str, system_prompt: str, user_prompt: str, model_type: str = "subagent") -> str:
         if provider == "anthropic":
             api_key = getattr(config, "ANTHROPIC_API_KEY", "")
@@ -666,7 +683,10 @@ class FridayCeo:
                 db_key, cast_fn = _DYNAMIC_PARAMS_MAP[key_upper]
                 try:
                     casted_val = cast_fn(str(val))
-                    database.set_state(db_key, str(casted_val))
+                    if key_upper in ("TRADE_THRESHOLD", "RISK_PCT"):
+                        self._apply_param_with_clamp(db_key, float(casted_val), actor="friday", reason="llm_decision")
+                    else:
+                        database.set_state(db_key, str(casted_val), actor="friday", reason="llm_decision")
                     # Clear config cache
                     if key_upper in config._CONFIG_CACHE:
                         del config._CONFIG_CACHE[key_upper]
@@ -1244,16 +1264,47 @@ class FridayCeo:
                         telegram_delivery.send_voice(voice_bytes)
                 return empty_msg
 
-        # Determine the provider
-        provider = getattr(config, "FRIDAY_LLM_PROVIDER", "auto").lower()
-        if provider == "auto":
-            if getattr(config, "GEMINI_API_KEY", ""):
-                provider = "gemini"
-            elif getattr(config, "ANTHROPIC_API_KEY", ""):
-                provider = "anthropic"
-            elif getattr(config, "OLLAMA_API_BASE", ""):
-                provider = "ollama"
-            else:
+        # Check LLM mode and daily budget
+        llm_mode = getattr(config, "FRIDAY_LLM_MODE", "offline").lower()
+        llm_budget = int(getattr(config, "FRIDAY_LLM_DAILY_BUDGET", 5))
+
+        if llm_mode == "offline":
+            provider = "offline"
+        else:
+            # Check daily call budget
+            try:
+                import database as _db
+                calls_today = int(_db.get_state("friday_llm_calls_today") or "0")
+                if calls_today >= llm_budget:
+                    logger.warning(
+                        "[Friday] LLM günlük bütçe aşıldı (%d/%d). offline moda geçiliyor.",
+                        calls_today, llm_budget
+                    )
+                    if calls_today == llm_budget:
+                        try:
+                            telegram_delivery.send_message(
+                                f"ℹ️ <b>Friday LLM günlük bütçeye ulaştı</b> ({llm_budget} çağrı). "
+                                f"Gece yarısı sıfırlanacak."
+                            )
+                        except Exception:
+                            pass
+                        _db.set_state("friday_llm_calls_today", str(calls_today + 1))
+                    provider = "offline"
+                else:
+                    _db.set_state("friday_llm_calls_today", str(calls_today + 1))
+                    # Determine the provider
+                    provider = getattr(config, "FRIDAY_LLM_PROVIDER", "auto").lower()
+                    if provider == "auto":
+                        if getattr(config, "GEMINI_API_KEY", ""):
+                            provider = "gemini"
+                        elif getattr(config, "ANTHROPIC_API_KEY", ""):
+                            provider = "anthropic"
+                        elif getattr(config, "OLLAMA_API_BASE", ""):
+                            provider = "ollama"
+                        else:
+                            provider = "offline"
+            except Exception as _budget_err:
+                logger.debug("[Friday] Budget check failed: %s", _budget_err)
                 provider = "offline"
 
         ctx = self.get_system_context()
@@ -1414,9 +1465,9 @@ class FridayCeo:
                     if bypass_shields:
                         # Paper/Bypass mode: Be extremely aggressive in Choppy!
                         logger.info("[Friday CEO] Choppy market detected in Paper/Bypass mode. Enforcing aggressive scaling.")
-                        set_state("risk_pct", "1.5")
-                        set_state("trade_threshold", "45.0")
-                        set_state("regime_filter_min_quality_in_choppy", "A")
+                        self._apply_param_with_clamp("risk_pct", 1.5, actor="friday", reason="choppy_paper_mode")
+                        self._apply_param_with_clamp("trade_threshold", 45.0, actor="friday", reason="choppy_paper_mode")
+                        set_state("regime_filter_min_quality_in_choppy", "A", actor="friday", reason="choppy_paper_mode")
                         
                         try:
                             conn = sqlite3.connect(self.db_path, timeout=5)
@@ -1452,8 +1503,8 @@ class FridayCeo:
                         set_state("friday_pre_choppy_risk", str(curr_risk))
                         set_state("friday_pre_choppy_threshold", str(curr_threshold))
                         
-                        set_state("risk_pct", "0.5")
-                        set_state("trade_threshold", "65.0")
+                        self._apply_param_with_clamp("risk_pct", 0.5, actor="friday", reason="choppy_live_protection")
+                        self._apply_param_with_clamp("trade_threshold", 65.0, actor="friday", reason="choppy_live_protection")
                         try:
                             conn = sqlite3.connect(self.db_path, timeout=5)
                             conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (0.5,))
@@ -1484,22 +1535,14 @@ class FridayCeo:
                     if bypass_shields:
                         # Paper/Bypass mode returning to Trending/Neutral: Still aggressive!
                         logger.info("[Friday CEO] Market regime returning to trending in Paper/Bypass mode. Enforcing standard aggressive parameters.")
-                        set_state("risk_pct", "1.5")
-                        set_state("trade_threshold", "45.0")
-                        
-                        try:
-                            conn = sqlite3.connect(self.db_path, timeout=5)
-                            conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (1.5,))
-                            conn.commit()
-                            conn.close()
-                        except Exception as e:
-                            logger.error(f"[Friday CEO] Error updating risk_pct in params: {e}")
-                            
+                        self._apply_param_with_clamp("risk_pct", 1.5, actor="friday", reason="choppy_ended_paper_mode")
+                        self._apply_param_with_clamp("trade_threshold", 45.0, actor="friday", reason="choppy_ended_paper_mode")
+
                         # Clear cache
                         for key in ["RISK_PCT", "TRADE_THRESHOLD"]:
                             if key in config._CONFIG_CACHE:
                                 del config._CONFIG_CACHE[key]
-                                
+
                         mode_desc = "Paper trading" if environment == "paper" else "Bypass Live"
                         msg = (
                             "Batuhan Bey, piyasadaki aşırı oynaklık ve dalgalı rejim sona erdi. Piyasa rejimimiz normale döndü. ✨\n\n"
@@ -1516,8 +1559,8 @@ class FridayCeo:
                         prev_risk = get_system_state("friday_pre_choppy_risk") or "0.75"
                         prev_threshold = get_system_state("friday_pre_choppy_threshold") or "55.0"
                         
-                        set_state("risk_pct", prev_risk)
-                        set_state("trade_threshold", prev_threshold)
+                        self._apply_param_with_clamp("risk_pct", float(prev_risk), actor="friday", reason="choppy_ended_live_restore")
+                        self._apply_param_with_clamp("trade_threshold", float(prev_threshold), actor="friday", reason="choppy_ended_live_restore")
                         try:
                             conn = sqlite3.connect(self.db_path, timeout=5)
                             conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (float(prev_risk),))

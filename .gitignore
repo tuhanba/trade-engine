@@ -41,6 +41,20 @@ log_*
 *.model
 models/
 
+# Backtest temp files
+backtest_data/
+backtest_temp_*.db
+*.db-wal
+*.db-shm
+
+# Model backups
+core/sgd_online_model.pkl.biased_backup
+core/backups/
+
+# Logs
+logs/
+*.log
+
 # ─── Yedek / Geçici dosyalar ────────────────────────────────────────
 .backup_pre_restore/
 *_backup_*/

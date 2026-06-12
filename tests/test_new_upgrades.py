@@ -567,8 +567,8 @@ def test_friday_autonomous_monitoring():
 
             # Check that we set the last regime and saved previous settings
             mock_set_state.assert_any_call("friday_last_regime", "CHOPPY")
-            mock_set_state.assert_any_call("risk_pct", "0.5")
-            mock_set_state.assert_any_call("trade_threshold", "65.0")
+            mock_set_state.assert_any_call("risk_pct", "0.5", actor="friday", reason="choppy_live_protection")
+            mock_set_state.assert_any_call("trade_threshold", "65.0", actor="friday", reason="choppy_live_protection")
             mock_send_msg.assert_called()
             mock_send_voice.assert_called_with(b"voice_data", caption="Friday Otonom Risk Koruma Kalkanı")
 
@@ -594,8 +594,8 @@ def test_friday_autonomous_monitoring():
             ceo.run_autonomous_monitoring()
 
             mock_set_state.assert_any_call("friday_last_regime", "NEUTRAL")
-            mock_set_state.assert_any_call("risk_pct", "0.85")
-            mock_set_state.assert_any_call("trade_threshold", "58.0")
+            mock_set_state.assert_any_call("risk_pct", "0.85", actor="friday", reason="choppy_ended_live_restore")
+            mock_set_state.assert_any_call("trade_threshold", "58.0", actor="friday", reason="choppy_ended_live_restore")
             mock_send_msg.assert_called()
             mock_send_voice.assert_called_with(b"voice_data", caption="Friday Otonom Risk Modu Güncellemesi")
 

@@ -44,51 +44,7 @@ class ExecutionService:
                 closed_ids   = prev_open_ids - current_ids
 
                 for trade_id in closed_ids:
-                    closed = await asyncio.to_thread(database.get_trade_by_id, trade_id)
-                    if not closed:
-                        continue
-
-                    # Süre hesabı
-                    duration_str = ""
-                    try:
-                        from datetime import datetime, timezone as _tz
-                        from execution_engine import parse_utc_datetime
-                        opened_dt = parse_utc_datetime(closed.get("open_time", ""))
-                        closed_dt = parse_utc_datetime(closed.get("close_time", "") or
-                                                       datetime.now(_tz.utc).isoformat())
-                        mins = int((closed_dt - opened_dt).total_seconds() / 60)
-                        duration_str = f"{mins}dk" if mins < 60 else f"{mins // 60}s{mins % 60}dk"
-                    except Exception:
-                        pass
-
-                    _entry = float(closed.get("entry") or closed.get("entry_price") or 1)
-                    _sl    = float(closed.get("sl") or closed.get("stop_loss") or 1)
-                    _sl_d  = max(abs(_entry - _sl), 1e-8)
-                    _pnl   = float(closed.get("net_pnl") or 0)
-                    _risk_usd = float(closed.get("risk_usd") or 0)
-                    if _risk_usd <= 0:
-                        _qty = float(closed.get("qty") or closed.get("quantity") or 0)
-                        _risk_usd = _qty * _sl_d if _qty > 0 else _sl_d
-                    _r     = round(_pnl / _risk_usd, 3) if _risk_usd > 0 else 0
-
-                    balance = await asyncio.to_thread(database.get_active_balance)
-
-                    await event_bus.publish(Event(
-                        type=EventType.TRADE_CLOSED,
-                        payload={
-                            "trade_id":     trade_id,
-                            "symbol":       closed.get("symbol"),
-                            "direction":    closed.get("direction"),
-                            "net_pnl":      _pnl,
-                            "reason":       closed.get("close_reason", "unknown"),
-                            "r_multiple":   _r,
-                            "duration":     duration_str,
-                            "balance_after": balance,
-                            "total_fee":    float(closed.get("total_fee") or 0),
-                        }
-                    ))
-                    logger.info("[ExecutionService] TRADE_CLOSED #%d %s pnl=%.4f",
-                                trade_id, closed.get("symbol"), _pnl)
+                    logger.debug("[ExecutionService] Trade #%d detected closed (TRADE_CLOSED handled by execution_engine)", trade_id)
 
                 prev_open_ids = current_ids
 
@@ -120,15 +76,12 @@ class ExecutionService:
 
             sig = SignalData.from_dict(signal_dict)
 
-            # ML bonus — scalp modunda yüksek ML skoru eşiği düşürür
-            ml_score = float(getattr(sig, "ml_score", 50.0) or 50.0)
-            if is_scalp and ml_score >= 65:
-                trade_thr -= 3.0
-                logger.debug("[ExecutionService] %s ML bonus → thr=%.1f", symbol, trade_thr)
-
             qualities = getattr(config, "EXECUTABLE_QUALITIES", ("S", "A+", "A", "B", "C", "M"))
 
-            if sig.final_score >= trade_thr and sig.setup_quality in qualities:
+            logger.info("[Threshold] effective=ai_decision quality=%s score=%.1f source=execution_service",
+                        sig.setup_quality, sig.final_score)
+
+            if sig.setup_quality in qualities:
                 conf_qualities = getattr(config, "CONFIRMATION_AUTO_EXECUTE_QUALITIES", ("S", "A+", "A"))
                 conf_score     = getattr(config, "CONFIRMATION_AUTO_EXECUTE_SCORE", 70.0)
                 is_high_quality = sig.setup_quality in conf_qualities or sig.final_score >= conf_score
@@ -287,12 +240,8 @@ class ExecutionService:
                     logger.warning("[ExecutionService] %s trade açılamadı (engine None döndü).", symbol)
 
             else:
-                # ── Eşik Altı — EXECUTION_REJECTED ────────────────────────
-                reject_reason = (
-                    f"score_{sig.final_score:.1f}_below_{trade_thr:.1f}"
-                    if sig.final_score < trade_thr
-                    else f"quality_{sig.setup_quality}_not_executable"
-                )
+                # ── Kalite Dışı — EXECUTION_REJECTED ──────────────────────
+                reject_reason = f"quality_{sig.setup_quality}_not_executable"
                 logger.debug("[ExecutionService] %s reddedildi: %s", symbol, reject_reason)
 
                 try:

@@ -46,8 +46,20 @@ class GlobalRiskManager:
                     current_balance = get_paper_balance()
                     self.start_balance = current_balance
                     self.last_reset_day = today
+                    was_killed = self.is_killed
                     self.is_killed = False
                     logger.info(f"[GlobalRiskManager] Günlük sıfırlama tamamlandı. Yeni başlangıç bakiyesi: ${self.start_balance:.2f}")
+                    if was_killed:
+                        await event_bus.publish(Event(
+                            type=EventType.KILL_SWITCH_DEACTIVATED,
+                            payload={"reason": "daily_reset", "timestamp": datetime.now(timezone.utc).isoformat()}
+                        ))
+                        try:
+                            from telegram_delivery import TelegramDelivery
+                            tg = TelegramDelivery()
+                            tg.send_message("ℹ️ <b>Kill switch günlük sıfırlama ile kaldırıldı.</b> Scanner yeniden başlıyor.")
+                        except Exception as _tg:
+                            logger.debug(f"Telegram deactivation bildirimi atılamadı: {_tg}")
 
                 if self.is_killed:
                     await asyncio.sleep(60)
