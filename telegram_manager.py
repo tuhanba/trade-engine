@@ -217,6 +217,8 @@ class TelegramManager:
             "/friday_voice": self._cmd_friday_voice,
             "/friday_ses":   self._cmd_friday_voice,
             "/friday_log":   self._cmd_friday_log,
+            "/friday_decisions": self._cmd_friday_decisions,
+            "/kararlar":         self._cmd_friday_decisions,
             "/diagnose": self._cmd_diagnose,
             "/teshis":   self._cmd_diagnose,
         }
@@ -1938,4 +1940,17 @@ class TelegramManager:
             self.send_fn("\n".join(lines))
         except Exception as e:
             self.send_fn(f"⚠️ Friday log alınamadı: {e}")
+
+    def _cmd_friday_decisions(self):
+        """Faz 2.1: Son 10 Friday kararını outcome skorlarıyla gösterir.
+
+        NEDEN: /friday_log yalnız param_audit'i gösterir; bu komut karar
+        GÜNLÜĞÜNÜ (friday_decisions) sonuç skorlarıyla birlikte sunar —
+        'Friday'in kararları işe yarıyor mu?' sorusunun cevabı.
+        """
+        try:
+            from core.friday_decisions import format_decisions_table
+            self.send_fn(format_decisions_table(10))
+        except Exception as e:
+            self.send_fn(f"⚠️ Friday karar günlüğü alınamadı: {e}")
 
