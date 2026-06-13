@@ -222,6 +222,8 @@ class TelegramManager:
             "/expectancy":       self._cmd_expectancy,
             "/beklenti":         self._cmd_expectancy,
             "/readiness":        self._cmd_readiness,
+            "/funnel":           self._cmd_funnel,
+            "/huni":             self._cmd_funnel,
             "/diagnose": self._cmd_diagnose,
             "/teshis":   self._cmd_diagnose,
         }
@@ -471,6 +473,52 @@ class TelegramManager:
             self._cmd_daily()
         elif action == "friday_voice":
             self._cmd_friday_voice()
+        # ── Faz 5.2: Tehlikeli komut onayları ──
+        elif action == "do_live":
+            self._edit_message_text("🔥 LIVE moda geçiliyor...", msg_id, None)
+            self._do_live()
+        elif action == "do_close_all":
+            self._edit_message_text("⏳ Tüm pozisyonlar kapatılıyor...", msg_id, None)
+            self._do_close_all()
+        elif action.startswith("do_set:"):
+            try:
+                _, pname, pval = action.split(":", 2)
+                self._edit_message_text(f"⏳ {pname} → {pval} uygulanıyor...", msg_id, None)
+                self._do_set(pname, pval)
+            except Exception as e:
+                self.send_fn(f"❌ Onay uygulanamadı: {e}")
+        elif action == "cancel_action":
+            self._edit_message_text("❌ <b>İşlem iptal edildi.</b>", msg_id, None)
+        # ── Faz 5.2: Yeni komut callback'leri ──
+        elif action == "expectancy":
+            self._cmd_expectancy()
+        elif action == "readiness":
+            self._cmd_readiness()
+        elif action == "funnel":
+            self._cmd_funnel()
+        elif action == "friday_decisions":
+            self._cmd_friday_decisions()
+        elif action == "stats":
+            self._cmd_stats()
+        elif action == "trades":
+            self._cmd_trades()
+        elif action == "balance":
+            self._cmd_balance()
+        elif action == "ghost":
+            self._cmd_ghost()
+        elif action == "ml":
+            self._cmd_ml()
+        elif action == "mode":
+            self._cmd_mode()
+        elif action == "settings":
+            self._cmd_settings()
+        # ── Faz 5.2: Kategorili /help menü navigasyonu ──
+        elif action == "help_main":
+            self._edit_message_text("🤖 <b>AurvexAI Komuta Hattı</b>\n\nKategori seçin:", msg_id, self._get_help_markup())
+        elif action.startswith("cat_"):
+            cat = action[4:]
+            title, markup = self._get_category_markup(cat)
+            self._edit_message_text(title, msg_id, markup)
         elif action.startswith("close:"):
             trade_id_str = action[6:]
             self._cmd_close([trade_id_str])
@@ -824,36 +872,71 @@ class TelegramManager:
             logger.warning(f"Telegram webhook temizleme hatası: {e}")
 
     def _get_help_markup(self) -> dict:
+        """Faz 5.2: Kategorili ana menü — 5 kategori (📊 Durum | 💼 İşlemler |
+        👻 Ghost | 🤖 Friday | ⚙️ Ayarlar). Her kategori alt menüye açılır."""
         return {
             "inline_keyboard": [
                 [
-                    {"text": "📊 Durum", "callback_data": "cmd:status"},
-                    {"text": "📈 Açık Pozisyonlar", "callback_data": "cmd:open"},
-                    {"text": "⚡ Günlük Kâr", "callback_data": "cmd:daily"}
+                    {"text": "📊 Durum", "callback_data": "cmd:cat_status"},
+                    {"text": "💼 İşlemler", "callback_data": "cmd:cat_trades"},
                 ],
                 [
-                    {"text": "⚙️ Ayarlar", "callback_data": "cmd:refresh_settings"},
-                    {"text": "🩺 Sistem Sağlığı", "callback_data": "cmd:health"},
-                    {"text": "📊 Isı Haritası", "callback_data": "cmd:heatmap_chart"}
+                    {"text": "👻 Ghost", "callback_data": "cmd:cat_ghost"},
+                    {"text": "🤖 Friday", "callback_data": "cmd:cat_friday"},
                 ],
                 [
-                    {"text": "🧠 İnsan Modu", "callback_data": "cmd:human"},
-                    {"text": "⚔️ Scalp Modu", "callback_data": "cmd:scalp"}
+                    {"text": "⚙️ Ayarlar", "callback_data": "cmd:cat_settings"},
                 ],
-                [
-                    {"text": "🧪 Paper Modu", "callback_data": "cmd:paper"},
-                    {"text": "🔥 CANLI Mod", "callback_data": "cmd:live"}
-                ],
-                [
-                    {"text": "⏸ Duraklat", "callback_data": "cmd:pause"},
-                    {"text": "▶️ Devam Et", "callback_data": "cmd:resume"}
-                ],
-                [
-                    {"text": "🗣 Friday Sesli Rapor", "callback_data": "cmd:friday_voice"},
-                    {"text": "🔍 Sistem Teşhisi", "callback_data": "cmd:diagnose_flow"}
-                ]
             ]
         }
+
+    def _get_category_markup(self, cat: str) -> tuple:
+        """Kategori alt menüsü döndürür (başlık, inline_keyboard)."""
+        back = [{"text": "« Geri", "callback_data": "cmd:help_main"}]
+        menus = {
+            "status": ("📊 <b>Durum & Raporlama</b>", [
+                [{"text": "🩺 Sistem Durumu", "callback_data": "cmd:status"},
+                 {"text": "💚 Sağlık", "callback_data": "cmd:health"}],
+                [{"text": "🎯 Expectancy", "callback_data": "cmd:expectancy"},
+                 {"text": "🚦 Readiness", "callback_data": "cmd:readiness"}],
+                [{"text": "📊 Sinyal Hunisi", "callback_data": "cmd:funnel"},
+                 {"text": "🔍 Teşhis", "callback_data": "cmd:diagnose_flow"}],
+                back,
+            ]),
+            "trades": ("💼 <b>İşlemler</b>", [
+                [{"text": "📈 Açık Pozisyonlar", "callback_data": "cmd:open"},
+                 {"text": "⚡ Günlük Kâr", "callback_data": "cmd:daily"}],
+                [{"text": "📜 Son İşlemler", "callback_data": "cmd:trades"},
+                 {"text": "📊 İstatistik", "callback_data": "cmd:stats"}],
+                [{"text": "💳 Bakiye", "callback_data": "cmd:balance"},
+                 {"text": "📊 Isı Haritası", "callback_data": "cmd:heatmap_chart"}],
+                back,
+            ]),
+            "ghost": ("👻 <b>Ghost Learner</b>", [
+                [{"text": "👻 Ghost Durumu", "callback_data": "cmd:ghost"},
+                 {"text": "🧠 ML Durumu", "callback_data": "cmd:ml"}],
+                back,
+            ]),
+            "friday": ("🤖 <b>Friday CEO</b>", [
+                [{"text": "🗂 Kararlar", "callback_data": "cmd:friday_decisions"},
+                 {"text": "🗣 Sesli Rapor", "callback_data": "cmd:friday_voice"}],
+                [{"text": "🔍 Sistem Teşhisi", "callback_data": "cmd:diagnose_flow"}],
+                back,
+            ]),
+            "settings": ("⚙️ <b>Ayarlar & Mod</b>", [
+                [{"text": "⚙️ Ayarlar", "callback_data": "cmd:refresh_settings"},
+                 {"text": "🔧 Mod", "callback_data": "cmd:mode"}],
+                [{"text": "🧠 İnsan", "callback_data": "cmd:human"},
+                 {"text": "⚔️ Scalp", "callback_data": "cmd:scalp"}],
+                [{"text": "🧪 Paper", "callback_data": "cmd:paper"},
+                 {"text": "🔥 CANLI", "callback_data": "cmd:live"}],
+                [{"text": "⏸ Duraklat", "callback_data": "cmd:pause"},
+                 {"text": "▶️ Devam", "callback_data": "cmd:resume"}],
+                back,
+            ]),
+        }
+        title, kb = menus.get(cat, ("❓ Bilinmeyen kategori", [back]))
+        return title, {"inline_keyboard": kb}
 
     def _get_open_markup(self, open_trades: list) -> Optional[dict]:
         if not open_trades:
@@ -881,6 +964,10 @@ class TelegramManager:
             "🔹 <code>/daily</code> — Bugüne özel kaç işlem açıldığını ve güncel kâr/zararı listeler.\n"
             "🔹 <code>/balance</code> — Kasanın büyüme oranını detaylıca gösterir.\n"
             "🔹 <code>/trades</code> — Kapanan son 5 işlemi (Neden kapandığıyla birlikte) listeler.\n"
+            "🔹 <code>/expectancy</code> — 30 günlük beklenti (E/işlem, kuzey yıldızı metrik).\n"
+            "🔹 <code>/funnel</code> — Sinyal hunisi + en sık 3 reddetme sebebi.\n"
+            "🔹 <code>/readiness</code> — Canlıya geçiş için 5 kapı kontrolü.\n"
+            "🔹 <code>/friday_decisions</code> — Friday'in son 10 kararı + sonuç skorları.\n"
             "🔹 <code>/ghost</code> — Yapay zekanın (Ghost Learning) arka planda ne kadar öğrendiğini gösterir.\n"
             "🔹 <code>/ml</code> — Yapay Zeka (ML) durum ve tahmin parametrelerini listeler.\n"
             "🔹 <code>/retrain</code> — ML modelini veritabanındaki son işlemlerle manuel olarak yeniden eğitir.\n\n"
@@ -1295,8 +1382,26 @@ class TelegramManager:
 
     def _cmd_close(self, args: list):
         if not args:
-            self.send_fn("Kapatılacak işlem ID'sini belirtin. Örnek: <code>/close 15</code>")
+            self.send_fn("Kapatılacak işlem ID'sini belirtin. Örnek: <code>/close 15</code> veya <code>/close all</code>")
             return
+
+        # NEDEN (Faz 5.2): /close all tehlikeli — tüm pozisyonları kapatır, onay butonu şart.
+        if str(args[0]).lower() in ("all", "hepsi", "tümü", "tumu"):
+            import database
+            open_trades = database.get_open_trades()
+            n = len(open_trades)
+            if n == 0:
+                self.send_fn("Kapatılacak açık işlem yok.")
+                return
+            self.send_fn(
+                f"⚠️ <b>{n} açık pozisyonun TAMAMI kapatılacak.</b>\nBu işlem geri alınamaz. Onaylıyor musunuz?",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "✅ Onayla", "callback_data": "cmd:do_close_all"},
+                    {"text": "❌ Vazgeç", "callback_data": "cmd:cancel_action"},
+                ]]},
+            )
+            return
+
         try:
             trade_id = int(args[0])
         except ValueError:
@@ -1330,6 +1435,33 @@ class TelegramManager:
         except Exception as e:
             logger.exception("Manual close error:")
             self.send_fn(f"❌ Kapatma hatası: {e}")
+
+    def _do_close_all(self):
+        """Tüm açık pozisyonları kapatır — /close all onayı sonrası (Faz 5.2)."""
+        import database
+        from execution_engine import _get_price, ExecutionEngine
+        open_trades = database.get_open_trades()
+        if not open_trades:
+            self.send_fn("Kapatılacak açık işlem yok.")
+            return
+        engine = ExecutionEngine()
+        closed, failed = 0, 0
+        for trade in open_trades:
+            symbol = trade.get("symbol", "")
+            try:
+                exit_price = _get_price(None, symbol)
+                if not exit_price or exit_price <= 0:
+                    from core.market_data import get_current_price
+                    exit_price = get_current_price(symbol) or float(trade.get("entry_price") or trade.get("entry") or 0)
+                engine.close_trade(trade, exit_price, reason="manual")
+                closed += 1
+            except Exception as e:
+                logger.error(f"[close all] {symbol} kapatılamadı: {e}")
+                failed += 1
+        msg = f"✅ <b>{closed} pozisyon kapatıldı.</b>"
+        if failed:
+            msg += f"\n⚠️ {failed} pozisyon kapatılamadı (loglara bakın)."
+        self.send_fn(msg)
 
     def _cmd_force(self, args: list):
         if not args:
@@ -1460,6 +1592,35 @@ class TelegramManager:
         param_name = args[0].strip().lower()
         raw_val = args[1].strip()
 
+        # NEDEN (Faz 5.2): risk_pct gibi tehlikeli parametrelerde önce onay butonu.
+        _DANGEROUS_SET = {"risk_pct"}
+        if param_name in _DANGEROUS_SET:
+            # Manuel /set gate'i BYPASS eder (boss kararı) ama gate simülasyon
+            # sonucunu bilgi olarak gösterir (Faz 3.2 kuralı).
+            gate_info = ""
+            try:
+                from core.param_gate import validate_param_change
+                import database as _db
+                old_v = _db.get_state(param_name) or getattr(config, param_name.upper(), 0)
+                _, rep = validate_param_change(param_name, float(old_v), float(raw_val))
+                if rep.get("gated") and "new_expectancy_r" in rep:
+                    gate_info = f"\n📊 Simülasyon: E {rep['old_expectancy_r']:+.3f}R → {rep['new_expectancy_r']:+.3f}R (bilgi)"
+            except Exception:
+                pass
+            self.send_fn(
+                f"⚠️ <b>{param_name}</b> → <b>{raw_val}</b> olarak değiştirilecek.{gate_info}\n\n"
+                f"Bu sermaye riskini etkiler. Onaylıyor musunuz?",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "✅ Onayla", "callback_data": f"cmd:do_set:{param_name}:{raw_val}"},
+                    {"text": "❌ Vazgeç", "callback_data": "cmd:cancel_action"},
+                ]]},
+            )
+            return
+
+        self._do_set(param_name, raw_val)
+
+    def _do_set(self, param_name: str, raw_val: str):
+        """Dinamik parametreyi uygular — /set ve onay callback'i buradan geçer (Faz 5.2)."""
         param_mapping = {
             "trade_threshold": ("trade_threshold", float),
             "telegram_threshold": ("telegram_threshold", float),
@@ -1467,6 +1628,7 @@ class TelegramManager:
             "data_threshold": ("data_threshold", float),
             "max_spread_pct": ("max_spread_pct", float),
             "max_open_trades": ("max_open_trades", int),
+            "risk_pct": ("risk_pct", float),
             "human_mode": ("tg_human_mode", lambda v: "True" if v.lower() in ("true", "1", "yes") else "False"),
             "execution_mode": ("tg_execution_mode", lambda v: "live" if v.lower() == "live" else "paper"),
             "confirmation_mode": ("confirmation_mode", lambda v: "true" if v.lower() in ("true", "1", "yes") else "false"),
@@ -1835,12 +1997,30 @@ class TelegramManager:
             )
             return
 
+        if force:
+            # Boss zorlamasi — onay butonu atla, dogrudan gec
+            self._do_live(bypassed=not result["ready"])
+            return
+
+        # NEDEN (Faz 5.2): Tehlikeli komut — kapilar yesil olsa bile onay butonu.
+        from core.live_readiness import format_report as _fr
+        self.send_fn(
+            _fr(result) +
+            "\n\n🔥 <b>LIVE moda geçmek üzeresiniz</b> — gerçek bakiyeyle işlem açılacak.",
+            reply_markup={"inline_keyboard": [[
+                {"text": "✅ Onayla", "callback_data": "cmd:do_live"},
+                {"text": "❌ Vazgeç", "callback_data": "cmd:cancel_action"},
+            ]]},
+        )
+
+    def _do_live(self, bypassed: bool = False):
+        """LIVE moda gerçek geçiş — onay sonrası çağrılır (Faz 5.2)."""
         try:
             import config as _cfg
             _cfg.EXECUTION_MODE = "live"
             import database as _db
             _db.set_state("tg_execution_mode", "live")
-            prefix = "⚠️ <b>KAPILAR BYPASS EDİLDİ (force)</b>\n\n" if (force and not result["ready"]) else ""
+            prefix = "⚠️ <b>KAPILAR BYPASS EDİLDİ (force)</b>\n\n" if bypassed else ""
             self.send_fn(
                 prefix +
                 "🔥 <b>LIVE TRADING AKTİF</b>\n\n⚠️ <b>DİKKAT:</b> Sistem şu andan itibaren "
@@ -1848,6 +2028,32 @@ class TelegramManager:
             )
         except Exception as e:
             self.send_fn(f"Hata: {e}")
+
+    def _cmd_funnel(self):
+        """Faz 5.2: Sinyal hunisi + son 24s en sık 3 reddetme sebebi."""
+        try:
+            import dashboard_service
+            f = dashboard_service.get_funnel_with_rejects(24)
+            steps = [
+                ("🔍 Scanned", f.get("scanned", 0)),
+                ("📡 Candidate", f.get("candidate", 0)),
+                ("👁 Watchlist", f.get("watchlist", 0)),
+                ("✈️ Telegram", f.get("telegram", 0)),
+                ("⚡ Trade", f.get("trade", 0)),
+            ]
+            lines = ["📊 <b>Sinyal Hunisi (son 24s)</b>", "━━━━━━━━━━━━━━"]
+            for name, v in steps:
+                lines.append(f"{name}: <b>{v}</b>")
+            rejects = f.get("rejects", [])
+            if rejects:
+                lines.append("\n<b>En sık red sebepleri:</b>")
+                for r in rejects:
+                    lines.append(f"🔻 {r['reason']} <code>×{r['count']}</code>")
+            else:
+                lines.append("\n<i>Son 24s'te kayıtlı red sebebi yok.</i>")
+            self.send_fn("\n".join(lines))
+        except Exception as e:
+            self.send_fn(f"⚠️ Huni verisi alınamadı: {e}")
 
     def _cmd_readiness(self):
         """Faz 3.3: Live-Readiness 5 kapısını çalıştırıp durumu gösterir."""
