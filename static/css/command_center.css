@@ -1,0 +1,184 @@
+/* ════════════════════════════════════════════════════════════════════════
+   command_center.css — AURVEX "Komuta Merkezi" (Faz 4)
+   İlke: 5 saniyede durum, 30 saniyede teşhis. Mobil öncelikli.
+   Renk anlamı SABİT: altın=kâr/aktif, bakır-kırmızı=zarar/risk,
+   gümüş-mavi=SHORT/nötr-bilgi, soluk yeşil=sağlık.
+   ════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --cc-gold: #d4a843;
+  --cc-night: #030305;
+  --cc-copper: #c0533e;       /* zarar / risk */
+  --cc-silver-blue: #7e9cc0;  /* SHORT / nötr-bilgi */
+  --cc-health: #5fa97a;       /* sağlık / yeşil */
+  --cc-card-bg: rgba(255, 255, 255, 0.03);
+  --cc-card-border: rgba(212, 168, 67, 0.15);
+  --cc-text: #e8e6e0;
+  --cc-text-dim: #8a8a93;
+}
+
+/* ── Kart temel dili ─────────────────────────────────────────────────── */
+.cc-card {
+  background: var(--cc-card-bg);
+  border: 1px solid var(--cc-card-border);
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 16px;
+}
+.cc-card-title {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--cc-text-dim);
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cc-num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+.cc-pos { color: var(--cc-gold); }
+.cc-neg { color: var(--cc-copper); }
+.cc-short { color: var(--cc-silver-blue); }
+.cc-muted { color: var(--cc-text-dim); }
+
+/* ── KATMAN 1: HERO ŞERİT (sticky) ───────────────────────────────────── */
+.cc-hero {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1fr;
+  gap: 14px;
+  padding: 14px;
+  margin-bottom: 16px;
+  background: rgba(3, 3, 5, 0.82);
+  border: 1px solid var(--cc-card-border);
+  border-radius: 14px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.cc-hero-cell { display: flex; flex-direction: column; justify-content: center; }
+.cc-hero-cell.center { align-items: center; text-align: center; }
+.cc-hero-cell.right { align-items: flex-end; text-align: right; }
+
+/* Sistem nabzı */
+.cc-pulse { display: flex; align-items: center; gap: 12px; }
+.cc-pulse-dot {
+  width: 16px; height: 16px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.cc-pulse-dot.ok { background: var(--cc-health); box-shadow: 0 0 0 0 rgba(95,169,122,0.6); animation: cc-pulse 2.2s infinite; }
+.cc-pulse-dot.degrade { background: var(--cc-gold); box-shadow: 0 0 0 0 rgba(212,168,67,0.6); animation: cc-pulse 2.2s infinite; }
+.cc-pulse-dot.down { background: var(--cc-copper); box-shadow: 0 0 0 0 rgba(192,83,62,0.6); animation: cc-pulse 1.1s infinite; }
+@keyframes cc-pulse {
+  0%   { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+  70%  { box-shadow: 0 0 0 10px transparent; opacity: 0.85; }
+  100% { box-shadow: 0 0 0 0 transparent; opacity: 1; }
+}
+.cc-pulse-label { font-family: 'Inter', sans-serif; font-weight: 700; font-size: 15px; letter-spacing: 0.5px; }
+.cc-pulse-sub { font-size: 10px; color: var(--cc-text-dim); margin-top: 2px; }
+.cc-pulse-components { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.cc-chip {
+  font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 5px;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+.cc-chip.ok { background: rgba(95,169,122,0.14); color: var(--cc-health); }
+.cc-chip.warn { background: rgba(212,168,67,0.14); color: var(--cc-gold); }
+.cc-chip.down { background: rgba(192,83,62,0.16); color: var(--cc-copper); }
+
+/* Expectancy — sayfanın en büyük sayısı */
+.cc-exp-label { font-size: 10px; letter-spacing: 1px; color: var(--cc-text-dim); text-transform: uppercase; }
+.cc-exp-value {
+  font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums;
+  font-size: clamp(34px, 6vw, 56px); font-weight: 700; line-height: 1.05;
+}
+.cc-exp-unit { font-size: 0.42em; opacity: 0.7; margin-left: 2px; }
+.cc-spark { width: 100%; max-width: 260px; height: 34px; margin-top: 4px; }
+.cc-exp-sub { font-size: 10px; color: var(--cc-text-dim); margin-top: 2px; }
+
+/* Bakiye + PnL */
+.cc-balance { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 600; color: var(--cc-text); }
+.cc-balance-label { font-size: 10px; letter-spacing: 0.8px; color: var(--cc-text-dim); text-transform: uppercase; }
+.cc-pnl-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-family: 'JetBrains Mono', monospace; font-size: 14px; }
+.cc-open-badge {
+  margin-top: 8px; font-size: 10px; padding: 3px 9px; border-radius: 20px;
+  background: rgba(212,168,67,0.12); color: var(--cc-gold); font-weight: 600;
+}
+
+/* ── KATMAN 2: CANLI OPERASYON ───────────────────────────────────────── */
+.cc-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+/* Açık pozisyon kartı */
+.cc-pos-item { padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.cc-pos-item:last-child { border-bottom: none; }
+.cc-pos-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.cc-pos-sym { font-weight: 700; font-size: 13px; }
+.cc-side-tag { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
+.cc-side-long { background: rgba(212,168,67,0.15); color: var(--cc-gold); }
+.cc-side-short { background: rgba(126,156,192,0.15); color: var(--cc-silver-blue); }
+/* Canlı PnL bar (entry↔TP dolum) */
+.cc-pnl-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden; position: relative; }
+.cc-pnl-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease, background 0.3s; }
+.cc-tp-dots { display: flex; gap: 5px; margin-top: 5px; }
+.cc-tp-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.18); }
+.cc-tp-dot.hit { background: var(--cc-gold); }
+
+/* Sinyal hunisi (dikey daralan) */
+.cc-funnel-step { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.cc-funnel-bar { height: 26px; border-radius: 6px; background: linear-gradient(90deg, rgba(212,168,67,0.4), rgba(212,168,67,0.12)); display: flex; align-items: center; padding: 0 10px; min-width: 40px; transition: width 0.5s ease; }
+.cc-funnel-name { font-size: 10px; width: 78px; color: var(--cc-text-dim); text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0; }
+.cc-funnel-count { font-family: 'JetBrains Mono', monospace; font-weight: 600; font-size: 12px; }
+.cc-rejects { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); }
+.cc-reject-item { display: flex; justify-content: space-between; font-size: 10px; color: var(--cc-text-dim); padding: 2px 0; }
+
+/* ── KATMAN 3: ZEKA KATMANI ──────────────────────────────────────────── */
+.cc-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.cc-decision { display: flex; align-items: center; gap: 8px; font-size: 11px; padding: 4px 0; }
+.cc-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.cc-dot.good { background: var(--cc-health); }
+.cc-dot.bad { background: var(--cc-copper); }
+.cc-dot.neutral { background: var(--cc-text-dim); }
+.cc-thinking { font-size: 11px; font-style: italic; color: var(--cc-text-dim); margin: 8px 0; line-height: 1.4; min-height: 32px; }
+.cc-regime-badge {
+  display: inline-block; font-family: 'Inter', sans-serif; font-weight: 700;
+  font-size: 14px; padding: 8px 16px; border-radius: 10px; letter-spacing: 0.5px;
+  background: rgba(126,156,192,0.12); color: var(--cc-silver-blue);
+}
+.cc-regime-band { display: flex; gap: 1px; height: 10px; margin-top: 12px; border-radius: 4px; overflow: hidden; }
+.cc-regime-seg { flex: 1; min-width: 2px; }
+.cc-mini-input { width: 100%; margin-top: 10px; display: flex; gap: 6px; }
+.cc-mini-input input { flex: 1; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 7px 10px; color: var(--cc-text); font-size: 11px; }
+.cc-mini-input button { background: rgba(212,168,67,0.15); border: 1px solid var(--cc-card-border); color: var(--cc-gold); border-radius: 8px; padding: 0 12px; cursor: pointer; font-size: 12px; }
+
+/* ── KATMAN 4: ANALİZ (akordeon) ─────────────────────────────────────── */
+.cc-accordion { margin-bottom: 16px; }
+.cc-acc-head {
+  display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+  padding: 14px 16px; background: var(--cc-card-bg); border: 1px solid var(--cc-card-border);
+  border-radius: 12px; user-select: none;
+}
+.cc-acc-head h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--cc-text); margin: 0; }
+.cc-acc-body { display: none; padding: 16px 4px 4px; }
+.cc-accordion.open .cc-acc-body { display: block; }
+.cc-accordion.open .cc-acc-chevron { transform: rotate(180deg); }
+.cc-acc-chevron { transition: transform 0.25s; color: var(--cc-text-dim); }
+/* Live-readiness kapıları */
+.cc-gate { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 11px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.cc-gate:last-child { border-bottom: none; }
+.cc-gate-icon { width: 18px; flex-shrink: 0; text-align: center; }
+.cc-gate.pass .cc-gate-icon { color: var(--cc-health); }
+.cc-gate.fail .cc-gate-icon { color: var(--cc-copper); }
+
+/* ── Boş durumlar ────────────────────────────────────────────────────── */
+.cc-empty { color: var(--cc-text-dim); font-size: 11px; font-style: italic; padding: 14px 4px; text-align: center; }
+
+/* ── Mobil: Katman 1+2 ilk ekranda, huni yatay mini-bar ─────────────── */
+@media (max-width: 860px) {
+  .cc-hero { grid-template-columns: 1fr; gap: 10px; text-align: left; }
+  .cc-hero-cell.center, .cc-hero-cell.right { align-items: flex-start; text-align: left; }
+  .cc-grid-2, .cc-grid-3 { grid-template-columns: 1fr; }
+  .cc-funnel-name { width: 64px; }
+}

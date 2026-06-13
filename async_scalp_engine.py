@@ -236,6 +236,7 @@ class AsyncScalpEngine:
         await self.market_data.initialize()
         
         # Sinyal geldiğinde event bus'a bas (örnek - devre dışı bırakıldı)
+        self._last_ws_hb_write = 0.0
         def on_ticker_update(data):
             try:
                 from core.market_data import set_cached_price, set_cached_ticker
@@ -245,6 +246,18 @@ class AsyncScalpEngine:
                     if price_str:
                         set_cached_price(sym, float(price_str))
                     set_cached_ticker(sym, data)
+                # NEDEN (Faz 4): Dashboard nabzının WS bileşeni için ws_heartbeat.
+                # Dashboard ayrı süreç — WS canlılığını yalnız paylaşılan durumdan
+                # görebilir. 30 sn'de bir yazılır (lock baskısını artırmaz).
+                now_ts = time.time()
+                if now_ts - getattr(self, "_last_ws_hb_write", 0) >= 30:
+                    self._last_ws_hb_write = now_ts
+                    try:
+                        from database import update_bot_status
+                        from datetime import datetime as _dt, timezone as _tz
+                        update_bot_status("ws_heartbeat", _dt.now(_tz.utc).isoformat())
+                    except Exception:
+                        pass
             except Exception:
                 pass
         self.market_data.on_ticker(on_ticker_update)

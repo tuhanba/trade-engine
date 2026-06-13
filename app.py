@@ -337,6 +337,15 @@ def api_live_readiness():
         return _error(str(exc))
 
 
+@app.route("/api/command_center")
+def api_command_center():
+    """Komuta Merkezi — tüm katman verisi tek çağrıda (Faz 4)."""
+    try:
+        return _ok(dashboard_service.get_command_center())
+    except Exception as exc:
+        return _error(str(exc))
+
+
 @app.route("/api/daily_summary")
 def api_daily_summary():
     """Günlük özet serisi (sparkline/trend) — daily_summary tablosu (Faz 3.1)."""
