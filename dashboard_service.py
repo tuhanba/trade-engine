@@ -308,3 +308,265 @@ def get_learning_metrics(days: int = 14) -> dict:
     except Exception as e:
         logger.error("get_learning_metrics hata: %s", e)
         return {"days": days, "ghost_winrate": 0.0, "paper_winrate": 0.0}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# KOMUTA MERKEZİ (Faz 4) — tek çağrıda tüm katman verisi
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _hb_age_seconds(key: str = "heartbeat") -> float | None:
+    """bot_status'taki bir zaman damgasının yaşını saniye cinsinden döner."""
+    try:
+        st = database.get_bot_status(key) or {}
+        val = st.get("value") or ""
+        if not val:
+            return None
+        dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - dt).total_seconds())
+    except Exception:
+        return None
+
+
+def get_system_pulse() -> dict:
+    """Katman 1 sol: birleşik sistem nabzı (heartbeat + WS + Redis + Telegram + DB).
+
+    NEDEN: Dashboard ile engine AYRI süreçler — nabız yalnız paylaşılan duruma
+    (SQLite/Redis) bakar. Tek dev gösterge: 🟢 ÇALIŞIYOR / 🟡 DEGRADE / 🔴 SORUN.
+    """
+    comp = {}
+
+    # DB
+    db_ok = False
+    try:
+        with database.get_conn() as conn:
+            conn.execute("SELECT 1")
+        db_ok = True
+    except Exception:
+        pass
+    comp["db"] = "ok" if db_ok else "down"
+
+    # Engine heartbeat
+    hb = _hb_age_seconds("heartbeat")
+    comp["engine"] = "ok" if (hb is not None and hb < 120) else ("warn" if (hb is not None and hb < 300) else "down")
+
+    # WebSocket akışı (engine ws_heartbeat yazıyorsa) — yoksa engine'e devret
+    ws = _hb_age_seconds("ws_heartbeat")
+    if ws is None:
+        comp["websocket"] = comp["engine"]  # ayrı sinyal yoksa engine durumu
+    else:
+        comp["websocket"] = "ok" if ws < 120 else ("warn" if ws < 300 else "down")
+
+    # Redis (dashboard'ın kendi bağlantısı)
+    try:
+        from core import redis_state
+        comp["redis"] = "ok" if redis_state.available() else "warn"
+    except Exception:
+        comp["redis"] = "warn"
+
+    # Telegram
+    try:
+        comp["telegram"] = "ok" if _get_telegram().is_configured() else "warn"
+    except Exception:
+        comp["telegram"] = "warn"
+
+    # Birleşik karar: kritik (db/engine) down → SORUN; ikincil warn/down → DEGRADE
+    critical_down = comp["db"] == "down" or comp["engine"] == "down"
+    any_warn = any(v in ("warn", "down") for v in comp.values())
+    if critical_down:
+        status, label = "down", "SORUN"
+    elif any_warn:
+        status, label = "degrade", "DEGRADE"
+    else:
+        status, label = "ok", "ÇALIŞIYOR"
+
+    score = sum(1 for v in comp.values() if v == "ok")
+    return {"status": status, "label": label, "score": score, "max": len(comp), "components": comp}
+
+
+def get_funnel_with_rejects(hours: int = 24) -> dict:
+    """Katman 2: huni sayıları + son `hours` saatin en sık 3 reddi (signal_events)."""
+    funnel = {"scanned": 0, "candidate": 0, "watchlist": 0, "telegram": 0, "trade": 0, "rejects": []}
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        with database.get_conn() as conn:
+            def status_count(key):
+                try:
+                    return int(conn.execute("SELECT value FROM bot_status WHERE key=?", (key,)).fetchone()[0])
+                except Exception:
+                    return 0
+
+            funnel["scanned"] = status_count("pipeline_scanned")
+            funnel["candidate"] = status_count("pipeline_candidate")
+            funnel["watchlist"] = conn.execute(
+                "SELECT COUNT(*) FROM signal_candidates WHERE status NOT IN ('NEW','rejected')"
+            ).fetchone()[0] or 0
+            funnel["telegram"] = conn.execute(
+                "SELECT COUNT(*) FROM telegram_messages WHERE status IN ('queued','sent') AND created_at>=?",
+                (cutoff,),
+            ).fetchone()[0] or 0
+            funnel["trade"] = conn.execute(
+                "SELECT COUNT(*) FROM trades WHERE open_time>=?", (cutoff,)
+            ).fetchone()[0] or 0
+
+            # En sık 3 reddetme sebebi (son `hours` saat)
+            rows = conn.execute(
+                """
+                SELECT reject_reason, COUNT(*) AS c FROM signal_events
+                WHERE created_at >= ? AND reject_reason IS NOT NULL AND reject_reason != ''
+                GROUP BY reject_reason ORDER BY c DESC LIMIT 3
+                """,
+                (cutoff,),
+            ).fetchall()
+            funnel["rejects"] = [{"reason": r[0], "count": r[1]} for r in rows]
+    except Exception as e:
+        logger.error("[CommandCenter] funnel hata: %s", e)
+    return funnel
+
+
+def get_friday_panel() -> dict:
+    """Katman 3: Friday paneli — son 5 karar + 'şu an ne düşünüyor' + rejim."""
+    panel = {"decisions": [], "thinking": "", "regime": "NEUTRAL"}
+    try:
+        from core import friday_decisions
+        panel["decisions"] = friday_decisions.get_recent_decisions(5)
+        # "Şu an ne düşünüyor": en son kararın gerekçesinin ilk cümlesi
+        for d in panel["decisions"]:
+            reason = (d.get("reasoning") or "").strip()
+            if reason:
+                first = reason.replace("\n", " ").split(". ")[0]
+                panel["thinking"] = (first[:160] + "…") if len(first) > 160 else first
+                break
+    except Exception as e:
+        logger.debug("[CommandCenter] friday panel hata: %s", e)
+    try:
+        panel["regime"] = database.get_market_regime() or "NEUTRAL"
+    except Exception:
+        pass
+    return panel
+
+
+def get_ghost_panel() -> dict:
+    """Katman 3: Ghost Learner paneli — sanal WR, aktif override, son öneriler, skip doğruluğu."""
+    panel = {"virtual_wr": 0.0, "active_overrides": 0, "recent": [], "skip_correctness": 0.0, "total": 0}
+    try:
+        from core.ghost_learning import get_ghost_learning_stats
+        stats = get_ghost_learning_stats()
+        panel["virtual_wr"] = round(float(stats.get("ghost_win_rate", 0)) * 100, 1)
+        panel["total"] = stats.get("total", 0)
+    except Exception:
+        pass
+    try:
+        with database.get_conn() as conn:
+            # Aktif override sayısı: threshold_overrides içeren coin_configs
+            rows = conn.execute("SELECT config_json FROM coin_configs").fetchall()
+            cnt = 0
+            for r in rows:
+                try:
+                    import json
+                    cfg = json.loads(r[0]) if r[0] else {}
+                    if cfg.get("threshold_overrides"):
+                        cnt += 1
+                except Exception:
+                    continue
+            panel["active_overrides"] = cnt
+
+            # Son 3 uygulanan öneri
+            recent = conn.execute(
+                "SELECT symbol, trigger_type, suggested_threshold, virtual_wr, created_at "
+                "FROM ghost_suggestions WHERE applied=1 ORDER BY id DESC LIMIT 3"
+            ).fetchall()
+            panel["recent"] = [
+                {"symbol": r[0], "trigger": r[1], "threshold": r[2], "wr": r[3], "at": r[4]}
+                for r in recent
+            ]
+
+            # Ghost'un haklı çıkma oranı (skip_decision_correct ortalaması)
+            row = conn.execute(
+                "SELECT AVG(CASE WHEN skip_decision_correct=1 THEN 1.0 ELSE 0.0 END) "
+                "FROM paper_results WHERE skip_decision_correct IS NOT NULL"
+            ).fetchone()
+            panel["skip_correctness"] = round(float(row[0] or 0) * 100, 1)
+    except Exception as e:
+        logger.debug("[CommandCenter] ghost panel hata: %s", e)
+    return panel
+
+
+def get_regime_band(hours: int = 24) -> dict:
+    """Katman 3: mevcut rejim + son `hours` saat rejim şeridi (kapanan trade'lerden)."""
+    band = {"current": "NEUTRAL", "band": []}
+    try:
+        band["current"] = database.get_market_regime() or "NEUTRAL"
+    except Exception:
+        pass
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        with database.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT market_regime, close_time FROM trades "
+                "WHERE close_time >= ? AND market_regime IS NOT NULL AND market_regime != '' "
+                "ORDER BY close_time ASC",
+                (cutoff,),
+            ).fetchall()
+        band["band"] = [{"regime": r[0], "at": r[1]} for r in rows]
+    except Exception as e:
+        logger.debug("[CommandCenter] regime band hata: %s", e)
+    return band
+
+
+def get_command_center(environment: str | None = None) -> dict:
+    """Faz 4: Komuta Merkezi'nin tüm katman verisini TEK çağrıda döndürür.
+
+    NEDEN: Dashboard 'tek sayfa dikey akış' — çok sayıda küçük istek yerine tek
+    zengin endpoint hem ağ turunu hem JS karmaşıklığını azaltır. Her alt-bölüm
+    kendi try/except'i ile güvenli (biri çökse diğerleri dolar).
+    """
+    env = environment or get_ax_status().get("execution_mode", "paper")
+    out = {"environment": env, "ts": datetime.now(timezone.utc).isoformat()}
+
+    # Katman 1
+    out["pulse"] = _safe_call(get_system_pulse, {"status": "down", "label": "SORUN", "components": {}})
+    out["expectancy"] = _safe_call(get_expectancy, {"expectancy_r": 0.0, "n": 0}, 30, env)
+    # Sparkline: daily_summary'den günlük expectancy serisi
+    try:
+        summaries = database.get_daily_summaries(30, env)
+        out["sparkline"] = [
+            {"date": s.get("date"), "e": float(s.get("expectancy_r") or 0), "pnl": float(s.get("net_pnl") or 0)}
+            for s in summaries
+        ]
+    except Exception:
+        out["sparkline"] = []
+
+    stats = _safe_call(get_stats, {}, env)
+    try:
+        bal = database.get_active_balance_details()
+        balance = float(bal.get("total", 0))
+    except Exception:
+        balance = float(stats.get("balance", 0) or 0)
+    today_pnl = float(stats.get("today_pnl", 0) or 0)
+    base = balance - today_pnl
+    out["wallet"] = {
+        "balance": round(balance, 2),
+        "today_pnl": round(today_pnl, 2),
+        "today_pnl_pct": round((today_pnl / base * 100) if base > 0 else 0.0, 2),
+        "open_count": len(_safe_call(get_live_trades, [], env)),
+    }
+
+    # Katman 2
+    out["funnel"] = _safe_call(get_funnel_with_rejects, {}, 24)
+    out["open_trades"] = _safe_call(get_live_trades, [], env)
+
+    # Katman 3
+    out["friday"] = _safe_call(get_friday_panel, {})
+    out["ghost"] = _safe_call(get_ghost_panel, {})
+    out["regime"] = _safe_call(get_regime_band, {}, 24)
+
+    # Katman 4
+    try:
+        from core.live_readiness import check as _readiness_check
+        out["readiness"] = _readiness_check()
+    except Exception:
+        out["readiness"] = {"ready": False, "gates": []}
+
+    return out

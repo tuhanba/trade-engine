@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AURVEXAI // Advanced Signal Intelligence Hub</title>
     <!-- Premium Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Cinzel:wght@500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
     <!-- FontAwesome for Premium Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Chart.js and Socket.IO -->
@@ -13,6 +13,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <!-- Custom Style Sheet -->
     <link rel="stylesheet" href="/static/css/hub.css">
+    <link rel="stylesheet" href="/static/css/command_center.css">
     <link rel="stylesheet" href="/static/css/friday_chat.css">
 
     <!-- Global fetch interceptor for Dashboard PIN Authentication -->
@@ -85,7 +86,10 @@
 
         <!-- TAB NAVIGATION -->
         <div class="tab-navigation">
-            <button class="tab-btn active" onclick="switchTab('overview')">
+            <button class="tab-btn active" onclick="switchTab('command')">
+                <i class="fa-solid fa-satellite-dish"></i> Komuta Merkezi
+            </button>
+            <button class="tab-btn" onclick="switchTab('overview')">
                 <i class="fa-solid fa-chart-pie"></i> Overview & Analytics
             </button>
             <button class="tab-btn" onclick="switchTab('trades')">
@@ -101,9 +105,99 @@
 
         <!-- MAIN LAYOUT -->
         <main class="main-layout">
-            
+
+            <!-- TAB 0: KOMUTA MERKEZİ (Faz 4) -->
+            <div id="tab-command" class="tab-content active">
+              <div id="cc-root">
+
+                <!-- KATMAN 1: HERO ŞERİT (sticky) -->
+                <section class="cc-hero">
+                  <div class="cc-hero-cell">
+                    <div class="cc-pulse">
+                      <span class="cc-pulse-dot down" id="ccPulseDot"></span>
+                      <div>
+                        <div class="cc-pulse-label" id="ccPulseLabel">BAĞLANIYOR</div>
+                        <div class="cc-pulse-sub" id="ccPulseSub">nabız okunuyor…</div>
+                      </div>
+                    </div>
+                    <div class="cc-pulse-components" id="ccPulseComponents"></div>
+                  </div>
+                  <div class="cc-hero-cell center">
+                    <span class="cc-exp-label">Expectancy (30 Gün)</span>
+                    <span class="cc-exp-value cc-muted" id="ccExpValue"><span class="cc-exp-number">0.000</span><span class="cc-exp-unit">R</span></span>
+                    <div class="cc-spark" id="ccSpark"></div>
+                    <span class="cc-exp-sub" id="ccExpSub">veri birikiyor…</span>
+                  </div>
+                  <div class="cc-hero-cell right">
+                    <span class="cc-balance-label">Bakiye</span>
+                    <span class="cc-balance" id="ccBalance">$0.00</span>
+                    <div class="cc-pnl-row" id="ccTodayPnl"><span>■</span><span>$0.00</span></div>
+                    <span class="cc-open-badge" id="ccOpenBadge">0 açık pozisyon</span>
+                  </div>
+                </section>
+
+                <!-- KATMAN 2: CANLI OPERASYON -->
+                <section class="cc-grid-2">
+                  <div class="cc-card">
+                    <h3 class="cc-card-title"><i class="fa-solid fa-bolt"></i> Açık Pozisyonlar</h3>
+                    <div id="ccPositions"><div class="cc-empty">yükleniyor…</div></div>
+                  </div>
+                  <div class="cc-card">
+                    <h3 class="cc-card-title"><i class="fa-solid fa-filter"></i> Sinyal Hunisi (24s)</h3>
+                    <div id="ccFunnel"><div class="cc-empty">yükleniyor…</div></div>
+                  </div>
+                </section>
+
+                <!-- KATMAN 3: ZEKA KATMANI -->
+                <section class="cc-grid-3">
+                  <div class="cc-card">
+                    <h3 class="cc-card-title"><i class="fa-solid fa-user-tie"></i> Friday Paneli</h3>
+                    <div id="ccFridayDecisions"><div class="cc-empty">yükleniyor…</div></div>
+                    <div class="cc-thinking" id="ccFridayThinking">Friday gözlem modunda…</div>
+                    <div class="cc-mini-input">
+                      <input type="text" id="ccFridayInput" placeholder="Friday'e sor…">
+                      <button id="ccFridaySend"><i class="fa-solid fa-paper-plane"></i></button>
+                    </div>
+                  </div>
+                  <div class="cc-card">
+                    <h3 class="cc-card-title"><i class="fa-solid fa-ghost"></i> Ghost Learner</h3>
+                    <div id="ccGhost"><div class="cc-empty">yükleniyor…</div></div>
+                  </div>
+                  <div class="cc-card">
+                    <h3 class="cc-card-title"><i class="fa-solid fa-wave-square"></i> Rejim Göstergesi</h3>
+                    <div style="text-align:center;padding:8px 0">
+                      <span class="cc-regime-badge" id="ccRegimeBadge">NEUTRAL</span>
+                    </div>
+                    <div class="cc-regime-band" id="ccRegimeBand"></div>
+                    <div class="cc-pulse-sub" style="margin-top:8px;text-align:center">son 24s rejim şeridi</div>
+                  </div>
+                </section>
+
+                <!-- KATMAN 4: ANALİZ (akordeon, varsayılan kapalı) -->
+                <div class="cc-accordion">
+                  <div class="cc-acc-head">
+                    <h3><i class="fa-solid fa-traffic-light"></i> Live-Readiness Protokolü</h3>
+                    <i class="fa-solid fa-chevron-down cc-acc-chevron"></i>
+                  </div>
+                  <div class="cc-acc-body">
+                    <div id="ccReadiness"><div class="cc-empty">yükleniyor…</div></div>
+                  </div>
+                </div>
+                <div class="cc-accordion">
+                  <div class="cc-acc-head">
+                    <h3><i class="fa-solid fa-chart-area"></i> Derin Analiz (Equity · Isı Haritası · Lig Tablosu)</h3>
+                    <i class="fa-solid fa-chevron-down cc-acc-chevron"></i>
+                  </div>
+                  <div class="cc-acc-body">
+                    <div class="cc-empty">Detaylı analiz panelleri için <a href="#" onclick="switchTab('overview');return false;" style="color:var(--cc-gold)">Overview &amp; Analytics</a> sekmesini açın.</div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
             <!-- TAB 1: OVERVIEW & ANALYTICS -->
-            <div id="tab-overview" class="tab-content active">
+            <div id="tab-overview" class="tab-content">
                 <div class="overview-layout">
                     <!-- Left: Stats Grid + Equity Chart -->
                     <div class="overview-left">
@@ -570,6 +664,7 @@
 
     <!-- JS Source -->
     <script src="/static/js/hub.js"></script>
+    <script src="/static/js/command_center.js"></script>
     <script src="/static/js/friday_chat.js"></script>
 
     <!-- Friday AI CEO Live Chat Widget -->
