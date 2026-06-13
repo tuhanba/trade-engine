@@ -488,6 +488,16 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
     "ghost_results": [
         ("exit_price", "REAL DEFAULT 0"),
     ],
+    # Faz 3.1: daily_summary canlandırma — expectancy + funnel kolonları.
+    # NEDEN: Mevcut tablo bu alanları içermiyordu; idempotent migration ile eklenir.
+    "daily_summary": [
+        ("expectancy_r",    "REAL DEFAULT 0"),
+        ("funnel_scanned",  "INTEGER DEFAULT 0"),
+        ("funnel_candidate","INTEGER DEFAULT 0"),
+        ("funnel_telegram", "INTEGER DEFAULT 0"),
+        ("funnel_executed", "INTEGER DEFAULT 0"),
+        ("environment",     "TEXT DEFAULT 'paper'"),
+    ],
     "coin_profiles": [
         ("win_rate", "REAL DEFAULT 0.5"),
         ("avg_r", "REAL DEFAULT 0"),
@@ -3077,6 +3087,139 @@ def save_candidate_signal(data: dict) -> int:
     except Exception as e:
         logger.warning(f"save_candidate_signal: {e}")
         return 0
+
+
+def write_daily_summary(date_str: str | None = None, environment: str | None = None) -> dict:
+    """Belirtilen günün özetini hesaplar ve daily_summary tablosuna yazar (Faz 3.1).
+
+    date_str verilmezse DÜN'ün özeti yazılır (gece 00:05 UTC loop bir önceki
+    günü kapatır). Günün expectancy + funnel sayıları dahil.
+    NEDEN: daily_summary trend grafiklerinin ve sparkline'ların veri kaynağı.
+    """
+    from datetime import datetime, timezone, timedelta
+    import config as _cfg
+
+    env = environment or getattr(_cfg, "EXECUTION_MODE", "paper")
+    if date_str is None:
+        date_str = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    summary = {"date": date_str, "environment": env}
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT symbol, net_pnl, risk_usd, r_multiple FROM trades
+                WHERE DATE(close_time) = ? AND status = 'closed' AND environment = ?
+                  AND COALESCE(is_valid_for_stats, 1) = 1
+                """,
+                (date_str, env),
+            ).fetchall()
+
+            trade_count = len(rows)
+            wins = [r for r in rows if float(r["net_pnl"] or 0) > 0]
+            losses = [r for r in rows if float(r["net_pnl"] or 0) <= 0]
+            win_count, loss_count = len(wins), len(losses)
+            win_rate = (win_count / trade_count) if trade_count else 0.0
+            gross_pnl = sum(float(r["net_pnl"] or 0) for r in rows)
+            net_pnl = gross_pnl  # net_pnl zaten fee dahil
+
+            # R değerleri ve günün expectancy'si (calculate_expectancy ile aynı formül)
+            def _r(row):
+                try:
+                    r = float(row["r_multiple"] or 0)
+                    if r != 0:
+                        return r
+                    ru = float(row["risk_usd"] or 0)
+                    return (float(row["net_pnl"] or 0) / ru) if ru > 0 else None
+                except Exception:
+                    return None
+            r_vals = [v for v in (_r(r) for r in rows) if v is not None]
+            avg_r = (sum(r_vals) / len(r_vals)) if r_vals else 0.0
+            win_r = [v for v in r_vals if v > 0]
+            loss_r = [v for v in r_vals if v <= 0]
+            awr = (sum(win_r) / len(win_r)) if win_r else 0.0
+            alr = abs(sum(loss_r) / len(loss_r)) if loss_r else 0.0
+            expectancy_r = (win_rate * awr) - ((1 - win_rate) * alr)
+
+            # En iyi / en kötü coin
+            by_coin: dict = {}
+            for r in rows:
+                by_coin[r["symbol"]] = by_coin.get(r["symbol"], 0.0) + float(r["net_pnl"] or 0)
+            best_coin = max(by_coin, key=by_coin.get) if by_coin else ""
+            worst_coin = min(by_coin, key=by_coin.get) if by_coin else ""
+
+            # Gün sonu bakiye
+            bal_row = conn.execute("SELECT balance FROM paper_account WHERE id=1").fetchone()
+            balance_eod = float(bal_row[0] or 0) if bal_row else 0.0
+
+            # Funnel sayıları (signal_events stage'leri, o güne ait)
+            def _stage_count(stages):
+                ph = ",".join("?" * len(stages))
+                try:
+                    return conn.execute(
+                        f"SELECT COUNT(*) FROM signal_events WHERE DATE(created_at)=? AND stage IN ({ph})",
+                        (date_str, *stages),
+                    ).fetchone()[0] or 0
+                except Exception:
+                    return 0
+            funnel_scanned = _stage_count(["SCANNED"])
+            funnel_candidate = _stage_count(["CANDIDATE", "TREND_CHECKED", "RISK_APPROVED"])
+            funnel_telegram = _stage_count(["TELEGRAM_SENT", "PENDING_APPROVAL"])
+            funnel_executed = _stage_count(["EXECUTED"])
+
+            summary.update({
+                "trade_count": trade_count, "win_count": win_count, "loss_count": loss_count,
+                "win_rate": round(win_rate, 4), "gross_pnl": round(gross_pnl, 2),
+                "net_pnl": round(net_pnl, 2), "avg_r": round(avg_r, 3),
+                "expectancy_r": round(expectancy_r, 4), "balance_eod": round(balance_eod, 2),
+                "best_coin": best_coin, "worst_coin": worst_coin,
+                "funnel_scanned": funnel_scanned, "funnel_candidate": funnel_candidate,
+                "funnel_telegram": funnel_telegram, "funnel_executed": funnel_executed,
+            })
+
+            conn.execute(
+                """
+                INSERT INTO daily_summary
+                    (date, trade_count, win_count, loss_count, win_rate, gross_pnl, net_pnl,
+                     avg_r, balance_eod, best_coin, worst_coin, expectancy_r,
+                     funnel_scanned, funnel_candidate, funnel_telegram, funnel_executed, environment)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(date) DO UPDATE SET
+                    trade_count=excluded.trade_count, win_count=excluded.win_count,
+                    loss_count=excluded.loss_count, win_rate=excluded.win_rate,
+                    gross_pnl=excluded.gross_pnl, net_pnl=excluded.net_pnl, avg_r=excluded.avg_r,
+                    balance_eod=excluded.balance_eod, best_coin=excluded.best_coin,
+                    worst_coin=excluded.worst_coin, expectancy_r=excluded.expectancy_r,
+                    funnel_scanned=excluded.funnel_scanned, funnel_candidate=excluded.funnel_candidate,
+                    funnel_telegram=excluded.funnel_telegram, funnel_executed=excluded.funnel_executed,
+                    environment=excluded.environment
+                """,
+                (date_str, trade_count, win_count, loss_count, round(win_rate, 4),
+                 round(gross_pnl, 2), round(net_pnl, 2), round(avg_r, 3), round(balance_eod, 2),
+                 best_coin, worst_coin, round(expectancy_r, 4),
+                 funnel_scanned, funnel_candidate, funnel_telegram, funnel_executed, env),
+            )
+        logger.info(f"[DailySummary] {date_str} özeti yazıldı: {trade_count} işlem, E={summary['expectancy_r']:+.3f}R")
+        return summary
+    except Exception as e:
+        logger.error(f"[DailySummary] {date_str} özeti yazılamadı: {e}")
+        return summary
+
+
+def get_daily_summaries(days: int = 30, environment: str | None = None) -> list[dict]:
+    """Son `days` günün daily_summary kayıtlarını döner (sparkline/trend için)."""
+    import config as _cfg
+    env = environment or getattr(_cfg, "EXECUTION_MODE", "paper")
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM daily_summary WHERE environment = ? ORDER BY date DESC LIMIT ?",
+                (env, days),
+            ).fetchall()
+            return [dict(r) for r in rows][::-1]  # eskiden yeniye
+    except Exception as e:
+        logger.debug(f"[DailySummary] okuma hatası: {e}")
+        return []
 
 
 def save_signal_event(signal_id, event_type: str, **kwargs):

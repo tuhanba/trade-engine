@@ -316,6 +316,38 @@ def api_signals():
         return _error(str(exc))
 
 
+@app.route("/api/expectancy")
+def api_expectancy():
+    """Expectancy (kuzey yıldızı) metriği — dashboard ana kartı (Faz 3.1)."""
+    try:
+        days = int(request.args.get("days", 30))
+        exec_mode = dashboard_service.get_ax_status().get("execution_mode", "paper")
+        return _ok(dashboard_service.get_expectancy(days, exec_mode))
+    except Exception as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/live_readiness")
+def api_live_readiness():
+    """Live-Readiness 5 kapı durumu — dashboard kartı (Faz 3.3)."""
+    try:
+        from core.live_readiness import check
+        return _ok(check())
+    except Exception as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/daily_summary")
+def api_daily_summary():
+    """Günlük özet serisi (sparkline/trend) — daily_summary tablosu (Faz 3.1)."""
+    try:
+        days = int(request.args.get("days", 30))
+        exec_mode = dashboard_service.get_ax_status().get("execution_mode", "paper")
+        return _ok(database.get_daily_summaries(days, exec_mode))
+    except Exception as exc:
+        return _error(str(exc))
+
+
 @app.route("/api/learning")
 def api_learning():
     """Ghost learning özeti."""

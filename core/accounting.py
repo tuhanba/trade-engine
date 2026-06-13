@@ -238,6 +238,87 @@ def calculate_r_multiple(pnl: float, risk_usd: float) -> float:
     return round(pnl / risk_usd, 3)
 
 
+# ── Expectancy — Tek Kuzey Yıldızı Metrik (Faz 3.1) ──────────────────
+
+def _trade_r_value(row) -> Optional[float]:
+    """Kapanmış bir trade satırının R-multiple değerini döner.
+
+    Önce kayıtlı r_multiple kullanılır; yoksa net_pnl/risk_usd'den hesaplanır.
+    Hiçbiri yoksa None (örneklem dışı bırakılır).
+    NEDEN: Tek R kaynağı — friday_decisions ile aynı mantık, tutarlı expectancy.
+    """
+    try:
+        r = float(row["r_multiple"] or 0.0)
+        if r != 0.0:
+            return r
+        risk_usd = float(row["risk_usd"] or 0.0)
+        if risk_usd > 0:
+            return float(row["net_pnl"] or 0.0) / risk_usd
+    except Exception:
+        pass
+    return None
+
+
+def calculate_expectancy(days: int = 30, environment: Optional[str] = None) -> dict:
+    """Son `days` günün kapanmış trade'lerinden expectancy (R cinsinden) hesaplar.
+
+    E = (WR × AvgWin_R) − ((1−WR) × |AvgLoss_R|)
+
+    Returns:
+        expectancy_r, avg_win_r, avg_loss_r, win_rate, trades_per_day,
+        weekly_r_projection, n (örneklem), days, environment.
+    NEDEN (Faz 3.1): Sistemin tek kuzey yıldızı metriği. Dashboard ana kartı,
+    /stats, ve Friday context bu fonksiyonu çağırır — tek kaynak.
+    """
+    import database  # lazy: dairesel import (database → accounting) önlenir
+    from datetime import datetime, timezone, timedelta
+
+    env = environment or getattr(__import__("config"), "EXECUTION_MODE", "paper")
+    result = {
+        "expectancy_r": 0.0, "avg_win_r": 0.0, "avg_loss_r": 0.0,
+        "win_rate": 0.0, "trades_per_day": 0.0, "weekly_r_projection": 0.0,
+        "n": 0, "days": days, "environment": env,
+    }
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        with database.get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT net_pnl, risk_usd, r_multiple FROM trades
+                WHERE status = 'closed'
+                  AND close_time >= ?
+                  AND environment = ?
+                  AND COALESCE(is_valid_for_stats, 1) = 1
+                """,
+                (cutoff, env),
+            ).fetchall()
+        r_values = [r for r in (_trade_r_value(row) for row in rows) if r is not None]
+        n = len(r_values)
+        result["n"] = n
+        if n == 0:
+            return result
+        wins = [r for r in r_values if r > 0]
+        losses = [r for r in r_values if r <= 0]
+        wr = len(wins) / n
+        avg_win = (sum(wins) / len(wins)) if wins else 0.0
+        avg_loss = abs(sum(losses) / len(losses)) if losses else 0.0
+        expectancy = (wr * avg_win) - ((1.0 - wr) * avg_loss)
+        trades_per_day = n / max(1, days)
+        result.update({
+            "expectancy_r": round(expectancy, 4),
+            "avg_win_r": round(avg_win, 4),
+            "avg_loss_r": round(avg_loss, 4),
+            "win_rate": round(wr, 4),
+            "trades_per_day": round(trades_per_day, 2),
+            # Haftalık R projeksiyonu: işlem/gün × 7 × beklenti
+            "weekly_r_projection": round(trades_per_day * 7 * expectancy, 3),
+        })
+        return result
+    except Exception as e:
+        logger.error("[Expectancy] Hesaplama hatası: %s", e)
+        return result
+
+
 # ── Margin & leverage ─────────────────────────────────────────────
 
 def calculate_margin_loss_pct(

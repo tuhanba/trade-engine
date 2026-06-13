@@ -163,7 +163,21 @@ def _get_live_trades_impl(environment: str | None = None) -> list:
 
 def get_stats(environment: str | None = None) -> dict:
     """Özet istatistikler (genişletilmiş)."""
-    return _safe_call(database.get_dashboard_stats, {}, environment)
+    stats = _safe_call(database.get_dashboard_stats, {}, environment)
+    # NEDEN (Faz 3.1): Expectancy dashboard ana kartının veri kaynağı —
+    # get_stats tek çağrıda kuzey yıldızı metriğini de döndürür.
+    try:
+        from core.accounting import calculate_expectancy
+        stats["expectancy"] = calculate_expectancy(days=30, environment=environment)
+    except Exception:
+        stats["expectancy"] = {"expectancy_r": 0.0, "n": 0}
+    return stats
+
+
+def get_expectancy(days: int = 30, environment: str | None = None) -> dict:
+    """Expectancy detay metriği — /api/expectancy endpoint'i için (Faz 3.1)."""
+    from core.accounting import calculate_expectancy
+    return _safe_call(calculate_expectancy, {"expectancy_r": 0.0, "n": 0}, days, environment)
 
 
 def get_trades(limit: int = 100, environment: str | None = None) -> list[dict]:

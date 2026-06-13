@@ -799,12 +799,16 @@ def get_ghost_learning_stats() -> dict:
         return {}
 
 
-def apply_ghost_suggestions_v2(min_confidence: str = "MEDIUM") -> list:
+def apply_ghost_suggestions_v2(min_confidence: str = "MEDIUM", use_gate: bool = True) -> list:
     """
     ghost_suggestions tablosundaki uygulanmamış önerileri okur,
     ilgili coin'in coin_configs tablosundaki JSON parametrelerine 'threshold_overrides'
     olarak ekler ve öneriyi 'applied' olarak işaretler.
     Ayrıca Telegram üzerinden bildirim gönderir.
+
+    use_gate (Faz 3.2): True ise her eşik önerisi param_gate'ten geçer; simülasyonda
+    daha kötü çıkan öneri uygulanmaz (applied işaretlenir, atlanır). Testlerde
+    use_gate=False ile devre dışı bırakılabilir.
 
     Returns: uygulanan değişikliklerin string listesi.
     """
@@ -855,6 +859,21 @@ def apply_ghost_suggestions_v2(min_confidence: str = "MEDIUM") -> list:
                 if new_thr >= old_thr:
                     mark_ghost_suggestion_applied(s["id"])
                     continue
+
+            # NEDEN (Faz 3.2): Eşik düşürme önerisi backtest gate'inden geçer —
+            # simülasyonda expectancy'yi kötüleştiren öneri uygulanmaz. Eşik
+            # değişimi trade_threshold semantiğiyle doğrulanır (proxy).
+            if use_gate:
+                try:
+                    from core.param_gate import validate_param_change
+                    approved, gate_report = validate_param_change("trade_threshold", old_thr, new_thr)
+                    if not approved:
+                        logger.warning("[Ghost2/Gate] %s (%s) eşik önerisi reddedildi: %s",
+                                       sym, trigger, gate_report.get("reason"))
+                        mark_ghost_suggestion_applied(s["id"])
+                        continue
+                except Exception as _ge:
+                    logger.debug("[Ghost2/Gate] gate kontrolü atlandı: %s", _ge)
 
             overrides[trigger] = new_thr
             current_cfg["ghost_applied_at"]  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
