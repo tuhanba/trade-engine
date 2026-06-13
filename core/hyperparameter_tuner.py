@@ -103,6 +103,30 @@ def optimize_parameters():
         best_value = study.best_value
         logger.info(f"[Tuner] Optimization finished. Best simulated PnL: {best_value:.4f} USD. Parameters: {best_params}")
 
+        # NEDEN (Faz 3.2): Optuna sonuçları da backtest gate'inden geçer —
+        # her parametre ayrı ayrı doğrulanır; reddedilen mevcut değerinde kalır.
+        try:
+            from core.param_gate import validate_param_change
+            cur_sl = getattr(config, "SL_ATR_MULT", 1.8)
+            cur_tp = getattr(config, "TP2_R", 2.5)
+            cur_thr = getattr(config, "TRADE_THRESHOLD", 55.0)
+
+            ok_sl, rep_sl = validate_param_change("sl_atr_mult", cur_sl, best_params["sl_atr_mult"])
+            ok_tp, rep_tp = validate_param_change("tp_atr_mult", cur_tp, best_params["tp_atr_mult"])
+            ok_thr, rep_thr = validate_param_change("trade_threshold", cur_thr, best_params["trade_threshold"])
+
+            if not ok_sl:
+                logger.warning("[Tuner/Gate] sl_atr_mult reddedildi: %s", rep_sl.get("reason"))
+                best_params["sl_atr_mult"] = cur_sl
+            if not ok_tp:
+                logger.warning("[Tuner/Gate] tp_atr_mult reddedildi: %s", rep_tp.get("reason"))
+                best_params["tp_atr_mult"] = cur_tp
+            if not ok_thr:
+                logger.warning("[Tuner/Gate] trade_threshold reddedildi: %s", rep_thr.get("reason"))
+                best_params["trade_threshold"] = cur_thr
+        except Exception as _gate_err:
+            logger.debug("[Tuner/Gate] gate kontrolü atlandı: %s", _gate_err)
+
         # Update in database
         # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
         try:

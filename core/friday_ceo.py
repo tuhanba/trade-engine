@@ -236,8 +236,16 @@ class FridayCeo:
         self.db_path = db_path or config.DB_PATH
         self.dynamic_events = []
         
-    def _apply_param_with_clamp(self, key: str, value: float, actor: str = "friday", reason: str = "") -> float:
-        """Apply a parameter change with clamping and audit logging."""
+    def _apply_param_with_clamp(self, key: str, value: float, actor: str = "friday",
+                                reason: str = "", gate: bool = False) -> float:
+        """Apply a parameter change with clamping and audit logging.
+
+        gate=True (Faz 3.2): Değişiklik UYGULANMADAN ÖNCE param_gate
+        simülasyonundan geçer. Reddedilirse eski değer korunur (uygulanmaz);
+        veri yetersizse küçük adım (max %2) uygulanır. Yalnız OTONOM optimizasyon
+        kararları (LLM) gate=True ile çağrılır; acil koruma/drawdown kuralları
+        gate=False (varsayılan) ile çalışır — güvenlik her zaman uygulanır.
+        """
         import database as _db
         CLAMP_RULES = {
             "trade_threshold": (40.0, 70.0),
@@ -250,6 +258,34 @@ class FridayCeo:
                 logger.info("[Friday] %s clamped: %.2f → %.2f (range [%.1f, %.1f])", key, value, clamped, lo, hi)
                 reason = (reason + " clamped").strip()
                 value = clamped
+
+        if gate:
+            try:
+                from core.param_gate import validate_param_change, GATED_KEYS
+                if key in GATED_KEYS:
+                    old_val = _db.get_state(key)
+                    try:
+                        old_f = float(old_val) if old_val is not None else value
+                    except (TypeError, ValueError):
+                        old_f = value
+                    approved, gate_report = validate_param_change(key, old_f, value)
+                    if not approved:
+                        # NEDEN: Reddedilen otonom değişiklik UYGULANMAZ; eski değer kalır.
+                        logger.warning("[Friday/Gate] %s reddedildi: %s", key, gate_report.get("reason"))
+                        try:
+                            from core import friday_decisions as _fd
+                            _fd.log_decision("NOOP", param_key=key, old_value=old_f, new_value=value,
+                                             reasoning="param_gate RED: " + str(gate_report.get("reason", "")))
+                        except Exception:
+                            pass
+                        return old_f
+                    if gate_report.get("insufficient_data") and "applied_value" in gate_report:
+                        # Veri yetersiz → küçük adım kuralıyla kısıtlanmış değeri uygula
+                        value = float(gate_report["applied_value"])
+                        reason = (reason + " gate:small_step").strip()
+            except Exception as _ge:
+                logger.debug("[Friday/Gate] gate kontrolü atlandı: %s", _ge)
+
         _db.set_state(key, str(value), actor=actor, reason=reason)
         return value
 
@@ -792,6 +828,16 @@ class FridayCeo:
             ctx["market_regime"] = "NEUTRAL"
             logger.warning(f"[Friday CEO] Context regime error: {e}")
 
+        # 4.5 Expectancy — kuzey yıldızı metrik (Faz 3.1)
+        # NEDEN: Friday her kararında 30g beklentiyi görür; parametre
+        # değişikliklerini kör değil, expectancy trendine göre alır.
+        try:
+            from core.accounting import calculate_expectancy
+            ctx["expectancy"] = calculate_expectancy(days=30, environment=environment)
+        except Exception as e:
+            ctx["expectancy"] = {"expectancy_r": 0.0, "n": 0}
+            logger.debug(f"[Friday CEO] Context expectancy error: {e}")
+
         # 5. Friday karar günlüğü özeti (Faz 2.1)
         # NEDEN: Friday geçmiş kararlarının sonuç skorlarını (outcome_score)
         # her karar turunda görür — negatif skorlu karar tiplerini tekrarlamadan
@@ -938,7 +984,8 @@ class FridayCeo:
                     old_value = database.get_state(db_key)
                     casted_val = cast_fn(str(val))
                     if key_upper in ("TRADE_THRESHOLD", "RISK_PCT"):
-                        casted_val = self._apply_param_with_clamp(db_key, float(casted_val), actor="friday", reason="llm_decision")
+                        # NEDEN (Faz 3.2): Otonom LLM kararı → gate=True (simülasyon kanıtı şart)
+                        casted_val = self._apply_param_with_clamp(db_key, float(casted_val), actor="friday", reason="llm_decision", gate=True)
                     else:
                         database.set_state(db_key, str(casted_val), actor="friday", reason="llm_decision")
                     # Clear config cache

@@ -219,13 +219,16 @@ class TelegramManager:
             "/friday_log":   self._cmd_friday_log,
             "/friday_decisions": self._cmd_friday_decisions,
             "/kararlar":         self._cmd_friday_decisions,
+            "/expectancy":       self._cmd_expectancy,
+            "/beklenti":         self._cmd_expectancy,
+            "/readiness":        self._cmd_readiness,
             "/diagnose": self._cmd_diagnose,
             "/teshis":   self._cmd_diagnose,
         }
         handler = handlers.get(cmd)
         if handler:
             try:
-                if cmd in ("/close", "/set", "/friday", "/force", "/ac", "/approve", "/ignore", "/veto"):
+                if cmd in ("/close", "/set", "/friday", "/force", "/ac", "/approve", "/ignore", "/veto", "/live"):
                     handler(args)
                 else:
                     handler()
@@ -1169,8 +1172,28 @@ class TelegramManager:
         mode_label = "Canlı Cüzdan" if exec_mode == "live" else "Sanal Kasa"
         sharpe = stats.get("sharpe_ratio", 0.0)
         sortino = stats.get("sortino_ratio", 0.0)
+
+        # NEDEN (Faz 3.1): Expectancy kuzey yıldızı metriği — /stats çıktısının en üstünde.
+        exp_line = ""
+        try:
+            from core.accounting import calculate_expectancy
+            exp = calculate_expectancy(days=30, environment=exec_mode)
+            if exp.get("n", 0) > 0:
+                er = exp["expectancy_r"]
+                icon = "🟢" if er > 0 else "🔴"
+                exp_line = (
+                    f"{icon} <b>Expectancy (30g):</b> {er:+.3f}R "
+                    f"(WR %{exp['win_rate']*100:.0f} | Ø+{exp['avg_win_r']:.2f}R / Ø{exp['avg_loss_r']:.2f}R | "
+                    f"~{exp['weekly_r_projection']:+.1f}R/hafta, n={exp['n']})\n\n"
+                )
+            else:
+                exp_line = "⚪ <b>Expectancy (30g):</b> yetersiz veri (kapalı işlem yok)\n\n"
+        except Exception:
+            pass
+
         self.send_fn(
             f"📊 <b>Genel Performans İstatistikleri ({exec_mode.upper()})</b>\n\n"
+            f"{exp_line}"
             f"Bu veriler botun şu ama kadar gösterdiği tüm başarı oranını özetler:\n\n"
             f"🔸 <b>Toplam Kapanan İşlem:</b> {total} adet\n"
             f"🔸 <b>Başarı Oranı (Kazanılan/Kaybedilen):</b> {wins} Başarılı / {loss} Zararlı\n"
@@ -1787,15 +1810,52 @@ class TelegramManager:
         except Exception as e:
             self.send_fn(f"Hata: {e}")
 
-    def _cmd_live(self):
+    def _cmd_live(self, args: list = None):
+        """Live moda geçiş — Live-Readiness 5 kapısı geçilmeden İZİN VERİLMEZ (Faz 3.3).
+
+        Kapılar geçilmişse onay butonu sunulur; /live force ile (boss kararı)
+        kapılar bypass edilebilir ancak eksikler yine de gösterilir.
+        """
+        force = bool(args) and str(args[0]).lower() in ("force", "zorla", "onayla")
+        try:
+            from core.live_readiness import check, format_report
+            result = check()
+        except Exception as e:
+            self.send_fn(f"⚠️ Live-readiness kontrolü çalıştırılamadı: {e}")
+            return
+
+        if not result["ready"] and not force:
+            # NEDEN (Faz 3.3): /live komutu kontrolü ÇALIŞTIRMADAN moda geçişe izin
+            # vermez; eksik kapıları listeler.
+            from core.live_readiness import format_report as _fr
+            self.send_fn(
+                _fr(result) +
+                "\n\n⛔ Eksik kapılar nedeniyle LIVE moda <b>geçilmedi</b>.\n"
+                "Boss kararıyla zorlamak için: <code>/live force</code>"
+            )
+            return
+
         try:
             import config as _cfg
             _cfg.EXECUTION_MODE = "live"
             import database as _db
             _db.set_state("tg_execution_mode", "live")
-            self.send_fn("🔥 <b>LIVE TRADING AKTİF</b>\n\n⚠️ <b>DİKKAT:</b> Sistem şu andan itibaren GERÇEK Binance bakiyenizle işlem açacaktır. Kemerlerinizi bağlayın!")
+            prefix = "⚠️ <b>KAPILAR BYPASS EDİLDİ (force)</b>\n\n" if (force and not result["ready"]) else ""
+            self.send_fn(
+                prefix +
+                "🔥 <b>LIVE TRADING AKTİF</b>\n\n⚠️ <b>DİKKAT:</b> Sistem şu andan itibaren "
+                "GERÇEK Binance bakiyenizle işlem açacaktır. Kemerlerinizi bağlayın!"
+            )
         except Exception as e:
             self.send_fn(f"Hata: {e}")
+
+    def _cmd_readiness(self):
+        """Faz 3.3: Live-Readiness 5 kapısını çalıştırıp durumu gösterir."""
+        try:
+            from core.live_readiness import format_report
+            self.send_fn(format_report())
+        except Exception as e:
+            self.send_fn(f"⚠️ Readiness raporu alınamadı: {e}")
 
     def _cmd_heatmap(self):
         try:
@@ -1940,6 +2000,36 @@ class TelegramManager:
             self.send_fn("\n".join(lines))
         except Exception as e:
             self.send_fn(f"⚠️ Friday log alınamadı: {e}")
+
+    def _cmd_expectancy(self):
+        """Faz 3.1: 30 günlük expectancy detayını gösterir (kuzey yıldızı metrik)."""
+        try:
+            from core.accounting import calculate_expectancy
+            exec_mode = getattr(config, "EXECUTION_MODE", "paper")
+            exp = calculate_expectancy(days=30, environment=exec_mode)
+            if exp.get("n", 0) == 0:
+                self.send_fn("⚪ <b>Expectancy (30g)</b>\n\nYeterli veri yok — son 30 günde kapanmış işlem bulunamadı.")
+                return
+            er = exp["expectancy_r"]
+            icon = "🟢" if er > 0 else "🔴"
+            yorum = (
+                "Pozitif beklenti — her işlem ortalama kâr getiriyor."
+                if er > 0 else
+                "Negatif beklenti — strateji gözden geçirilmeli."
+            )
+            self.send_fn(
+                f"{icon} <b>Expectancy (30 Gün, {exec_mode.upper()})</b>\n\n"
+                f"🎯 <b>Beklenti (E):</b> {er:+.3f}R / işlem\n"
+                f"🔸 Win Rate: %{exp['win_rate']*100:.1f}\n"
+                f"🔸 Ortalama Kazanç: +{exp['avg_win_r']:.2f}R\n"
+                f"🔸 Ortalama Kayıp: {exp['avg_loss_r']:.2f}R\n"
+                f"🔸 İşlem/Gün: {exp['trades_per_day']:.1f}\n"
+                f"🔸 Haftalık R Projeksiyonu: {exp['weekly_r_projection']:+.2f}R\n"
+                f"🔸 Örneklem: {exp['n']} işlem\n\n"
+                f"💡 <i>{yorum}</i>"
+            )
+        except Exception as e:
+            self.send_fn(f"⚠️ Expectancy hesaplanamadı: {e}")
 
     def _cmd_friday_decisions(self):
         """Faz 2.1: Son 10 Friday kararını outcome skorlarıyla gösterir.

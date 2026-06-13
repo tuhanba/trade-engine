@@ -172,6 +172,9 @@ class AsyncScalpEngine:
         # Start Weekly Telegram Performance Digest Loop
         asyncio.create_task(self._weekly_digest_loop())
 
+        # Faz 3.1: Günlük özet (daily_summary) yazıcı loop — 00:05 UTC
+        asyncio.create_task(self._daily_summary_loop())
+
         # Start Optuna Hyperparameter Tuner Loop
         asyncio.create_task(self._optuna_tuning_loop())
 
@@ -664,6 +667,29 @@ class AsyncScalpEngine:
         while True:
             await asyncio.sleep(43200) # 12h
             await asyncio.to_thread(_run_vacuum)
+
+    async def _daily_summary_loop(self):
+        """Faz 3.1: Her gece 00:05 UTC bir önceki günün özetini daily_summary'ye yazar.
+
+        NEDEN: daily_summary trend grafikleri/sparkline'ların veri kaynağı —
+        günün expectancy + funnel sayıları kalıcılaştırılır. Idempotent
+        (ON CONFLICT date) ve last_daily_summary_date ile çifte yazım engellenir.
+        """
+        from database import get_system_state, update_system_state, write_daily_summary
+        from datetime import datetime, timezone, timedelta
+        while True:
+            try:
+                now = datetime.now(timezone.utc)
+                # 00:00–00:15 penceresi: bir önceki günü kapat
+                if now.hour == 0 and now.minute < 15:
+                    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+                    if get_system_state("last_daily_summary_date", default="") != yesterday:
+                        await asyncio.to_thread(write_daily_summary, yesterday)
+                        await asyncio.to_thread(update_system_state, "last_daily_summary_date", yesterday)
+                        logger.info(f"[DailySummary] {yesterday} günü özeti yazıldı.")
+            except Exception as e:
+                logger.error(f"[DailySummary] Loop hatası: {e}")
+            await asyncio.sleep(600)  # 10 dakikada bir kontrol
 
     async def _weekly_digest_loop(self):
         """Haftalık özet raporunu Pazar günleri saat 21:00 UTC'de otomatik gönderir."""
