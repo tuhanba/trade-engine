@@ -2233,10 +2233,10 @@ class FridayCeo:
                 if not self._alert_recently_sent("friday_last_drought_alert", cooldown_minutes=120):
                     set_state("friday_last_drought_alert", now.isoformat())
                     diag = self.diagnose_data_flow()
-                    msg = (
-                        "🚨 <b>ANOMALİ • Sinyal Kuraklığı</b>\n"
-                        "Son 2 saattir pipeline'a hiç sinyal düşmedi (scanner heartbeat canlı ✓).\n\n"
-                        + diag + "\n\n/teshis ile tam rapor"
+                    # NEDEN (Faz 5.1): merkezi anomali şablonu — sabit görsel imza.
+                    msg = telegram_delivery.tpl_anomaly(
+                        "Sinyal Kuraklığı",
+                        ["Son 2 saattir pipeline'a hiç sinyal düşmedi (scanner heartbeat canlı ✓).", "", diag],
                     )
                     telegram_delivery.send_message(msg)
                     _fd.log_decision("REPORT", param_key="signal_drought",

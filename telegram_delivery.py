@@ -94,7 +94,229 @@ def _mode_tag() -> str:
 LINE = "─" * 22
 
 
-# ── Altyapı — değişmez ────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# FAZ 5 — MERKEZİ MESAJ ŞABLONLARI ("Cep Komuta Hattı")
+# İlke: Her mesaj 3 saniyede taranabilir. Sabit görsel imza + SABİT sayı formatı.
+# Para $1,234.50 · Yüzde +1.57% · R +1.27R — tutarsızlık YASAK.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def fmt_money(v) -> str:
+    """Para: $1,234.50 (işaretsiz — bakiye/risk için)."""
+    try:
+        v = float(v or 0)
+        return ("-" if v < 0 else "") + f"${abs(v):,.2f}"
+    except Exception:
+        return "$0.00"
+
+
+def fmt_money_signed(v) -> str:
+    """İşaretli para: +$31.40 / -$10.00 (PnL için)."""
+    try:
+        v = float(v or 0)
+        return ("+" if v >= 0 else "-") + f"${abs(v):,.2f}"
+    except Exception:
+        return "+$0.00"
+
+
+def fmt_pct(v) -> str:
+    """Yüzde: +1.57% / -1.58%."""
+    try:
+        v = float(v or 0)
+        return f"{'+' if v >= 0 else ''}{v:.2f}%"
+    except Exception:
+        return "0.00%"
+
+
+def fmt_r(v) -> str:
+    """R-multiple: +1.27R / -1.00R."""
+    try:
+        v = float(v or 0)
+        return f"{'+' if v >= 0 else ''}{v:.2f}R"
+    except Exception:
+        return "0.00R"
+
+
+def fmt_price(v) -> str:
+    """Fiyat: büyüklüğe göre uyarlanır (BTC 60000.0 · SOL 142.350 · SHIB 0.00002431)."""
+    try:
+        v = float(v or 0)
+        if v == 0:
+            return "0"
+        a = abs(v)
+        if a >= 1000:
+            return f"{v:,.2f}"
+        if a >= 1:
+            return f"{v:.3f}"
+        if a >= 0.01:
+            return f"{v:.5f}"
+        return f"{v:.8f}".rstrip("0").rstrip(".")
+    except Exception:
+        return str(v)
+
+
+def _short_regime(regime: str) -> str:
+    """Rejimi kısa ok'lu etikete çevirir: TRENDING_HIGH_VOL → TREND↑, CHOPPY → CHOP."""
+    r = str(regime or "").upper()
+    if "TRENDING" in r:
+        return "TREND↑" if "HIGH" in r else "TREND"
+    if "CHOPPY" in r:
+        return "CHOP↑" if "HIGH" in r else "CHOP"
+    if "BULL" in r:
+        return "BULL↑"
+    if "BEAR" in r:
+        return "BEAR↓"
+    return r or "NEUTRAL"
+
+
+def _r_at_target(entry: float, sl: float, target: float, direction: str) -> Optional[float]:
+    """Bir hedefteki R-multiple = (hedef mesafesi) / (stop mesafesi)."""
+    try:
+        risk = abs(entry - sl)
+        if risk <= 0 or target <= 0 or entry <= 0:
+            return None
+        if str(direction).upper() == "LONG":
+            return (target - entry) / risk
+        return (entry - target) / risk
+    except Exception:
+        return None
+
+
+def _signed_pct(entry: float, target: float, direction: str) -> str:
+    """Girişten hedefe yön-duyarlı yüzde, +1.57% formatında (parantezsiz)."""
+    try:
+        if entry <= 0 or target <= 0:
+            return ""
+        diff = (target - entry) / entry * 100
+        if str(direction).upper() == "SHORT":
+            diff = -diff
+        return fmt_pct(diff)
+    except Exception:
+        return ""
+
+
+def tpl_trade_open(symbol: str, direction: str, leverage, entry: float, sl: float,
+                   tp1: float, tp2: float, risk_usd: float, risk_pct: float,
+                   score: float, regime: Optional[str] = None,
+                   ghost_wr: Optional[float] = None, ghost_n: Optional[int] = None) -> str:
+    """Trade açılış şablonu (Faz 5.1) — sabit satır düzeni."""
+    direction = str(direction).upper()
+    side_icon = "🟢" if direction == "LONG" else "🔵"  # LONG altın-yeşil, SHORT gümüş-mavi
+    lev_str = f"x{leverage}" if leverage not in (None, "", "?") else ""
+
+    sl_pct = _signed_pct(entry, sl, direction)
+    tp1_pct = _signed_pct(entry, tp1, direction)
+    tp2_pct = _signed_pct(entry, tp2, direction)
+    tp1_r = _r_at_target(entry, sl, tp1, direction)
+    tp2_r = _r_at_target(entry, sl, tp2, direction)
+
+    lines = [
+        f"{side_icon} <b>{direction} • {symbol}</b>{('  ' + lev_str) if lev_str else ''}",
+        LINE,
+        f"Giriş   <code>{fmt_price(entry)}</code>",
+    ]
+    if sl > 0:
+        lines.append(f"Stop    <code>{fmt_price(sl)}</code>   ({sl_pct})")
+    if tp1 > 0:
+        r_part = f"  R {tp1_r:.2f}" if tp1_r is not None else ""
+        lines.append(f"TP1     <code>{fmt_price(tp1)}</code>   ({tp1_pct}){r_part}")
+    if tp2 > 0:
+        r_part = f"  R {tp2_r:.2f}" if tp2_r is not None else ""
+        lines.append(f"TP2     <code>{fmt_price(tp2)}</code>   ({tp2_pct}){r_part}")
+    lines.append(LINE)
+
+    info = f"Risk {fmt_money(risk_usd)} ({risk_pct:.1f}%) • Skor {score:.0f}"
+    if regime:
+        info += f" • Rejim {regime}"
+    lines.append(info)
+    if ghost_wr is not None:
+        n_part = f" (n={ghost_n})" if ghost_n is not None else ""
+        lines.append(f"👻 Ghost WR(setup): {ghost_wr:.0f}%{n_part}")
+    return "\n".join(lines)
+
+
+def tpl_trade_close(symbol: str, direction: str, net_pnl: float, r_multiple: float,
+                    duration_str: str, reason: str, balance_after: float,
+                    today_wins: Optional[int] = None, today_losses: Optional[int] = None,
+                    today_pnl: Optional[float] = None, expectancy_r: Optional[float] = None) -> str:
+    """Trade kapanış şablonu (Faz 5.1) — en kritik mesaj. Kutlama/teselli tonu,
+    format DEĞİŞMEZ; sadece ikon/başlık değişir."""
+    direction = str(direction).upper()
+    if net_pnl > 0:
+        head = f"✅ <b>KAZANÇ</b> • {symbol} {direction}"
+    elif net_pnl < 0:
+        head = f"🔻 <b>ZARAR</b> • {symbol} {direction}"
+    else:
+        head = f"⚖️ <b>BAŞA BAŞ</b> • {symbol} {direction}"
+
+    reason_map = {
+        "sl": "Stop Loss", "tp1": "TP1", "tp2": "TP2", "tp3": "TP3",
+        "manual": "Manuel", "timeout": "Süre Doldu", "max_hold_timeout": "Max Süre",
+        "trail": "Trailing", "runner": "Runner", "breakeven": "Breakeven", "finish": "Finish",
+    }
+    reason_label = reason_map.get(str(reason).lower(), str(reason).upper())
+
+    pnl_line = f"PnL    {fmt_money_signed(net_pnl)}  ({fmt_r(r_multiple)})"
+    bal_line = f"Bakiye {fmt_money(balance_after)}"
+    if today_pnl is not None:
+        bal_line += f"  (gün: {fmt_money_signed(today_pnl)})"
+
+    lines = [head, LINE, pnl_line, f"Süre   {duration_str or '—'} • Sebep: {reason_label}", bal_line, LINE]
+
+    # Bugünkü performans + 30g expectancy
+    footer_parts = []
+    if today_wins is not None and today_losses is not None:
+        footer_parts.append(f"Bugün: {today_wins}W-{today_losses}L")
+    if expectancy_r is not None:
+        footer_parts.append(f"E(30g): {fmt_r(expectancy_r)}")
+    if footer_parts:
+        lines.append("📊 " + " • ".join(footer_parts))
+    return "\n".join(lines)
+
+
+def tpl_anomaly(title: str, body_lines: list, suggestion: Optional[str] = None,
+                footer: str = "/teshis ile tam rapor") -> str:
+    """Anomali/Kritik şablonu (Faz 5.1) — sabit görsel imza."""
+    lines = [f"🚨 <b>ANOMALİ • {title}</b>"]
+    lines.extend(body_lines)
+    if suggestion:
+        lines.append(f"Öneri: {suggestion}")
+    if footer:
+        lines.append(footer)
+    return "\n".join(lines)
+
+
+def _today_perf(environment: Optional[str] = None) -> dict:
+    """Bugünün W-L ve net PnL'i + 30g expectancy (kapanış şablonu footer'ı için)."""
+    out = {"wins": None, "losses": None, "pnl": None, "expectancy_r": None}
+    try:
+        import database
+        from datetime import datetime as _dt, timezone as _tz
+        env = environment or EXECUTION_MODE
+        today = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+        with database.get_conn() as conn:
+            row = conn.execute(
+                "SELECT SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END), "
+                "SUM(CASE WHEN net_pnl<=0 THEN 1 ELSE 0 END), COALESCE(SUM(net_pnl),0) "
+                "FROM trades WHERE DATE(close_time)=? AND status='closed' "
+                "AND COALESCE(is_valid_for_stats,1)=1 AND environment=?",
+                (today, env),
+            ).fetchone()
+        out["wins"] = int(row[0] or 0)
+        out["losses"] = int(row[1] or 0)
+        out["pnl"] = round(float(row[2] or 0), 2)
+    except Exception:
+        pass
+    try:
+        from core.accounting import calculate_expectancy
+        exp = calculate_expectancy(days=30, environment=environment)
+        if exp.get("n", 0) > 0:
+            out["expectancy_r"] = exp["expectancy_r"]
+    except Exception:
+        pass
+    return out
+
+
+
 
 class TelegramDelivery:
     """Geriye dönük uyumluluk — eski kod bu sınıfı import ediyor."""
@@ -416,21 +638,25 @@ def send_trade_open(data: dict) -> bool:
         tp2   = float(data.get("tp2", 0) or 0)
         lev   = data.get("leverage", "?")
         risk  = float(data.get("risk_usd", 0) or 0)
-        qual  = data.get("setup_quality", "-")
+        risk_pct = float(data.get("risk_pct", 0) or 0)
         score = float(data.get("final_score", 0) or 0)
 
-        text = (
-            f"✅ <b>İŞLEM AÇILDI</b>  [{_mode_tag()}]\n"
-            f"{LINE}\n"
-            f"{dir_icon} <b>{symbol}</b>  {direction}  ·  {lev}x\n"
-            f"{LINE}\n"
-            f"📍 Giriş  <code>{_fmt(entry)}</code>\n"
-            f"🛑 Stop   <code>{_fmt(sl)}</code>{_pct(entry, sl, 'SHORT' if direction == 'LONG' else 'LONG')}\n"
-            f"🎯 TP1    <code>{_fmt(tp1)}</code>{_pct(entry, tp1, direction)}\n"
-            f"🎯 TP2    <code>{_fmt(tp2)}</code>{_pct(entry, tp2, direction)}\n"
-            f"{LINE}\n"
-            f"💰 Risk   <b>${_fmt(risk, 2)}</b>  ·  Kalite: <b>{qual}</b>  ({score:.1f}p)\n"
-            f"⏰ {_now_utc()}\n"
+        # Rejim — kısa ok'lu etiket
+        regime = data.get("market_regime") or None
+        if not regime:
+            try:
+                import database
+                regime = database.get_market_regime()
+            except Exception:
+                regime = None
+        if regime:
+            regime = _short_regime(regime)
+
+        # NEDEN (Faz 5.1): Merkezi şablon — tüm açılış mesajları aynı görsel imza.
+        text = tpl_trade_open(
+            symbol=symbol, direction=direction, leverage=lev, entry=entry, sl=sl,
+            tp1=tp1, tp2=tp2, risk_usd=risk, risk_pct=risk_pct, score=score,
+            regime=regime, ghost_wr=data.get("ghost_wr"), ghost_n=data.get("ghost_n"),
         )
 
         reply_markup = None
@@ -508,51 +734,13 @@ def send_trade_close(symbol: str, net_pnl: float, total_fee: float,
     BE   → ⚖️ nötr.
     """
     try:
-        sign      = "+" if net_pnl >= 0 else ""
-        dir_label = "LONG" if "LONG" in str(direction).upper() else "SHORT"
-
-        reason_map = {
-            "sl":               "Stop Loss",
-            "tp1":              "TP1",
-            "tp2":              "TP2",
-            "tp3":              "TP3",
-            "manual":           "Manuel Kapatma",
-            "timeout":          "Süre Doldu",
-            "max_hold_timeout": "Max Süre Doldu",
-            "trail":            "Trailing Stop",
-            "runner":           "Runner Kapandı",
-            "breakeven":        "Breakeven",
-            "finish":           "Finish Modu",
-        }
-        reason_label = reason_map.get(str(reason).lower(), str(reason).upper())
-
-        if net_pnl > 0:
-            header  = f"🟢 <b>KAZANÇ!</b>  {symbol}  ({dir_label})"
-            pnl_ln  = f"💵 Net Kâr    <b>{sign}${net_pnl:.2f}</b>"
-            r_ln    = f"📈 R-Multiple  <b>+{r_multiple:.2f}R</b>\n" if r_multiple > 0 else ""
-        elif net_pnl < 0:
-            header  = f"🔴 <b>ZARAR</b>  {symbol}  ({dir_label})"
-            pnl_ln  = f"💵 Zarar      <b>${net_pnl:.2f}</b>"
-            r_ln    = f"📉 R-Multiple  <b>{r_multiple:.2f}R</b>\n" if r_multiple != 0 else ""
-        else:
-            header  = f"⚖️ <b>BAŞA BAŞ</b>  {symbol}  ({dir_label})"
-            pnl_ln  = "💵 PnL        <b>$0.00</b>"
-            r_ln    = ""
-
-        fee_ln = f"💸 Komisyon   ${total_fee:.3f}\n" if total_fee and total_fee > 0 else ""
-        dur_ln = f"⏱ Süre       {duration_str}\n" if duration_str else ""
-
-        text = (
-            f"{header}\n"
-            f"{LINE}\n"
-            f"📋 Sebep      {reason_label}\n"
-            f"{pnl_ln}\n"
-            f"{r_ln}"
-            f"{fee_ln}"
-            f"{dur_ln}"
-            f"{LINE}\n"
-            f"💳 Bakiye     <b>${balance_after:.2f}</b>\n"
-            f"⏰ {_now_utc()}\n"
+        # NEDEN (Faz 5.1): Merkezi şablon — bugünkü W-L + 30g expectancy footer.
+        perf = _today_perf()
+        text = tpl_trade_close(
+            symbol=symbol, direction=direction, net_pnl=net_pnl, r_multiple=r_multiple,
+            duration_str=duration_str, reason=reason, balance_after=balance_after,
+            today_wins=perf.get("wins"), today_losses=perf.get("losses"),
+            today_pnl=perf.get("pnl"), expectancy_r=perf.get("expectancy_r"),
         )
 
         dk = (f"close:{symbol}:{direction}:{reason}:{_fmt(net_pnl)}"
