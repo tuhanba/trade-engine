@@ -346,6 +346,24 @@ def api_command_center():
         return _error(str(exc))
 
 
+@app.route("/api/correlation_matrix")
+def api_correlation_matrix():
+    """Açık pozisyonlar arası canlı Pearson korelasyon matrisi (Faz 6.3, on-demand)."""
+    try:
+        return _ok(dashboard_service.get_correlation_matrix())
+    except Exception as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/trade_replay/<int:trade_id>")
+def api_trade_replay(trade_id):
+    """Setup Replay — 'bu trade neden açıldı' giriş anı snapshot'ı (Faz 6.2)."""
+    try:
+        return _ok(dashboard_service.get_trade_setup_replay(trade_id))
+    except Exception as exc:
+        return _error(str(exc))
+
+
 @app.route("/api/daily_summary")
 def api_daily_summary():
     """Günlük özet serisi (sparkline/trend) — daily_summary tablosu (Faz 3.1)."""

@@ -233,6 +233,14 @@ MIN_ADX_5M      = _env_float("MIN_ADX_5M", 12)         # v6.0 gevşetildi
 FUNDING_LONG_MAX  = _env_float("FUNDING_LONG_MAX", 0.005)   # v6.0 gevşetildi
 FUNDING_SHORT_MIN = _env_float("FUNDING_SHORT_MIN", -0.005)  # v6.0 gevşetildi
 
+# Funding-Rate Avcısı (Faz 6.7) — bağımsız mean-reversion strateji servisi.
+# NEDEN: Aşırı funding = kalabalık taraf; mean-reversion ters yön sinyali üretir.
+# Pipeline'a SCANNED event'iyle eklemlenir (mevcut akışı bozmaz). Varsayılan KAPALI.
+FUNDING_HUNTER_ENABLED   = _env_bool("FUNDING_HUNTER_ENABLED", False)
+FUNDING_HUNTER_THRESHOLD = _env_float("FUNDING_HUNTER_THRESHOLD", 0.0008)  # |funding| eşiği (≈%0.08/8h)
+FUNDING_HUNTER_INTERVAL  = _env_int("FUNDING_HUNTER_INTERVAL", 900)        # tarama periyodu (sn)
+FUNDING_HUNTER_MAX_SIGNALS = _env_int("FUNDING_HUNTER_MAX_SIGNALS", 3)     # tur başına max aday
+
 # Flask
 FLASK_HOST = _env("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = _env_int("FLASK_PORT", 5000)

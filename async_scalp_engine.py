@@ -232,6 +232,13 @@ class AsyncScalpEngine:
         except Exception as e:
             logger.error(f"SentimentScraper başlatılamadı: {e}")
 
+        # Faz 6.7: Funding-Rate Avcısı (bağımsız strateji, varsayılan KAPALI)
+        try:
+            from core.services.funding_hunter import funding_hunter
+            asyncio.create_task(funding_hunter.start_background_task())
+        except Exception as e:
+            logger.error(f"FundingHunter başlatılamadı: {e}")
+
         # Start WebSocket Data Feed
         await self.market_data.initialize()
         
@@ -376,6 +383,14 @@ class AsyncScalpEngine:
                     logger.info(f"[FridayOutcome] {filled} karar outcome'u dolduruldu.")
             except Exception as e:
                 logger.error(f"[FridayOutcome] Döngü hatası: {e}")
+            # Faz 6.4: Shadow A/B — 72h dolmuş reddedilen önerileri değerlendir
+            try:
+                from core.shadow_eval import evaluate_pending_shadows
+                n = await asyncio.to_thread(evaluate_pending_shadows)
+                if n:
+                    logger.info(f"[Shadow] {n} gölge değerlendirme tamamlandı.")
+            except Exception as e:
+                logger.error(f"[Shadow] Döngü hatası: {e}")
             await asyncio.sleep(3600)  # 1 saat
 
     async def _friday_morning_brief_loop(self):
@@ -722,6 +737,16 @@ class AsyncScalpEngine:
                         logger.info("[WeeklyDigest] Haftalık rapor otomatik oluşturuluyor ve gönderiliyor...")
                         # Send to Telegram
                         await asyncio.to_thread(telegram_delivery.send_weekly_digest)
+                        # Faz 6.1: Haftalık Trade Journal MD dosyasını da gönder
+                        try:
+                            from core.trade_journal import write_journal_file
+                            path = await asyncio.to_thread(write_journal_file, 7)
+                            await asyncio.to_thread(
+                                telegram_delivery.send_document, path,
+                                "📓 Haftalık Trade Journal — işlemler, gerekçeler, Friday kararları, dersler.",
+                            )
+                        except Exception as je:
+                            logger.error(f"[WeeklyDigest] Trade Journal gönderilemedi: {je}")
                         # Update state to avoid duplicate sending
                         await asyncio.to_thread(update_system_state, "last_weekly_digest_date", today_str)
             except Exception as e:

@@ -1,0 +1,12 @@
+# AurvexAI Prometheus scrape config (Faz 6.6)
+# engine:8000 trading/sistem metriklerini 15sn'de bir kazır.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: aurvex_engine
+    static_configs:
+      - targets: ["engine:8000"]
+        labels:
+          service: engine

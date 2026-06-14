@@ -122,16 +122,49 @@
       const pnl = Number(t.total_pnl || t.unrealized_pnl || 0);
       if (pnl < 0) fillColor = "var(--cc-copper)";
       const tpDots = [t.tp1_hit, t.tp2_hit, false].map((h) => `<span class="cc-tp-dot ${h ? "hit" : ""}"></span>`).join("");
+      const tid = t.id;
       return `<div class="cc-pos-item">
         <div class="cc-pos-head">
           <span class="cc-pos-sym">${t.symbol}<span class="cc-side-tag ${isLong ? "cc-side-long" : "cc-side-short"}">${isLong ? "LONG" : "SHORT"}</span></span>
           <span class="cc-num ${pnl >= 0 ? "cc-pos" : "cc-neg"}">${fmtMoney(pnl)}</span>
         </div>
         <div class="cc-pnl-bar"><div class="cc-pnl-fill" style="width:${fillPct.toFixed(0)}%;background:${fillColor}"></div></div>
-        <div class="cc-tp-dots">${tpDots}<span class="cc-num cc-muted" style="font-size:9px;margin-left:auto">x${t.leverage || 1}</span></div>
+        <div class="cc-tp-dots">${tpDots}
+          <a href="#" class="cc-replay-link" data-tid="${tid}" style="margin-left:auto;font-size:9px;color:var(--cc-silver-blue)">🔍 neden?</a>
+        </div>
+        <div class="cc-replay-box" id="ccReplay${tid}" style="display:none"></div>
       </div>`;
     }).join("");
+    // Replay link'lerini bağla (Setup Replay — Faz 6.2)
+    host.querySelectorAll(".cc-replay-link").forEach((a) => {
+      a.addEventListener("click", (e) => { e.preventDefault(); ccReplay(a.getAttribute("data-tid")); });
+    });
   }
+
+  async function ccReplay(tid) {
+    const box = $("ccReplay" + tid);
+    if (!box) return;
+    if (box.style.display === "block") { box.style.display = "none"; return; }
+    box.style.display = "block";
+    box.innerHTML = `<div class="cc-empty" style="padding:6px">giriş anı yükleniyor…</div>`;
+    try {
+      const d = (await (await fetch("/api/trade_replay/" + tid)).json()).data || {};
+      if (!d.found) { box.innerHTML = `<div class="cc-empty" style="padding:6px">Kayıt yok.</div>`; return; }
+      const inds = Object.entries(d.indicators || {});
+      const indHtml = inds.length
+        ? inds.map(([k, v]) => `<span class="cc-chip ok" style="margin:2px">${k}: ${v}</span>`).join("")
+        : '<span class="cc-muted" style="font-size:10px">indikatör snapshot yok</span>';
+      box.innerHTML =
+        `<div style="font-size:10px;padding:6px 0;border-top:1px solid rgba(255,255,255,0.05);margin-top:6px">
+           <div class="cc-muted" style="margin-bottom:4px">📋 Gerekçe: ${d.rationale}</div>
+           <div class="cc-muted" style="margin-bottom:4px">Skor ${d.score} · Kalite ${d.setup_quality} · Rejim ${d.market_regime}</div>
+           <div>${indHtml}</div>
+         </div>`;
+    } catch (e) {
+      box.innerHTML = `<div class="cc-empty" style="padding:6px">yüklenemedi.</div>`;
+    }
+  }
+  window.ccReplay = ccReplay;
 
   function renderFunnel(f) {
     const host = $("ccFunnel");
@@ -263,8 +296,54 @@
     }
   }
 
+  // ── KATMAN 4: Korelasyon ısı haritası (on-demand, Faz 6.3) ─────────
+  function corrColor(v) {
+    if (v === null || v === undefined) return "rgba(255,255,255,0.05)";
+    // +1 bakır (riskli birlikte hareket), 0 nötr, -1 gümüş-mavi (çeşitlendirme)
+    if (v >= 0) return `rgba(192,83,62,${(0.15 + 0.65 * v).toFixed(2)})`;
+    return `rgba(126,156,192,${(0.15 + 0.65 * Math.abs(v)).toFixed(2)})`;
+  }
+  async function loadCorrelation() {
+    const host = $("ccCorrelation");
+    if (!host) return;
+    host.innerHTML = `<div class="cc-empty">Pearson matrisi hesaplanıyor…</div>`;
+    try {
+      const resp = await fetch("/api/correlation_matrix");
+      const d = (await resp.json()).data || {};
+      const syms = d.symbols || [];
+      if (!d.matrix || d.matrix.length === 0) {
+        host.innerHTML = `<div class="cc-empty">${d.note || "Korelasyon için en az 2 açık pozisyon gerekir."}</div>`;
+        return;
+      }
+      let html = '<table style="border-collapse:collapse;font-size:10px;width:100%"><tr><th></th>';
+      html += syms.map((s) => `<th style="padding:3px;color:var(--cc-text-dim)">${s.replace("USDT", "")}</th>`).join("");
+      html += "</tr>";
+      d.matrix.forEach((row, i) => {
+        html += `<tr><td style="padding:3px;color:var(--cc-text-dim)">${syms[i].replace("USDT", "")}</td>`;
+        html += row.map((v) => {
+          const txt = v === null ? "·" : v.toFixed(2);
+          return `<td class="cc-num" style="padding:5px;text-align:center;background:${corrColor(v)}">${txt}</td>`;
+        }).join("");
+        html += "</tr>";
+      });
+      html += "</table>";
+      if (d.max_pair) {
+        html += `<div class="cc-pulse-sub" style="margin-top:8px">En yüksek: ${d.max_pair.a.replace("USDT", "")}↔${d.max_pair.b.replace("USDT", "")} = ${d.max_pair.corr.toFixed(2)}</div>`;
+      }
+      host.innerHTML = html;
+    } catch (e) {
+      host.innerHTML = `<div class="cc-empty">Korelasyon yüklenemedi.</div>`;
+    }
+  }
+
   function toggleAccordion(el) {
-    if (el && el.parentElement) el.parentElement.classList.toggle("open");
+    if (el && el.parentElement) {
+      el.parentElement.classList.toggle("open");
+      // Korelasyon akordeonu açıldığında on-demand yükle (5sn poll'a dahil değil)
+      if (el.parentElement.id === "ccCorrAccordion" && el.parentElement.classList.contains("open")) {
+        loadCorrelation();
+      }
+    }
   }
 
   function init() {

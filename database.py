@@ -429,6 +429,7 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("market_regime",     "TEXT"),
         ("is_valid_for_stats","INTEGER DEFAULT 1"),
         ("environment",       "TEXT"),
+        ("tenant_id",         "TEXT DEFAULT 'main'"),  # Faz 6.5: SaaS coklu-kullanici temeli
         ("session",           "TEXT"),
     ],
     "signal_candidates": [
@@ -497,6 +498,7 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("funnel_telegram", "INTEGER DEFAULT 0"),
         ("funnel_executed", "INTEGER DEFAULT 0"),
         ("environment",     "TEXT DEFAULT 'paper'"),
+        ("tenant_id",       "TEXT DEFAULT 'main'"),  # Faz 6.5: SaaS coklu-kullanici temeli
     ],
     "coin_profiles": [
         ("win_rate", "REAL DEFAULT 0.5"),
@@ -771,6 +773,13 @@ def init_db() -> None:
             conn.execute(FRIDAY_DECISIONS_INDEX_DDL)
         except Exception as _fd_err:
             logger.warning(f"friday_decisions tablosu oluşturulamadı: {_fd_err}")
+        # NEDEN (Faz 6.4): Shadow A/B değerlendirme tablosu — tek kaynak DDL.
+        try:
+            from core.shadow_eval import SHADOW_DDL, SHADOW_INDEX_DDL
+            conn.execute(SHADOW_DDL)
+            conn.execute(SHADOW_INDEX_DDL)
+        except Exception as _sh_err:
+            logger.warning(f"shadow_evaluations tablosu oluşturulamadı: {_sh_err}")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS adaptive_stats (
                 id          TEXT PRIMARY KEY,

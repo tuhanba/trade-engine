@@ -15,9 +15,10 @@ from __future__ import annotations
 import logging
 import time
 import threading
+import os
 from collections import deque
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import requests
 import config
@@ -863,6 +864,33 @@ def send_photo(photo_bytes: bytes, caption: str = "") -> bool:
         return ok
     except Exception as e:
         logger.error("[Telegram] send_photo: %s", e)
+        return False
+
+
+def send_document(file_path: str, caption: str = "") -> bool:
+    """Bir dosyayı Telegram'a sendDocument ile gönderir (Faz 6.1 — Trade Journal)."""
+    token = config.TELEGRAM_BOT_TOKEN
+    chat_id = config.TELEGRAM_CHAT_ID
+    if not token or not chat_id:
+        logger.debug("[Telegram] Token/chat_id boş — döküman atlandı.")
+        return False
+    if not os.path.exists(file_path):
+        logger.warning("[Telegram] Döküman bulunamadı: %s", file_path)
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendDocument"
+        # Çoklu chat_id desteği — ilkine gönder
+        cid = str(chat_id).split(",")[0].strip().strip('"').strip("'")
+        with open(file_path, "rb") as f:
+            files = {"document": (os.path.basename(file_path), f)}
+            data = {"chat_id": cid, "caption": caption[:1024], "parse_mode": "HTML"}
+            resp = requests.post(url, data=data, files=files, timeout=30)
+        if resp.status_code == 200:
+            return True
+        logger.warning("[Telegram] sendDocument HTTP %d — %s", resp.status_code, resp.text[:100])
+        return False
+    except Exception as e:
+        logger.error("[Telegram] send_document: %s", e)
         return False
 
 

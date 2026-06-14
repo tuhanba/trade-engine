@@ -224,6 +224,10 @@ class TelegramManager:
             "/readiness":        self._cmd_readiness,
             "/funnel":           self._cmd_funnel,
             "/huni":             self._cmd_funnel,
+            "/journal":          self._cmd_journal,
+            "/gunluk":           self._cmd_journal,
+            "/shadow":           self._cmd_shadow,
+            "/golge":            self._cmd_shadow,
             "/diagnose": self._cmd_diagnose,
             "/teshis":   self._cmd_diagnose,
         }
@@ -2028,6 +2032,32 @@ class TelegramManager:
             )
         except Exception as e:
             self.send_fn(f"Hata: {e}")
+
+    def _cmd_shadow(self):
+        """Faz 6.4: Shadow A/B — reddedilen önerilerin 'uygulasaydık ne olurdu' raporu."""
+        try:
+            from core.shadow_eval import format_report
+            self.send_fn(format_report(10))
+        except Exception as e:
+            self.send_fn(f"⚠️ Shadow raporu alınamadı: {e}")
+
+    def _cmd_journal(self):
+        """Faz 6.1: Haftalık Trade Journal MD raporunu üretip dosya olarak gönderir."""
+        self.send_fn("⏳ Haftalık Trade Journal hazırlanıyor (işlemler, gerekçeler, Friday kararları, dersler)...")
+        try:
+            import telegram_delivery
+            from core.trade_journal import write_journal_file
+            path = write_journal_file(7)
+            ok = telegram_delivery.send_document(
+                path, "📓 Haftalık Trade Journal"
+            )
+            if not ok:
+                # Dosya gönderilemezse (token yok vb.) özet metni gönder
+                from core.trade_journal import generate_markdown
+                md = generate_markdown(7)
+                self.send_fn("📓 <b>Trade Journal</b> (dosya gönderilemedi, özet):\n\n<code>" + md[:3500] + "</code>")
+        except Exception as e:
+            self.send_fn(f"⚠️ Trade Journal oluşturulamadı: {e}")
 
     def _cmd_funnel(self):
         """Faz 5.2: Sinyal hunisi + son 24s en sık 3 reddetme sebebi."""
