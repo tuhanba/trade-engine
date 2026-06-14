@@ -376,6 +376,14 @@ class AsyncScalpEngine:
                     logger.info(f"[FridayOutcome] {filled} karar outcome'u dolduruldu.")
             except Exception as e:
                 logger.error(f"[FridayOutcome] Döngü hatası: {e}")
+            # Faz 6.4: Shadow A/B — 72h dolmuş reddedilen önerileri değerlendir
+            try:
+                from core.shadow_eval import evaluate_pending_shadows
+                n = await asyncio.to_thread(evaluate_pending_shadows)
+                if n:
+                    logger.info(f"[Shadow] {n} gölge değerlendirme tamamlandı.")
+            except Exception as e:
+                logger.error(f"[Shadow] Döngü hatası: {e}")
             await asyncio.sleep(3600)  # 1 saat
 
     async def _friday_morning_brief_loop(self):

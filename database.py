@@ -773,6 +773,13 @@ def init_db() -> None:
             conn.execute(FRIDAY_DECISIONS_INDEX_DDL)
         except Exception as _fd_err:
             logger.warning(f"friday_decisions tablosu oluşturulamadı: {_fd_err}")
+        # NEDEN (Faz 6.4): Shadow A/B değerlendirme tablosu — tek kaynak DDL.
+        try:
+            from core.shadow_eval import SHADOW_DDL, SHADOW_INDEX_DDL
+            conn.execute(SHADOW_DDL)
+            conn.execute(SHADOW_INDEX_DDL)
+        except Exception as _sh_err:
+            logger.warning(f"shadow_evaluations tablosu oluşturulamadı: {_sh_err}")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS adaptive_stats (
                 id          TEXT PRIMARY KEY,

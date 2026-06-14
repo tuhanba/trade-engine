@@ -226,6 +226,8 @@ class TelegramManager:
             "/huni":             self._cmd_funnel,
             "/journal":          self._cmd_journal,
             "/gunluk":           self._cmd_journal,
+            "/shadow":           self._cmd_shadow,
+            "/golge":            self._cmd_shadow,
             "/diagnose": self._cmd_diagnose,
             "/teshis":   self._cmd_diagnose,
         }
@@ -2030,6 +2032,14 @@ class TelegramManager:
             )
         except Exception as e:
             self.send_fn(f"Hata: {e}")
+
+    def _cmd_shadow(self):
+        """Faz 6.4: Shadow A/B — reddedilen önerilerin 'uygulasaydık ne olurdu' raporu."""
+        try:
+            from core.shadow_eval import format_report
+            self.send_fn(format_report(10))
+        except Exception as e:
+            self.send_fn(f"⚠️ Shadow raporu alınamadı: {e}")
 
     def _cmd_journal(self):
         """Faz 6.1: Haftalık Trade Journal MD raporunu üretip dosya olarak gönderir."""

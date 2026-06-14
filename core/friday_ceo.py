@@ -278,6 +278,15 @@ class FridayCeo:
                                              reasoning="param_gate RED: " + str(gate_report.get("reason", "")))
                         except Exception:
                             pass
+                        # NEDEN (Faz 6.4): Reddedilen öneri gölge A/B'ye kaydedilir —
+                        # 72h sonra "uygulasaydık ne olurdu" değerlendirilir.
+                        try:
+                            from core import shadow_eval as _sh
+                            _sh.record_shadow(key, old_f, value,
+                                              gate_report.get("old_expectancy_r"),
+                                              gate_report.get("new_expectancy_r"))
+                        except Exception:
+                            pass
                         return old_f
                     if gate_report.get("insufficient_data") and "applied_value" in gate_report:
                         # Veri yetersiz → küçük adım kuralıyla kısıtlanmış değeri uygula
