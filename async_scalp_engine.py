@@ -722,6 +722,16 @@ class AsyncScalpEngine:
                         logger.info("[WeeklyDigest] Haftalık rapor otomatik oluşturuluyor ve gönderiliyor...")
                         # Send to Telegram
                         await asyncio.to_thread(telegram_delivery.send_weekly_digest)
+                        # Faz 6.1: Haftalık Trade Journal MD dosyasını da gönder
+                        try:
+                            from core.trade_journal import write_journal_file
+                            path = await asyncio.to_thread(write_journal_file, 7)
+                            await asyncio.to_thread(
+                                telegram_delivery.send_document, path,
+                                "📓 Haftalık Trade Journal — işlemler, gerekçeler, Friday kararları, dersler.",
+                            )
+                        except Exception as je:
+                            logger.error(f"[WeeklyDigest] Trade Journal gönderilemedi: {je}")
                         # Update state to avoid duplicate sending
                         await asyncio.to_thread(update_system_state, "last_weekly_digest_date", today_str)
             except Exception as e:
