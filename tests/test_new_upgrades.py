@@ -1394,3 +1394,28 @@ def test_macro_veto_filter_in_classify_signal():
         assert "Makro Koruyucu" in res.reason
 
 
+def test_config_adaptive_scaling():
+    import config
+    from unittest.mock import patch
+    
+    # Invalidate cache
+    if "RSI_LIMIT" in config._CONFIG_CACHE:
+        del config._CONFIG_CACHE["RSI_LIMIT"]
+    if "CVD_FILTER_VAL" in config._CONFIG_CACHE:
+        del config._CONFIG_CACHE["CVD_FILTER_VAL"]
+        
+    with patch("database.get_market_regime", return_value="TRENDING_LOW_VOL"):
+        assert config.RSI_LIMIT == 18.0
+        assert config.CVD_FILTER_VAL == -0.35
+        
+    if "RSI_LIMIT" in config._CONFIG_CACHE:
+        del config._CONFIG_CACHE["RSI_LIMIT"]
+    if "CVD_FILTER_VAL" in config._CONFIG_CACHE:
+        del config._CONFIG_CACHE["CVD_FILTER_VAL"]
+        
+    with patch("database.get_market_regime", return_value="CHOPPY_HIGH_VOL"):
+        assert config.RSI_LIMIT == 30.0
+        assert config.CVD_FILTER_VAL == -0.10
+
+
+

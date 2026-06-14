@@ -390,6 +390,26 @@ def __getattr__(name: str) -> Any:
                     val = val * 0.75
             except Exception:
                 pass
+        elif name == "RSI_LIMIT":
+            try:
+                import database
+                regime = database.get_market_regime()
+                if "TRENDING" in regime:
+                    val = 18.0  # Relaxed for trend dip buying
+                elif "CHOPPY" in regime:
+                    val = 30.0  # Strict for choppy range protection
+            except Exception:
+                pass
+        elif name == "CVD_FILTER_VAL":
+            try:
+                import database
+                regime = database.get_market_regime()
+                if "TRENDING" in regime:
+                    val = -0.35  # Relaxed for strong trending markets
+                elif "CHOPPY" in regime:
+                    val = -0.10  # Tight filter for choppy range protection
+            except Exception:
+                pass
         elif name == "TRADE_THRESHOLD":
             pass  # Regime adjustment removed — Friday manages threshold directly
 
