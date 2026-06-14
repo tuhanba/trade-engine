@@ -350,10 +350,51 @@ def update_coin_stats(symbol: str, result: str, net_pnl: float,
     """
     Kapanan trade sonrası coin istatistiklerini günceller.
     coin_configs tablosundaki config_json içine kazanç/kayıp sayaçları eklenir.
+    Son 50 trade verisi sorgulanarak coine özel karakter ve Reputation belirlenir.
     """
     try:
         from database import get_conn
         with get_conn() as conn:
+            # 1. Son 50 kapanmış trade verisini sorgula
+            trades_rows = conn.execute("""
+                SELECT net_pnl, r_multiple, realized_pnl
+                FROM trades
+                WHERE symbol = ? AND LOWER(status) = 'closed'
+                ORDER BY id DESC LIMIT 50
+            """, (symbol,)).fetchall()
+
+            total = len(trades_rows)
+            wins = sum(1 for r in trades_rows if float(r["net_pnl"] or 0) > 0)
+            losses = sum(1 for r in trades_rows if float(r["net_pnl"] or 0) <= 0)
+            
+            win_rate = round(wins / total, 4) if total > 0 else 0.5
+            
+            profits = [float(r["net_pnl"] or 0) for r in trades_rows if float(r["net_pnl"] or 0) > 0]
+            losses_val = [abs(float(r["net_pnl"] or 0)) for r in trades_rows if float(r["net_pnl"] or 0) <= 0]
+            
+            avg_profit = round(sum(profits) / len(profits), 4) if profits else 0.0
+            avg_loss = round(sum(losses_val) / len(losses_val), 4) if losses_val else 0.0
+            avg_r = round(sum(float(r["r_multiple"] or 0) for r in trades_rows) / total, 3) if total > 0 else 0.0
+
+            # Reputation Belirleme (Faz A)
+            if total < 5:
+                if win_rate >= 0.52 and total >= 3:
+                    reputation = "Good"
+                else:
+                    reputation = "Neutral"
+            else:
+                if win_rate >= 0.65:
+                    reputation = "Elite"
+                elif win_rate >= 0.52:
+                    reputation = "Good"
+                elif win_rate >= 0.25 and win_rate < 0.40:
+                    reputation = "Risky"
+                elif win_rate < 0.25:
+                    reputation = "Trash"
+                else:
+                    reputation = "Neutral"
+
+            # 2. Mevcut config verisini çek ve birleştir
             row = conn.execute(
                 "SELECT config_json FROM coin_configs WHERE coin=?", (symbol,)
             ).fetchone()
@@ -364,34 +405,42 @@ def update_coin_stats(symbol: str, result: str, net_pnl: float,
                 except Exception:
                     data = {}
 
-            # İstatistik güncelle
+            # Güncel veriler
             data["last_result"]  = result
             data["last_pnl"]     = round(float(net_pnl), 4)
             data["last_updated"] = datetime.now(timezone.utc).isoformat()
-            data["total_trades"] = data.get("total_trades", 0) + 1
-            if result == "WIN":
-                data["wins"] = data.get("wins", 0) + 1
-            else:
-                data["losses"] = data.get("losses", 0) + 1
-            total = data["total_trades"]
-            wins  = data.get("wins", 0)
-            data["win_rate"] = round(wins / total, 4) if total > 0 else 0.5
-            # Coin score = 50 + (win_rate - 0.5) * 100 → 0-100
-            data["coin_score"] = round(50 + (data["win_rate"] - 0.5) * 100, 1)
-            data["avg_r"]      = round(
-                (data.get("avg_r", 0) * (total - 1) + r_multiple) / total, 3
-            )
+            
+            # Son 50 trade istatistikleri
+            data["total_trades"] = total
+            data["wins"] = wins
+            data["losses"] = losses
+            data["win_rate"] = win_rate
+            data["avg_profit"] = avg_profit
+            data["avg_loss"] = avg_loss
+            data["avg_r"] = avg_r
+            data["reputation"] = reputation
+            
+            # Coin score güncelle
+            data["coin_score"] = round(50 + (win_rate - 0.5) * 100, 1)
+
+            # Ekstra karakter/davranış hafızası alanları (Faz A)
+            data["volatility"] = round(data.get("atr_pct", 1.5), 3)
+            data["news_impact"] = "Neutral"
+            data["trend_behavior"] = "Strong ADX" if data.get("adx_current", 0) > 25 else "Sideways"
+            data["spread_behavior"] = "Low Spread" if data.get("optimal_sl_mult", 1.8) <= 1.8 else "High Spread"
+            data["liquidity_behavior"] = "High Liquidity" if data.get("volume_cv", 0) < 120 else "Low Liquidity"
+            data["ghost_notes"] = "Ghost learning active"
 
             now_str = datetime.now(timezone.utc).isoformat()
             cur = conn.execute("""
                 UPDATE coin_configs SET config_json=?, updated_at=? WHERE coin=?
-            """, (json.dumps(data), now_str, symbol))
+            """, (json.dumps(data, ensure_ascii=False), now_str, symbol))
             if cur.rowcount == 0:
                 conn.execute("""
                     INSERT INTO coin_configs (coin, config_json, updated_at)
                     VALUES (?, ?, ?)
-                """, (symbol, json.dumps(data), now_str))
-        logger.debug(f"[CoinLib] {symbol} stats updated: {result} wr={data.get('win_rate', 0):.2f}")
+                """, (symbol, json.dumps(data, ensure_ascii=False), now_str))
+        logger.debug(f"[CoinLib] {symbol} reputation updated: {reputation} wr={win_rate:.2f} (n={total})")
     except Exception as e:
         logger.warning(f"[CoinLib] update_coin_stats {symbol}: {e}")
 

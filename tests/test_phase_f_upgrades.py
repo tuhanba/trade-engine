@@ -76,7 +76,7 @@ def test_ml_market_regime_classifier_success():
     classifier = MLMarketRegimeClassifier(client)
     
     regime = classifier.classify("BTCUSDT")
-    assert regime in ("TRENDING_HIGH_VOL", "TRENDING_LOW_VOL", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL")
+    assert regime in ("NEWS_DRIVEN", "HIGH_MOMENTUM", "BULLISH", "BEARISH", "HIGH_VOLATILITY", "LOW_VOLATILITY", "SIDEWAYS")
 
 def test_ml_market_regime_classifier_fallback():
     """Verify MLMarketRegimeClassifier falls back to rule-based logic when candles are empty/insufficient."""
@@ -85,7 +85,7 @@ def test_ml_market_regime_classifier_fallback():
     
     with patch("core.trend_engine.TrendEngine.get_btc_trend", return_value="BULLISH"):
         regime = classifier.classify("BTCUSDT")
-        assert regime in ("TRENDING_HIGH_VOL", "TRENDING_LOW_VOL", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL")
+        assert regime in ("NEWS_DRIVEN", "HIGH_MOMENTUM", "BULLISH", "BEARISH", "HIGH_VOLATILITY", "LOW_VOLATILITY", "SIDEWAYS")
 
 def test_order_book_wall_guard_imbalance_block(setup_test_db):
     """Verify order book bid-ask imbalance > 75% blocks entry."""
@@ -246,13 +246,16 @@ def test_self_healing_optuna_ghost_optimization(setup_test_db):
     assert 20.0 <= rsi_limit <= 45.0
     assert -0.20 <= cvd_filter_val <= 0.10
 
-def test_emergency_clutch_switch(setup_test_db):
+def test_emergency_clutch_switch(setup_test_db, monkeypatch):
     """Verify that RiskEngine calculates rejects and switches execution mode to paper on high latency/slippage."""
+    monkeypatch.setattr(config, "EXECUTION_MODE", "live")
+    from datetime import datetime, timezone
+    now_str = datetime.now(timezone.utc).isoformat()
     # Write 3 high latency/slippage closed trades to DB
     conn = sqlite3.connect(setup_test_db)
     for _ in range(3):
-        conn.execute("INSERT INTO trades (symbol, direction, status, realized_pnl, environment, slippage, latency_ms) "
-                     "VALUES ('BTCUSDT', 'LONG', 'closed', 10.0, 'live', 0.30, 950)")
+        conn.execute("INSERT INTO trades (symbol, direction, status, realized_pnl, environment, slippage, latency_ms, close_time) "
+                     "VALUES ('BTCUSDT', 'LONG', 'closed', 10.0, 'live', 0.30, 950, ?)", (now_str,))
     conn.commit()
     conn.close()
 

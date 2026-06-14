@@ -651,4 +651,38 @@ def get_command_center(environment: str | None = None) -> dict:
     except Exception:
         out["readiness"] = {"ready": False, "gates": []}
 
+    # Coin reputations for Phase G
+    out["coin_reputations"] = _safe_call(get_coin_reputations, [])
+
     return out
+
+
+def get_coin_reputations() -> list[dict]:
+    """Exposes coin reputations and score details for the dashboard."""
+    try:
+        from database import get_conn
+        import json
+        with get_conn() as conn:
+            rows = conn.execute("SELECT coin, config_json, updated_at FROM coin_configs").fetchall()
+            result = []
+            for r in rows:
+                try:
+                    data = json.loads(r["config_json"]) if r["config_json"] else {}
+                    reputation = data.get("reputation", "Neutral")
+                    win_rate = data.get("win_rate", 0.5)
+                    total_trades = data.get("total_trades", 0)
+                    coin_score = data.get("coin_score", 50.0)
+                    result.append({
+                        "coin": r["coin"],
+                        "reputation": reputation,
+                        "win_rate": win_rate,
+                        "total_trades": total_trades,
+                        "coin_score": coin_score,
+                        "updated_at": r["updated_at"]
+                    })
+                except Exception:
+                    pass
+            return result
+    except Exception as e:
+        logger.error(f"[Dashboard] get_coin_reputations error: {e}")
+        return []

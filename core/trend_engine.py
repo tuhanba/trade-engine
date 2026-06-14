@@ -375,91 +375,73 @@ class MLMarketRegimeClassifier:
             return pd.DataFrame()
 
     def classify(self, symbol: str = "BTCUSDT") -> str:
-        df_features = self.get_regime_features(symbol)
-        
-        # Rule-based fallback if features are insufficient
-        if df_features.empty or len(df_features) < 30:
-            logger.warning("[MLRegime] Insufficient features for clustering. Using rule-based fallback.")
-            return self._fallback_rule_based(symbol)
-
-        try:
-            from sklearn.cluster import KMeans
-            import numpy as np
-
-            X = df_features.values
-            kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
-            kmeans.fit(X)
-            
-            last_label = kmeans.labels_[-1]
-            centroids = kmeans.cluster_centers_  # (4, 4)
-
-            # Features index: 0: atr_pct, 1: rel_vol, 2: rsi, 3: adx
-            cluster_metrics = []
-            for j in range(4):
-                cluster_metrics.append({
-                    "cluster": j,
-                    "mean_adx": centroids[j][3],
-                    "mean_vol": centroids[j][0]  # atr_pct
-                })
-
-            # Sort by mean_adx descending
-            sorted_by_adx = sorted(cluster_metrics, key=lambda x: x["mean_adx"], reverse=True)
-
-            # Top 2 are TRENDING, bottom 2 are CHOPPY
-            trending_clusters = sorted_by_adx[:2]
-            choppy_clusters = sorted_by_adx[2:]
-
-            # Within trending, sort by volume/volatility
-            trending_clusters = sorted(trending_clusters, key=lambda x: x["mean_vol"], reverse=True)
-            t_high_vol = trending_clusters[0]["cluster"]
-            t_low_vol = trending_clusters[1]["cluster"]
-
-            # Within choppy, sort by volume/volatility
-            choppy_clusters = sorted(choppy_clusters, key=lambda x: x["mean_vol"], reverse=True)
-            c_high_vol = choppy_clusters[0]["cluster"]
-            c_low_vol = choppy_clusters[1]["cluster"]
-
-            mapping = {
-                t_high_vol: "TRENDING_HIGH_VOL",
-                t_low_vol: "TRENDING_LOW_VOL",
-                c_high_vol: "CHOPPY_HIGH_VOL",
-                c_low_vol: "CHOPPY_LOW_VOL"
-            }
-
-            regime = mapping[last_label]
-            logger.info(f"[MLRegime] Clustering successful. Current regime: {regime}")
-            return regime
-        except Exception as e:
-            logger.error(f"[MLRegime] KMeans clustering failed: {e}. Using rule-based fallback.")
-            return self._fallback_rule_based(symbol)
-
-    def _fallback_rule_based(self, symbol: str) -> str:
+        """
+        Sınıflandırma motoru: BTCUSDT verilerini alarak 7 farklı piyasa rejimine ayırır:
+        (1) NEWS_DRIVEN
+        (2) HIGH_MOMENTUM
+        (3) BULLISH
+        (4) BEARISH
+        (5) HIGH_VOLATILITY
+        (6) LOW_VOLATILITY
+        (7) SIDEWAYS
+        """
         try:
             from core.trend_engine import TrendEngine
             engine = TrendEngine(self.client)
-            df = engine.get_candles(symbol, "1h", 30)
-            if df.empty:
-                return "CHOPPY_LOW_VOL"
-            
-            btc_trend = engine.get_btc_trend()
-            is_trending = btc_trend in ("BULLISH", "BEARISH")
-            
-            h, l, c = df["high"], df["low"], df["close"]
-            tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
-            atr = tr.rolling(14).mean().iloc[-1]
-            atr_pct = atr / c.iloc[-1]
-            
-            is_high_vol = atr_pct > 0.012
-            
-            if is_trending and is_high_vol:
-                return "TRENDING_HIGH_VOL"
-            elif is_trending and not is_high_vol:
-                return "TRENDING_LOW_VOL"
-            elif not is_trending and is_high_vol:
-                return "CHOPPY_HIGH_VOL"
+            df = engine.get_candles(symbol, "1h", 100)
+            if df.empty or len(df) < 30:
+                logger.warning("[Regime] Mum verileri yetersiz. SIDEWAYS rejimine dönülüyor.")
+                return "SIDEWAYS"
+
+            df_features = self.get_regime_features(symbol, limit=100)
+            if df_features.empty:
+                logger.warning("[Regime] Özellikler üretilemedi. SIDEWAYS rejimine dönülüyor.")
+                return "SIDEWAYS"
+
+            last_row = df_features.iloc[-1]
+            atr_pct = float(last_row["atr_pct"])
+            rel_vol = float(last_row["rel_vol"])
+            rsi = float(last_row["rsi"])
+            adx = float(last_row["adx"])
+
+            # EMA ve Fiyat Değerleri
+            close = float(df["close"].iloc[-1])
+            open_val = float(df["open"].iloc[-1])
+            ema21_series = engine._ema(df["close"], 21)
+            ema55_series = engine._ema(df["close"], 55)
+            ema21 = float(ema21_series.iloc[-1])
+            ema55 = float(ema55_series.iloc[-1])
+
+            # 1. NEWS_DRIVEN (Haber Etkili / Aşırı Hacim veya Volatilite)
+            price_change_1h = abs(close - open_val) / open_val
+            if rel_vol > 2.2 or price_change_1h > 0.022 or atr_pct > 0.022:
+                regime = "NEWS_DRIVEN"
+            # 2. HIGH_MOMENTUM (Yüksek Güçte Trend + Hacim)
+            elif adx > 32 and rel_vol > 1.3:
+                regime = "HIGH_MOMENTUM"
+            # 3. BULLISH (Boğa Trendi)
+            elif ema21 > ema55 and close > ema55 and adx > 20 and rsi > 52:
+                regime = "BULLISH"
+            # 4. BEARISH (Ayı Trendi)
+            elif ema21 < ema55 and close < ema55 and adx > 20 and rsi < 48:
+                regime = "BEARISH"
+            # 5. HIGH_VOLATILITY (Yüksek Oynaklık / Trend Gücü Zayıf)
+            elif atr_pct > 0.015:
+                regime = "HIGH_VOLATILITY"
+            # 6. LOW_VOLATILITY (Durgun / Sıkışık)
+            elif atr_pct < 0.007 or adx < 18:
+                regime = "LOW_VOLATILITY"
+            # 7. SIDEWAYS (Yatay)
             else:
-                return "CHOPPY_LOW_VOL"
+                regime = "SIDEWAYS"
+
+            logger.info(f"[MLRegime] Otonom sınıflandırılan rejim: {regime} (ATR%={atr_pct:.4f}, RelVol={rel_vol:.2f}, ADX={adx:.1f}, RSI={rsi:.1f})")
+            return regime
         except Exception as e:
-            logger.error(f"[MLRegime] Fallback failed: {e}")
-            return "CHOPPY_LOW_VOL"
+            logger.error(f"[MLRegime] classify hatası: {e}. SIDEWAYS rejimine dönülüyor.")
+            return "SIDEWAYS"
+
+    def _fallback_rule_based(self, symbol: str) -> str:
+        """classify metodu hata durumlarında bu fallback metodunu çağırır."""
+        return self.classify(symbol)
 

@@ -376,13 +376,28 @@ def __getattr__(name: str) -> Any:
     if val is None:
         val = _STATIC_DEFAULTS.get(name)
         
-    # Dynamic scaling based on market regime
+    # Dynamic scaling based on market regime and starvation alarm
     if val is not None:
         if name == "RISK_PCT":
             try:
                 import database
                 regime = database.get_market_regime()
-                if regime == "TRENDING_HIGH_VOL":
+                if regime == "BULLISH":
+                    val = val * 1.3
+                elif regime == "BEARISH":
+                    val = val * 0.7
+                elif regime == "SIDEWAYS":
+                    val = val * 0.8
+                elif regime == "HIGH_MOMENTUM":
+                    val = val * 1.2
+                elif regime == "NEWS_DRIVEN":
+                    val = val * 0.4
+                elif regime == "HIGH_VOLATILITY":
+                    val = val * 0.6
+                elif regime == "LOW_VOLATILITY":
+                    val = val * 0.9
+                # Backwards compatibility fallbacks
+                elif regime == "TRENDING_HIGH_VOL":
                     val = val * 1.2
                 elif regime == "CHOPPY_HIGH_VOL":
                     val = val * 0.5
@@ -394,9 +409,9 @@ def __getattr__(name: str) -> Any:
             try:
                 import database
                 regime = database.get_market_regime()
-                if "TRENDING" in regime:
+                if regime in ("BULLISH", "HIGH_MOMENTUM") or "TRENDING" in regime:
                     val = 18.0  # Relaxed for trend dip buying
-                elif "CHOPPY" in regime:
+                elif regime in ("BEARISH", "SIDEWAYS", "HIGH_VOLATILITY", "NEWS_DRIVEN") or "CHOPPY" in regime:
                     val = 30.0  # Strict for choppy range protection
             except Exception:
                 pass
@@ -404,14 +419,43 @@ def __getattr__(name: str) -> Any:
             try:
                 import database
                 regime = database.get_market_regime()
-                if "TRENDING" in regime:
+                if regime in ("BULLISH", "HIGH_MOMENTUM") or "TRENDING" in regime:
                     val = -0.35  # Relaxed for strong trending markets
-                elif "CHOPPY" in regime:
+                elif regime in ("BEARISH", "SIDEWAYS", "HIGH_VOLATILITY", "NEWS_DRIVEN") or "CHOPPY" in regime:
                     val = -0.10  # Tight filter for choppy range protection
             except Exception:
                 pass
         elif name == "TRADE_THRESHOLD":
-            pass  # Regime adjustment removed — Friday manages threshold directly
+            try:
+                import database
+                regime = database.get_market_regime()
+                if regime == "BULLISH":
+                    val -= 4.0
+                elif regime == "HIGH_MOMENTUM":
+                    val -= 3.0
+                elif regime == "BEARISH":
+                    val += 3.0
+                elif regime == "SIDEWAYS":
+                    val += 4.0
+                elif regime == "NEWS_DRIVEN":
+                    val += 5.0
+                elif regime == "HIGH_VOLATILITY":
+                    val += 3.0
+                elif regime == "LOW_VOLATILITY":
+                    val += 2.0
+                
+                # Trade Starvation Relaxation (Phase C)
+                if database.get_system_state("trade_starvation_alarm") == "true":
+                    val -= 5.0
+            except Exception:
+                pass
+        elif name == "REGIME_FILTER_MIN_QUALITY_IN_CHOPPY":
+            try:
+                import database
+                if database.get_system_state("trade_starvation_alarm") == "true":
+                    val = "B"
+            except Exception:
+                pass
 
     if not is_testing:
         _CONFIG_CACHE[name] = (val, now + _CONFIG_CACHE_TTL)

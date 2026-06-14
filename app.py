@@ -345,6 +345,15 @@ def api_command_center():
         return _error(str(exc))
 
 
+@app.route("/api/coin_reputations")
+def api_coin_reputations():
+    """Coin reputations and performance statistics for the dashboard."""
+    try:
+        return _ok(dashboard_service.get_coin_reputations())
+    except Exception as exc:
+        return _error(str(exc))
+
+
 @app.route("/api/correlation_matrix")
 def api_correlation_matrix():
     """Açık pozisyonlar arası canlı Pearson korelasyon matrisi (Faz 6.3, on-demand)."""

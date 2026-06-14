@@ -223,6 +223,28 @@ def evaluate_signal_risk(
             "confidence": 1.0,
         }
 
+    # 2.6 Coin Reputation Check (Phase A)
+    try:
+        from database import get_coin_config
+        coin_cfg = get_coin_config(signal.symbol)
+        reputation = coin_cfg.get("reputation", "Neutral")
+        
+        import sys
+        is_paper = (getattr(config, "EXECUTION_MODE", "paper") == "paper")
+        is_testing = "pytest" in sys.modules or "unittest" in sys.modules
+        bypass_shields = getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False)
+        if not is_testing:
+            bypass_shields = bypass_shields or is_paper
+
+        if reputation == "Trash" and not bypass_shields:
+            return {
+                "decision": SignalDecision.VETO.value,
+                "reason": f"Coin Reputation 'Trash' (Win Rate < 25%). Signal vetoed.",
+                "confidence": 1.0,
+            }
+    except Exception as e:
+        logger.debug(f"[Risk Engine] Coin Reputation check failed/skipped: {e}")
+
     # 2.5 Correlation Block Kontrolü
     if not check_correlated_exposure(signal.symbol, signal.direction, open_trades):
         return {

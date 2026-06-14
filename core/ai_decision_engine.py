@@ -1414,6 +1414,41 @@ def classify_signal(
     try:
         from database import get_coin_config
         coin_cfg = get_coin_config(signal.symbol)
+        
+        # Coin Reputation System (Faz A)
+        reputation = coin_cfg.get("reputation", "Neutral")
+        if reputation == "Trash":
+            logger.info(f"[Reputation Shield] VETO issued for {signal.symbol}: Reputation is Trash")
+            if not bypass_shields:
+                return return_decision(AIDecisionResult(
+                    decision=SignalDecision.VETO.value,
+                    reason=f"Coin Reputation 'Trash' (Win Rate < 25%). İşlem engellendi.",
+                    confidence=1.0,
+                    score_adjusted=adjusted_score
+                ))
+            else:
+                logger.info(f"[Bypass] Trash coin reputation veto bypassed for {signal.symbol}")
+        elif reputation == "Risky":
+            trade_threshold += 5.0
+            signal.risk_pct *= 0.5
+            if hasattr(signal, "position_size") and signal.position_size:
+                signal.position_size = round(signal.position_size * 0.5, 6)
+            if hasattr(signal, "notional_size") and signal.notional_size:
+                signal.notional_size = round(signal.notional_size * 0.5, 4)
+            if hasattr(signal, "max_loss") and signal.max_loss:
+                signal.max_loss = round(signal.max_loss * 0.5, 4)
+            logger.info(f"[Reputation Shield] {signal.symbol} reputation is Risky -> Threshold +5.0, Risk 0.5x")
+        elif reputation == "Elite":
+            trade_threshold -= 5.0
+            signal.risk_pct *= 1.25
+            if hasattr(signal, "position_size") and signal.position_size:
+                signal.position_size = round(signal.position_size * 1.25, 6)
+            if hasattr(signal, "notional_size") and signal.notional_size:
+                signal.notional_size = round(signal.notional_size * 1.25, 4)
+            if hasattr(signal, "max_loss") and signal.max_loss:
+                signal.max_loss = round(signal.max_loss * 1.25, 4)
+            logger.info(f"[Reputation Boost] {signal.symbol} reputation is Elite -> Threshold -5.0, Risk 1.25x")
+
         if coin_cfg and "threshold_overrides" in coin_cfg:
             trigger_type = getattr(signal, "trigger_type", None) or getattr(signal, "setup_quality", None) or "UNKNOWN"
             overrides = coin_cfg["threshold_overrides"]
@@ -1422,7 +1457,7 @@ def classify_signal(
                 trade_threshold = float(override_val)
                 logger.info(f"[AI Override] {signal.symbol} ({trigger_type}) için YZ otonom eşiği uygulandı: {trade_threshold:.1f}")
     except Exception as exc:
-        logger.debug(f"[AI Override] Ghost threshold override okunamadı: {exc}")
+        logger.debug(f"[AI Override] Ghost threshold override/reputation okunamadı: {exc}")
 
     # Open Interest Spike & Volatility Squeeze Filter (Phase I Upgrade)
     try:

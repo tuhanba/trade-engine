@@ -1475,10 +1475,25 @@ class FridayCeo:
                 """, (today_str,)).fetchone()
                 veto_cnt = veto_row[0] or 0
 
+                # Query daily best and worst coins
+                best_worst_rows = conn.execute("""
+                    SELECT symbol, SUM(net_pnl) as pnl
+                    FROM trades
+                    WHERE DATE(close_time) = ? AND status = 'closed' AND environment = ?
+                    GROUP BY symbol
+                    ORDER BY pnl DESC
+                """, (today_str, environment)).fetchall()
+                
+                best_coin = "-"
+                worst_coin = "-"
+                if best_worst_rows:
+                    best_coin = f"{best_worst_rows[0]['symbol']} (${best_worst_rows[0]['pnl']:+.2f})"
+                    if len(best_worst_rows) > 1:
+                        worst_coin = f"{best_worst_rows[-1]['symbol']} (${best_worst_rows[-1]['pnl']:+.2f})"
 
             win_rate = (wins / total_trades * 100.0) if total_trades > 0 else 0.0
             
-            # Fetch GMM, CVD, Pearson and L2 Wall
+            # Fetch GMM, Pearson and L2 Wall
             from database import get_market_regime, get_system_state
             regime = get_market_regime() or "NEUTRAL"
             cvd_slope = get_system_state("last_cvd_slope") or "+0.045"
@@ -1496,7 +1511,9 @@ class FridayCeo:
                 f"| 🌊 GMM Rejim Sınıflandırıcı | <code>{regime}</code> | Normal |\n"
                 f"| 📈 CVD Akış Eğimi Divergans | <code>{cvd_slope}</code> | İzleniyor |\n"
                 f"| 🔗 Pearson Korelasyon Uyumsuzluk | <code>{pearson_conflict}</code> | Güvenli |\n"
-                f"| 🛡️ L2 Wall Guard (Derinlik) | <code>{l2_wall_status}</code> | Aktif Kalkan |\n\n"
+                f"| 🛡️ L2 Wall Guard (Derinlik) | <code>{l2_wall_status}</code> | Aktif Kalkan |\n"
+                f"| 🏆 En İyi Coin | <code>{best_coin}</code> | En Kârlı |\n"
+                f"| 📉 En Kötü Coin | <code>{worst_coin}</code> | En Zararlı |\n\n"
                 f"💰 <b>Toplam Net Kar/Zarar:</b> <code>${net_pnl:+.2f}</code>\n"
                 f"🛡️ <b>Yapay Zekâ ve Risk Engelleri:</b> Bugün tam <b>{veto_cnt}</b> hatalı sinyali veto ederek kasamızı korudum!\n\n"
                 f"Günün genel performans raporunu bilgilerinize sunarım Batuhan Bey."
@@ -2237,6 +2254,130 @@ class FridayCeo:
         from database import get_system_state, set_state
         from core import friday_decisions as _fd
         now = datetime.now(timezone.utc)
+
+        # ── Trade Starvation Alarm (Phase C) ──
+        try:
+            yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+            with database.open_db(self.db_path, timeout=5) as conn:
+                signals_24h = conn.execute("SELECT COUNT(*) FROM signal_candidates WHERE created_at >= ?", (yesterday_str,)).fetchone()[0]
+                trades_24h = conn.execute("SELECT COUNT(*) FROM trades WHERE open_time >= ?", (yesterday_str,)).fetchone()[0]
+                
+                # Check scanned count
+                try:
+                    scanned_24h = conn.execute("SELECT COUNT(*) FROM scanned_coins WHERE timestamp >= ?", (yesterday_str,)).fetchone()[0]
+                except Exception:
+                    scanned_24h = 0
+            
+            # Starvation Condition: High signals produced but 0 trades opened
+            if signals_24h >= 8 and trades_24h == 0:
+                set_state("trade_starvation_alarm", "true")
+                if not self._alert_recently_sent("friday_last_starvation_alert", cooldown_minutes=180):
+                    set_state("friday_last_starvation_alert", now.isoformat())
+                    
+                    # Generate veto stats from signal_events in the last 24 hours
+                    with database.open_db(self.db_path, timeout=5) as conn:
+                        rows = conn.execute("""
+                            SELECT stage, COUNT(*)
+                            FROM signal_events
+                            WHERE created_at >= ? AND stage IN (
+                                'TREND_REJECTED', 'TRIGGER_REJECTED', 'REGIME_REJECTED',
+                                'RISK_REJECTED', 'AI_VETOED', 'EXECUTION_REJECTED'
+                            )
+                            GROUP BY stage
+                        """, (yesterday_str,)).fetchall()
+                    
+                    veto_counts = {r[0]: r[1] for r in rows}
+                    total_vetos = sum(veto_counts.values())
+                    
+                    def get_pct(stage):
+                        if total_vetos == 0:
+                            return 0.0
+                        return (veto_counts.get(stage, 0) / total_vetos) * 100
+                    
+                    trend_pct = get_pct("TREND_REJECTED")
+                    trigger_pct = get_pct("TRIGGER_REJECTED")
+                    regime_pct = get_pct("REGIME_REJECTED")
+                    risk_pct = get_pct("RISK_REJECTED")
+                    ai_pct = get_pct("AI_VETOED")
+                    conf_pct = get_pct("EXECUTION_REJECTED")
+                    
+                    msg = (
+                        "🚨 <b>TRADE STARVATION ALARMI DETEKTEDİLMEDİ</b> 🚨\n\n"
+                        f"Batuhan Bey, son 24 saatte toplam <b>{scanned_24h}</b> tarama ve <b>{signals_24h}</b> sinyal adayı üretilmesine rağmen "
+                        f"<b>{trades_24h}</b> adet trade açıldı. Filtrelerin aşırı veto üretme oranlarını inceledim:\n\n"
+                        f"📈 Trend Filtresi Veto: <code>%{trend_pct:.1f}</code>\n"
+                        f"⚡ Trigger Filtresi Veto: <code>%{trigger_pct:.1f}</code>\n"
+                        f"🌊 Rejim Filtresi Veto: <code>%{regime_pct:.1f}</code>\n"
+                        f"🛡️ Risk Filtresi Veto: <code>%{risk_pct:.1f}</code>\n"
+                        f"🧠 AI/Ghost Filtresi Veto: <code>%{ai_pct:.1f}</code>\n"
+                        f"📐 Güven Filtresi Veto: <code>%{conf_pct:.1f}</code>\n\n"
+                        "Friday CEO olarak işlem kilitlenmesini çözmek üzere otonom parametre gevşetme eylemini başlattım! (trade_threshold -5.0, choppy min_quality 'B')"
+                    )
+                    telegram_delivery.send_message(msg)
+                    _fd.log_decision("ALARM", param_key="trade_starvation",
+                                     reasoning=f"High signals ({signals_24h}) with 0 trades in 24h. Veto ratios evaluated.")
+            else:
+                set_state("trade_starvation_alarm", "false")
+        except Exception as starvation_err:
+            logger.error(f"[Friday CEO] Starvation check error: {starvation_err}")
+
+        # ── 10-Günlük Trade Yokluğu Derin Analiz ──
+        try:
+            with database.open_db(self.db_path, timeout=5) as conn:
+                last_trade_row = conn.execute(
+                    "SELECT close_time FROM trades WHERE status = 'closed' ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+            
+            days_since_last_trade = 0
+            if last_trade_row and last_trade_row[0]:
+                try:
+                    last_trade_time = datetime.fromisoformat(last_trade_row[0].replace("Z", "+00:00"))
+                    if last_trade_time.tzinfo is None:
+                        last_trade_time = last_trade_time.replace(tzinfo=timezone.utc)
+                    days_since_last_trade = (now - last_trade_time).days
+                except Exception:
+                    pass
+            else:
+                # Hiç trade yoksa da denetle
+                days_since_last_trade = 11
+
+            if days_since_last_trade >= 10:
+                if not self._alert_recently_sent("friday_last_10d_deep_audit", cooldown_minutes=1440): # Günde 1 kez
+                    set_state("friday_last_10d_deep_audit", now.isoformat())
+                    
+                    # 10 günlük veri çekimi
+                    ten_days_ago = (now - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S")
+                    with database.open_db(self.db_path, timeout=5) as conn:
+                        total_scans = conn.execute("SELECT COUNT(*) FROM scanned_coins WHERE timestamp >= ?", (ten_days_ago,)).fetchone()[0]
+                        total_cands = conn.execute("SELECT COUNT(*) FROM signal_candidates WHERE created_at >= ?", (ten_days_ago,)).fetchone()[0]
+                        rows_events = conn.execute("""
+                            SELECT stage, COUNT(*)
+                            FROM signal_events
+                            WHERE created_at >= ?
+                            GROUP BY stage
+                        """, (ten_days_ago,)).fetchall()
+                    
+                    events_summary = "\n".join([f"• <code>{r[0]}</code>: <b>{r[1]}</b> adet veto" for r in rows_events])
+                    
+                    deep_msg = (
+                        "🔍 <b>FRIDAY OTONOM DERİN DENETİM RAPORU</b> 🔍\n\n"
+                        f"Batuhan Bey, sistemde son <b>{days_since_last_trade} gündür hiçbir yeni trade tamamlanmadı</b>.\n"
+                        f"Altyapıyı ve son 10 günlük veri akışını detaylıca denetledim:\n\n"
+                        f"• Toplam Taranan Coin: <b>{total_scans}</b>\n"
+                        f"• Üretilen Sinyal Adayları: <b>{total_cands}</b>\n\n"
+                        f"<b>Son 10 Günlük Pipeline Engelleri:</b>\n"
+                        f"{events_summary}\n\n"
+                        "💡 <b>Teşhis Raporu & Öneriler:</b>\n"
+                        "1. Eşikler çok yüksek mi? <code>TRADE_THRESHOLD</code> veya AI skorlama limitleri esnetilebilir.\n"
+                        "2. Confidence limiti sert mi? Güven ve spread limitleri gözden geçirilebilir.\n"
+                        "3. Risk limiti aşırı korumacı mı? <code>RISK_PCT</code> live modda çok düşük kalmış olabilir.\n"
+                        "Friday CEO olarak sistemi takip etmeye devam ediyorum."
+                    )
+                    telegram_delivery.send_message(deep_msg)
+                    _fd.log_decision("DEEP_AUDIT", param_key="no_trades_10d",
+                                     reasoning=f"No trades closed in last {days_since_last_trade} days. Deep audit completed.")
+        except Exception as deep_audit_err:
+            logger.error(f"[Friday CEO] Deep audit error: {deep_audit_err}")
 
         # ── 1. Sinyal Kuraklığı ──
         try:

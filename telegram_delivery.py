@@ -196,7 +196,8 @@ def _signed_pct(entry: float, target: float, direction: str) -> str:
 def tpl_trade_open(symbol: str, direction: str, leverage, entry: float, sl: float,
                    tp1: float, tp2: float, risk_usd: float, risk_pct: float,
                    score: float, regime: Optional[str] = None,
-                   ghost_wr: Optional[float] = None, ghost_n: Optional[int] = None) -> str:
+                   ghost_wr: Optional[float] = None, ghost_n: Optional[int] = None,
+                   confidence: Optional[float] = None) -> str:
     """Trade açılış şablonu (Faz 5.1) — sabit satır düzeni."""
     direction = str(direction).upper()
     side_icon = "🟢" if direction == "LONG" else "🔵"  # LONG altın-yeşil, SHORT gümüş-mavi
@@ -224,6 +225,8 @@ def tpl_trade_open(symbol: str, direction: str, leverage, entry: float, sl: floa
     lines.append(LINE)
 
     info = f"Risk {fmt_money(risk_usd)} ({risk_pct:.1f}%) • Skor {score:.0f}"
+    if confidence is not None:
+        info += f" • Güven %{confidence * 100:.0f}"
     if regime:
         info += f" • Rejim {regime}"
     lines.append(info)
@@ -656,6 +659,7 @@ def send_trade_open(data: dict) -> bool:
             symbol=symbol, direction=direction, leverage=lev, entry=entry, sl=sl,
             tp1=tp1, tp2=tp2, risk_usd=risk, risk_pct=risk_pct, score=score,
             regime=regime, ghost_wr=data.get("ghost_wr"), ghost_n=data.get("ghost_n"),
+            confidence=data.get("confidence"),
         )
 
         reply_markup = None
