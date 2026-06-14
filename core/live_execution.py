@@ -294,26 +294,44 @@ class LiveExecutionEngine:
         if remaining_qty > 0:
             rem_qty_str = self._format_quantity(symbol, remaining_qty)
             if float(rem_qty_str) > 0:
-                logger.info(f"[Limit Chase] Kalan miktar icin MARKET emri gonderiliyor: {rem_qty_str}")
-                emit_progress("MARKET_FALLBACK", entry_price)
+                allow_market_fallback = True
                 try:
-                    m_order = self.client.futures_create_order(
-                        symbol=symbol,
-                        side=side,
-                        type='MARKET',
-                        quantity=rem_qty_str
-                    )
-                    m_exec_qty = float(m_order.get('executedQty', remaining_qty))
-                    m_avg_price = float(m_order.get('avgPrice', 0.0))
-                    if m_avg_price == 0:
-                        m_avg_price = entry_price
-                    filled_qty += m_exec_qty
-                    cum_quote += m_exec_qty * m_avg_price
-                    remaining_qty = total_qty - filled_qty
-                    if 'orderId' in m_order:
-                        order_ids.append(m_order['orderId'])
-                except Exception as e:
-                    logger.error(f"[Limit Chase] Market fallback basarisiz: {e}")
+                    from core.market_data import get_current_price
+                    curr_price = get_current_price(symbol)
+                    if curr_price and entry_price > 0:
+                        drift_pct = abs(curr_price - entry_price) / entry_price * 100.0
+                        max_slippage = float(getattr(config, "MAX_SLIPPAGE_PCT", 1.0))
+                        if drift_pct > max_slippage:
+                            logger.warning(
+                                f"[Limit Chase] Market fallback blocked for {symbol}: "
+                                f"Price drift ({drift_pct:.2f}%) exceeds max slippage ({max_slippage:.2f}%). "
+                                f"Current price: {curr_price}, Target entry: {entry_price}."
+                            )
+                            allow_market_fallback = False
+                except Exception as _se:
+                    logger.debug(f"[Limit Chase] Slippage cap check bypassed due to error: {_se}")
+
+                if allow_market_fallback:
+                    logger.info(f"[Limit Chase] Kalan miktar icin MARKET emri gonderiliyor: {rem_qty_str}")
+                    emit_progress("MARKET_FALLBACK", entry_price)
+                    try:
+                        m_order = self.client.futures_create_order(
+                            symbol=symbol,
+                            side=side,
+                            type='MARKET',
+                            quantity=rem_qty_str
+                        )
+                        m_exec_qty = float(m_order.get('executedQty', remaining_qty))
+                        m_avg_price = float(m_order.get('avgPrice', 0.0))
+                        if m_avg_price == 0:
+                            m_avg_price = entry_price
+                        filled_qty += m_exec_qty
+                        cum_quote += m_exec_qty * m_avg_price
+                        remaining_qty = total_qty - filled_qty
+                        if 'orderId' in m_order:
+                            order_ids.append(m_order['orderId'])
+                    except Exception as e:
+                        logger.error(f"[Limit Chase] Market fallback basarisiz: {e}")
 
         if filled_qty > 0:
             final_avg_price = cum_quote / filled_qty

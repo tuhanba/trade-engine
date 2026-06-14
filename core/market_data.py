@@ -119,10 +119,11 @@ def get_cached_ticker(symbol: str) -> Optional[dict]:
 def get_current_price(symbol: str) -> Optional[float]:
     """
     Sembolün güncel fiyatını döner.
-    Öncelikle RAM (WebSocket) önbelleğini kullanır.
-    Yoksa REST API ile çeker.
+    Öncelikle RAM (WebSocket) önbelleğini kullanır (120 sn tazelik şartı ile).
+    Yoksa veya bayatsa REST API ile çeker.
     """
-    if symbol in _PRICE_CACHE:
+    age = get_price_age(symbol)
+    if symbol in _PRICE_CACHE and age is not None and age <= 120.0:
         return _PRICE_CACHE[symbol]
         
     try:
@@ -133,9 +134,15 @@ def get_current_price(symbol: str) -> Optional[float]:
         )
         resp.raise_for_status()
         data = resp.json()
-        return float(data.get("price", 0))
+        price = float(data.get("price", 0))
+        if price > 0:
+            set_cached_price(symbol, price)
+        return price
     except Exception as exc:
         logger.error("Güncel fiyat alınamadı [%s]: %s", symbol, exc)
+        if symbol in _PRICE_CACHE:
+            logger.warning("REST fiyat çekilemedi [%s], bayat cache fiyatı kullanılıyor.", symbol)
+            return _PRICE_CACHE[symbol]
         return None
 
 
