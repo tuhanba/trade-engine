@@ -780,6 +780,15 @@ def init_db() -> None:
             conn.execute(SHADOW_INDEX_DDL)
         except Exception as _sh_err:
             logger.warning(f"shadow_evaluations tablosu oluşturulamadı: {_sh_err}")
+        # NEDEN (sertleştirme): heartbeat geçmişi — live-readiness uptime kapısının
+        # gerçek boşluk analizi için periyodik örnekler (proxy yerine).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS heartbeat_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_heartbeat_history_ts ON heartbeat_history (ts)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS adaptive_stats (
                 id          TEXT PRIMARY KEY,
@@ -3228,6 +3237,118 @@ def get_daily_summaries(days: int = 30, environment: str | None = None) -> list[
             return [dict(r) for r in rows][::-1]  # eskiden yeniye
     except Exception as e:
         logger.debug(f"[DailySummary] okuma hatası: {e}")
+        return []
+
+
+def record_heartbeat_sample(prune_days: int = 35) -> None:
+    """Periyodik heartbeat örneği kaydeder (live-readiness boşluk analizi için).
+
+    NEDEN: Tek 'son heartbeat' değeri gerçek uptime/gap analizi yapamaz. Bu
+    düşük-frekanslı zaman serisi (engine ~5 dk'da bir yazar) Kapı 4'ün proxy
+    yerine ölçülebilir boşluk analizine geçmesini sağlar. Eski kayıtlar budanır.
+    """
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    try:
+        with get_conn() as conn:
+            conn.execute("INSERT INTO heartbeat_history (ts) VALUES (?)", (now.isoformat(),))
+            cutoff = (now - timedelta(days=prune_days)).isoformat()
+            conn.execute("DELETE FROM heartbeat_history WHERE ts < ?", (cutoff,))
+    except Exception as e:
+        logger.debug(f"[Heartbeat] örnek kaydedilemedi: {e}")
+
+
+def get_heartbeat_samples(days: int = 30) -> list[str]:
+    """Son `days` günün heartbeat örnek zaman damgalarını (artan) döner."""
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT ts FROM heartbeat_history WHERE ts >= ? ORDER BY ts ASC", (cutoff,)
+            ).fetchall()
+            return [r[0] for r in rows]
+    except Exception:
+        return []
+
+
+def write_weekly_summary(week_start: str | None = None, environment: str | None = None) -> dict:
+    """Bir haftanın özetini hesaplar ve weekly_summary tablosuna yazar (Plan 1.3 / 3 ucu).
+
+    week_start verilmezse İÇİNDE BULUNULAN ISO haftanın Pazartesi'si alınır.
+    Günlük özetlerden (daily_summary) toplar; en iyi/en kötü günü işaretler.
+    """
+    from datetime import datetime, timezone, timedelta
+    import config as _cfg
+    env = environment or getattr(_cfg, "EXECUTION_MODE", "paper")
+
+    if week_start is None:
+        now = datetime.now(timezone.utc)
+        monday = now - timedelta(days=now.weekday())
+        week_start = monday.strftime("%Y-%m-%d")
+    week_start_dt = datetime.fromisoformat(week_start).replace(tzinfo=timezone.utc)
+    week_end = (week_start_dt + timedelta(days=7)).strftime("%Y-%m-%d")
+
+    summary = {"week_start": week_start, "environment": env}
+    try:
+        with get_conn() as conn:
+            # Haftanın günlük özetlerini kullan (daily_summary canlandırıldı)
+            drows = conn.execute(
+                "SELECT date, trade_count, win_count, loss_count, net_pnl, avg_r "
+                "FROM daily_summary WHERE date >= ? AND date < ? AND environment = ? ORDER BY date ASC",
+                (week_start, week_end, env),
+            ).fetchall()
+
+            trade_count = sum(int(d["trade_count"] or 0) for d in drows)
+            win_count = sum(int(d["win_count"] or 0) for d in drows)
+            loss_count = sum(int(d["loss_count"] or 0) for d in drows)
+            net_pnl = sum(float(d["net_pnl"] or 0) for d in drows)
+            win_rate = round(win_count / trade_count, 4) if trade_count else 0.0
+            # avg_r: işlem-ağırlıklı ortalama
+            r_weighted = sum(float(d["avg_r"] or 0) * int(d["trade_count"] or 0) for d in drows)
+            avg_r = round(r_weighted / trade_count, 3) if trade_count else 0.0
+
+            best_day = worst_day = None
+            if drows:
+                best_day = max(drows, key=lambda d: float(d["net_pnl"] or 0))["date"]
+                worst_day = min(drows, key=lambda d: float(d["net_pnl"] or 0))["date"]
+
+            summary.update({
+                "trade_count": trade_count, "win_count": win_count, "loss_count": loss_count,
+                "win_rate": win_rate, "net_pnl": round(net_pnl, 2), "avg_r": avg_r,
+                "best_day": best_day, "worst_day": worst_day,
+            })
+
+            conn.execute(
+                """
+                INSERT INTO weekly_summary
+                    (week_start, trade_count, win_count, loss_count, win_rate, net_pnl, avg_r, best_day, worst_day)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(week_start) DO UPDATE SET
+                    trade_count=excluded.trade_count, win_count=excluded.win_count,
+                    loss_count=excluded.loss_count, win_rate=excluded.win_rate,
+                    net_pnl=excluded.net_pnl, avg_r=excluded.avg_r,
+                    best_day=excluded.best_day, worst_day=excluded.worst_day
+                """,
+                (week_start, trade_count, win_count, loss_count, win_rate,
+                 round(net_pnl, 2), avg_r, best_day, worst_day),
+            )
+        logger.info(f"[WeeklySummary] {week_start} haftası yazıldı: {trade_count} işlem, net {net_pnl:+.2f}")
+        return summary
+    except Exception as e:
+        logger.error(f"[WeeklySummary] {week_start} yazılamadı: {e}")
+        return summary
+
+
+def get_weekly_summaries(weeks: int = 12, environment: str | None = None) -> list[dict]:
+    """Son `weeks` haftanın weekly_summary kayıtlarını döner (eskiden yeniye)."""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM weekly_summary ORDER BY week_start DESC LIMIT ?", (weeks,)
+            ).fetchall()
+            return [dict(r) for r in rows][::-1]
+    except Exception:
         return []
 
 

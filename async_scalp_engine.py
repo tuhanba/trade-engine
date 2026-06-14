@@ -332,13 +332,23 @@ class AsyncScalpEngine:
             await asyncio.sleep(14400)  # 4 hours
 
     async def _heartbeat_loop(self):
-        """Update heartbeat in database every 10 seconds."""
-        from database import update_bot_status
+        """Update heartbeat in database every 10 seconds.
+
+        Ayrıca ~5 dk'da bir heartbeat_history'ye örnek yazar (live-readiness
+        uptime kapısının gerçek boşluk analizi için — sertleştirme).
+        """
+        from database import update_bot_status, record_heartbeat_sample
         from datetime import datetime, timezone
+        import time as _t
+        last_sample = 0.0
         while True:
             try:
                 await asyncio.to_thread(update_bot_status, "heartbeat", datetime.now(timezone.utc).isoformat())
                 await asyncio.to_thread(update_bot_status, "status", "running")
+                now_ts = _t.time()
+                if now_ts - last_sample >= 300:  # 5 dk
+                    last_sample = now_ts
+                    await asyncio.to_thread(record_heartbeat_sample)
             except Exception as e:
                 logger.error(f"Heartbeat failed: {e}")
             await asyncio.sleep(10)
@@ -735,6 +745,12 @@ class AsyncScalpEngine:
                     
                     if last_sent != today_str:
                         logger.info("[WeeklyDigest] Haftalık rapor otomatik oluşturuluyor ve gönderiliyor...")
+                        # Plan 1.3 son ucu: weekly_summary tablosunu yaz (uykudan canlandı)
+                        try:
+                            from database import write_weekly_summary
+                            await asyncio.to_thread(write_weekly_summary)
+                        except Exception as we:
+                            logger.error(f"[WeeklyDigest] weekly_summary yazılamadı: {we}")
                         # Send to Telegram
                         await asyncio.to_thread(telegram_delivery.send_weekly_digest)
                         # Faz 6.1: Haftalık Trade Journal MD dosyasını da gönder
