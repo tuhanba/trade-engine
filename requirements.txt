@@ -2,10 +2,8 @@
 # Core framework
 flask>=3.0.0
 flask-socketio>=5.3.0
-# NEDEN (Faz 1.5): SocketIO async_mode="threading"a geçildi — eventlet artık
-# kullanılmıyor ama 1 hafta production gözlemi bitmeden KALDIRILMAYACAK (plan kuralı).
-eventlet>=0.35.0
-# threading modunda WebSocket transport'u için (engineio bağımlılığı, açıkça sabitlendi)
+# NEDEN (Faz 1.5 tamamlandı): SocketIO async_mode="threading" — eventlet kaldırıldı
+# (artık kullanılmıyor). WebSocket transport'u simple-websocket ile sağlanır.
 simple-websocket>=1.0.0
 gunicorn>=21.2.0
 # Data science

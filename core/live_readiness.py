@@ -72,16 +72,61 @@ def _max_drawdown_pct(days: int = 30) -> float:
         return 0.0
 
 
-def _uptime_pct(days: int = 30) -> tuple[float, str]:
-    """Uptime tahmini: anlık heartbeat tazeliği + günlük özet kapsama oranı.
+# Heartbeat örnekleme periyodu (engine ~5 dk'da bir yazar); bu sürenin 2 katından
+# (10 dk) uzun boşluk "downtime" sayılır.
+HEARTBEAT_INTERVAL_SEC = 300
+HEARTBEAT_GAP_TOLERANCE_SEC = 2 * HEARTBEAT_INTERVAL_SEC
 
-    NEDEN: Heartbeat geçmişi ayrı tabloda tutulmuyor; gerçek kesintisiz uptime
-    yerine pratik proxy — (a) şu an heartbeat canlı mı, (b) son `days` günün
-    kaçında daily_summary kaydı var (sistem o gün çalışıp özet yazmış). Bu
-    canlı-öncesi operasyonel sürekliliğin muhafazakâr göstergesidir.
+
+def _uptime_from_history(days: int = 30) -> tuple[float, str] | None:
+    """heartbeat_history boşluk analizinden gerçek uptime%'si.
+
+    Operasyonel pencere = ilk örnek → şimdi. 10 dk'dan uzun her boşluk downtime
+    sayılır. <2 örnek varsa None döner (çağıran proxy'ye düşer).
     """
     import database
-    # (a) Anlık heartbeat tazeliği — bayatsa uptime düşük kabul edilir
+    samples = database.get_heartbeat_samples(days=days)
+    if len(samples) < 2:
+        return None
+    try:
+        ts = []
+        for s in samples:
+            dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            ts.append(dt)
+        ts.sort()
+        now = datetime.now(timezone.utc)
+        # Operasyonel pencere: ilk örnekten şimdiye (sistemin var olmadığı süreyi cezalandırma)
+        points = ts + [now]
+        span = (now - ts[0]).total_seconds()
+        if span <= 0:
+            return None
+        downtime = 0.0
+        for a, b in zip(points[:-1], points[1:]):
+            gap = (b - a).total_seconds()
+            if gap > HEARTBEAT_GAP_TOLERANCE_SEC:
+                downtime += gap
+        uptime = max(0.0, (span - downtime) / span * 100.0)
+        op_days = span / 86400.0
+        return round(uptime, 2), f"boşluk analizi: {len(ts)} örnek, {op_days:.1f}g operasyonel pencere"
+    except Exception:
+        return None
+
+
+def _uptime_pct(days: int = 30) -> tuple[float, str]:
+    """Uptime: önce heartbeat_history boşluk analizi (gerçek ölçüm); yeterli
+    örnek yoksa proxy (anlık tazelik + daily_summary kapsama) fallback.
+
+    NEDEN (sertleştirme): Artık periyodik heartbeat örnekleri tutuluyor, gerçek
+    boşluk analizi yapılabiliyor. Geçmiş yokken (yeni deploy) proxy korunur.
+    """
+    real = _uptime_from_history(days)
+    if real is not None:
+        return real
+
+    import database
+    # Fallback proxy — (a) anlık heartbeat tazeliği
     fresh = False
     try:
         hb = database.get_bot_status("heartbeat") or {}
@@ -102,9 +147,8 @@ def _uptime_pct(days: int = 30) -> tuple[float, str]:
         covered = 0
     coverage_pct = (covered / max(1, days)) * 100.0
 
-    # Anlık heartbeat bayatsa uptime'ı 0'a çek (canlıya geçilmemeli)
     uptime = coverage_pct if fresh else min(coverage_pct, 50.0)
-    detail = f"heartbeat={'canlı' if fresh else 'BAYAT'}, günlük kapsama {covered}/{days}"
+    detail = f"proxy (geçmiş yok): heartbeat={'canlı' if fresh else 'BAYAT'}, günlük kapsama {covered}/{days}"
     return round(uptime, 1), detail
 
 
