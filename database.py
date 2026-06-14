@@ -429,6 +429,7 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("market_regime",     "TEXT"),
         ("is_valid_for_stats","INTEGER DEFAULT 1"),
         ("environment",       "TEXT"),
+        ("tenant_id",         "TEXT DEFAULT 'main'"),  # Faz 6.5: SaaS coklu-kullanici temeli
         ("session",           "TEXT"),
     ],
     "signal_candidates": [
@@ -497,6 +498,7 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("funnel_telegram", "INTEGER DEFAULT 0"),
         ("funnel_executed", "INTEGER DEFAULT 0"),
         ("environment",     "TEXT DEFAULT 'paper'"),
+        ("tenant_id",       "TEXT DEFAULT 'main'"),  # Faz 6.5: SaaS coklu-kullanici temeli
     ],
     "coin_profiles": [
         ("win_rate", "REAL DEFAULT 0.5"),
