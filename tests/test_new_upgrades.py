@@ -1324,3 +1324,73 @@ def test_stop_hunt_liquidity_sweep_boost():
         # Adjusted score should be boosted (base adjusted score around 75.6 + 10 = 85.6)
         assert res.score_adjusted >= 80.0
 
+
+def test_friday_local_error_diagnostics():
+    from core.friday_ceo import FridayCeo
+    ceo = FridayCeo(db_path="trading.db")
+    
+    assert "Binance API anahtarı formatı geçersiz" in ceo._diagnose_error_locally("API-key format invalid")
+    assert "IP kısıtlamasına takıldı" in ceo._diagnose_error_locally("IP address not whitelisted")
+    assert "SQLite veritabanı kilitlendi" in ceo._diagnose_error_locally("database is locked")
+    assert "bağlantı sorunu" in ceo._diagnose_error_locally("Connection refused")
+    assert "yetersiz bakiye" in ceo._diagnose_error_locally("insufficient balance")
+    assert ceo._diagnose_error_locally("Some random error msg") == ""
+
+
+def test_balance_client_reuse():
+    import database
+    from unittest.mock import MagicMock, patch
+    
+    mock_client = MagicMock()
+    mock_client.futures_account.return_value = {
+        'totalWalletBalance': '1234.56',
+        'availableBalance': '1000.0'
+    }
+    
+    with patch("config.EXECUTION_MODE", "live"), \
+         patch("config.BINANCE_API_KEY", "mock_key"), \
+         patch("config.BINANCE_API_SECRET", "mock_secret"):
+        
+        # Reset caching variables
+        database._last_live_balance_fetch = 0.0
+        database._cached_live_balance = 0.0
+        database._last_live_details_fetch = 0.0
+        database._cached_live_details = {}
+        
+        bal = database.get_active_balance(client=mock_client)
+        assert bal == 1234.56
+        
+        details = database.get_active_balance_details(client=mock_client)
+        assert details["total"] == 1234.56
+        assert details["available"] == 1000.0
+        assert details["execution_mode"] == "live"
+
+
+def test_macro_veto_filter_in_classify_signal():
+    from core.ai_decision_engine import classify_signal
+    from core.data_layer import SignalData
+    from unittest.mock import patch
+    
+    sig = SignalData()
+    sig.symbol = "BTCUSDT"
+    sig.side = "LONG"
+    sig.entry_price = 50000.0
+    sig.stop_loss = 49000.0
+    sig.tp1 = 53000.0
+    sig.score = 70.0
+    sig.setup_quality = "B"
+    
+    context = {}
+    
+    with patch("database.get_system_state", return_value="true"), \
+         patch("database.get_market_regime", return_value="NEUTRAL"), \
+         patch("database.get_open_trades", return_value=[]), \
+         patch("core.ai_decision_engine.GhostMemoryManager.get_symbol_ghost_stats", return_value={"total": 0, "tp_hits": 0, "sl_hits": 0, "ghost_winrate": 0.0}), \
+         patch("core.ai_decision_engine.GhostMemoryManager.get_direction_bias", return_value={}), \
+         patch("core.ai_decision_engine.GhostMemoryManager.get_score_multiplier", return_value=1.0):
+        
+        res = classify_signal(sig, context)
+        assert res.decision == "VETO"
+        assert "Makro Koruyucu" in res.reason
+
+

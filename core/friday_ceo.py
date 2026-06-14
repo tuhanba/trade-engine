@@ -2259,6 +2259,7 @@ class FridayCeo:
             if storm_line and not self._alert_recently_sent("friday_last_errorstorm_alert", cooldown_minutes=60):
                 set_state("friday_last_errorstorm_alert", now.isoformat())
                 diagnosis = ""
+                is_local_diag = False
                 try:
                     # LLM varsa hata özetini yorumlat (teşhis notu) — yoksa sessizce atla
                     llm_provider = ""
@@ -2275,13 +2276,19 @@ class FridayCeo:
                         )
                 except Exception as _diag_err:
                     logger.debug(f"[Friday CEO] Hata fırtınası LLM teşhisi atlandı: {_diag_err}")
+                
+                if not diagnosis:
+                    diagnosis = self._diagnose_error_locally(storm_line)
+                    is_local_diag = True
+
                 msg = (
                     "🚨 <b>KRİTİK • Hata Fırtınası</b>\n"
                     f"Aynı ERROR satırı son 15 dk'da <b>{storm_count}</b> kez tekrarlandı:\n"
                     f"<code>{storm_line[:300]}</code>"
                 )
                 if diagnosis:
-                    msg += f"\n\n🩺 <b>Friday Teşhisi:</b> {diagnosis[:400]}"
+                    label = "Friday Teşhisi (Çevrimdışı)" if is_local_diag else "Friday Teşhisi"
+                    msg += f"\n\n🩺 <b>{label}:</b> {diagnosis[:400]}"
                 telegram_delivery.send_message(msg)
                 _fd.log_decision("REPORT", param_key="error_storm", new=str(storm_count),
                                  reasoning=f"Tekrarlanan hata: {storm_line[:200]}")
@@ -2389,6 +2396,21 @@ class FridayCeo:
         except Exception as e:
             logger.debug(f"[Friday CEO] error storm tarama hatası: {e}")
             return None, 0
+
+    def _diagnose_error_locally(self, storm_line: str) -> str:
+        """Kritik hata fırtınası durumunda çevrimdışı (rule-based) yerel teşhis yapar."""
+        line_lower = storm_line.lower()
+        if "api-key format invalid" in line_lower or "api key format invalid" in line_lower:
+            return "Binance API anahtarı formatı geçersiz görünüyor. Lütfen config dosyasındaki/ortam değişkenlerindeki API key/secret tanımlarını kontrol edin."
+        if "ip address not whitelisted" in line_lower or "ip restriction" in line_lower or "restricted ip" in line_lower or "invalid ip" in line_lower:
+            return "Binance API erişimi IP kısıtlamasına takıldı. Sunucu IP'nizin Binance API yönetim panelinde beyaz listede (whitelist) tanımlı olduğundan emin olun."
+        if "database is locked" in line_lower or "sqlite3.operationalerror: database is locked" in line_lower:
+            return "SQLite veritabanı kilitlendi (Database is locked). Eşzamanlı yazma işlemleri veya başka bir işlem DB dosyasını açık bırakmış olabilir."
+        if "connection" in line_lower or "timeout" in line_lower or "max retries exceeded" in line_lower or "connection refused" in line_lower or "readtimeout" in line_lower or "network is unreachable" in line_lower:
+            return "Sunucuda ağ veya bağlantı sorunu tespit edildi. Binance veya dış servislere erişimde kesinti yaşanıyor olabilir (DNS/proxy ayarlarını veya internet erişimini kontrol edin)."
+        if "insufficient balance" in line_lower or "insufficient_balance" in line_lower or "margin is insufficient" in line_lower:
+            return "Hesapta işlem açmak veya komisyonları ödemek için yetersiz bakiye/marjin hatası alınıyor. Binance Futures cüzdan bakiyesini kontrol edin."
+        return ""
 
     # ── Faz 2.4 — Sabah Brifingi ─────────────────────────────────────────────
 

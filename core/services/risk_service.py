@@ -20,6 +20,7 @@ logger = logging.getLogger("ax.services.risk")
 
 class RiskService:
     def __init__(self, client):
+        self.client = client
         self.risk_engine = RiskEngine(client)
         event_bus.subscribe(EventType.TRIGGER_CHECKED, self.handle_trigger_checked)
 
@@ -43,7 +44,7 @@ class RiskService:
                 logger.warning("[RiskService] %s entry=0 — trigger_result keys: %s",
                                symbol, list(trigger_result.keys()))
 
-            balance = await asyncio.to_thread(get_active_balance)
+            balance = await asyncio.to_thread(get_active_balance, self.client)
 
             risk_result = await asyncio.to_thread(
                 self.risk_engine.calculate,

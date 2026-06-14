@@ -2063,7 +2063,7 @@ _cached_live_balance = 0.0
 _last_live_details_fetch = 0.0
 _cached_live_details = {}
 
-def get_active_balance() -> float:
+def get_active_balance(client=None) -> float:
     """
     Dinamik olarak aktif bakiyeyi döner. Canlı modda Binance Futures cüzdan bakiyesini,
     paper modda SQLite paper_account bakiyesini kullanır.
@@ -2078,9 +2078,12 @@ def get_active_balance() -> float:
             if now - _last_live_balance_fetch < 15.0 and _cached_live_balance > 0:
                 return _cached_live_balance
             
-            from binance.client import Client
-            if config.BINANCE_API_KEY and config.BINANCE_API_SECRET:
-                client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET)
+            if client is None:
+                from binance.client import Client
+                if config.BINANCE_API_KEY and config.BINANCE_API_SECRET:
+                    client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET)
+            
+            if client:
                 account = client.futures_account()
                 balance = float(account.get('totalWalletBalance', 0.0))
                 if balance > 0:
@@ -2092,7 +2095,7 @@ def get_active_balance() -> float:
     return get_paper_balance()
 
 
-def get_active_balance_details() -> dict:
+def get_active_balance_details(client=None) -> dict:
     """
     Aktif bakiye detaylarını döner (total, available, execution_mode).
     """
@@ -2113,9 +2116,12 @@ def get_active_balance_details() -> dict:
                 return _cached_live_details
             
             res["execution_mode"] = "live"
-            from binance.client import Client
-            if config.BINANCE_API_KEY and config.BINANCE_API_SECRET:
-                client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET)
+            if client is None:
+                from binance.client import Client
+                if config.BINANCE_API_KEY and config.BINANCE_API_SECRET:
+                    client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET)
+                    
+            if client:
                 account = client.futures_account()
                 res["total"] = float(account.get('totalWalletBalance', 0.0))
                 res["available"] = float(account.get('availableBalance', 0.0))

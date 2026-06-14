@@ -1256,6 +1256,22 @@ def classify_signal(
         else:
             logger.info(f"[Bypass] AI Consensus VETO bypassed for {signal.symbol}: {reason_msg}")
 
+    # ── Makro Haber Veto Filtresi (V3) ──────────────────────────────────
+    try:
+        from database import get_system_state
+        if get_system_state("friday_macro_paused") == "true":
+            if not bypass_shields:
+                return return_decision(AIDecisionResult(
+                    decision=SignalDecision.VETO.value,
+                    reason="Makro Koruyucu: Yüksek etkili haber öncesi/sonrası otonom veto (friday_macro_paused)",
+                    confidence=0.95,
+                    score_adjusted=adjusted_score
+                ))
+            else:
+                logger.info(f"[Bypass] Macro news VETO bypassed for {signal.symbol}.")
+    except Exception as macro_paused_err:
+        logger.debug(f"[AI] Macro news pause check failed: {macro_paused_err}")
+
     # ── Portföy Korelasyon Kalkanı (Faz 5) ──────────────────────────
     try:
         from database import get_open_trades
