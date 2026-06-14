@@ -49,10 +49,6 @@ def get_conn() -> Generator[sqlite3.Connection, None, None]:
         with conn:
             yield conn
     finally:
-        try:
-            conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
-        except Exception:
-            pass
         conn.close()
 
 
@@ -73,10 +69,6 @@ def open_db(db_path: str | None = None, timeout: int = 15) -> Generator[sqlite3.
     try:
         yield conn
     finally:
-        try:
-            conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
-        except Exception:
-            pass
         conn.close()
 
 
