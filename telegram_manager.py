@@ -1906,6 +1906,9 @@ class TelegramManager:
         try:
             import database as _db
             _db.set_state("tg_is_paused", "False")
+            _db.set_state("friday_emergency_clutch", "-")
+            from datetime import datetime, timezone, timedelta
+            _db.set_state("friday_clutch_cooldown_until", (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat())
         except Exception:
             pass
         self.send_fn(
@@ -2024,6 +2027,9 @@ class TelegramManager:
             _cfg.EXECUTION_MODE = "live"
             import database as _db
             _db.set_state("tg_execution_mode", "live")
+            _db.set_state("friday_emergency_clutch", "-")
+            from datetime import datetime, timezone, timedelta
+            _db.set_state("friday_clutch_cooldown_until", (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat())
             prefix = "⚠️ <b>KAPILAR BYPASS EDİLDİ (force)</b>\n\n" if bypassed else ""
             self.send_fn(
                 prefix +

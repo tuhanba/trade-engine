@@ -74,10 +74,12 @@ def test_pearson_correlation_scaling(setup_test_db):
 def test_slippage_and_latency_guard_scaling(setup_test_db):
     """Verifies that average slippage > 0.15% (30% reduction) and latency > 500ms (20% reduction) applies correctly."""
     # Write 3 closed trades to database with high slippage and latency
+    from datetime import datetime, timezone
+    now_str = datetime.now(timezone.utc).isoformat()
     conn = sqlite3.connect(setup_test_db)
-    conn.execute("INSERT INTO trades (symbol, direction, status, slippage, latency_ms) VALUES ('BTCUSDT', 'LONG', 'closed', 0.20, 600)")
-    conn.execute("INSERT INTO trades (symbol, direction, status, slippage, latency_ms) VALUES ('ETHUSDT', 'LONG', 'closed', 0.25, 550)")
-    conn.execute("INSERT INTO trades (symbol, direction, status, slippage, latency_ms) VALUES ('SOLUSDT', 'LONG', 'closed', 0.15, 650)")
+    conn.execute("INSERT INTO trades (symbol, direction, status, slippage, latency_ms, close_time) VALUES ('BTCUSDT', 'LONG', 'closed', 0.20, 600, ?)", (now_str,))
+    conn.execute("INSERT INTO trades (symbol, direction, status, slippage, latency_ms, close_time) VALUES ('ETHUSDT', 'LONG', 'closed', 0.25, 550, ?)", (now_str,))
+    conn.execute("INSERT INTO trades (symbol, direction, status, slippage, latency_ms, close_time) VALUES ('SOLUSDT', 'LONG', 'closed', 0.15, 650, ?)", (now_str,))
     conn.commit()
     conn.close()
 

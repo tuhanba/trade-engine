@@ -909,40 +909,60 @@ class RiskEngine:
             # 4. Adaptive Slippage & Latency Guard
             if not bypass_shields:
                 try:
-                    from database import get_conn
-                    with get_conn() as conn:
-                        recent_perf = conn.execute("""
-                            SELECT COALESCE(slippage, 0.0) as slippage, COALESCE(latency_ms, 0) as latency_ms
-                            FROM trades
-                            WHERE status = 'closed'
-                            ORDER BY id DESC LIMIT 3
-                        """).fetchall()
-                    if recent_perf:
-                        avg_slippage = sum(float(r["slippage"]) for r in recent_perf) / len(recent_perf)
-                        avg_latency = sum(int(r["latency_ms"]) for r in recent_perf) / len(recent_perf)
-                        
-                        # Emergency Clutch Check (High latency or slippage protection gate)
-                        if avg_slippage > 0.25 or avg_latency > 800:
-                            try:
-                                from database import update_system_state
-                                update_system_state("tg_execution_mode", "paper")
-                                update_system_state("friday_emergency_clutch", f"slippage={avg_slippage:.3f},latency={avg_latency}")
-                                logger.critical(f"[Emergency Clutch] CRITICAL latency ({avg_latency}ms) or slippage ({avg_slippage:.3f}%) detected! Autonomously switched engine to paper mode.")
-                                return {"valid": False, "score": 0, "risk_reject_reason": "emergency_clutch_switch_triggered"}
-                            except Exception as cl_err:
-                                logger.error(f"[Emergency Clutch] Failed to trigger paper switch: {cl_err}")
-
-                        slippage_mult = 1.0
-                        if avg_slippage > 0.15:
-                            slippage_mult = 0.70
-                            logger.info(f"[Slippage Guard] Avg slippage of last {len(recent_perf)} trades is {avg_slippage:.3f}% > 0.15%. Risk scaled by 0.7x (30% reduction)")
-                        
-                        latency_mult = 1.0
-                        if avg_latency > 500:
-                            latency_mult = 0.80
-                            logger.info(f"[Latency Guard] Avg latency of last {len(recent_perf)} trades is {avg_latency:.1f}ms > 500ms. Risk scaled by 0.8x (20% reduction)")
-                        
-                        risk_pct *= (slippage_mult * latency_mult)
+                    from database import get_conn, get_system_state
+                    from datetime import datetime, timezone, timedelta
+                    
+                    # Check if manual clutch override/cooldown is active
+                    clutch_cooldown = False
+                    cooldown_until_str = get_system_state("friday_clutch_cooldown_until")
+                    if cooldown_until_str and cooldown_until_str != "-":
+                        try:
+                            cooldown_dt = datetime.fromisoformat(cooldown_until_str)
+                            if datetime.now(timezone.utc) < cooldown_dt:
+                                clutch_cooldown = True
+                                logger.info(f"[Emergency Clutch] Clutch check bypassed due to active cooldown until {cooldown_until_str}")
+                        except Exception as ce:
+                            logger.warning(f"[Emergency Clutch] Error parsing clutch cooldown: {ce}")
+                            
+                    if not clutch_cooldown:
+                        cutoff_str = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+                        with get_conn() as conn:
+                            recent_perf = conn.execute("""
+                                SELECT COALESCE(slippage, 0.0) as slippage, COALESCE(latency_ms, 0) as latency_ms
+                                FROM trades
+                                WHERE status = 'closed' AND close_time >= ?
+                                ORDER BY id DESC LIMIT 3
+                            """, (cutoff_str,)).fetchall()
+                        if recent_perf:
+                            avg_slippage = sum(float(r["slippage"]) for r in recent_perf) / len(recent_perf)
+                            avg_latency = sum(int(r["latency_ms"]) for r in recent_perf) / len(recent_perf)
+                            
+                            # Emergency Clutch Check (High latency or slippage protection gate)
+                            if avg_slippage > 0.25 or avg_latency > 800:
+                                current_mode = getattr(config, "EXECUTION_MODE", "paper")
+                                if current_mode == "paper":
+                                    logger.info("[Emergency Clutch] Already in paper mode. Skipping clutch trigger.")
+                                else:
+                                    try:
+                                        from database import update_system_state
+                                        update_system_state("tg_execution_mode", "paper")
+                                        update_system_state("friday_emergency_clutch", f"slippage={avg_slippage:.3f},latency={avg_latency}")
+                                        logger.critical(f"[Emergency Clutch] CRITICAL latency ({avg_latency}ms) or slippage ({avg_slippage:.3f}%) detected! Autonomously switched engine to paper mode.")
+                                        return {"valid": False, "score": 0, "risk_reject_reason": "emergency_clutch_switch_triggered"}
+                                    except Exception as cl_err:
+                                        logger.error(f"[Emergency Clutch] Failed to trigger paper switch: {cl_err}")
+                            
+                            slippage_mult = 1.0
+                            if avg_slippage > 0.15:
+                                slippage_mult = 0.70
+                                logger.info(f"[Slippage Guard] Avg slippage of last {len(recent_perf)} trades is {avg_slippage:.3f}% > 0.15%. Risk scaled by 0.7x (30% reduction)")
+                            
+                            latency_mult = 1.0
+                            if avg_latency > 500:
+                                latency_mult = 0.80
+                                logger.info(f"[Latency Guard] Avg latency of last {len(recent_perf)} trades is {avg_latency:.1f}ms > 500ms. Risk scaled by 0.8x (20% reduction)")
+                            
+                            risk_pct *= (slippage_mult * latency_mult)
                 except Exception as e:
                     logger.debug(f"[Risk-Slippage-Latency-Check] Query failed: {e}")
 
