@@ -346,6 +346,15 @@ def api_command_center():
         return _error(str(exc))
 
 
+@app.route("/api/correlation_matrix")
+def api_correlation_matrix():
+    """Açık pozisyonlar arası canlı Pearson korelasyon matrisi (Faz 6.3, on-demand)."""
+    try:
+        return _ok(dashboard_service.get_correlation_matrix())
+    except Exception as exc:
+        return _error(str(exc))
+
+
 @app.route("/api/daily_summary")
 def api_daily_summary():
     """Günlük özet serisi (sparkline/trend) — daily_summary tablosu (Faz 3.1)."""

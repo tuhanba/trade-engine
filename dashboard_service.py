@@ -515,6 +515,26 @@ def get_regime_band(hours: int = 24) -> dict:
     return band
 
 
+def get_correlation_matrix(environment: str | None = None) -> dict:
+    """Açık pozisyonlar arası canlı Pearson korelasyon matrisi (Faz 6.3).
+
+    NEDEN: portfolio_risk zaten hesaplıyor — burada açık pozisyon sembolleri
+    için tam matris döndürülür (dashboard görselleştirmesi). On-demand çağrılır
+    (klines fetch eder), 5sn polling'e dahil DEĞİL.
+    """
+    try:
+        trades = get_live_trades(environment)
+        symbols = sorted({t.get("symbol") for t in trades if t.get("symbol")})
+        if len(symbols) < 2:
+            return {"symbols": symbols, "matrix": [], "max_pair": None,
+                    "note": "Korelasyon için en az 2 açık pozisyon gerekir."}
+        from core.portfolio_risk import calculate_correlation_matrix
+        return calculate_correlation_matrix(symbols)
+    except Exception as e:
+        logger.error("[Dashboard] korelasyon matrisi hatası: %s", e)
+        return {"symbols": [], "matrix": [], "max_pair": None, "error": str(e)}
+
+
 def get_command_center(environment: str | None = None) -> dict:
     """Faz 4: Komuta Merkezi'nin tüm katman verisini TEK çağrıda döndürür.
 

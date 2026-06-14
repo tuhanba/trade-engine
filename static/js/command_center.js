@@ -263,8 +263,54 @@
     }
   }
 
+  // ── KATMAN 4: Korelasyon ısı haritası (on-demand, Faz 6.3) ─────────
+  function corrColor(v) {
+    if (v === null || v === undefined) return "rgba(255,255,255,0.05)";
+    // +1 bakır (riskli birlikte hareket), 0 nötr, -1 gümüş-mavi (çeşitlendirme)
+    if (v >= 0) return `rgba(192,83,62,${(0.15 + 0.65 * v).toFixed(2)})`;
+    return `rgba(126,156,192,${(0.15 + 0.65 * Math.abs(v)).toFixed(2)})`;
+  }
+  async function loadCorrelation() {
+    const host = $("ccCorrelation");
+    if (!host) return;
+    host.innerHTML = `<div class="cc-empty">Pearson matrisi hesaplanıyor…</div>`;
+    try {
+      const resp = await fetch("/api/correlation_matrix");
+      const d = (await resp.json()).data || {};
+      const syms = d.symbols || [];
+      if (!d.matrix || d.matrix.length === 0) {
+        host.innerHTML = `<div class="cc-empty">${d.note || "Korelasyon için en az 2 açık pozisyon gerekir."}</div>`;
+        return;
+      }
+      let html = '<table style="border-collapse:collapse;font-size:10px;width:100%"><tr><th></th>';
+      html += syms.map((s) => `<th style="padding:3px;color:var(--cc-text-dim)">${s.replace("USDT", "")}</th>`).join("");
+      html += "</tr>";
+      d.matrix.forEach((row, i) => {
+        html += `<tr><td style="padding:3px;color:var(--cc-text-dim)">${syms[i].replace("USDT", "")}</td>`;
+        html += row.map((v) => {
+          const txt = v === null ? "·" : v.toFixed(2);
+          return `<td class="cc-num" style="padding:5px;text-align:center;background:${corrColor(v)}">${txt}</td>`;
+        }).join("");
+        html += "</tr>";
+      });
+      html += "</table>";
+      if (d.max_pair) {
+        html += `<div class="cc-pulse-sub" style="margin-top:8px">En yüksek: ${d.max_pair.a.replace("USDT", "")}↔${d.max_pair.b.replace("USDT", "")} = ${d.max_pair.corr.toFixed(2)}</div>`;
+      }
+      host.innerHTML = html;
+    } catch (e) {
+      host.innerHTML = `<div class="cc-empty">Korelasyon yüklenemedi.</div>`;
+    }
+  }
+
   function toggleAccordion(el) {
-    if (el && el.parentElement) el.parentElement.classList.toggle("open");
+    if (el && el.parentElement) {
+      el.parentElement.classList.toggle("open");
+      // Korelasyon akordeonu açıldığında on-demand yükle (5sn poll'a dahil değil)
+      if (el.parentElement.id === "ccCorrAccordion" && el.parentElement.classList.contains("open")) {
+        loadCorrelation();
+      }
+    }
   }
 
   function init() {

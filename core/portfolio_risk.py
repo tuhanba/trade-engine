@@ -69,11 +69,53 @@ def calculate_max_correlation(open_symbols: list[str], new_symbol: str, interval
     return max_corr
 
 
+def calculate_correlation_matrix(symbols: list[str], interval: str = "1h", limit: int = 50) -> dict:
+    """Açık pozisyon sembolleri arasındaki tam Pearson korelasyon matrisi (Faz 6.3).
+
+    _get_returns altyapısını yeniden kullanır (yeniden hesaplamaz).
+    Returns: {"symbols": [...], "matrix": [[float|None,...]], "max_pair": {...}}
+    Köşegen 1.0; getirisi alınamayan sembol satır/sütununda None.
+    """
+    result = {"symbols": list(symbols), "matrix": [], "max_pair": None}
+    if not symbols:
+        return result
+
+    # Getirileri bir kez çek (tekrar tekrar fetch'i önle)
+    returns = {s: _get_returns(s, interval, limit) for s in symbols}
+    n = len(symbols)
+    matrix = [[None] * n for _ in range(n)]
+    max_abs = -1.0
+    max_pair = None
+
+    for i in range(n):
+        matrix[i][i] = 1.0
+        for j in range(i + 1, n):
+            r1, r2 = returns[symbols[i]], returns[symbols[j]]
+            corr = None
+            if r1 is not None and r2 is not None and len(r1) and len(r2):
+                m = min(len(r1), len(r2))
+                try:
+                    c = np.corrcoef(r1[-m:], r2[-m:])[0, 1]
+                    if not np.isnan(c):
+                        corr = round(float(c), 3)
+                except Exception:
+                    corr = None
+            matrix[i][j] = corr
+            matrix[j][i] = corr
+            if corr is not None and abs(corr) > max_abs:
+                max_abs = abs(corr)
+                max_pair = {"a": symbols[i], "b": symbols[j], "corr": corr}
+
+    result["matrix"] = matrix
+    result["max_pair"] = max_pair
+    return result
+
+
 def calculate_portfolio_var(
-    open_positions: list[dict], 
-    new_position: dict, 
-    balance: float, 
-    interval: str = "1h", 
+    open_positions: list[dict],
+    new_position: dict,
+    balance: float,
+    interval: str = "1h",
     limit: int = 50
 ) -> float:
     """
