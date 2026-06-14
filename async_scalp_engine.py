@@ -232,6 +232,13 @@ class AsyncScalpEngine:
         except Exception as e:
             logger.error(f"SentimentScraper başlatılamadı: {e}")
 
+        # Faz 6.7: Funding-Rate Avcısı (bağımsız strateji, varsayılan KAPALI)
+        try:
+            from core.services.funding_hunter import funding_hunter
+            asyncio.create_task(funding_hunter.start_background_task())
+        except Exception as e:
+            logger.error(f"FundingHunter başlatılamadı: {e}")
+
         # Start WebSocket Data Feed
         await self.market_data.initialize()
         
