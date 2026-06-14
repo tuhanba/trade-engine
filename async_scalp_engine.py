@@ -70,8 +70,47 @@ class AsyncScalpEngine:
             binance.client.Client.ping = lambda self: {}
             self.client = Client(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")
         self._last_trade_opened_at = time.time()
+        self.loop = None
+
+    def trigger_ws_reconnect(self):
+        """Thread-safe trigger for WebSocket reconnection."""
+        if self.loop:
+            logger.info("[Engine] Thread-safe trigger for WS reconnect received.")
+            asyncio.run_coroutine_threadsafe(self.reconnect_websocket(), self.loop)
+        else:
+            logger.error("[Engine] Event loop not initialized. Cannot reconnect WebSocket.")
+
+    async def reconnect_websocket(self):
+        """Reconnects CCXT Pro WebSocket ticker stream on halt."""
+        logger.warning("[Engine] WebSocket halt detected. Initiating reconnection...")
+        try:
+            await self.market_data.stop()
+        except Exception as e:
+            logger.debug(f"[Engine] Stop market data failed: {e}")
+            
+        try:
+            await self.market_data.initialize()
+            await self.market_data.start_all_tickers()
+            logger.info("[Engine] WebSocket reconnected successfully.")
+            
+            # Reset ws_heartbeat time to prevent immediate loops
+            try:
+                from database import update_bot_status
+                from datetime import datetime as _dt, timezone as _tz
+                update_bot_status("ws_heartbeat", _dt.now(_tz.utc).isoformat())
+            except Exception:
+                pass
+                
+            try:
+                from telegram_delivery import send_message
+                send_message("🔄 <b>WebSocket Kurtarma Aktif</b>\nAkış donması tespit edildi. Ticker verileri sıfırlanıp yeniden bağlandı.")
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error(f"[Engine] WebSocket reconnection failed: {e}")
 
     async def start(self):
+        self.loop = asyncio.get_running_loop()
         logger.info("Starting Event-Driven Async Scalp Engine...")
         
         # Init Redis (SQLite lock baskısını azaltır — yoksa SQLite fallback)
@@ -196,7 +235,7 @@ class AsyncScalpEngine:
         try:
             from core.watchdog import SystemWatchdog
             db_path = config.DB_PATH
-            self.watchdog = SystemWatchdog(db_path)
+            self.watchdog = SystemWatchdog(db_path, ws_reconnect_fn=self.trigger_ws_reconnect)
             self.watchdog.start()
         except Exception as e:
             logger.error(f"Watchdog başlatılamadı: {e}")

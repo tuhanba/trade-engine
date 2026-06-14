@@ -21,6 +21,34 @@ from core.data_layer import SignalData, TradeData
 logger = logging.getLogger("ax.database")
 
 
+def retry_on_db_lock(max_retries=5, base_delay=0.05):
+    """Decorator to retry a database function if it encounters a lock/busy OperationalError."""
+    def decorator(func):
+        import functools
+        import time
+        import random
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            retries = 0
+            while True:
+                try:
+                    return func(*args, **kwargs)
+                except sqlite3.OperationalError as e:
+                    err_msg = str(e).lower()
+                    if "locked" in err_msg or "busy" in err_msg:
+                        retries += 1
+                        if retries > max_retries:
+                            logger.error(f"[DB Lock Retry] Max retries exceeded for {func.__name__}: {e}")
+                            raise e
+                        delay = base_delay * (2 ** (retries - 1)) + random.uniform(0.01, 0.05)
+                        logger.warning(f"[DB Lock Retry] Database locked/busy. Retrying {func.__name__} in {delay:.3f}s (attempt {retries}/{max_retries})...")
+                        time.sleep(delay)
+                    else:
+                        raise e
+        return wrapper
+    return decorator
+
+
 # ── Bağlantı ────────────────────────────────────────────────────────
 
 def get_connection() -> sqlite3.Connection:
@@ -1125,6 +1153,7 @@ def update_signal_ghost_pnl(signal_id: int, pnl: float, status: str) -> None:
 
 # ── Trade CRUD ─────────────────────────────────────────────────────
 
+@retry_on_db_lock()
 def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
     """Yeni trade kaydı oluşturur, id döner."""
     conn = get_connection()
@@ -1662,6 +1691,7 @@ def get_dashboard_stats(environment: str | None = None) -> dict:
 
 # ── Bot status ─────────────────────────────────────────────────────
 
+@retry_on_db_lock()
 def update_bot_status(key: str, value: str) -> None:
     """Bot durum anahtarını günceller. Redis primary, SQLite sync (heartbeat hariç)."""
     try:
@@ -2676,6 +2706,7 @@ def set_state(key: str, value: str, actor: str = "system", reason: str = ""):
         logger.warning(f"[DB] set_state hatası: {e}")
 
 
+@retry_on_db_lock()
 def update_system_state(key: str, value: str):
     """system_state'e yazar — TEK yetkili yazım noktası (Faz 1.1).
 
@@ -3050,6 +3081,7 @@ def archive_old_scalp_signals(hours: int = 24):
         logger.warning(f"archive_old_scalp_signals: {e}")
 
 
+@retry_on_db_lock()
 def save_candidate_signal(data: dict) -> int:
     """Sinyal adayını signal_candidates tablosuna kaydeder, id döndürür."""
     try:
@@ -3344,6 +3376,7 @@ def get_weekly_summaries(weeks: int = 12, environment: str | None = None) -> lis
         return []
 
 
+@retry_on_db_lock()
 def save_signal_event(signal_id, event_type: str, **kwargs):
     """Sinyal yaşam döngüsü olayını signal_events tablosuna kaydeder."""
     try:
@@ -3417,6 +3450,7 @@ def get_ghost_stats() -> dict:
         }
 
 
+@retry_on_db_lock()
 def update_candidate_status(candidate_id: int, **kwargs):
     """signal_candidates kaydının durumunu günceller."""
     try:

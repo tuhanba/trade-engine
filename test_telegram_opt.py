@@ -50,7 +50,7 @@ class TestTelegramInteractiveManager(unittest.TestCase):
         # Check presence of Status and Open Positions buttons
         kbd = last_msg["reply_markup"]["inline_keyboard"]
         self.assertEqual(kbd[0][0]["text"], "📊 Durum")
-        self.assertEqual(kbd[0][0]["callback_data"], "cmd:status")
+        self.assertEqual(kbd[0][0]["callback_data"], "cmd:cat_status")
 
     def test_set_parameter_dynamic_override(self):
         # Initial config value

@@ -456,6 +456,16 @@ def calculate_kelly_risk_pct(symbol: str, setup_rr: float, base_risk_pct: float)
                 clamped *= 0.5
                 logger.info(f"[Dynamic Kelly] Downscaling applied for {symbol} due to win_rate={win_rate:.2%}: 0.5x multiplier. Risk%={clamped:.2f}%")
                 
+        # Apply volatility adjustment based on market regime
+        try:
+            from database import get_market_regime
+            regime = get_market_regime()
+            if regime and "HIGH_VOL" in regime:
+                clamped *= 0.6
+                logger.info(f"[Kelly Volatility Scale] High volatility regime ({regime}) detected. Scaling Kelly risk by 0.6x. Risk%={clamped:.2f}%")
+        except Exception as vol_err:
+            logger.debug(f"[Kelly Volatility Scale] Error querying regime: {vol_err}")
+            
         # Make sure final is clamped to safety limits
         clamped = max(0.5, min(3.0, clamped))
         

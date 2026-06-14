@@ -62,9 +62,10 @@ def report_db_write_success() -> None:
 class SystemWatchdog:
     """7/24 çalışma için sistem izleme ve otomatik recovery."""
 
-    def __init__(self, db_path: str, check_interval: int = 60):
+    def __init__(self, db_path: str, check_interval: int = 60, ws_reconnect_fn=None):
         self.db_path = db_path
         self.check_interval = check_interval
+        self.ws_reconnect_fn = ws_reconnect_fn
         self._running = False
         self._thread = None
         self._start_time = time.time()
@@ -249,6 +250,43 @@ class SystemWatchdog:
         except Exception:
             return False
 
+    def _check_ws_health(self):
+        """WebSocket ticker akışının canlılığını kontrol eder. Donma durumunda tetikleyici çalıştırır."""
+        try:
+            from database import get_system_state
+            ws_hb_str = get_system_state("ws_heartbeat", default="")
+            if not ws_hb_str:
+                return
+            
+            # Clean up fractional seconds for safe parsing
+            if "." in ws_hb_str:
+                parts = ws_hb_str.split(".")
+                ws_hb_str = parts[0]
+                if "+" in parts[1]:
+                    ws_hb_str += "+" + parts[1].split("+")[1]
+                elif "-" in parts[1]:
+                    ws_hb_str += "-" + parts[1].split("-")[1]
+                else:
+                    ws_hb_str += "+00:00"
+
+            if ws_hb_str.endswith("Z"):
+                ws_hb_str = ws_hb_str[:-1] + "+00:00"
+            try:
+                ws_hb = datetime.fromisoformat(ws_hb_str)
+            except Exception:
+                return
+                
+            if ws_hb.tzinfo is None:
+                ws_hb = ws_hb.replace(tzinfo=timezone.utc)
+            
+            age = (datetime.now(timezone.utc) - ws_hb).total_seconds()
+            if age > 45:
+                logger.warning(f"[Watchdog] WebSocket ticker stream is stale! Age: {age:.1f}s (>45s). Triggering auto-reconnect...")
+                if self.ws_reconnect_fn:
+                    self.ws_reconnect_fn()
+        except Exception as e:
+            logger.debug(f"[Watchdog] WebSocket health check failed: {e}")
+
     def _loop(self):
         """Ana watchdog döngüsü."""
         logger.info("[Watchdog] Başlatıldı.")
@@ -258,6 +296,9 @@ class SystemWatchdog:
                 self._sd_notify("WATCHDOG=1")
                 # DB sağlık kontrolü
                 self._check_db_health()
+
+                # WebSocket sağlık kontrolü
+                self._check_ws_health()
 
                 # Günlük rapor
                 if self._should_send_daily_report():
