@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from core.event_bus import event_bus
 from core.event_types import Event, EventType
 
@@ -14,6 +15,50 @@ class NotificationService:
         event_bus.subscribe(EventType.TRADE_OPENED, self.handle_trade_opened)
         event_bus.subscribe(EventType.TRADE_CLOSED, self.handle_trade_closed)
         event_bus.subscribe(EventType.TP_OR_SL_TRIGGERED, self.handle_tp_sl)
+        event_bus.subscribe(EventType.AI_VALIDATED, self.handle_ai_validated)
+
+    async def handle_ai_validated(self, event: Event):
+        payload = event.payload
+        symbol = payload.get("symbol")
+        signal_dict = payload.get("signal_data")
+        ai_decision = payload.get("ai_decision", {})
+        decision = ai_decision.get("decision", "WATCH")
+
+        try:
+            from core.data_layer import SignalData
+            sig = SignalData.from_dict(signal_dict)
+
+            # 1. Real-time Dashboard Update
+            if event_manager:
+                event_manager.broadcast_signal_generated(
+                    symbol, sig.direction, sig.setup_quality, sig.final_score
+                )
+
+            # 2. Telegram Alert for Non-Auto-Executed Signals
+            if decision in ("ALLOW", "WATCH"):
+                import config
+                # Determine if this signal will be auto-executed
+                is_scalp = not getattr(config, "HUMAN_MODE", False)
+                trade_thr = (
+                    config.HUMAN_TRADE_THRESHOLD if not is_scalp
+                    else getattr(config, "TRADE_THRESHOLD", 55.0)
+                )
+                
+                # Check execution criteria
+                qualities = getattr(config, "EXECUTABLE_QUALITIES", ("S", "A+", "A", "B", "C", "M"))
+                will_execute = (
+                    sig.final_score >= trade_thr
+                    and sig.setup_quality in qualities
+                )
+
+                # Send Telegram message if NOT auto-executed and passes Telegram threshold
+                tg_threshold = getattr(config, "TELEGRAM_THRESHOLD", 35.0)
+                if not will_execute and sig.final_score >= tg_threshold:
+                    from telegram_delivery import deliver_signal
+                    await asyncio.to_thread(deliver_signal, sig)
+                    logger.info("[NotificationService] Telegram signal alert delivered for %s (not auto-executed)", symbol)
+        except Exception as e:
+            logger.error(f"[NotificationService] Error in handle_ai_validated: {e}")
 
     async def handle_trade_opened(self, event: Event):
         try:

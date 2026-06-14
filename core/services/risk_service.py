@@ -72,6 +72,13 @@ class RiskService:
                 except Exception as _e:
                     logger.debug("[RiskService] signal_event yazılamadı: %s", _e)
 
+                try:
+                    from websocket_events import event_manager
+                    if event_manager:
+                        event_manager.broadcast_signal_rejected(symbol, trend_result.get("direction", "LONG"), reject_reason)
+                except Exception:
+                    pass
+
                 # Candidate status güncelle
                 if candidate_id:
                     try:

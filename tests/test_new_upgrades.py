@@ -1418,4 +1418,114 @@ def test_config_adaptive_scaling():
         assert config.CVD_FILTER_VAL == -0.10
 
 
+@pytest.mark.asyncio
+async def test_scanner_service_pause_finish_states():
+    """Verify that ScannerService pauses scanning when tg_is_paused or tg_is_finish_mode (no open trades) is active."""
+    from core.services.scanner_service import ScannerService
+    from core.event_types import Event, EventType
+    import asyncio
+    from unittest.mock import patch
+    
+    svc = ScannerService(interval_seconds=1)
+    
+    with patch("database.get_state") as mock_get_state, \
+         patch("database.get_open_trades", return_value=[]) as mock_get_open_trades, \
+         patch("core.async_market_scanner.AsyncMarketScanner.scan", return_value=[]) as mock_scan:
+        
+        # Scenario 1: Bot is paused (tg_is_paused = True)
+        def side_effect_paused(key):
+            if key == "tg_is_paused":
+                return "True"
+            return "False"
+        
+        mock_get_state.side_effect = side_effect_paused
+        
+        task = asyncio.create_task(svc.start())
+        await asyncio.sleep(0.1)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+            
+        mock_scan.assert_not_called()
+
+        # Scenario 2: Bot is finishing (tg_is_finish_mode = True, no open trades)
+        def side_effect_finish(key):
+            if key == "tg_is_paused":
+                return "False"
+            if key == "tg_is_finish_mode":
+                return "True"
+            return "False"
+        
+        mock_get_state.side_effect = side_effect_finish
+        mock_scan.reset_mock()
+        
+        task = asyncio.create_task(svc.start())
+        await asyncio.sleep(0.1)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+            
+        mock_scan.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notification_service_signal_alert_delivery():
+    """Verify that NotificationService delivers signal alerts to Telegram for non-auto-executed signals."""
+    from core.services.notification_service import NotificationService
+    from core.event_bus import event_bus
+    from core.event_types import Event, EventType
+    import asyncio
+    
+    with patch("telegram_delivery.deliver_signal") as mock_deliver_signal, \
+         patch("websocket_events.event_manager.broadcast_signal_generated") as mock_broadcast, \
+         patch("config.TRADE_THRESHOLD", 55.0), \
+         patch("config.TELEGRAM_THRESHOLD", 35.0), \
+         patch("config.EXECUTABLE_QUALITIES", ("S", "A+", "A", "B", "C", "M")):
+         
+        svc = NotificationService()
+        
+        sig_data = {
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "direction": "LONG",
+            "entry_price": 50000.0,
+            "entry_zone": 50000.0,
+            "stop_loss": 49000.0,
+            "tp1": 51000.0,
+            "final_score": 45.0,
+            "setup_quality": "B",
+            "max_loss": 50.0,
+            "risk_percent": 1.0,
+            "position_size": 0.1,
+            "notional_size": 5000.0,
+            "rr": 1.0,
+        }
+        
+        event = Event(
+            type=EventType.AI_VALIDATED,
+            payload={
+                "symbol": "BTCUSDT",
+                "signal_id": 100,
+                "candidate_id": 200,
+                "signal_data": sig_data,
+                "ai_decision": {"decision": "ALLOW", "final_score": 45.0, "reason": "Passed telegram threshold"}
+            }
+        )
+        
+        await event_bus.start()
+        try:
+            await event_bus.publish(event)
+            await asyncio.sleep(0.1)
+        finally:
+            await event_bus.stop()
+        
+        mock_deliver_signal.assert_called_once()
+        mock_broadcast.assert_called_once_with("BTCUSDT", "LONG", "B", 45.0)
+
+
+
 

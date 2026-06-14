@@ -43,6 +43,32 @@ class ScannerService:
             if self._paused:
                 await asyncio.sleep(30)
                 continue
+
+            # Check Telegram Pause/Finish state
+            try:
+                from database import get_state
+                tg_paused = await asyncio.to_thread(get_state, "tg_is_paused")
+                tg_finish = await asyncio.to_thread(get_state, "tg_is_finish_mode")
+                
+                if tg_paused == "True":
+                    logger.debug("[ScannerService] Bot is paused via Telegram (tg_is_paused=True). Skipping scan.")
+                    await asyncio.sleep(10)
+                    continue
+                    
+                if tg_finish == "True":
+                    from database import get_open_trades
+                    open_trades = await asyncio.to_thread(get_open_trades)
+                    if not open_trades:
+                        logger.info("[ScannerService] Finish mode completed. No open trades. Skipping scan.")
+                        await asyncio.sleep(10)
+                        continue
+                    else:
+                        logger.debug("[ScannerService] Bot is in Finish mode but open trades exist. Skipping scan to prevent new entries.")
+                        await asyncio.sleep(10)
+                        continue
+            except Exception as e:
+                logger.error("[ScannerService] Pause/Finish state check error: %s", e)
+
             try:
                 open_trades  = await asyncio.to_thread(get_open_trades)
                 open_symbols = {t["symbol"] for t in open_trades}

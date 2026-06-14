@@ -36,6 +36,12 @@ class TrendService:
                     )
                 except Exception:
                     pass
+                try:
+                    from websocket_events import event_manager
+                    if event_manager:
+                        event_manager.broadcast_signal_rejected(symbol, "NO_TRADE", "weak_trend")
+                except Exception:
+                    pass
                 return
             
             # Create the initial signal id in database

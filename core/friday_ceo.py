@@ -1845,17 +1845,23 @@ class FridayCeo:
                     bypass_shields = bypass_shields or is_paper
                 
                 if "CHOPPY" in regime:
+                    # Save pre-choppy states for restoration
+                    curr_risk = float(getattr(config, "RISK_PCT", 0.75))
+                    curr_threshold = float(getattr(config, "TRADE_THRESHOLD", 55.0))
+                    set_state("friday_pre_choppy_risk", str(curr_risk))
+                    set_state("friday_pre_choppy_threshold", str(curr_threshold))
+
                     if bypass_shields:
-                        # Paper/Bypass mode: Be extremely aggressive in Choppy!
-                        logger.info("[Friday CEO] Choppy market detected in Paper/Bypass mode. Enforcing aggressive scaling.")
-                        self._apply_param_with_clamp("risk_pct", 1.5, actor="friday", reason="choppy_paper_mode")
-                        self._apply_param_with_clamp("trade_threshold", 45.0, actor="friday", reason="choppy_paper_mode")
-                        set_state("regime_filter_min_quality_in_choppy", "A", actor="friday", reason="choppy_paper_mode")
+                        # Paper/Bypass mode: Be defensive in Choppy too to protect the virtual balance!
+                        logger.info("[Friday CEO] Choppy market detected in Paper/Bypass mode. Enforcing defensive scaling.")
+                        self._apply_param_with_clamp("risk_pct", 0.5, actor="friday", reason="choppy_paper_mode")
+                        self._apply_param_with_clamp("trade_threshold", 65.0, actor="friday", reason="choppy_paper_mode")
+                        set_state("regime_filter_min_quality_in_choppy", "A+", actor="friday", reason="choppy_paper_mode")
                         
                         try:
                             # NEDEN (Faz 1.2): WAL/busy_timeout disiplini için database.open_db
                             with database.open_db(self.db_path, timeout=5) as conn:
-                                conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (1.5,))
+                                conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (0.5,))
                                 conn.commit()
                         except Exception as e:
                             logger.error(f"[Friday CEO] Error updating risk_pct in params: {e}")
@@ -1866,13 +1872,11 @@ class FridayCeo:
                                 del config._CONFIG_CACHE[key]
                                 
                         mode_desc = "Paper trading" if environment == "paper" else "Bypass Live"
-                        risk_desc = "sermaye riski sıfırdır" if environment == "paper" else "canlı bypass kalkanları aktiftir"
                         msg = (
                             f"Batuhan Bey, piyasada yoğun dalgalanma (CHOPPY) tespit ettim. ⚠️\n\n"
-                            f"{mode_desc} modunda olduğumuz için {risk_desc}. "
-                            "Yapay zekanın daha agresif öğrenmesi ve kâr üretmesini sağlamak amacıyla "
-                            "otonom olarak işlem eşik puanını <b>45.0</b> seviyesine çektim, "
-                            "kasa risk yüzdemizi ise <b>%1.50</b> seviyesine yükselttim. Fırsatları otonom avlamaya devam ediyoruz! ⚔️"
+                            f"{mode_desc} modunda olsak dahi sanal bakiyemizi ve performansı korumak amacıyla "
+                            "otonom olarak işlem eşik puanını <b>65.0</b> seviyesine yükselttim, "
+                            "kasa risk yüzdemizi ise <b>%0.50</b> seviyesine düşürdüm. Fırsatları daha seçici otonom avlamaya devam ediyoruz! 🛡️"
                         )
                         telegram_delivery.send_message(msg)
                         voice_bytes = self.generate_voice_from_text(msg)
@@ -1880,12 +1884,6 @@ class FridayCeo:
                             telegram_delivery.send_voice(voice_bytes, caption="Friday Otonom Paper Optimizasyonu")
                     else:
                         # Live mode: Scale down risk to protect the bankroll
-                        curr_risk = float(getattr(config, "RISK_PCT", 0.75))
-                        curr_threshold = float(getattr(config, "TRADE_THRESHOLD", 55.0))
-                        
-                        set_state("friday_pre_choppy_risk", str(curr_risk))
-                        set_state("friday_pre_choppy_threshold", str(curr_threshold))
-                        
                         self._apply_param_with_clamp("risk_pct", 0.5, actor="friday", reason="choppy_live_protection")
                         self._apply_param_with_clamp("trade_threshold", 65.0, actor="friday", reason="choppy_live_protection")
                         try:
@@ -1916,10 +1914,20 @@ class FridayCeo:
                     from database import get_system_state
                     
                     if bypass_shields:
-                        # Paper/Bypass mode returning to Trending/Neutral: Still aggressive!
-                        logger.info("[Friday CEO] Market regime returning to trending in Paper/Bypass mode. Enforcing standard aggressive parameters.")
-                        self._apply_param_with_clamp("risk_pct", 1.5, actor="friday", reason="choppy_ended_paper_mode")
-                        self._apply_param_with_clamp("trade_threshold", 45.0, actor="friday", reason="choppy_ended_paper_mode")
+                        # Paper/Bypass mode returning to Trending/Neutral: Restore pre-choppy settings!
+                        prev_risk = get_system_state("friday_pre_choppy_risk") or "1.5"
+                        prev_threshold = get_system_state("friday_pre_choppy_threshold") or "45.0"
+                        
+                        logger.info("[Friday CEO] Market regime returning to trending in Paper/Bypass mode. Restoring previous settings.")
+                        self._apply_param_with_clamp("risk_pct", float(prev_risk), actor="friday", reason="choppy_ended_paper_mode")
+                        self._apply_param_with_clamp("trade_threshold", float(prev_threshold), actor="friday", reason="choppy_ended_paper_mode")
+                        
+                        try:
+                            with database.open_db(self.db_path, timeout=5) as conn:
+                                conn.execute("UPDATE params SET risk_pct = ?, updated_at = datetime('now') WHERE id = 1", (float(prev_risk),))
+                                conn.commit()
+                        except Exception as e:
+                            logger.error(f"[Friday CEO] Error updating risk_pct in params: {e}")
 
                         # Clear cache
                         for key in ["RISK_PCT", "TRADE_THRESHOLD"]:
@@ -1929,8 +1937,8 @@ class FridayCeo:
                         mode_desc = "Paper trading" if environment == "paper" else "Bypass Live"
                         msg = (
                             "Batuhan Bey, piyasadaki aşırı oynaklık ve dalgalı rejim sona erdi. Piyasa rejimimiz normale döndü. ✨\n\n"
-                            f"{mode_desc} modunda maksimum kârı avlamaya devam etmek için "
-                            "risk yüzdemizi <b>%1.50</b> ve işlem giriş eşiğimizi <b>45.0</b> seviyesinde sabit tuttum. "
+                            f"{mode_desc} modunda normal risk yönetimine geri dönmek için "
+                            f"risk yüzdemizi tekrar <b>%{float(prev_risk)*100:.1f}</b> ve işlem giriş eşiğimizi <b>{prev_threshold}</b> seviyesine çektim. "
                             "Botumuz tam kapasiteyle çalışmaya devam ediyor."
                         )
                         telegram_delivery.send_message(msg)

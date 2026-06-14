@@ -442,6 +442,7 @@ class AIDecisionEngine:
                 "confidence":  float(result.confidence or 0.5),
                 "reason":      result.reason or "",
                 "ai_score":    float(result.score_adjusted or sig.score or 50.0),
+                "agent_data":  result.agent_data or {},
             }
         except Exception as e:
             logger.warning("evaluate() fallback: %s", e)

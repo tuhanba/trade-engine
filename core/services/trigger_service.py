@@ -72,6 +72,12 @@ class TriggerService:
                                         )
                                     except Exception:
                                         pass
+                                    try:
+                                        from websocket_events import event_manager
+                                        if event_manager:
+                                            event_manager.broadcast_signal_rejected(symbol, trend_result.get("direction", "LONG"), f"regime_filter_quality_{quality}_below_{min_quality}")
+                                    except Exception:
+                                        pass
                                     
                                     # Log as ghost signal
                                     try:
@@ -110,6 +116,12 @@ class TriggerService:
                         save_signal_event, signal_id, "TRIGGER_REJECTED",
                         symbol=symbol, reject_reason=_reject
                     )
+                except Exception:
+                    pass
+                try:
+                    from websocket_events import event_manager
+                    if event_manager:
+                        event_manager.broadcast_signal_rejected(symbol, trend_result.get("direction", "LONG"), _reject)
                 except Exception:
                     pass
                 return
