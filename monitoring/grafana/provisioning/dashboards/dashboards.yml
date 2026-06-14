@@ -1,0 +1,12 @@
+# Grafana dashboard provider — /var/lib/grafana/dashboards (Faz 6.6)
+apiVersion: 1
+providers:
+  - name: AurvexAI
+    orgId: 1
+    folder: AurvexAI
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
