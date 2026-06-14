@@ -122,16 +122,49 @@
       const pnl = Number(t.total_pnl || t.unrealized_pnl || 0);
       if (pnl < 0) fillColor = "var(--cc-copper)";
       const tpDots = [t.tp1_hit, t.tp2_hit, false].map((h) => `<span class="cc-tp-dot ${h ? "hit" : ""}"></span>`).join("");
+      const tid = t.id;
       return `<div class="cc-pos-item">
         <div class="cc-pos-head">
           <span class="cc-pos-sym">${t.symbol}<span class="cc-side-tag ${isLong ? "cc-side-long" : "cc-side-short"}">${isLong ? "LONG" : "SHORT"}</span></span>
           <span class="cc-num ${pnl >= 0 ? "cc-pos" : "cc-neg"}">${fmtMoney(pnl)}</span>
         </div>
         <div class="cc-pnl-bar"><div class="cc-pnl-fill" style="width:${fillPct.toFixed(0)}%;background:${fillColor}"></div></div>
-        <div class="cc-tp-dots">${tpDots}<span class="cc-num cc-muted" style="font-size:9px;margin-left:auto">x${t.leverage || 1}</span></div>
+        <div class="cc-tp-dots">${tpDots}
+          <a href="#" class="cc-replay-link" data-tid="${tid}" style="margin-left:auto;font-size:9px;color:var(--cc-silver-blue)">🔍 neden?</a>
+        </div>
+        <div class="cc-replay-box" id="ccReplay${tid}" style="display:none"></div>
       </div>`;
     }).join("");
+    // Replay link'lerini bağla (Setup Replay — Faz 6.2)
+    host.querySelectorAll(".cc-replay-link").forEach((a) => {
+      a.addEventListener("click", (e) => { e.preventDefault(); ccReplay(a.getAttribute("data-tid")); });
+    });
   }
+
+  async function ccReplay(tid) {
+    const box = $("ccReplay" + tid);
+    if (!box) return;
+    if (box.style.display === "block") { box.style.display = "none"; return; }
+    box.style.display = "block";
+    box.innerHTML = `<div class="cc-empty" style="padding:6px">giriş anı yükleniyor…</div>`;
+    try {
+      const d = (await (await fetch("/api/trade_replay/" + tid)).json()).data || {};
+      if (!d.found) { box.innerHTML = `<div class="cc-empty" style="padding:6px">Kayıt yok.</div>`; return; }
+      const inds = Object.entries(d.indicators || {});
+      const indHtml = inds.length
+        ? inds.map(([k, v]) => `<span class="cc-chip ok" style="margin:2px">${k}: ${v}</span>`).join("")
+        : '<span class="cc-muted" style="font-size:10px">indikatör snapshot yok</span>';
+      box.innerHTML =
+        `<div style="font-size:10px;padding:6px 0;border-top:1px solid rgba(255,255,255,0.05);margin-top:6px">
+           <div class="cc-muted" style="margin-bottom:4px">📋 Gerekçe: ${d.rationale}</div>
+           <div class="cc-muted" style="margin-bottom:4px">Skor ${d.score} · Kalite ${d.setup_quality} · Rejim ${d.market_regime}</div>
+           <div>${indHtml}</div>
+         </div>`;
+    } catch (e) {
+      box.innerHTML = `<div class="cc-empty" style="padding:6px">yüklenemedi.</div>`;
+    }
+  }
+  window.ccReplay = ccReplay;
 
   function renderFunnel(f) {
     const host = $("ccFunnel");

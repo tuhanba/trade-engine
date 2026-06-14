@@ -515,6 +515,68 @@ def get_regime_band(hours: int = 24) -> dict:
     return band
 
 
+def get_trade_setup_replay(trade_id: int) -> dict:
+    """Setup Replay (Faz 6.2): 'bu trade neden açıldı' — giriş anı indikatör
+    anlık görüntüsü + gerekçe + sonuç.
+
+    NEDEN: signal.metadata giriş anında trade.metadata'ya gömülüyor (execution
+    engine), yani anlık görüntü TÜM trade'ler için zaten kalıcı — ayrı yazım
+    yoluna (market_snapshots) gerek yok, hot open path'e risk eklenmez.
+    """
+    import json
+    out = {"trade_id": trade_id, "found": False, "indicators": {}, "rationale": "—"}
+    try:
+        trade = database.get_trade_by_id(trade_id)
+        if not trade:
+            return out
+        out["found"] = True
+        out.update({
+            "symbol": trade.get("symbol"),
+            "direction": trade.get("direction") or trade.get("side"),
+            "entry": float(trade.get("entry") or trade.get("entry_price") or 0),
+            "sl": float(trade.get("sl") or trade.get("stop_loss") or 0),
+            "tp1": float(trade.get("tp1") or 0),
+            "score": float(trade.get("final_score") or 0),
+            "setup_quality": trade.get("setup_quality") or "-",
+            "market_regime": trade.get("market_regime") or "-",
+            "status": trade.get("status"),
+            "net_pnl": float(trade.get("net_pnl") or 0),
+            "close_reason": trade.get("close_reason") or "",
+            "opened_at": trade.get("open_time") or "",
+        })
+        meta = trade.get("metadata")
+        if isinstance(meta, str) and meta.strip().startswith("{"):
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = {}
+        if isinstance(meta, dict):
+            # Giriş anı indikatör anlık görüntüsü — bilinen sayısal alanları süz
+            indicator_keys = [
+                ("ADX", "adx"), ("ADX 15m", "adx15"), ("RSI 5m", "rsi5"), ("RSI 1m", "rsi1"),
+                ("BB Genişlik", "bb_width"), ("OB Oranı", "ob_ratio"), ("Hacim (M)", "volume_m"),
+                ("CVD", "cvd_value"), ("OI Δ%", "oi_change_pct"), ("Funding", "funding_rate"),
+                ("Momentum", "momentum_3c"),
+            ]
+            snap = {}
+            for label, key in indicator_keys:
+                if meta.get(key) is not None:
+                    try:
+                        snap[label] = round(float(meta[key]), 4)
+                    except Exception:
+                        snap[label] = meta[key]
+            out["indicators"] = snap
+            for rk in ("reason", "entry_reason", "setup_reason", "trigger_type", "setup"):
+                if meta.get(rk):
+                    out["rationale"] = str(meta[rk])[:200]
+                    break
+        return out
+    except Exception as e:
+        logger.error("[Dashboard] setup replay hatası: %s", e)
+        out["error"] = str(e)
+        return out
+
+
 def get_correlation_matrix(environment: str | None = None) -> dict:
     """Açık pozisyonlar arası canlı Pearson korelasyon matrisi (Faz 6.3).
 
