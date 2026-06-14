@@ -494,6 +494,7 @@ class RiskEngine:
 
     def __init__(self, client, db_path: str = ""):
         self.client = client
+        self._atr_cache = {}  # symbol -> (atr_value, expire_time)
         try:
             import config as _cfg
             self.db_path = db_path or _cfg.DB_PATH
@@ -1079,6 +1080,13 @@ class RiskEngine:
 
     def _get_atr(self, symbol: str, interval: str = "5m", period: int = 14) -> float:
         try:
+            import time
+            now = time.time()
+            if hasattr(self, "_atr_cache") and symbol in self._atr_cache:
+                val, expire = self._atr_cache[symbol]
+                if now < expire:
+                    return val
+
             import pandas as pd
             klines = self.client.futures_klines(symbol=symbol, interval=interval, limit=period + 5)
             df = pd.DataFrame(klines, columns=[
@@ -1093,7 +1101,12 @@ class RiskEngine:
                 (df["low"] - df["close"].shift()).abs(),
             ], axis=1).max(axis=1)
             v = float(tr.rolling(period).mean().iloc[-1])
-            return v if v > 0 else 0.0
+            if v > 0:
+                if not hasattr(self, "_atr_cache"):
+                    self._atr_cache = {}
+                self._atr_cache[symbol] = (v, now + 300.0) # Cache for 5 minutes
+                return v
+            return 0.0
         except Exception:
             return 0.0
 
