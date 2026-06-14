@@ -85,6 +85,15 @@ class ExecutionEngine:
         """
         start_time = time.time()
 
+        def _log_reject(reason: str):
+            try:
+                from database import save_signal_event
+                sig_id = getattr(signal, "id", None) or getattr(signal, "signal_id", None)
+                if sig_id:
+                    database.save_signal_event(sig_id, "EXECUTION_REJECTED", symbol=signal.symbol, reject_reason=reason)
+            except Exception as _e:
+                logger.debug(f"[open_paper_trade] reject event logging failed: {_e}")
+
         # 0. Fiyat Tazeliği Guard'ı (Faz 1.4)
         # NEDEN: WS 10 dk koparsa _PRICE_CACHE donar ve get_current_price bayat
         # fiyatı tercih eder — gerçek piyasadan kopuk girişe yol açar. Cache'te
@@ -99,6 +108,7 @@ class ExecutionEngine:
                     "[Price Freshness Guard] %s reddedildi: fiyat %.0f sn bayat (limit %.0f sn) — WS akışı kopmuş olabilir.",
                     signal.symbol, price_age, max_age,
                 )
+                _log_reject("price_stale_ws_disconnected")
                 return None
         except Exception as _fg_err:
             logger.debug(f"[Price Freshness Guard] kontrol atlandı: {_fg_err}")
@@ -117,6 +127,7 @@ class ExecutionEngine:
                         f"[Portfolio Risk] Trade rejected for {signal.symbol}: "
                         f"Correlation with open positions ({max_corr:.2f}) exceeds threshold ({config.MAX_CORRELATION_THRESHOLD})"
                     )
+                    _log_reject("correlation_limit_exceeded")
                     return None
             except Exception as e:
                 logger.error(f"Error checking Pearson correlation: {e}")
@@ -134,6 +145,7 @@ class ExecutionEngine:
         )
         if trade is None:
             logger.warning("Trade oluşturulamadı: %s", signal.symbol)
+            _log_reject("trade_build_failed")
             return None
 
         # 2. Value-at-Risk (VaR) Constraint
@@ -150,6 +162,7 @@ class ExecutionEngine:
                     f"[Portfolio Risk] Trade rejected for {trade.symbol}: "
                     f"Portfolio VaR ({port_var*100:.2f}%) exceeds limit ({config.PORTFOLIO_VAR_LIMIT*100:.2f}%)"
                 )
+                _log_reject("portfolio_var_limit_exceeded")
                 return None
         except Exception as e:
             logger.error(f"Error checking portfolio VaR: {e}")
@@ -231,6 +244,7 @@ class ExecutionEngine:
                         spread_pct = (ask - bid) / bid * 100
                         if spread_pct > max_spread:
                             logger.warning(f"[Paper Slippage Guard] {signal.symbol} spread too high: {spread_pct:.3f}% > {max_spread}%. Rejecting trade.")
+                            _log_reject("spread_too_high")
                             return None
             except Exception as e:
                 logger.debug(f"[Paper Slippage Guard] check failed: {e}")
@@ -283,6 +297,7 @@ class ExecutionEngine:
         trade_id = database.create_trade(trade, metadata=state_json)
         if trade_id is None:
             logger.error("Trade DB'ye yazılamadı: %s", signal.symbol)
+            _log_reject("db_write_failed")
             return None
 
         logger.info(
@@ -682,6 +697,13 @@ class ExecutionEngine:
         """
         if config.is_live_trading_allowed():
             logger.error("LIVE TRADING İSTENDİ AMA BU ENGINE SADECE PAPER MODE!")
+            try:
+                from database import save_signal_event
+                sig_id = getattr(signal, "id", None) or getattr(signal, "signal_id", None)
+                if sig_id:
+                    database.save_signal_event(sig_id, "EXECUTION_REJECTED", symbol=signal.symbol, reject_reason="live_trading_attempted_on_paper_engine")
+            except Exception:
+                pass
             return None
 
         return self.open_paper_trade(signal)

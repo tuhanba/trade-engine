@@ -124,6 +124,7 @@ class SignalData:
         sig.is_liquidity_sweep = d.get("is_liquidity_sweep", False)
         sig.is_sfp        = d.get("is_sfp", False)
         sig.metadata      = d.get("metadata", {})
+        sig.id            = d.get("id") or d.get("signal_id")
         return sig
 
     def __post_init__(self):

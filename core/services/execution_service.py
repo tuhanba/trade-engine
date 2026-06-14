@@ -175,6 +175,7 @@ class ExecutionService:
                                 symbol, sig.setup_quality, sig.final_score)
 
                 # ── Trade Aç ─────────────────────────────────────────────────
+                sig.id = signal_id
                 if config.EXECUTION_MODE == "live":
                     if not hasattr(self, "live_execution_engine"):
                         from core.live_execution import LiveExecutionEngine
@@ -238,6 +239,14 @@ class ExecutionService:
 
                 else:
                     logger.warning("[ExecutionService] %s trade açılamadı (engine None döndü).", symbol)
+                    try:
+                        from database import save_signal_event
+                        await asyncio.to_thread(
+                            save_signal_event, signal_id, "EXECUTION_REJECTED",
+                            symbol=symbol, reject_reason="engine_returned_none",
+                        )
+                    except Exception as _e:
+                        logger.debug("[ExecutionService] engine_returned_none save_signal_event error: %s", _e)
 
             else:
                 # ── Kalite Dışı — EXECUTION_REJECTED ──────────────────────

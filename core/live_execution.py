@@ -333,12 +333,23 @@ class LiveExecutionEngine:
         Gercek emirleri borsaya gonderir ve DB'ye isler.
         Returns: DB trade_id veya None
         """
+        def _log_reject(reason: str):
+            try:
+                from database import save_signal_event
+                sig_id = getattr(signal, "id", None) or getattr(signal, "signal_id", None)
+                if sig_id:
+                    database.save_signal_event(sig_id, "EXECUTION_REJECTED", symbol=signal.symbol, reject_reason=reason)
+            except Exception as _e:
+                logger.debug(f"[open_live_trade] reject event logging failed: {_e}")
+
         if not self.client:
             logger.error("Binance Client baglantisi yok. Islem acilamaz.")
+            _log_reject("binance_client_missing")
             return None
             
         if not config.is_live_trading_allowed():
             logger.error("Canli islem ayarlardan kapali veya DRY_RUN acik!")
+            _log_reject("live_trading_disabled_or_dry_run")
             return None
 
         symbol = signal.symbol
@@ -360,6 +371,7 @@ class LiveExecutionEngine:
             
         if live_balance < 10.0:
             logger.error(f"Gercek bakiye yetersiz: {live_balance} USDT")
+            _log_reject("insufficient_balance")
             return None
 
         # 2. Risk hesaplama (Approved dynamic risk from SignalData)
@@ -377,6 +389,7 @@ class LiveExecutionEngine:
         
         if sl_dist == 0:
             logger.error(f"SL mesafesi 0 olamaz. Symbol: {symbol}")
+            _log_reject("zero_sl_distance")
             return None
             
         qty = risk_usd / sl_dist
@@ -387,6 +400,7 @@ class LiveExecutionEngine:
         
         if qty_float <= 0:
             logger.error(f"Hesaplanan miktar borsanin min limitinden kucuk. Bakiye yetersiz olabilir.")
+            _log_reject("quantity_below_min")
             return None
             
         leverage = int(getattr(signal, "leverage", 0) or getattr(signal, "leverage_suggestion", 0) or config.MAX_LEVERAGE)
@@ -404,6 +418,7 @@ class LiveExecutionEngine:
                 free_margin = float(free_margin_val)
                 if margin_used > free_margin:
                     logger.error(f"[Live] Yetersiz kullanılabilir bakiye (Free Margin): Gerekli={margin_used:.2f} USDT, Mevcut={free_margin:.2f} USDT")
+                    _log_reject("insufficient_available_margin")
                     return None
         except Exception as _e:
             logger.warning(f"[Live] Binance kullanılabilir bakiye kontrolü yapılamadı: {_e}")
@@ -445,6 +460,7 @@ class LiveExecutionEngine:
                             f"[Slippage Guard] {symbol} spread oranı çok yüksek: {spread_pct:.3f}% > {max_spread}%. "
                             "Emir gönderimi reddedildi."
                         )
+                        _log_reject("spread_too_high")
                         return None
         except Exception as e:
             logger.debug(f"[Slippage Guard] Kontrol hatası: {e}")
@@ -464,6 +480,7 @@ class LiveExecutionEngine:
 
         if not chase_result:
             logger.error(f"[LIVE REJECTED] Limit chase entry basarisiz veya reddedildi {symbol}")
+            _log_reject("limit_chase_failed")
             return None
 
         entry_price = chase_result['avgPrice']
@@ -564,11 +581,10 @@ class LiveExecutionEngine:
         
         if trade_id is None:
             logger.error(f"[LIVE] Islem borsada acildi ama DB'ye yazilamadi: {symbol}")
+            _log_reject("db_write_failed")
             return None
             
         logger.info(f"[LIVE SUCCESS] Trade basariyla acildi: #{trade_id} {symbol} @ {entry_price} (Slippage={slippage_val:.3f}%, Latency={latency_ms}ms)")
-        
-        return trade_id
         
         return trade_id
 
