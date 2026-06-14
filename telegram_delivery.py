@@ -24,10 +24,8 @@ import requests
 import config
 
 try:
-    from config import EXECUTION_MODE
     from database import save_telegram_message
 except Exception:
-    EXECUTION_MODE = "paper"
     def save_telegram_message(*a, **kw): return True
 
 logger = logging.getLogger("ax.telegram")
@@ -86,7 +84,7 @@ def _session() -> str:
 
 def _mode_tag() -> str:
     try:
-        mode = EXECUTION_MODE
+        mode = getattr(config, "EXECUTION_MODE", "paper")
     except Exception:
         mode = "paper"
     return "🔴 LIVE" if mode == "live" else "PAPER"
@@ -292,7 +290,7 @@ def _today_perf(environment: Optional[str] = None) -> dict:
     try:
         import database
         from datetime import datetime as _dt, timezone as _tz
-        env = environment or EXECUTION_MODE
+        env = environment or getattr(config, "EXECUTION_MODE", "paper")
         today = _dt.now(_tz.utc).strftime("%Y-%m-%d")
         with database.get_conn() as conn:
             row = conn.execute(
