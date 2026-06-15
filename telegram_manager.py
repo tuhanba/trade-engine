@@ -1903,9 +1903,11 @@ class TelegramManager:
 
     def _cmd_resume(self):
         self.is_paused = False
+        self.is_finish_mode = False
         try:
             import database as _db
             _db.set_state("tg_is_paused", "False")
+            _db.set_state("tg_is_finish_mode", "False")
             _db.set_state("friday_emergency_clutch", "-")
             from datetime import datetime, timezone, timedelta
             _db.set_state("friday_clutch_cooldown_until", (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat())

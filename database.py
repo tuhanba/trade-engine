@@ -453,6 +453,7 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("session",           "TEXT"),
     ],
     "signal_candidates": [
+        ("side", "TEXT"),
         ("tp2", "REAL DEFAULT 0"),
         ("tp3", "REAL DEFAULT 0"),
         ("leverage", "INTEGER DEFAULT 1"),

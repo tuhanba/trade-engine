@@ -85,7 +85,7 @@ fi
 echo -e "\n${YELLOW}🧼 [6] Flushing Redis cache & resetting Friday CEO blocks...${NC}"
 sleep 3  # Wait a few seconds for services to fully bind
 docker exec aurvex_redis redis-cli flushall >/dev/null 2>&1 || true
-docker exec aurvex_engine python -c "import database; database.set_state('confirmation_mode', 'false'); database.set_state('friday_auto_paused_by_guard', 'false'); database.set_state('friday_boss_cooldown_until', ''); database.set_state('friday_emergency_clutch', 'false')" >/dev/null 2>&1 || true
+docker exec aurvex_engine python -c "import database; database.set_state('confirmation_mode', 'false'); database.set_state('friday_auto_paused_by_guard', 'false'); database.set_state('friday_boss_cooldown_until', ''); database.set_state('friday_emergency_clutch', 'false'); database.set_state('tg_is_finish_mode', 'false'); database.set_state('tg_is_paused', 'false')" >/dev/null 2>&1 || true
 echo -e "${GREEN}✅ Redis önbelleği temizlendi ve otonom durumlar başarıyla sıfırlandı.${NC}"
 
 # 7. Automated Container Verification
