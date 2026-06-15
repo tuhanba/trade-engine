@@ -56,7 +56,6 @@ class ScannerService:
                     continue
                     
                 if tg_finish == "True":
-                    from database import get_open_trades
                     open_trades = await asyncio.to_thread(get_open_trades)
                     if not open_trades:
                         logger.info("[ScannerService] Finish mode completed. No open trades. Skipping scan.")
