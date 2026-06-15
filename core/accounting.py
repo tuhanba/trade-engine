@@ -383,14 +383,18 @@ def validate_risk(
     if stop_distance <= 0:
         return False, "Stop distance sıfır veya negatif"
 
+    if signal.entry_price <= 0:
+        return False, "Entry price sıfır veya negatif"
+
+    is_forced = "force" in str(getattr(signal, "source", "")).lower() or "force" in str(getattr(signal, "reason", "")).lower()
+    if is_forced:
+        return True, "OK"
+
     if signal.leverage > max_leverage:
         return False, f"Leverage ({signal.leverage}) > max ({max_leverage})"
 
     if signal.risk_pct > max_risk_pct:
         return False, f"Risk% ({signal.risk_pct}) > max ({max_risk_pct})"
-
-    if signal.entry_price <= 0:
-        return False, "Entry price sıfır veya negatif"
 
     tp1 = signal.tp1 or 0
     if tp1 > 0:
@@ -447,9 +451,11 @@ def build_trade_from_signal(
     """
     import config
 
+    is_forced = "force" in str(getattr(signal, "source", "")).lower() or "force" in str(getattr(signal, "reason", "")).lower()
+
     # ── Spread & Fee-Aware Take-Profit Optimizer (Scalp Recommendation) ──
     is_scalp = not getattr(config, "HUMAN_MODE", False)
-    if is_scalp and getattr(config, "SCALP_TP_OPTIMIZER_ENABLED", True):
+    if not is_forced and is_scalp and getattr(config, "SCALP_TP_OPTIMIZER_ENABLED", True):
         try:
             from core.market_data import get_book_ticker
             book = get_book_ticker(signal.symbol)
@@ -497,7 +503,10 @@ def build_trade_from_signal(
         )
         return None
 
-    leverage = min(signal.leverage, max_leverage)
+    if is_forced:
+        leverage = signal.leverage
+    else:
+        leverage = min(signal.leverage, max_leverage)
     if leverage <= 0:
         leverage = 1
 
@@ -514,42 +523,46 @@ def build_trade_from_signal(
 
     # Dinamik Büyüklük (Kelly Kriteri Benzeri + Piyasa Rejimi Koruyucusu)
     base_risk = signal.risk_pct
-    score = getattr(signal, "final_score", 75.0) or 75.0
-    dynamic_risk = base_risk * (score / 75.0)
-    
-    if score >= 80.0:
-        dynamic_risk *= 1.3
-    elif score <= 55.0:
-        dynamic_risk *= 0.6
+    if is_forced:
+        dynamic_risk = base_risk
+        logger.info(f"[Accounting] Forced trade detected. Dynamic Risk set to Base Risk: {dynamic_risk}%")
+    else:
+        score = getattr(signal, "final_score", 75.0) or 75.0
+        dynamic_risk = base_risk * (score / 75.0)
         
-    if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
-        dynamic_risk *= 0.5
-    elif regime in ("BULLISH", "BEARISH", "TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"):
-        dynamic_risk *= 1.1
+        if score >= 80.0:
+            dynamic_risk *= 1.3
+        elif score <= 55.0:
+            dynamic_risk *= 0.6
+            
+        if regime in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL"):
+            dynamic_risk *= 0.5
+        elif regime in ("BULLISH", "BEARISH", "TRENDING_HIGH_VOL", "TRENDING_LOW_VOL"):
+            dynamic_risk *= 1.1
 
-    # Dynamic Risk Scaling via Sharpe & Sortino ratios (Hedge Fund Guard)
-    try:
-        from core.portfolio_risk import calculate_sharpe_sortino_ratios
-        ratios = calculate_sharpe_sortino_ratios("paper")
-        sortino = ratios.get("sortino_ratio", 0.0)
-        sharpe = ratios.get("sharpe_ratio", 0.0)
-        
-        if sharpe != 0.0 or sortino != 0.0:
-            if sortino < 0.0 or sharpe < 0.0:
-                dynamic_risk *= 0.5
-                logger.info(f"[Accounting Risk Guard] Highly negative Sortino ({sortino}) or Sharpe ({sharpe}). Risk scaled by 0.5x.")
-            elif sortino < 0.5 or sharpe < 0.5:
-                dynamic_risk *= 0.75
-                logger.info(f"[Accounting Risk Guard] Low Sortino ({sortino}) or Sharpe ({sharpe}). Risk scaled by 0.75x.")
-            elif sortino >= 2.0 and sharpe >= 2.0:
-                dynamic_risk *= 1.2
-                logger.info(f"[Accounting Risk Guard] Excellent Sortino ({sortino}) and Sharpe ({sharpe}). Risk boosted by 1.2x.")
-    except Exception as e:
-        logger.debug(f"[Accounting Risk Guard] Failed to adjust risk with Sharpe/Sortino: {e}")
+        # Dynamic Risk Scaling via Sharpe & Sortino ratios (Hedge Fund Guard)
+        try:
+            from core.portfolio_risk import calculate_sharpe_sortino_ratios
+            ratios = calculate_sharpe_sortino_ratios("paper")
+            sortino = ratios.get("sortino_ratio", 0.0)
+            sharpe = ratios.get("sharpe_ratio", 0.0)
+            
+            if sharpe != 0.0 or sortino != 0.0:
+                if sortino < 0.0 or sharpe < 0.0:
+                    dynamic_risk *= 0.5
+                    logger.info(f"[Accounting Risk Guard] Highly negative Sortino ({sortino}) or Sharpe ({sharpe}). Risk scaled by 0.5x.")
+                elif sortino < 0.5 or sharpe < 0.5:
+                    dynamic_risk *= 0.75
+                    logger.info(f"[Accounting Risk Guard] Low Sortino ({sortino}) or Sharpe ({sharpe}). Risk scaled by 0.75x.")
+                elif sortino >= 2.0 and sharpe >= 2.0:
+                    dynamic_risk *= 1.2
+                    logger.info(f"[Accounting Risk Guard] Excellent Sortino ({sortino}) and Sharpe ({sharpe}). Risk boosted by 1.2x.")
+        except Exception as e:
+            logger.debug(f"[Accounting Risk Guard] Failed to adjust risk with Sharpe/Sortino: {e}")
 
-    dynamic_risk = max(base_risk * 0.2, min(dynamic_risk, base_risk * 2.0))
-    dynamic_risk = max(0.2, min(dynamic_risk, 3.0))
-    logger.info(f"[Accounting] Dynamic Risk for {signal.symbol}: Base={base_risk}% -> Dynamic={dynamic_risk:.2f}% (Score={score}, Regime={regime})")
+        dynamic_risk = max(base_risk * 0.2, min(dynamic_risk, base_risk * 2.0))
+        dynamic_risk = max(0.2, min(dynamic_risk, 3.0))
+        logger.info(f"[Accounting] Dynamic Risk for {signal.symbol}: Base={base_risk}% -> Dynamic={dynamic_risk:.2f}% (Score={score}, Regime={regime})")
 
     pos = calculate_position_size(
         balance=balance,
@@ -563,6 +576,11 @@ def build_trade_from_signal(
         logger.error("Position size hesaplanamadı [%s]: %s", signal.symbol, pos["reason"])
         return None
 
+    quantity = pos["qty"]
+    notional = pos["notional"]
+    margin_used = pos["margin"]
+    risk_usd = pos["risk_usd"]
+
     # ── Check Portfolio Exposure & Available Balance limits ──
     try:
         import database
@@ -571,29 +589,45 @@ def build_trade_from_signal(
         
         # Max portfolio exposure check
         max_allowed_margin = balance * (float(getattr(config, "MAX_PORTFOLIO_EXPOSURE_PCT", 95.0)) / 100.0)
-        req_margin = pos["margin"]
+        req_margin = margin_used
         
-        if used_margin + req_margin > max_allowed_margin:
-            logger.warning(
-                "[Accounting] %s rejected: margin exposure exceeded. Used=%.2f, Req=%.2f, MaxAllowed=%.2f",
-                signal.symbol, used_margin, req_margin, max_allowed_margin
-            )
-            return None
-            
-        # Available balance check
-        if req_margin > (balance - used_margin):
-            logger.warning(
-                "[Accounting] %s rejected: insufficient available balance. Balance=%.2f, Used=%.2f, Req=%.2f",
-                signal.symbol, balance, used_margin, req_margin
-            )
-            return None
+        if not is_forced:
+            if used_margin + req_margin > max_allowed_margin:
+                logger.warning(
+                    "[Accounting] %s rejected: margin exposure exceeded. Used=%.2f, Req=%.2f, MaxAllowed=%.2f",
+                    signal.symbol, used_margin, req_margin, max_allowed_margin
+                )
+                return None
+                
+            if req_margin > (balance - used_margin):
+                logger.warning(
+                    "[Accounting] %s rejected: insufficient available balance. Balance=%.2f, Used=%.2f, Req=%.2f",
+                    signal.symbol, balance, used_margin, req_margin
+                )
+                return None
+        else:
+            # If forced and we don't have enough available balance, scale down the quantity/margin if possible
+            if req_margin > (balance - used_margin):
+                available = balance - used_margin
+                if available > 0.1:
+                    scale = available / req_margin
+                    quantity = quantity * scale
+                    notional = notional * scale
+                    margin_used = margin_used * scale
+                    risk_usd = risk_usd * scale
+                    logger.info(
+                        "[Accounting] Forced trade %s scaled down to fit available margin. "
+                        "Scale=%.4f, New Qty=%.6f, Margin=%.4f",
+                        signal.symbol, scale, quantity, margin_used
+                    )
+                else:
+                    logger.info(
+                        "[Accounting] Forced trade %s bypasses margin limits but no available balance remains. "
+                        "Executing with original size.", signal.symbol
+                    )
     except Exception as _e:
-        logger.debug(f"[Accounting] Margin exposure check skipped or failed: {_e}")
+        logger.exception("[Accounting] Margin exposure check skipped or failed")
 
-    quantity = pos["qty"]
-    notional = pos["notional"]
-    margin_used = pos["margin"]
-    risk_usd = pos["risk_usd"]
 
     # Dinamik Take-Profit (Piyasa Rejimine Göre)
     regime = "TRENDING"

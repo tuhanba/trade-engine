@@ -84,6 +84,7 @@ class ExecutionEngine:
         Returns: trade_id veya None
         """
         start_time = time.time()
+        is_forced = "force" in str(getattr(signal, "source", "")).lower() or "force" in str(getattr(signal, "reason", "")).lower()
 
         def _log_reject(reason: str):
             try:
@@ -95,43 +96,40 @@ class ExecutionEngine:
                 logger.debug(f"[open_paper_trade] reject event logging failed: {_e}")
 
         # 0. Fiyat Tazeliği Guard'ı (Faz 1.4)
-        # NEDEN: WS 10 dk koparsa _PRICE_CACHE donar ve get_current_price bayat
-        # fiyatı tercih eder — gerçek piyasadan kopuk girişe yol açar. Cache'te
-        # kayıt VARSA ve 120 sn'den eskiyse trade AÇILMAZ. Cache'te hiç yoksa
-        # (REST yolu / backtest) engelleme yapılmaz.
-        try:
-            from core.market_data import get_price_age, get_current_price
-            max_age = float(getattr(config, "PRICE_MAX_AGE_SEC", 120))
-            price_age = get_price_age(signal.symbol)
-            if price_age is not None and price_age > max_age:
-                logger.warning(
-                    "[Price Freshness Guard] %s fiyatı %.0f sn bayat (limit %.0f sn) — REST fiyatı ile güncellenmeye çalışılıyor...",
-                    signal.symbol, price_age, max_age,
-                )
-                fresh_price = get_current_price(signal.symbol)
-                if fresh_price:
-                    price_age = get_price_age(signal.symbol)
-                    if price_age is not None and price_age > max_age:
-                        logger.warning(
-                            "[Price Freshness Guard] %s hâlâ bayat: %.0f sn.",
-                            signal.symbol, price_age,
-                        )
+        if not is_forced:
+            try:
+                from core.market_data import get_price_age
+                max_age = float(getattr(config, "PRICE_MAX_AGE_SEC", 120))
+                price_age = get_price_age(signal.symbol)
+                if price_age is not None and price_age > max_age:
+                    logger.warning(
+                        "[Price Freshness Guard] %s fiyatı %.0f sn bayat (limit %.0f sn) — REST fiyatı ile güncellenmeye çalışılıyor...",
+                        signal.symbol, price_age, max_age,
+                    )
+                    fresh_price = get_current_price(signal.symbol)
+                    if fresh_price:
+                        price_age = get_price_age(signal.symbol)
+                        if price_age is not None and price_age > max_age:
+                            logger.warning(
+                                "[Price Freshness Guard] %s hâlâ bayat: %.0f sn.",
+                                signal.symbol, price_age,
+                            )
+                            _log_reject("price_stale_ws_disconnected")
+                            return None
+                        else:
+                            logger.info("[Price Freshness Guard] %s fiyatı REST ile başarıyla tazelendi: %.4f", signal.symbol, fresh_price)
+                    else:
                         _log_reject("price_stale_ws_disconnected")
                         return None
-                    else:
-                        logger.info("[Price Freshness Guard] %s fiyatı REST ile başarıyla tazelendi: %.4f", signal.symbol, fresh_price)
-                else:
-                    _log_reject("price_stale_ws_disconnected")
-                    return None
-        except Exception as _fg_err:
-            logger.debug(f"[Price Freshness Guard] kontrol atlandı: {_fg_err}")
+            except Exception as _fg_err:
+                logger.debug(f"[Price Freshness Guard] kontrol atlandı: {_fg_err}")
 
         # Get active positions
         open_trades = database.get_open_trades()
         open_symbols = [t["symbol"] for t in open_trades]
         
         # 1. Pearson Correlation Blocker
-        if open_symbols:
+        if not is_forced and open_symbols:
             try:
                 from core.portfolio_risk import calculate_max_correlation
                 max_corr = calculate_max_correlation(open_symbols, signal.symbol)
@@ -177,41 +175,42 @@ class ExecutionEngine:
             return None
 
         # 2. Value-at-Risk (VaR) Constraint
-        try:
-            from core.portfolio_risk import calculate_portfolio_var
-            candidate_pos = {
-                "symbol": trade.symbol,
-                "qty": trade.quantity,
-                "entry_price": trade.entry_price
-            }
-            port_var = calculate_portfolio_var(open_trades, candidate_pos, balance)
-            
+        if not is_forced:
             try:
-                from database import get_market_regime
-                regime = get_market_regime()
-            except Exception:
-                regime = "NEUTRAL"
-            
-            portfolio_var_limit = getattr(config, "PORTFOLIO_VAR_LIMIT", 0.05)
-            if regime and "TRENDING" in regime.upper():
-                portfolio_var_limit = min(0.15, portfolio_var_limit * 1.5)
-                logger.info(f"[Adaptive Shields] Trending regime detected. VaR limit scaled to {portfolio_var_limit*100:.1f}%")
-            elif regime and "CHOPPY" in regime.upper():
-                portfolio_var_limit = portfolio_var_limit * 0.6
-                logger.info(f"[Adaptive Shields] Choppy regime detected. VaR limit scaled to {portfolio_var_limit*100:.1f}%")
-            
-            if port_var > portfolio_var_limit:
-                logger.warning(
-                    f"[Portfolio Risk] Trade rejected for {trade.symbol}: "
-                    f"Portfolio VaR ({port_var*100:.2f}%) exceeds limit ({portfolio_var_limit*100:.2f}%)"
-                )
-                _log_reject("portfolio_var_limit_exceeded")
-                return None
-        except Exception as e:
-            logger.error(f"Error checking portfolio VaR: {e}")
+                from core.portfolio_risk import calculate_portfolio_var
+                candidate_pos = {
+                    "symbol": trade.symbol,
+                    "qty": trade.quantity,
+                    "entry_price": trade.entry_price
+                }
+                port_var = calculate_portfolio_var(open_trades, candidate_pos, balance)
+                
+                try:
+                    from database import get_market_regime
+                    regime = get_market_regime()
+                except Exception:
+                    regime = "NEUTRAL"
+                
+                portfolio_var_limit = getattr(config, "PORTFOLIO_VAR_LIMIT", 0.05)
+                if regime and "TRENDING" in regime.upper():
+                    portfolio_var_limit = min(0.15, portfolio_var_limit * 1.5)
+                    logger.info(f"[Adaptive Shields] Trending regime detected. VaR limit scaled to {portfolio_var_limit*100:.1f}%")
+                elif regime and "CHOPPY" in regime.upper():
+                    portfolio_var_limit = portfolio_var_limit * 0.6
+                    logger.info(f"[Adaptive Shields] Choppy regime detected. VaR limit scaled to {portfolio_var_limit*100:.1f}%")
+                
+                if port_var > portfolio_var_limit:
+                    logger.warning(
+                        f"[Portfolio Risk] Trade rejected for {trade.symbol}: "
+                        f"Portfolio VaR ({port_var*100:.2f}%) exceeds limit ({portfolio_var_limit*100:.2f}%)"
+                    )
+                    _log_reject("portfolio_var_limit_exceeded")
+                    return None
+            except Exception as e:
+                logger.error(f"Error checking portfolio VaR: {e}")
 
         # 3. ML Online Learning Gating Constraint
-        if getattr(config, "DYNAMIC_THRESHOLD_ENABLED", True):
+        if not is_forced and getattr(config, "DYNAMIC_THRESHOLD_ENABLED", True):
             try:
                 from core.online_learning import predict_online_probability
                 meta = signal.metadata or {}
@@ -275,7 +274,7 @@ class ExecutionEngine:
                 logger.error(f"Error checking ML Online gating: {e}")
 
         # Spread check simulation
-        if getattr(config, "PAPER_SPREAD_CHECK_ENABLED", False):
+        if not is_forced and getattr(config, "PAPER_SPREAD_CHECK_ENABLED", False):
             max_spread = getattr(config, "MAX_SPREAD_PCT", 0.15)
             try:
                 from core.market_data import get_cached_ticker
