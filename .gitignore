@@ -82,7 +82,6 @@ coverage.xml
 
 # ─── Claude / AI araç dosyaları ──────────────────────────────────────
 .claude/
-CLAUDE.md
 
 # ─── Patch & geçici script ───────────────────────────────────────────
 patch_*.py
