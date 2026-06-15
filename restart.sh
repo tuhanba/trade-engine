@@ -62,15 +62,26 @@ echo -e "${GREEN}✅ Host temizliği tamamlandı.${NC}"
 # 5. Docker Rebuild & Reload
 echo -e "\n${YELLOW}🔄 [5/5] Restarting and rebuilding Docker Containers...${NC}"
 if [ -f "docker-compose.yml" ]; then
-    echo -e "   Docker konteynerleri durduruluyor..."
-    docker-compose --ansi never down || docker compose --ansi never down || true
-    
+    # NEDEN: Tek compose komutu seç (V1/V2 karışımı orphan konteyner çakışmasına
+    # yol açıyordu). --ansi flag'i V2'de geçersiz olduğu için kaldırıldı.
+    if docker compose version >/dev/null 2>&1; then
+        DC="docker compose"
+    else
+        DC="docker-compose"
+    fi
+    echo -e "   Compose komutu: ${DC}"
+
+    echo -e "   Docker konteynerleri durduruluyor (orphan'lar dahil)..."
+    $DC down --remove-orphans || true
+
     echo -e "   Eski çakışan konteynerler temizleniyor..."
-    docker stop aurvex_redis aurvex_engine aurvex_dashboard 2>/dev/null || true
-    docker rm aurvex_redis aurvex_engine aurvex_dashboard 2>/dev/null || true
-    
+    # NEDEN: prometheus/grafana (Faz 6.6) da temizlenmeli — aksi halde isim
+    # çakışması ('container name already in use') başlatmayı bozar.
+    docker stop aurvex_redis aurvex_engine aurvex_dashboard aurvex_prometheus aurvex_grafana 2>/dev/null || true
+    docker rm   aurvex_redis aurvex_engine aurvex_dashboard aurvex_prometheus aurvex_grafana 2>/dev/null || true
+
     echo -e "   Docker konteynerleri yeniden inşa ediliyor ve başlatılıyor..."
-    if docker-compose --ansi never up -d --build || docker compose --ansi never up -d --build; then
+    if $DC up -d --build --remove-orphans; then
         echo -e "${GREEN}✅ Docker servisleri başarıyla başlatıldı!${NC}"
     else
         echo -e "${RED}❌ Docker başlatma başarısız oldu! Docker daemon çalışıyor mu?${NC}"
