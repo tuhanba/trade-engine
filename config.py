@@ -410,7 +410,7 @@ def __getattr__(name: str) -> Any:
                 import database
                 regime = database.get_market_regime()
                 if regime in ("BULLISH", "HIGH_MOMENTUM") or "TRENDING" in regime:
-                    val = 18.0  # Relaxed for trend dip buying
+                    val = 24.0  # 18→24: gerçek boğa-devamı dip'leri RSI 25-40 bandında olur; 18 tuzağı engellendi
                 elif regime in ("BEARISH", "SIDEWAYS", "HIGH_VOLATILITY", "NEWS_DRIVEN") or "CHOPPY" in regime:
                     val = 30.0  # Strict for choppy range protection
             except Exception:
