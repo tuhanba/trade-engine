@@ -1405,7 +1405,7 @@ def test_config_adaptive_scaling():
         del config._CONFIG_CACHE["CVD_FILTER_VAL"]
         
     with patch("database.get_market_regime", return_value="TRENDING_LOW_VOL"):
-        assert config.RSI_LIMIT == 18.0
+        assert config.RSI_LIMIT == 24.0
         assert config.CVD_FILTER_VAL == -0.35
         
     if "RSI_LIMIT" in config._CONFIG_CACHE:

@@ -182,8 +182,18 @@ def test_coin_reputation_veto_in_risk_engine(test_db_setup, monkeypatch):
     assert res["decision"] == "VETO"
     assert "Trash" in res["reason"]
 
-def test_market_regime_classification(test_db_setup):
+def test_market_regime_classification(test_db_setup, monkeypatch):
     """Verifies that the MLMarketRegimeClassifier correctly identifies the 7 granular market regimes."""
+    import pandas as pd
+    def mock_get_regime_features(self, symbol="BTCUSDT", limit=100):
+        return pd.DataFrame([{
+            "atr_pct": self.client.atr_pct,
+            "rel_vol": self.client.rel_vol,
+            "rsi": self.client.rsi,
+            "adx": self.client.adx
+        }])
+    monkeypatch.setattr(MLMarketRegimeClassifier, "get_regime_features", mock_get_regime_features)
+
     from core.trend_engine import _GLOBAL_KLINE_CACHE
     
     # Test BULLISH
@@ -212,7 +222,7 @@ def test_market_regime_classification(test_db_setup):
     
     # Test HIGH_VOLATILITY (atr_pct > 0.015)
     _GLOBAL_KLINE_CACHE.clear()
-    client_vol = MockBinanceClient(atr_pct=0.009, rel_vol=1.0, rsi=50.0, adx=20.0, trend_dir="NEUTRAL")
+    client_vol = MockBinanceClient(atr_pct=0.016, rel_vol=1.0, rsi=50.0, adx=20.0, trend_dir="NEUTRAL")
     classifier_vol = MLMarketRegimeClassifier(client_vol)
     assert classifier_vol.classify("BTCUSDT") == "HIGH_VOLATILITY"
 
