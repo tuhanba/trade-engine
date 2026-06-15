@@ -707,10 +707,10 @@ class AsyncScalpEngine:
             logger.info("[Maintenance] Starting semi-daily SQLite maintenance...")
             try:
                 with get_conn() as conn:
-                    # 1. Prune signal_events older than 30 days
-                    c1 = conn.execute("DELETE FROM signal_events WHERE created_at < datetime('now', '-30 days')").rowcount
-                    # 2. Prune signal_candidates older than 30 days
-                    c2 = conn.execute("DELETE FROM signal_candidates WHERE created_at < datetime('now', '-30 days')").rowcount
+                    # 1. Prune signal_events older than 7 days (2.8M kayıt şişmesinin ana kaynağı)
+                    c1 = conn.execute("DELETE FROM signal_events WHERE created_at < datetime('now', '-7 days')").rowcount
+                    # 2. Prune signal_candidates older than 7 days (115K kayıt)
+                    c2 = conn.execute("DELETE FROM signal_candidates WHERE created_at < datetime('now', '-7 days')").rowcount
                     # 3. Prune telegram_messages older than 30 days
                     c3 = conn.execute("DELETE FROM telegram_messages WHERE created_at < datetime('now', '-30 days')").rowcount
                     # 4. Prune scanned_coins older than 30 days
