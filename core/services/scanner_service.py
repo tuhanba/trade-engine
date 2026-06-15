@@ -12,7 +12,11 @@ import asyncio
 from core.event_bus import event_bus
 from core.event_types import Event, EventType
 from core.async_market_scanner import AsyncMarketScanner
-from database import get_open_trades
+# NEDEN: Tüm database sembolleri MODÜL seviyesinde import edilir. Fonksiyon-içi
+# 'from database import ...' (lokal import) Python'da o adı fonksiyon-local yapar;
+# aynı isim daha önce kullanılırsa UnboundLocalError üretir. Bu footgun'ı kapatmak
+# için scan loop'undaki tüm db importları buraya taşındı.
+from database import get_open_trades, is_coin_muted, update_bot_status
 
 logger = logging.getLogger("ax.services.scanner")
 
@@ -75,7 +79,6 @@ class ScannerService:
                 candidates = await self.scanner.scan()
                 self._scan_count += 1
 
-                from database import is_coin_muted
                 eligible = []
                 for c in candidates:
                     sym = c.get("symbol")
@@ -91,7 +94,6 @@ class ScannerService:
 
                 # Dashboard funnel sayaçları
                 try:
-                    from database import update_bot_status
                     await asyncio.to_thread(
                         update_bot_status, "pipeline_scanned", str(len(candidates))
                     )

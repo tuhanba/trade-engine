@@ -419,12 +419,20 @@ class MLMarketRegimeClassifier:
             # 2. HIGH_MOMENTUM (Yüksek Güçte Trend + Hacim)
             elif adx > 32 and rel_vol > 1.3:
                 regime = "HIGH_MOMENTUM"
-            # 3. BULLISH (Boğa Trendi)
-            elif ema21 > ema55 and close > ema55 and adx > 20 and rsi > 52:
+            # 3. BULLISH (Boğa Trendi) — RSI tavanı 72: RSI>72 momentum tükenmesi/tepe,
+            #    boğa devamı değil. RSI_LIMIT=18 override tuzağını tetikliyordu.
+            elif ema21 > ema55 and close > ema55 and adx > 20 and 52 < rsi <= 72:
                 regime = "BULLISH"
-            # 4. BEARISH (Ayı Trendi)
-            elif ema21 < ema55 and close < ema55 and adx > 20 and rsi < 48:
+            # 3b. Overbought tükenme → HIGH_VOLATILITY (RSI_LIMIT override tetiklenmez,
+            #     varsayılan 30 kalır; LONG ve SHORT kapıları normal çalışır).
+            elif rsi > 72 and adx > 20:
+                regime = "HIGH_VOLATILITY"
+            # 4. BEARISH (Ayı Trendi) — RSI tabanı 28: aşırı oversold BEARISH sayılmaz.
+            elif ema21 < ema55 and close < ema55 and adx > 20 and 28 <= rsi < 48:
                 regime = "BEARISH"
+            # 4b. Oversold tükenme → HIGH_VOLATILITY (dönüş riski; tek-yön kilidi açılır).
+            elif rsi < 28 and adx > 20:
+                regime = "HIGH_VOLATILITY"
             # 5. HIGH_VOLATILITY (Yüksek Oynaklık / Trend Gücü Zayıf)
             elif atr_pct > 0.015:
                 regime = "HIGH_VOLATILITY"
