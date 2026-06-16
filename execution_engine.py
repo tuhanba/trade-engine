@@ -54,6 +54,13 @@ except Exception:
     TP2_CLOSE_PCT = 30
     RUNNER_CLOSE_PCT = 30
 
+# ── Trailing SL Throttle (GÖREV 1) ───────────────────────────────────
+# Canlıda her tick'te Binance API PUT /order çağrısını önler;
+# paper modda gereksiz DB write storm'unu keser.
+MIN_SL_MOVE_PCT = 0.001        # %0.1 — bu kadar hareket etmedikçe yaz
+MIN_SL_UPDATE_INTERVAL = 30    # saniye — son güncellemeden bu kadar geçmedikçe yaz
+_sl_last_update_time: dict = {} # trade_id → float (epoch)
+
 # ── AIDecisionEngine modül önbelleği (her trade kapanışında yeniden init önlenir) ─
 _cached_ai_engine = None
 
@@ -427,19 +434,46 @@ class ExecutionEngine:
         # ── State güncelle (SL değişmişse) ───────────────────────
         if result.new_sl and result.new_sl != (trade.get("sl") or trade.get("stop_loss", 0)):
             old_sl = trade.get("sl") or trade.get("stop_loss", 0)
-            database.update_trade_sl(trade_id, result.new_sl)
-            try:
-                from websocket_events import event_manager
-                if event_manager:
-                    event_manager.broadcast_trailing_stop_updated(
-                        symbol=symbol,
-                        trade_id=trade_id,
-                        old_sl=old_sl,
-                        new_sl=result.new_sl,
-                        current_price=current
-                    )
-            except Exception as _e:
-                logger.debug(f"WS trailing stop broadcast error: {_e}")
+            new_sl = result.new_sl
+
+            # ── Trailing SL Throttle ─────────────────────────────────
+            # 1. Minimum hareket kontrolü: %0.1'den az hareket = gürültü
+            _move_pct = abs(new_sl - old_sl) / old_sl if old_sl > 0 else 0.0
+            _min_move = float(getattr(config, "MIN_SL_MOVE_PCT", MIN_SL_MOVE_PCT))
+            # 2. Minimum zaman aralığı kontrolü
+            _now = time.time()
+            _last_t = _sl_last_update_time.get(trade_id, 0.0)
+            _min_interval = float(getattr(config, "MIN_SL_UPDATE_INTERVAL", MIN_SL_UPDATE_INTERVAL))
+            _time_ok = (_now - _last_t) >= _min_interval
+            _move_ok = _move_pct >= _min_move
+
+            if _move_ok and _time_ok:
+                # Gerçek güncelleme: DB'ye yaz, WS yayınla, log bas
+                database.update_trade_sl(trade_id, new_sl)
+                _sl_last_update_time[trade_id] = _now
+                logger.info(
+                    "[SL Update] %s: %.4f → %.4f (▲%.3f%%) | Price: %.4f",
+                    symbol, old_sl, new_sl, _move_pct * 100, current
+                )
+                try:
+                    from websocket_events import event_manager
+                    if event_manager:
+                        event_manager.broadcast_trailing_stop_updated(
+                            symbol=symbol,
+                            trade_id=trade_id,
+                            old_sl=old_sl,
+                            new_sl=new_sl,
+                            current_price=current
+                        )
+                except Exception as _e:
+                    logger.debug(f"WS trailing stop broadcast error: {_e}")
+            else:
+                # Throttle: state güncellendi ama DB'ye yazılmadı
+                logger.debug(
+                    "[SL Throttle] %s: %.4f → %.4f skip (move=%.4f%% min=%.3f%%, dt=%.1fs min=%.0fs)",
+                    symbol, old_sl, new_sl, _move_pct * 100, _min_move * 100,
+                    _now - _last_t, _min_interval
+                )
 
         # Exit state'i DB'ye yaz
         self._save_exit_state(trade_id, state)
