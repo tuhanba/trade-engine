@@ -409,20 +409,32 @@ def __getattr__(name: str) -> Any:
             try:
                 import database
                 regime = database.get_market_regime()
+                starvation = database.get_system_state("trade_starvation_alarm") == "true"
                 if regime in ("BULLISH", "HIGH_MOMENTUM") or "TRENDING" in regime:
-                    val = 24.0  # 18→24: gerçek boğa-devamı dip'leri RSI 25-40 bandında olur; 18 tuzağı engellendi
+                    val = 24.0  # 18→24: gerçek boğa-devamı dip'leri RSI 25-40 bandında olur
+                elif regime == "LOW_VOLATILITY":
+                    val = 20.0  # Düşük vol'da sinyal kıtlığı — RSI filtresi gevşetildi
                 elif regime in ("BEARISH", "SIDEWAYS", "HIGH_VOLATILITY", "NEWS_DRIVEN") or "CHOPPY" in regime:
                     val = 30.0  # Strict for choppy range protection
+                # Trade açlığı varsa daha da gevşet
+                if starvation:
+                    val = max(15.0, val - 8.0)  # Min 15.0 (SHORT veto eşiği = RSI>85)
             except Exception:
                 pass
         elif name == "CVD_FILTER_VAL":
             try:
                 import database
                 regime = database.get_market_regime()
+                starvation = database.get_system_state("trade_starvation_alarm") == "true"
                 if regime in ("BULLISH", "HIGH_MOMENTUM") or "TRENDING" in regime:
                     val = -0.35  # Relaxed for strong trending markets
+                elif regime == "LOW_VOLATILITY":
+                    val = -0.25  # Düşük vol'da CVD sinyali zayıf — filtre gevşetildi
                 elif regime in ("BEARISH", "SIDEWAYS", "HIGH_VOLATILITY", "NEWS_DRIVEN") or "CHOPPY" in regime:
                     val = -0.10  # Tight filter for choppy range protection
+                # Trade açlığı varsa daha da gevşet
+                if starvation:
+                    val = min(-0.40, val - 0.15)  # Max -0.40 (çok permissive)
             except Exception:
                 pass
         elif name == "TRADE_THRESHOLD":
