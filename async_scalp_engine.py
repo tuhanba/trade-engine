@@ -44,6 +44,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ax.async_engine")
 
+try:
+    from core.redis_logger import setup_redis_logger
+    setup_redis_logger()
+except Exception as e:
+    logger.debug(f"Could not setup redis logger: {e}")
+
 class AsyncScalpEngine:
     def __init__(self):
         self.market_data = AsyncMarketDataService(config.BINANCE_API_KEY or "", config.BINANCE_API_SECRET or "")

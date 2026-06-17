@@ -643,87 +643,38 @@ def api_ml_status():
 @app.route("/api/logs")
 def api_logs():
     import re
-    LOG_PATHS = [
-        # ── Faz 8: Engine ve Dashboard aynı /app klasöründen çalışıyorsa paylaşımlı log ──
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "bot.log"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "bot.log"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.log"),
-        os.path.join(getattr(config, "LOG_DIR", "logs"), "ax_bot.log"),
-        os.path.join(getattr(config, "LOG_DIR", "logs"), "bot.log"),
-        "/root/trade-engine/logs/bot.log",
-        "/root/trade_engine/logs/ax_bot.log",
-        "/root/trade_engine/logs/bot.log",
-        "/root/trade_engine/bot.log",
-        "/root/trade_engine/scalp_bot.log",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "ax_bot.log"),
-    ]
     n = min(int(request.args.get("n", 80)), 300)
     lines_out = []
-
-    for path in LOG_PATHS:
-        if os.path.exists(path):
-            try:
-                with open(path, "rb") as _f:
-                    _f.seek(0, 2)
-                    _fsize = _f.tell()
-                    _read = min(100_000, _fsize)
-                    _f.seek(-_read, 2)
-                    _raw = _f.read().decode("utf-8", errors="replace")
-                raw_lines = _raw.splitlines()[-n:]
-                for raw in raw_lines:
-                    raw = raw.rstrip("\n")
-                    level = "INFO"
-                    if re.search(r"\bERROR\b|\bCRITICAL\b|\bException\b|Traceback", raw, re.I):
-                        level = "ERROR"
-                    elif re.search(r"\bWARNING\b|\bWARN\b", raw, re.I):
-                        level = "WARNING"
-                    elif re.search(r"\bDEBUG\b", raw, re.I):
-                        level = "DEBUG"
-                    elif re.search(r"WIN|KÂR|PROFIT|LONG|SHORT|ENTRY|OPEN", raw):
-                        level = "TRADE"
-                    elif re.search(r"LOSS|STOP|CLOSE|KAPAND", raw):
-                        level = "CLOSE"
-                    lines_out.append({"text": raw, "level": level})
-                return jsonify({
-                    "ok": True,
-                    "data": {
-                        "lines": [l["text"] for l in lines_out],
-                        "items": lines_out,
-                    },
-                    "path": path,
-                    "total": len(lines_out)
-                })
-            except Exception:
-                continue
-
-    # Fallback: DB'den son trade'ler
+    
     try:
-        with get_conn() as conn:
-            rows = conn.execute(
-                "SELECT symbol, direction, close_reason, net_pnl, close_time "
-                "FROM trades WHERE close_time IS NOT NULL ORDER BY id DESC LIMIT ?", (n,)
-            ).fetchall()
-        for r in reversed(rows):
-            r = dict(r)
-            pnl = r.get("net_pnl", 0) or 0
-            level = "TRADE" if pnl > 0 else "CLOSE"
-            lines_out.append({
-                "text": f"[{r.get('close_time','')}] {r.get('symbol','')} "
-                        f"{r.get('direction','')} → {r.get('close_reason','?').upper()} "
-                        f"PNL: {pnl:+.4f}$",
-                "level": level,
-            })
-        return jsonify({
-            "ok": True,
-            "data": {
-                "lines": [l["text"] for l in lines_out],
-                "items": lines_out,
-            },
-            "path": "db_fallback",
-            "total": len(lines_out)
-        })
+        from core import redis_state
+        if getattr(redis_state, '_available', False) and getattr(redis_state, '_client', None):
+            raw_logs = redis_state._client.lrange(redis_state._k("log:ring_buffer"), 0, n - 1)
+            raw_lines = [r.decode("utf-8") for r in reversed(raw_logs)] if raw_logs else []
+        else:
+            raw_lines = ["[System] Redis bağlantısı yok veya Log Buffer boş."]
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e), "data": []}), 500
+        raw_lines = [f"[System] Redis Log okuma hatası: {e}"]
+
+    for raw in raw_lines:
+        raw = raw.rstrip("\n")
+        level = "INFO"
+        if re.search(r"\bERROR\b|\bCRITICAL\b|\bException\b|Traceback", raw, re.I):
+            level = "ERROR"
+        elif re.search(r"\bWARNING\b|\bWARN\b", raw, re.I):
+            level = "WARNING"
+        elif re.search(r"\bDEBUG\b", raw, re.I):
+            level = "DEBUG"
+            
+        lines_out.append({
+            "text": raw,
+            "level": level
+        })
+        
+    if not lines_out:
+        lines_out = [{"text": "[System] Henüz log bulunmuyor...", "level": "INFO"}]
+
+    return jsonify({"success": True, "logs": lines_out})
 
 
 # ── /api/execution_quality ────────────────────────────────────────────────────

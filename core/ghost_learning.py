@@ -278,6 +278,23 @@ def generate_threshold_suggestions(ghost_stats: list | None = None) -> list:
     Önerileri ghost_suggestions ve ghost_threshold_suggestions tablolarına kaydeder.
     Returns: önerilerin listesi.
     """
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            row = conn.execute('''
+                SELECT COUNT(*), 
+                       SUM(CASE WHEN virtual_outcome='WIN' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as wr
+                FROM ghost_results
+            ''').fetchone()
+            if row and row[0] and row[0] >= 50 and row[1] is not None and row[1] < 50.0:
+                logger.warning(f"[Ghost Auto-Calibrate] Ghost WR {row[1]:.2f}% < 50%. Piyasa rejimi değiştiği için ghost öğrenimleri sıfırlanıyor!")
+                conn.execute("DELETE FROM ghost_threshold_suggestions")
+                conn.execute("DELETE FROM ghost_results")
+                conn.execute("DELETE FROM ghost_signals")
+                return []
+    except Exception as e:
+        logger.debug(f"[Ghost Auto-Calibrate] Hata: {e}")
+
     if ghost_stats is None:
         ghost_stats = get_pattern_analysis()
 
