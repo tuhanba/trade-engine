@@ -62,6 +62,13 @@ class NotificationService:
 
     async def handle_trade_opened(self, event: Event):
         try:
+            # RL Meta-Learner trade opened handler (Phase M)
+            try:
+                from core.rl_meta_learner import handle_rl_trade_opened
+                handle_rl_trade_opened(event.payload)
+            except Exception as rl_err:
+                logger.error(f"[NotificationService] RL trade opened handler failed: {rl_err}")
+
             # Sync to dashboard
             if event_manager:
                 from database import get_open_trades
@@ -79,6 +86,13 @@ class NotificationService:
     async def handle_trade_closed(self, event: Event):
         payload = event.payload
         try:
+            # RL Meta-Learner trade closed handler (Phase M)
+            try:
+                from core.rl_meta_learner import update_rl_on_trade_closed
+                update_rl_on_trade_closed(payload)
+            except Exception as rl_err:
+                logger.error(f"[NotificationService] RL trade closed handler failed: {rl_err}")
+
             if event_manager:
                 from database import get_open_trades
                 event_manager.broadcast_live_update(get_open_trades())

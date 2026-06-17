@@ -216,3 +216,118 @@ def calculate_sharpe_sortino_ratios(environment: str = "paper") -> dict:
     except Exception as e:
         logger.error(f"Sharpe/Sortino calculation failed: {e}")
         return {"sharpe_ratio": 0.0, "sortino_ratio": 0.0}
+
+
+def _fetch_db_stats_for_kelly(symbol: str) -> tuple[float, float]:
+    """Fetches win rate and payoff ratio from the database for a symbol."""
+    try:
+        from database import get_conn
+        with get_conn() as conn:
+            # Let's try coin_profiles first
+            row = conn.execute("SELECT win_rate, total_trades FROM coin_profiles WHERE symbol = ?", (symbol,)).fetchone()
+            if row and row[1] >= 5:
+                wr = float(row[0] or 0.5)
+                # For payoff ratio, query trades
+                payoff_row = conn.execute("""
+                    SELECT 
+                        COALESCE(AVG(CASE WHEN net_pnl > 0 THEN net_pnl END), 0),
+                        COALESCE(AVG(CASE WHEN net_pnl <= 0 THEN ABS(net_pnl) END), 0)
+                    FROM trades 
+                    WHERE status = 'closed' AND symbol = ?
+                """, (symbol,)).fetchone()
+                if payoff_row and payoff_row[1] > 0:
+                    payoff = payoff_row[0] / payoff_row[1]
+                else:
+                    payoff = 2.0
+                return wr, payoff
+                
+            # If coin profiles doesn't have enough, query global/trades
+            row_global = conn.execute("""
+                SELECT 
+                    COUNT(*),
+                    SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END),
+                    COALESCE(AVG(CASE WHEN net_pnl > 0 THEN net_pnl END), 0),
+                    COALESCE(AVG(CASE WHEN net_pnl <= 0 THEN ABS(net_pnl) END), 0)
+                FROM trades 
+                WHERE status = 'closed'
+            """).fetchone()
+            if row_global and row_global[0] >= 5:
+                total = row_global[0]
+                wins = row_global[1]
+                avg_win = row_global[2]
+                avg_loss = row_global[3]
+                wr = wins / total
+                payoff = avg_win / avg_loss if avg_loss > 0 else 2.0
+                return wr, payoff
+    except Exception as e:
+        logger.warning(f"Error fetching DB stats for Kelly: {e}")
+    # Default fallback
+    return 0.50, 2.0
+
+
+def calculate_multi_asset_kelly(
+    symbols: list[str],
+    win_rates: dict[str, float] = None,
+    payoff_ratios: dict[str, float] = None,
+    interval: str = "1h",
+    limit: int = 50,
+    half_kelly: bool = True
+) -> dict[str, float]:
+    """
+    Multi-Asset Kelly Matrix: f* = C^-1 * m
+    Where C is the Pearson correlation matrix (regularized),
+    and m is the expected excess return vector m_i = p_i * R_i - (1 - p_i).
+    """
+    if not symbols:
+        return {}
+    
+    # 1. Calculate the Pearson correlation matrix
+    corr_data = calculate_correlation_matrix(symbols, interval, limit)
+    symbols_resolved = corr_data["symbols"]
+    n = len(symbols_resolved)
+    if n == 0:
+        return {}
+        
+    # Build the numpy correlation matrix, default missing correlations to 0
+    C = np.zeros((n, n))
+    for i in range(n):
+        C[i, i] = 1.0
+        for j in range(n):
+            if i != j:
+                val = corr_data["matrix"][i][j]
+                C[i, j] = val if val is not None else 0.0
+                
+    # 2. Regularization (Shrinkage: C_reg = (1 - lam) * C + lam * I)
+    lam = float(getattr(config, "KELLY_REGULARIZATION", 0.15))
+    C_reg = (1.0 - lam) * C + lam * np.eye(n)
+    
+    # 3. Calculate expected return vector m
+    m = np.zeros(n)
+    for i, sym in enumerate(symbols_resolved):
+        p = (win_rates or {}).get(sym)
+        r = (payoff_ratios or {}).get(sym)
+        
+        # If not provided, fetch from DB
+        if p is None or r is None:
+            db_p, db_r = _fetch_db_stats_for_kelly(sym)
+            if p is None: p = db_p
+            if r is None: r = db_r
+            
+        m[i] = p * r - (1.0 - p)
+        
+    # 4. Solve f* = C_reg^-1 * m
+    try:
+        f_star = np.linalg.solve(C_reg, m)
+    except Exception as e:
+        logger.warning(f"Failed to solve Kelly matrix: {e}. Falling back to single-asset Kelly.")
+        f_star = m
+        
+    # 5. Apply Half-Kelly and clamp weights
+    scale = 0.5 if half_kelly else 1.0
+    weights = {}
+    for i, sym in enumerate(symbols_resolved):
+        w = f_star[i] * scale
+        # Clamp between 0.005 and 0.03 (which matches [0.5%, 3.0%] in percentage)
+        weights[sym] = max(0.005, min(0.03, float(w)))
+        
+    return weights

@@ -196,7 +196,7 @@ class TestPhaseGQuantum(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.futures_klines.return_value = [[0, 0, 102 + i, 98 + i, 100 + i, 10, 0, 0, 0, 0, 0, 0] for i in range(150)]
         mock_client.futures_ticker.return_value = {"quoteVolume": "5000000"}
-        mock_client.futures_order_book.return_value = {"bids": [["99", "1"]], "asks": [["101", "1"]]}
+        mock_client.futures_order_book.return_value = {"bids": [["99.95", "1"]], "asks": [["100.01", "1"]]}
         
         engine = TriggerEngine(mock_client)
         with patch.object(engine, '_rsi', return_value=55.0), \

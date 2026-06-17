@@ -758,6 +758,12 @@ class TriggerEngine:
             ml_score = 50
         # ──────────────────────────────────────────────────────────────────────
 
+        # Override entry price for Swing Failure Pattern (SFP) (Phase L)
+        entry_price = c1
+        if is_sfp and sfp_level > 0.0:
+            entry_price = sfp_level
+            logger.info(f"[SFP Entry Optimization] Optimizing entry price to SFP sweep level: {entry_price}")
+
         return {
             "quality": quality,
             "score": min(10.0, max(0.0, score)),
@@ -767,7 +773,7 @@ class TriggerEngine:
             "ml_score": ml_score,
             "confluence_score": confluence_score,
             "confluence_total": confluence_total,
-            "entry": c1,
+            "entry": entry_price,
             "atr": round(atr_val, 6),
             "atr_pct": round(atr_val / c1, 4),
             "rsi5": round(rsi5, 1),

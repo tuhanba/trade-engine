@@ -418,13 +418,44 @@ class _Queue:
         self._q = deque()
         self._lock = threading.Lock()
         self._event = threading.Event()
-        self._thread = threading.Thread(target=self._worker, daemon=True)
-        self._thread.start()
+        self._thread = None
+        self._running = True
+        self._start_worker()
+        
+        # Start supervisor thread to monitor worker liveness (Phase 2.1)
+        import sys
+        is_testing = "pytest" in sys.modules or "unittest" in sys.modules
+        if not is_testing:
+            self._supervisor = threading.Thread(target=self._supervisor_loop, daemon=True, name="tg-queue-supervisor")
+            self._supervisor.start()
+
+
+    def _start_worker(self):
+        with self._lock:
+            self._thread = threading.Thread(target=self._worker, daemon=True, name="tg-queue-worker")
+            self._thread.start()
+            logger.info("[Telegram Queue] Worker thread started/restarted.")
+
+    def _supervisor_loop(self):
+        while self._running:
+            time.sleep(5.0)
+            try:
+                is_alive = False
+                with self._lock:
+                    if self._thread and self._thread.is_alive():
+                        is_alive = True
+                
+                if not is_alive:
+                    logger.error("[Telegram Queue Watchdog] Worker thread is dead! Restarting worker thread...")
+                    self._start_worker()
+                    self._event.set()
+            except Exception as e:
+                logger.error("[Telegram Queue Watchdog] Supervisor loop error: %s", e)
 
     def push(self, text: str, parse_mode: str = "HTML",
              dedupe_key: str = None, sig_id=None, symbol: str = None,
              attempts: int = 0, reply_markup: Optional[dict] = None,
-             photo_bytes: Optional[bytes] = None):
+             photo_bytes: Optional[bytes] = None, retry_at: float = 0.0):
         if not dedupe_key:
             import uuid
             dedupe_key = f"msg:{uuid.uuid4()}"
@@ -434,24 +465,52 @@ class _Queue:
             except Exception as e:
                 logger.debug("[Telegram] save_telegram_message: %s", e)
         with self._lock:
-            self._q.append((text, parse_mode, dedupe_key, attempts, reply_markup, photo_bytes))
+            self._q.append((text, parse_mode, dedupe_key, attempts, reply_markup, photo_bytes, retry_at))
         self._event.set()
 
     def _worker(self):
-        while True:
+        while self._running:
             self._event.wait()
             self._event.clear()
-            while True:
+            while self._running:
                 try:
                     with self._lock:
                         if not self._q:
                             break
-                        item = self._q.popleft()
+                        
+                        # Find the first item whose retry_at <= current time
+                        now = time.time()
+                        found_idx = -1
+                        for idx, item in enumerate(self._q):
+                            item_retry_at = item[6] if len(item) > 6 else 0.0
+                            if item_retry_at <= now:
+                                found_idx = idx
+                                break
+                        
+                        if found_idx == -1:
+                            # No items are ready to be sent right now.
+                            # Determine how long to wait before checking again.
+                            min_retry_at = min(item[6] if len(item) > 6 else 0.0 for item in self._q)
+                            wait_time = max(0.1, min_retry_at - now)
+                            # Sleep up to 2 seconds, then set the event to trigger retry
+                            time.sleep(min(2.0, wait_time))
+                            self._event.set()
+                            break
+                            
+                        # Retrieve the ready item
+                        if found_idx == 0:
+                            item = self._q.popleft()
+                        else:
+                            item = self._q[found_idx]
+                            del self._q[found_idx]
+                            
                     text, pm, dk, attempts, reply_markup, photo_bytes = item[0], item[1], item[2], item[3], item[4], item[5]
+                    
                     if photo_bytes:
                         ok, status_code = _send_photo_raw(photo_bytes, text, pm)
                     else:
                         ok, status_code = _send_raw_detailed(text, pm, reply_markup)
+                        
                     if ok:
                         if dk:
                             try:
@@ -467,12 +526,8 @@ class _Queue:
                             attempts = 99
                             if dk:
                                 try:
-                                    from database import get_conn
-                                    with get_conn() as conn:
-                                        conn.execute(
-                                            "UPDATE telegram_messages SET status='failed' WHERE dedupe_key=?",
-                                            (dk,)
-                                        )
+                                    from database import mark_telegram_message_failed
+                                    mark_telegram_message_failed(dk)
                                 except Exception:
                                     pass
                         elif is_read_timeout:
@@ -486,24 +541,22 @@ class _Queue:
                                     pass
                         else:
                             attempts += 1
-                        if attempts < 5:
+                            
+                        if attempts < 5 and not is_client_err and not is_read_timeout:
                             backoff = min(30, 2 ** attempts)
                             logger.warning("[TGQueue] Retry %d/5 in %ds key=%s",
                                            attempts, backoff, dk)
                             time.sleep(backoff)
+                            retry_at = time.time() + backoff
                             with self._lock:
-                                self._q.appendleft((text, pm, dk, attempts, reply_markup, photo_bytes))
+                                self._q.append((text, pm, dk, attempts, reply_markup, photo_bytes, retry_at))
                             self._event.set()
                         elif attempts != 99:
                             logger.error("[TGQueue] Kalıcı başarısız key=%s", dk)
                             if dk:
                                 try:
-                                    from database import get_conn
-                                    with get_conn() as conn:
-                                        conn.execute(
-                                            "UPDATE telegram_messages SET status='failed' WHERE dedupe_key=?",
-                                            (dk,)
-                                        )
+                                    from database import mark_telegram_message_failed
+                                    mark_telegram_message_failed(dk)
                                 except Exception:
                                     pass
                 except Exception as e:
