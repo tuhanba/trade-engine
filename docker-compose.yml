@@ -22,7 +22,27 @@ services:
       timeout: 5s
       retries: 3
 
-  # 1. Trade Engine
+  # 1. PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: aurvex_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aurvex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aurvexpass}
+      POSTGRES_DB: ${POSTGRES_DB:-aurvex}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aurvex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Trade Engine
   engine:
     build: .
     container_name: aurvex_engine
@@ -37,6 +57,8 @@ services:
       - TZ=UTC
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     logging: *default-logging
     healthcheck:
@@ -62,6 +84,8 @@ services:
       engine:
         condition: service_started
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     logging: *default-logging
     healthcheck:
@@ -111,3 +135,4 @@ services:
 volumes:
   prometheus_data:
   grafana_data:
+  postgres_data:

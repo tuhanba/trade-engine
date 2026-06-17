@@ -47,6 +47,14 @@ else:
     else:
         DB_PATH = str(BASE_DIR / "trading.db")
 
+# PostgreSQL Config
+POSTGRES_ENABLED = _env_bool("POSTGRES_ENABLED", False)
+POSTGRES_HOST = _env("POSTGRES_HOST", "postgres")
+POSTGRES_PORT = _env_int("POSTGRES_PORT", 5432)
+POSTGRES_DB = _env("POSTGRES_DB", "aurvex")
+POSTGRES_USER = _env("POSTGRES_USER", "aurvex")
+POSTGRES_PASSWORD = _env("POSTGRES_PASSWORD", "aurvexpass")
+
 # Execution
 EXECUTION_MODE          = _env("EXECUTION_MODE", "paper")
 AX_MODE                 = _env("AX_MODE", "execute")

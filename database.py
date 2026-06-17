@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
+import psycopg2
+import psycopg2.extras
+from psycopg2.pool import ThreadedConnectionPool
+import threading
 from datetime import datetime, timezone
 from typing import Any, Optional, Generator, ContextManager
 from contextlib import contextmanager
@@ -33,7 +36,7 @@ def retry_on_db_lock(max_retries=5, base_delay=0.05):
             while True:
                 try:
                     return func(*args, **kwargs)
-                except sqlite3.OperationalError as e:
+                except psycopg2.OperationalError as e:
                     err_msg = str(e).lower()
                     if "locked" in err_msg or "busy" in err_msg:
                         retries += 1
@@ -49,62 +52,147 @@ def retry_on_db_lock(max_retries=5, base_delay=0.05):
     return decorator
 
 
-# ── Bağlantı ────────────────────────────────────────────────────────
 
-def get_connection() -> sqlite3.Connection:
-    """WAL modunda SQLite bağlantısı döner."""
-    conn = sqlite3.connect(config.DB_PATH, timeout=30, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-64000")  # 64MB cache (negatif = KB)
-    conn.execute("PRAGMA temp_store=MEMORY")
-    return conn
+# ── Bağlantı (PostgreSQL) ────────────────────────────────────────────────────────
 
+_pool = None
+_pool_lock = threading.Lock()
+
+def get_pool():
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                import config
+                try:
+                    _pool = ThreadedConnectionPool(
+                        1, 20,
+                        host=config.POSTGRES_HOST,
+                        port=config.POSTGRES_PORT,
+                        dbname=config.POSTGRES_DB,
+                        user=config.POSTGRES_USER,
+                        password=config.POSTGRES_PASSWORD
+                    )
+                except Exception as e:
+                    logger.error(f"PostgreSQL bağlantı havuzu oluşturulamadı: {e}")
+                    raise
+    return _pool
+
+class PgShimConnection:
+    def __init__(self, conn):
+        self.conn = conn
+    def cursor(self):
+        cur = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        return PgShimCursor(cur)
+
+    def execute(self, query, vars=None):
+        cur = self.cursor()
+        cur.execute(query, vars)
+        self.lastrowid = getattr(cur, 'lastrowid', None)
+        return cur
+
+    def commit(self):
+        self.conn.commit()
+    def rollback(self):
+        self.conn.rollback()
+    def close(self):
+        pass # Handle returning to pool outside
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            self.commit()
+        else:
+            self.rollback()
+
+class PgShimCursor:
+    def __init__(self, cur):
+        self.cur = cur
+
+    def execute(self, query, vars=None):
+        if '?' in query and not isinstance(vars, dict):
+            query = query.replace('?', '%s')
+        
+        # Determine if it's an insert and we need lastrowid
+        is_insert = query.strip().upper().startswith("INSERT")
+        if is_insert and "RETURNING id" not in query:
+            query = query.rstrip()
+            if query.endswith(';'):
+                query = query[:-1]
+            query += " RETURNING id"
+            
+        self.cur.execute(query, vars)
+        
+        if is_insert:
+            try:
+                row = self.cur.fetchone()
+                if row and 'id' in row:
+                    self.lastrowid = row['id']
+            except Exception:
+                self.lastrowid = None
+        else:
+            self.lastrowid = None
+            
+        return self
+
+    def executemany(self, query, vars_list):
+        if '?' in query:
+            query = query.replace('?', '%s')
+        self.cur.executemany(query, vars_list)
+        return self
+    def fetchone(self):
+        row = self.cur.fetchone()
+        if row:
+            return dict(row)
+        return None
+    def fetchall(self):
+        return [dict(r) for r in self.cur.fetchall()]
+    def close(self):
+        self.cur.close()
+    def fetchmany(self, size):
+        return [dict(r) for r in self.cur.fetchmany(size)]
+    @property
+    def description(self):
+        return self.cur.description
+
+def get_connection():
+    pool = get_pool()
+    conn = pool.getconn()
+    conn.autocommit = False
+    # return shim that behaves like sqlite3 connection but we need a way to put it back
+    return PgShimConnection(conn)
 
 @contextmanager
-def get_conn() -> Generator[sqlite3.Connection, None, None]:
-    """get_connection alias — v5.1 compat (closes connection after exiting block)."""
-    conn = sqlite3.connect(config.DB_PATH, timeout=30, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
+def get_conn():
+    pool = get_pool()
+    conn = pool.getconn()
+    conn.autocommit = False
+    shim = PgShimConnection(conn)
     try:
-        with conn:
-            yield conn
+        with shim:
+            yield shim
     finally:
-        conn.close()
-
+        pool.putconn(conn)
 
 @contextmanager
-def open_db(db_path: str | None = None, timeout: int = 15) -> Generator[sqlite3.Connection, None, None]:
-    """
-    Herhangi bir yol için WAL modunda bağlantı açar.
-    db_path verilmezse config.DB_PATH kullanılır.
-    AIDecisionEngine ve GhostMemoryManager gibi farklı db_path kullanan modüller için.
-    """
-    path = db_path or config.DB_PATH
-    conn = sqlite3.connect(path, timeout=timeout, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-64000")
+def open_db(db_path: str | None = None, timeout: int = 15):
+    # db_path is ignored in postgres, we just return a connection from the pool
+    pool = get_pool()
+    conn = pool.getconn()
+    conn.autocommit = False
+    shim = PgShimConnection(conn)
     try:
-        yield conn
+        with shim:
+            yield shim
     finally:
-        conn.close()
+        pool.putconn(conn)
 
 
 # ── Tablo DDL'leri ───────────────────────────────────────────────────
 
 _TRADES_DDL = """
 CREATE TABLE IF NOT EXISTS trades (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                  SERIAL PRIMARY KEY,
     symbol              TEXT NOT NULL,
     direction           TEXT NOT NULL DEFAULT 'LONG',
     status              TEXT DEFAULT 'OPEN',
@@ -158,7 +246,7 @@ CREATE TABLE IF NOT EXISTS trades (
     ax_mode             TEXT,
     environment         TEXT,
     session             TEXT,
-    metadata            TEXT DEFAULT '{}',
+    metadata            JSONB DEFAULT '{}'::jsonb,
     trail_stop          REAL DEFAULT 0,
     slippage            REAL DEFAULT 0,
     latency_ms          INTEGER DEFAULT 0
@@ -167,7 +255,7 @@ CREATE TABLE IF NOT EXISTS trades (
 
 _SIGNAL_CANDIDATES_DDL = """
 CREATE TABLE IF NOT EXISTS signal_candidates (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              SERIAL PRIMARY KEY,
     symbol          TEXT,
     side            TEXT,
     entry_price     REAL DEFAULT 0,
@@ -184,7 +272,7 @@ CREATE TABLE IF NOT EXISTS signal_candidates (
     created_at      TEXT,
     status          TEXT DEFAULT 'NEW',
     ghost_pnl       REAL DEFAULT 0,
-    metadata        TEXT DEFAULT '{}',
+    metadata        JSONB DEFAULT '{}'::jsonb,
     uuid            TEXT,
     direction       TEXT DEFAULT '',
     entry           REAL DEFAULT 0,
@@ -219,7 +307,7 @@ CREATE TABLE IF NOT EXISTS signal_candidates (
 
 _BALANCE_LEDGER_DDL = """
 CREATE TABLE IF NOT EXISTS balance_ledger (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    id             SERIAL PRIMARY KEY,
     trade_id       INTEGER,
     symbol         TEXT DEFAULT '',
     event_type     TEXT DEFAULT 'CLOSE',
@@ -227,7 +315,7 @@ CREATE TABLE IF NOT EXISTS balance_ledger (
     balance_before REAL DEFAULT 0,
     balance_after  REAL NOT NULL DEFAULT 0,
     note           TEXT DEFAULT '',
-    created_at     TEXT DEFAULT (datetime('now'))
+    created_at     TEXT DEFAULT (NOW())
 )
 """
 
@@ -241,7 +329,7 @@ CREATE TABLE IF NOT EXISTS bot_status (
 
 _PARTIAL_CLOSES_DDL = """
 CREATE TABLE IF NOT EXISTS partial_closes (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              SERIAL PRIMARY KEY,
     trade_id        INTEGER NOT NULL,
     close_qty       REAL NOT NULL,
     close_pct       REAL NOT NULL,
@@ -255,7 +343,7 @@ CREATE TABLE IF NOT EXISTS partial_closes (
 
 _PAPER_RESULTS_DDL = """
 CREATE TABLE IF NOT EXISTS paper_results (
-    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                      SERIAL PRIMARY KEY,
     signal_id               TEXT,
     candidate_id            TEXT,
     symbol                  TEXT NOT NULL,
@@ -281,19 +369,19 @@ CREATE TABLE IF NOT EXISTS paper_results (
     skip_decision_correct   INTEGER DEFAULT 0,
     status                  TEXT DEFAULT 'pending',
     finalized_at            TEXT,
-    created_at              TEXT DEFAULT (datetime('now'))
+    created_at              TEXT DEFAULT (NOW())
 )
 """
 
 _SIGNAL_EVENTS_DDL = """
 CREATE TABLE IF NOT EXISTS signal_events (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    id            SERIAL PRIMARY KEY,
     signal_id     TEXT,
     stage         TEXT,
     symbol        TEXT,
     reject_reason TEXT,
     data          TEXT,
-    created_at    TEXT DEFAULT (datetime('now'))
+    created_at    TEXT DEFAULT (NOW())
 )
 """
 
@@ -302,7 +390,7 @@ CREATE TABLE IF NOT EXISTS paper_account (
     id              INTEGER PRIMARY KEY,
     balance         REAL NOT NULL DEFAULT 2000.0,
     initial_balance REAL NOT NULL DEFAULT 2000.0,
-    updated_at      TEXT DEFAULT (datetime('now'))
+    updated_at      TEXT DEFAULT (NOW())
 )
 """
 
@@ -319,7 +407,7 @@ CREATE TABLE IF NOT EXISTS coin_configs (
 
 _GHOST_SIGNALS_DDL = """
 CREATE TABLE IF NOT EXISTS ghost_signals (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              SERIAL PRIMARY KEY,
     candidate_id    INTEGER,
     symbol          TEXT DEFAULT '',
     timeframe       TEXT DEFAULT '5m',
@@ -341,14 +429,14 @@ CREATE TABLE IF NOT EXISTS ghost_signals (
     simulated       INTEGER DEFAULT 0,
     rsi             REAL DEFAULT 50.0,
     cvd_slope       REAL DEFAULT 0.0,
-    metadata        TEXT DEFAULT '{}',
-    created_at      TEXT DEFAULT (datetime('now'))
+    metadata        JSONB DEFAULT '{}'::jsonb,
+    created_at      TEXT DEFAULT (NOW())
 )
 """
 
 _GHOST_RESULTS_DDL = """
 CREATE TABLE IF NOT EXISTS ghost_results (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              SERIAL PRIMARY KEY,
     ghost_id        INTEGER NOT NULL,
     virtual_outcome TEXT DEFAULT 'OPEN',
     virtual_pnl_r   REAL DEFAULT 0,
@@ -357,14 +445,14 @@ CREATE TABLE IF NOT EXISTS ghost_results (
     bars_held       INTEGER DEFAULT 0,
     exit_price      REAL DEFAULT 0,
     pattern_type    TEXT DEFAULT '',
-    simulated_at    TEXT DEFAULT (datetime('now')),
+    simulated_at    TEXT DEFAULT (NOW()),
     FOREIGN KEY (ghost_id) REFERENCES ghost_signals(id)
 )
 """
 
 _GHOST_THRESHOLD_SUGGESTIONS_DDL = """
 CREATE TABLE IF NOT EXISTS ghost_threshold_suggestions (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              SERIAL PRIMARY KEY,
     coin            TEXT NOT NULL,
     trigger_type    TEXT NOT NULL,
     action          TEXT NOT NULL,
@@ -373,13 +461,13 @@ CREATE TABLE IF NOT EXISTS ghost_threshold_suggestions (
     expected_trades REAL DEFAULT 0,
     confidence      TEXT DEFAULT 'MEDIUM',
     applied         INTEGER DEFAULT 0,
-    created_at      TEXT DEFAULT (datetime('now'))
+    created_at      TEXT DEFAULT (NOW())
 )
 """
 
 _GHOST_SUGGESTIONS_DDL = """
 CREATE TABLE IF NOT EXISTS ghost_suggestions (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                  SERIAL PRIMARY KEY,
     symbol              TEXT NOT NULL,
     trigger_type        TEXT NOT NULL,
     current_threshold   REAL DEFAULT 0,
@@ -389,7 +477,7 @@ CREATE TABLE IF NOT EXISTS ghost_suggestions (
     sample_count        INTEGER DEFAULT 0,
     confidence          TEXT DEFAULT 'LOW',
     applied             INTEGER DEFAULT 0,
-    created_at          TEXT DEFAULT (datetime('now'))
+    created_at          TEXT DEFAULT (NOW())
 )
 """
 
@@ -539,8 +627,8 @@ _EXPECTED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("danger_score", "REAL DEFAULT 0"),
         ("sample_size", "INTEGER DEFAULT 0"),
         ("total_trades", "INTEGER DEFAULT 0"),
-        ("updated_at", "TEXT DEFAULT (datetime('now'))"),
-        ("last_updated", "TEXT DEFAULT (datetime('now'))"),
+        ("updated_at", "TEXT DEFAULT (NOW())"),
+        ("last_updated", "TEXT DEFAULT (NOW())"),
     ],
     "telegram_messages": [
         ("sig_id", "TEXT"),  # BUG FIX: save_telegram_message sig_id kullanıyor
@@ -777,12 +865,12 @@ def init_db() -> None:
         conn.execute(_GHOST_SUGGESTIONS_DDL)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS ai_learning (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                id            SERIAL PRIMARY KEY,
                 symbol        TEXT,
                 trade_result  TEXT,
                 pnl           REAL DEFAULT 0,
                 setup_quality TEXT,
-                created_at    TEXT DEFAULT (datetime('now'))
+                created_at    TEXT DEFAULT (NOW())
             )
         """)
         # NEDEN (Faz 2.1): Friday karar günlüğü — şema tek kaynaktan
@@ -805,7 +893,7 @@ def init_db() -> None:
         # gerçek boşluk analizi için periyodik örnekler (proxy yerine).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS heartbeat_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 ts TEXT NOT NULL
             )
         """)
@@ -825,7 +913,7 @@ def init_db() -> None:
                 threshold_trade     INTEGER DEFAULT 0,
                 action_taken TEXT DEFAULT '',
                 notes        TEXT DEFAULT '',
-                created_at   TEXT DEFAULT (datetime('now'))
+                created_at   TEXT DEFAULT (NOW())
             )
         """)
         conn.execute("""
@@ -848,13 +936,13 @@ def init_db() -> None:
                 danger_score REAL DEFAULT 0,
                 sample_size  INTEGER DEFAULT 0,
                 total_trades INTEGER DEFAULT 0,
-                updated_at   TEXT DEFAULT (datetime('now')),
-                last_updated TEXT DEFAULT (datetime('now'))
+                updated_at   TEXT DEFAULT (NOW()),
+                last_updated TEXT DEFAULT (NOW())
             )
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS params (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                id              SERIAL PRIMARY KEY,
                 version         INTEGER DEFAULT 1,
                 sl_atr_mult     REAL DEFAULT 1.2,
                 tp_atr_mult     REAL DEFAULT 2.0,
@@ -866,14 +954,14 @@ def init_db() -> None:
                 min_volume_m    REAL DEFAULT 10.0,
                 min_change_pct  REAL DEFAULT 2.0,
                 risk_pct        REAL DEFAULT 1.5,
-                updated_at      TEXT DEFAULT (datetime('now')),
+                updated_at      TEXT DEFAULT (NOW()),
                 ai_reason       TEXT DEFAULT ''
             )
         """)
-        conn.execute("INSERT OR IGNORE INTO params (id) VALUES (1)")
+        conn.execute("INSERT INTO params (id) VALUES (1) ON CONFLICT DO NOTHING")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS ai_logs (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                id              SERIAL PRIMARY KEY,
                 created_at      TEXT,
                 trades_analyzed INTEGER DEFAULT 0,
                 win_rate        REAL DEFAULT 0,
@@ -891,24 +979,24 @@ def init_db() -> None:
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS trade_events (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                id          SERIAL PRIMARY KEY,
                 trade_id    INTEGER,
                 event_type  TEXT,
                 data        TEXT DEFAULT '',
-                created_at  TEXT DEFAULT (datetime('now'))
+                created_at  TEXT DEFAULT (NOW())
             )
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS system_state (
                 key        TEXT PRIMARY KEY,
                 value      TEXT DEFAULT '',
-                updated_at TEXT DEFAULT (datetime('now'))
+                updated_at TEXT DEFAULT (NOW())
             )
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS param_audit (
-                id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts        TEXT DEFAULT (datetime('now')),
+                id        SERIAL PRIMARY KEY,
+                ts        TEXT DEFAULT (NOW()),
                 key       TEXT NOT NULL,
                 old_value TEXT DEFAULT '',
                 new_value TEXT NOT NULL,
@@ -950,19 +1038,19 @@ def init_db() -> None:
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS telegram_messages (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                id         SERIAL PRIMARY KEY,
                 sig_id     TEXT,
                 symbol     TEXT,
                 dedupe_key TEXT UNIQUE,
                 text       TEXT,
                 status     TEXT DEFAULT 'queued',
-                created_at TEXT DEFAULT (datetime('now')),
+                created_at TEXT DEFAULT (NOW()),
                 sent_at    TEXT
             )
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS scanned_coins (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                id         SERIAL PRIMARY KEY,
                 symbol     TEXT,
                 score      REAL DEFAULT 0,
                 status     TEXT DEFAULT 'scanned',
@@ -970,23 +1058,23 @@ def init_db() -> None:
                 volume     REAL DEFAULT 0,
                 price      REAL DEFAULT 0,
                 price_change REAL DEFAULT 0,
-                scanned_at TEXT DEFAULT (datetime('now'))
+                scanned_at TEXT DEFAULT (NOW())
             )
         """)
         conn.execute("DROP TABLE IF EXISTS best_params")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS best_params (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                id              SERIAL PRIMARY KEY,
                 data            TEXT,
                 params_json     TEXT,
                 win_rate        REAL,
                 profit_factor   REAL,
-                created_at      TEXT DEFAULT (datetime('now'))
+                created_at      TEXT DEFAULT (NOW())
             )
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS pattern_memory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 pattern_hash TEXT,
                 win_rate REAL,
                 occurrences INTEGER,
@@ -995,7 +1083,7 @@ def init_db() -> None:
         """)
         from config import INITIAL_PAPER_BALANCE
         conn.execute(
-            "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
+            "INSERT INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?) ON CONFLICT DO NOTHING",
             (INITIAL_PAPER_BALANCE, INITIAL_PAPER_BALANCE)
         )
         conn.commit()
@@ -1063,7 +1151,7 @@ def migrate_db() -> list[str]:
                         conn.execute(sql)
                         added.append(f"{table}.{col_name}")
                         logger.info("Kolon eklendi: %s.%s", table, col_name)
-                    except sqlite3.OperationalError as exc:
+                    except psycopg2.OperationalError as exc:
                         logger.warning("Kolon eklenemedi %s.%s: %s", table, col_name, exc)
         conn.commit()
     finally:
@@ -1092,7 +1180,7 @@ def ensure_column(table: str, column: str, column_type: str) -> bool:
             conn.commit()
             logger.info("Kolon eklendi: %s.%s", table, column)
             return True
-        except sqlite3.OperationalError as exc:
+        except psycopg2.OperationalError as exc:
             logger.warning("Kolon eklenemedi %s.%s: %s", table, column, exc)
             return False
     finally:
@@ -1897,7 +1985,7 @@ def _migrate():
         ("coin_profiles", "danger_score","REAL DEFAULT 0"),
         ("coin_profiles", "sample_size", "INTEGER DEFAULT 0"),
         ("coin_profiles", "total_trades", "INTEGER DEFAULT 0"),
-        ("coin_profiles", "updated_at",   "TEXT DEFAULT (datetime('now'))"),
+        ("coin_profiles", "updated_at",   "TEXT DEFAULT (NOW())"),
         ("trades", "total_fee",    "REAL DEFAULT 0"),
         ("trades", "setup_quality","TEXT"),
         ("trades", "final_score",  "REAL"),
@@ -2050,7 +2138,7 @@ def get_paper_balance() -> float:
             if row:
                 return float(row[0])
             conn.execute(
-                "INSERT OR IGNORE INTO paper_account (id, balance) VALUES (1, ?)",
+                "INSERT INTO paper_account (id, balance) VALUES (1, ?) ON CONFLICT DO NOTHING",
                 (_default,)
             )
             conn.commit()
@@ -2148,7 +2236,7 @@ def update_paper_balance(
             current = float(row[0])
         else:
             conn.execute(
-                "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
+                "INSERT INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?) ON CONFLICT DO NOTHING",
                 (init_bal, init_bal)
             )
             current = init_bal
@@ -2176,7 +2264,7 @@ def add_ledger_entry(trade_id, symbol, event_type, amount, note=""):
             balance_before = float(row[0])
         else:
             conn.execute(
-                "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
+                "INSERT INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?) ON CONFLICT DO NOTHING",
                 (init_bal, init_bal)
             )
             balance_before = init_bal
@@ -2725,8 +2813,8 @@ def update_system_state(key: str, value: str):
     with get_conn() as conn:
         conn.execute("""
             INSERT INTO system_state (key, value, updated_at)
-            VALUES (?, ?, datetime('now'))
-            ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')
+            VALUES (?, ?, NOW())
+            ON CONFLICT(key) DO UPDATE SET value=?, updated_at=NOW()
         """, (key, value, value))
     try:
         from core import redis_state
@@ -2908,13 +2996,13 @@ def save_telegram_message(sig_id, symbol: str, dedupe_key: str,
         with get_conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS telegram_messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     sig_id TEXT,
                     symbol TEXT,
                     dedupe_key TEXT UNIQUE,
                     text TEXT,
                     status TEXT DEFAULT 'queued',
-                    created_at TEXT DEFAULT (datetime('now'))
+                    created_at TEXT DEFAULT (NOW())
                 )
             """)
             existing = conn.execute(
@@ -2953,14 +3041,14 @@ def save_market_snapshot(data: dict):
         with get_conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS market_snapshots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     symbol TEXT,
                     volume REAL,
                     price REAL,
                     price_change REAL,
                     status TEXT,
                     score REAL,
-                    timestamp TEXT DEFAULT (datetime('now'))
+                    timestamp TEXT DEFAULT (NOW())
                 )
             """)
             conn.execute(
@@ -2978,7 +3066,7 @@ def save_scanned_coin(data: dict):
         with get_conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS scanned_coins (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     symbol TEXT,
                     status TEXT,
                     reason TEXT,
@@ -2986,7 +3074,7 @@ def save_scanned_coin(data: dict):
                     volume REAL,
                     price REAL,
                     price_change REAL,
-                    timestamp TEXT DEFAULT (datetime('now'))
+                    timestamp TEXT DEFAULT (NOW())
                 )
             """)
             conn.execute(
@@ -3065,7 +3153,7 @@ def init_paper_account(reset: bool = False):
             if not existing:
                 init_bal = getattr(config, 'INITIAL_PAPER_BALANCE', 2000.0)
                 conn.execute(
-                    "INSERT OR IGNORE INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?)",
+                    "INSERT INTO paper_account (id, balance, initial_balance) VALUES (1, ?, ?) ON CONFLICT DO NOTHING",
                     (init_bal, init_bal)
                 )
                 logger.info(f"[DB] paper_account oluşturuldu: ${init_bal}")
@@ -3669,12 +3757,12 @@ def ensure_ghost_reject_chain_table() -> None:
     with get_conn() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS ghost_reject_chain (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                id           SERIAL PRIMARY KEY,
                 ghost_id     INTEGER,
                 reject_stage TEXT,
                 reject_reason TEXT,
                 would_have_pnl_r REAL DEFAULT 0,
-                created_at   TEXT DEFAULT (datetime('now'))
+                created_at   TEXT DEFAULT (NOW())
             )
         """)
 
