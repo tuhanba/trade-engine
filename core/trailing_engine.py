@@ -437,18 +437,27 @@ class TrailingEngine:
                                     trade_id, active_sl, new_trail_sl, steps,
                                 )
                 else:  # ATR-based trailing
+                    # NEDEN: SL hesabı current_price değil highest_price (en iyi görülen
+                    # fiyat) baz alınır. LONG için max fiyat, SHORT için min fiyat.
+                    # Bu sayede fiyat geri çekildiğinde SL hareket etmez — kâr kilitlenir.
                     if side == "LONG":
-                        new_trail_sl = current_price - trail_distance
+                        # highest_price = LONG için görülen en yüksek fiyat
+                        new_trail_sl = state.highest_price - trail_distance
                         if new_trail_sl > state.current_sl:
                             state.current_sl = new_trail_sl
                             logger.debug(
-                                "[Trailing] SL güncellendi: #%s %.4f → %.4f",
-                                trade_id, active_sl, new_trail_sl,
+                                "[Trailing] SL güncellendi (LONG, peak-based): #%s %.4f → %.4f (peak=%.4f)",
+                                trade_id, active_sl, new_trail_sl, state.highest_price,
                             )
                     else:
-                        new_trail_sl = current_price + trail_distance
+                        # highest_price = SHORT için görülen en düşük fiyat (satır 279)
+                        new_trail_sl = state.highest_price + trail_distance
                         if state.current_sl == 0 or new_trail_sl < state.current_sl:
                             state.current_sl = new_trail_sl
+                            logger.debug(
+                                "[Trailing] SL güncellendi (SHORT, trough-based): #%s %.4f → %.4f (trough=%.4f)",
+                                trade_id, active_sl, new_trail_sl, state.highest_price,
+                            )
 
         # ── 7. Runner SL vuruldu mu? (trailing devredeyken) ─────────
         if state.trailing_active and state.current_sl > 0:

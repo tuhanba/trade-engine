@@ -636,8 +636,10 @@ function connectWebSocket() {
 
         socket.on('trailing_stop_updated', (data) => {
             const pctChange = ((data.new_sl - data.old_sl) / data.old_sl * 100);
+            // A3: Sadece anlamlı hareketleri göster (>0.5%) — micro-gürültü bastır
+            if (Math.abs(pctChange) < 0.5) return;
             const directionSign = pctChange >= 0 ? '▲' : '▼';
-            const msg = `🚨 <strong>[SL Update]</strong> ${data.symbol} (#${data.trade_id}): Trailing SL moved from <span class="mono">${data.old_sl.toFixed(4)}</span> to <span class="mono">${data.new_sl.toFixed(4)}</span> (${directionSign} ${pctChange.toFixed(2)}%) | Price: <span class="mono">${data.current_price.toFixed(4)}</span>`;
+            const msg = `🔔 <strong>[SL Update]</strong> ${data.symbol} (#${data.trade_id}): Trailing SL moved from <span class="mono">${data.old_sl.toFixed(4)}</span> to <span class="mono">${data.new_sl.toFixed(4)}</span> (${directionSign} ${pctChange.toFixed(2)}%) | Price: <span class="mono">${data.current_price.toFixed(4)}</span>`;
             addExecutionMonitorLog(msg, pctChange >= 0 ? 'success' : 'warning');
         });
 
