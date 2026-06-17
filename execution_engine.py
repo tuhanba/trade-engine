@@ -54,12 +54,71 @@ except Exception:
     TP2_CLOSE_PCT = 30
     RUNNER_CLOSE_PCT = 30
 
+def _calc_exec_quality(trade: dict, close_price: float) -> dict:
+    """
+    Trade kapanışında execution kalitesini ölçer.
+    Döner: {slippage_pct, mfe_util_pct, sl_drift_pct, quality_score}
+    """
+    try:
+        entry = float(trade.get("entry") or trade.get("entry_price") or 0)
+        side  = str(trade.get("direction") or trade.get("side") or "LONG").upper()
+        mfe   = float(trade.get("mfe") or 0)
+        realized_r = float(trade.get("pnl_r") or 0)
+
+        # Giriş kayması: sinyal fiyatından gerçek giriş farkı
+        signal_entry = float(trade.get("signal_entry") or entry)
+        slippage_pct = abs(entry - signal_entry) / signal_entry * 100 if signal_entry > 0 else 0.0
+
+        # MFE kullanım oranı: ne kadar hareketi realize ettik?
+        mfe_util = min(realized_r / mfe, 1.0) if mfe > 0 and realized_r > 0 else 0.0
+
+        # SL sürükleme: orijinal SL'den ne kadar uzaklaştı?
+        initial_sl = float(trade.get("initial_sl") or trade.get("stop_loss") or 0)
+        final_sl   = float(trade.get("stop_loss") or initial_sl)
+        sl_drift_pct = abs(final_sl - initial_sl) / initial_sl * 100 if initial_sl > 0 else 0.0
+
+        # 0-100 kompozit kalite skoru
+        score = max(0.0, min(100.0,
+            100.0
+            - slippage_pct * 10          # slippage cezası
+            - sl_drift_pct * 0.5          # SL sürükleme cezası
+            - (1.0 - mfe_util) * 20       # MFE kullanım boşluğu cezası
+        ))
+        return {
+            "slippage_pct":  round(slippage_pct, 4),
+            "mfe_util_pct":  round(mfe_util * 100, 2),
+            "sl_drift_pct":  round(sl_drift_pct, 4),
+            "quality_score": round(score, 2),
+        }
+    except Exception:
+        return {"slippage_pct": 0, "mfe_util_pct": 0, "sl_drift_pct": 0, "quality_score": 0}
+
+
 # ── Trailing SL Throttle (GÖREV 1) ───────────────────────────────────
 # Canlıda her tick'te Binance API PUT /order çağrısını önler;
 # paper modda gereksiz DB write storm'unu keser.
 MIN_SL_MOVE_PCT = 0.001        # %0.1 — bu kadar hareket etmedikçe yaz
 MIN_SL_UPDATE_INTERVAL = 30    # saniye — son güncellemeden bu kadar geçmedikçe yaz
-_sl_last_update_time: dict = {} # trade_id → float (epoch)
+# _sl_last_update_time artık Redis'te tutulur (restart-safe)
+
+
+def _get_sl_last_update(trade_id) -> float:
+    """Son SL güncelleme zamanını Redis'ten okur. Redis yoksa 0 döner."""
+    try:
+        from core import redis_state
+        v = redis_state.get(f"sl_last_upd:{trade_id}")
+        return float(v) if v is not None else 0.0
+    except Exception:
+        return 0.0
+
+
+def _set_sl_last_update(trade_id, ts: float) -> None:
+    """Son SL güncelleme zamanını Redis'e yazar (TTL: 24h)."""
+    try:
+        from core import redis_state
+        redis_state.set(f"sl_last_upd:{trade_id}", ts, ttl=86400)
+    except Exception:
+        pass
 
 # ── AIDecisionEngine modül önbelleği (her trade kapanışında yeniden init önlenir) ─
 _cached_ai_engine = None
@@ -371,6 +430,18 @@ class ExecutionEngine:
                     trade.get("id"), trade.get("symbol"), exc,
                 )
 
+        # ── Tek toplu broadcast (O(1)) ─────────────────────────────────
+        # Her trade için ayrı broadcast yapmak yerine (O(n²)), tüm
+        # döngü bittikten sonra tek seferde güncel listeyi gönder.
+        if open_trades:
+            try:
+                from websocket_events import event_manager
+                if event_manager:
+                    _bal = database.get_paper_balance() or 0.0
+                    event_manager.broadcast_live_update(database.get_open_trades())
+            except Exception as _e:
+                logger.debug(f"Batch broadcast error: {_e}")
+
     def _process_single_trade(self, trade: dict) -> None:
         """Tek trade'i değerlendirir."""
         trade_id = trade["id"]
@@ -392,14 +463,12 @@ class ExecutionEngine:
         )
         database.update_trade_price(trade_id, current, upnl)
 
-        # Broadcast live PnL and trade updates to WebSocket clients
+        # PnL micro-update (tek trade için anlık)
         try:
             from websocket_events import event_manager
             if event_manager:
                 _bal = database.get_paper_balance() or 0.0
                 event_manager.broadcast_pnl_update(_bal, upnl, trade.get("realized_pnl", 0))
-                # Also broadcast the live trades so the UI table updates current price
-                event_manager.broadcast_live_update(database.get_open_trades())
         except Exception as _e:
             logger.debug(f"Broadcast error in execution engine: {_e}")
 
@@ -442,7 +511,7 @@ class ExecutionEngine:
             _min_move = float(getattr(config, "MIN_SL_MOVE_PCT", MIN_SL_MOVE_PCT))
             # 2. Minimum zaman aralığı kontrolü
             _now = time.time()
-            _last_t = _sl_last_update_time.get(trade_id, 0.0)
+            _last_t = _get_sl_last_update(trade_id)
             _min_interval = float(getattr(config, "MIN_SL_UPDATE_INTERVAL", MIN_SL_UPDATE_INTERVAL))
             _time_ok = (_now - _last_t) >= _min_interval
             _move_ok = _move_pct >= _min_move
@@ -450,7 +519,7 @@ class ExecutionEngine:
             if _move_ok and _time_ok:
                 # Gerçek güncelleme: DB'ye yaz, WS yayınla, log bas
                 database.update_trade_sl(trade_id, new_sl)
-                _sl_last_update_time[trade_id] = _now
+                _set_sl_last_update(trade_id, _now)
                 logger.info(
                     "[SL Update] %s: %.4f → %.4f (▲%.3f%%) | Price: %.4f",
                     symbol, old_sl, new_sl, _move_pct * 100, current
@@ -613,6 +682,17 @@ class ExecutionEngine:
             realized_pnl=total_pnl,
             close_reason=reason,
         )
+
+        # ── Execution kalite skoru ────────────────────────────────────────
+        try:
+            eq = _calc_exec_quality(trade, exit_price)
+            database.update_execution_quality(
+                trade.get("id"),
+                eq["slippage_pct"], eq["mfe_util_pct"],
+                eq["sl_drift_pct"], eq["quality_score"]
+            )
+        except Exception as _eq_e:
+            logger.debug(f"Exec quality kayıt hatası: {_eq_e}")
 
         # ── P0 BUG FIX #1: Bakiye güncellemesi ─────────────────────────────
         # _finalize() sadece eski scalp_bot pipeline'ında çağrılıyordu.

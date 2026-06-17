@@ -8,6 +8,7 @@ import logging
 import config
 from binance.client import Client
 from database import init_db, init_paper_account
+import database
 from core.event_bus import event_bus
 from core.async_market_data import AsyncMarketDataService
 from core.recovery_service import RecoveryService
@@ -129,6 +130,30 @@ class AsyncScalpEngine:
         # Init DB
         await asyncio.to_thread(init_db)
         await asyncio.to_thread(init_paper_account)
+
+        # ── Faz 8 başlangıç init'leri ────────────────────────────────────
+        try:
+            database.ensure_ghost_reject_chain_table()
+            logger.info("[Init] ghost_reject_chain tablosu hazır")
+        except Exception as _e:
+            logger.warning("[Init] ghost_reject_chain init hatası: %s", _e)
+
+        try:
+            database.ensure_exec_quality_columns()
+            logger.info("[Init] execution quality kolonları hazır")
+        except Exception as _e:
+            logger.warning("[Init] exec_quality_columns init hatası: %s", _e)
+
+        try:
+            from core.runtime_config import RuntimeConfig
+            RuntimeConfig.warm_up([
+                "TRADE_THRESHOLD", "TELEGRAM_THRESHOLD", "RISK_PCT",
+                "MAX_OPEN_TRADES", "TRAILING_STOP_TYPE", "CONFIRMATION_MODE",
+                "EXECUTION_MODE", "HUMAN_MODE",
+            ])
+            logger.info("[Init] RuntimeConfig warm-up tamamlandı")
+        except Exception as _e:
+            logger.warning("[Init] RuntimeConfig warm-up hatası: %s", _e)
 
         # Start Prometheus Metrics Server
         start_metrics_server(port=8000)

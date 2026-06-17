@@ -2735,6 +2735,13 @@ def update_system_state(key: str, value: str):
         # Redis senkronu başarısız olsa bile SQLite yazımı geçerli —
         # redis_state.set_param kendi self-heal kuyruğunu yönetir.
         pass
+    # ── RuntimeConfig process cache invalidasyonu ─────────────────────
+    # Param değişince tüm çalışan process'lerin in-memory cache'ini temizle.
+    try:
+        from core.runtime_config import RuntimeConfig
+        RuntimeConfig.invalidate(key)
+    except Exception:
+        pass
 
 
 def get_system_state(key: str, default="-") -> str:
@@ -3651,3 +3658,150 @@ def is_coin_muted(symbol: str) -> bool:
     except Exception as e:
         logger.debug(f"is_coin_muted hatası: {e}")
     return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GHOST REJECT CHAIN (Faz 8.2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def ensure_ghost_reject_chain_table() -> None:
+    """ghost_reject_chain tablosunu oluşturur (yoksa). Engine başlangıcında çağrılır."""
+    with get_conn() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ghost_reject_chain (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                ghost_id     INTEGER,
+                reject_stage TEXT,
+                reject_reason TEXT,
+                would_have_pnl_r REAL DEFAULT 0,
+                created_at   TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+
+def save_ghost_reject(ghost_id: int, stage: str, reason: str, would_have_pnl_r: float = 0.0) -> None:
+    """
+    Reddedilen bir ghost sinyalinin hangi aşamada neden reddedildiğini kaydeder.
+    stage: 'trigger' | 'risk' | 'regime' | 'cooldown' | 'score' | 'var'
+    """
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """INSERT INTO ghost_reject_chain
+                   (ghost_id, reject_stage, reject_reason, would_have_pnl_r)
+                   VALUES (?, ?, ?, ?)""",
+                (ghost_id, stage, reason[:500], would_have_pnl_r)
+            )
+    except Exception as e:
+        logger.debug("[DB] save_ghost_reject hatası: %s", e)
+
+
+def get_ghost_reject_stats(days: int = 30) -> list:
+    """
+    Reject stage × reject_reason bazında istatistik döner.
+    Dashboard ve Friday CEO analizi için.
+    """
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    reject_stage,
+                    reject_reason,
+                    COUNT(*) as total,
+                    AVG(would_have_pnl_r) as avg_pnl_r,
+                    SUM(CASE WHEN would_have_pnl_r > 0 THEN 1 ELSE 0 END) as would_win
+                FROM ghost_reject_chain
+                WHERE created_at >= datetime('now', ?)
+                GROUP BY reject_stage, reject_reason
+                ORDER BY total DESC
+                LIMIT 50
+                """,
+                (f"-{days} days",)
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.debug("[DB] get_ghost_reject_stats hatası: %s", e)
+        return []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXECUTION KALİTE SKORU (Faz 8.3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def ensure_exec_quality_columns() -> None:
+    """
+    trades tablosuna execution kalite kolonlarını ekler (ALTER TABLE, idempotent).
+    Engine başlangıcında çağrılır.
+    """
+    cols_to_add = [
+        ("exec_slippage_pct",  "REAL DEFAULT 0"),
+        ("exec_mfe_util_pct",  "REAL DEFAULT 0"),
+        ("exec_sl_drift_pct",  "REAL DEFAULT 0"),
+        ("exec_quality_score", "REAL DEFAULT 0"),
+    ]
+    try:
+        with get_conn() as conn:
+            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(trades)").fetchall()}
+            for col_name, col_def in cols_to_add:
+                if col_name not in existing_cols:
+                    conn.execute(f"ALTER TABLE trades ADD COLUMN {col_name} {col_def}")
+                    logger.info("[DB] trades.%s kolonu eklendi", col_name)
+    except Exception as e:
+        logger.debug("[DB] ensure_exec_quality_columns hatası: %s", e)
+
+
+def update_execution_quality(
+    trade_id: int,
+    slippage_pct: float,
+    mfe_util_pct: float,
+    sl_drift_pct: float,
+    quality_score: float,
+) -> None:
+    """Trade kapanışında execution kalite skorunu günceller."""
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """UPDATE trades
+                   SET exec_slippage_pct  = ?,
+                       exec_mfe_util_pct  = ?,
+                       exec_sl_drift_pct  = ?,
+                       exec_quality_score = ?
+                   WHERE id = ?""",
+                (slippage_pct, mfe_util_pct, sl_drift_pct, quality_score, trade_id)
+            )
+    except Exception as e:
+        logger.debug("[DB] update_execution_quality hatası: %s", e)
+
+
+def get_execution_quality_report(days: int = 30, limit: int = 20) -> list:
+    """
+    Son N günde symbol bazında ortalama execution kalite skoru.
+    En düşük skorlular önce (iyileştirme hedefleri).
+    """
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    symbol,
+                    COUNT(*) as trade_count,
+                    AVG(exec_quality_score) as avg_quality,
+                    AVG(exec_slippage_pct)  as avg_slippage,
+                    AVG(exec_mfe_util_pct)  as avg_mfe_util,
+                    AVG(exec_sl_drift_pct)  as avg_sl_drift
+                FROM trades
+                WHERE status = 'closed'
+                  AND close_time >= datetime('now', ?)
+                  AND exec_quality_score > 0
+                GROUP BY symbol
+                HAVING trade_count >= 2
+                ORDER BY avg_quality ASC
+                LIMIT ?
+                """,
+                (f"-{days} days", limit)
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.debug("[DB] get_execution_quality_report hatası: %s", e)
+        return []

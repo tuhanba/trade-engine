@@ -42,7 +42,7 @@ _TRACKED_DECISIONS = {
 
 # ── Ghost Learning 2.0 ────────────────────────────────────────────────
 
-def maybe_ghost_log(signal: dict, reason: str) -> None:
+def maybe_ghost_log(signal: dict, reason: str) -> int:
     """
     Reddedilen sinyali ghost_signals tablosuna ekler.
     Confidence > 0.40 olan sinyaller için çalışır (tamamen berbatları alma).
@@ -79,8 +79,10 @@ def maybe_ghost_log(signal: dict, reason: str) -> None:
             "[Ghost2] %s ghost#%d kaydedildi reason=%s",
             _sym, ghost_id, reason
         )
+        return ghost_id
     except Exception as e:
         logger.warning("[Ghost2] maybe_ghost_log hatası: %s", e)
+        return 0
 
 
 
@@ -185,6 +187,37 @@ def _simulate_single_ghost(ghost: dict, client, now: datetime, prices: dict = No
         "[Ghost2] ghost#%d %s %s → %s pnl_r=%.2f",
         ghost_id, symbol, side, outcome, pnl_r
     )
+
+    # ── Reject Chain geriye besleme ──────────────────────────────────────
+    # Reddedilen ghost sinyalin gerçekte WIN/LOSS olacağını kaydet.
+    # Friday CEO bu veriyi "hangi filtremiz fırsat kaçırıyor?" analizinde kullanır.
+    if outcome in ("WIN", "LOSS"):
+        try:
+            from database import save_ghost_reject
+            reject_reason = str(ghost.get("reject_reason") or "").upper()
+            if reject_reason and reject_reason != "ALLOW":
+                # Reject stage'i reason'dan çıkar
+                if "RISK" in reject_reason:
+                    stage = "risk"
+                elif "REGIME" in reject_reason:
+                    stage = "regime"
+                elif "COOLDOWN" in reject_reason:
+                    stage = "cooldown"
+                elif "SCORE" in reject_reason or "LOW" in reject_reason:
+                    stage = "score"
+                elif "SPREAD" in reject_reason or "MARGIN" in reject_reason:
+                    stage = "var"
+                else:
+                    stage = "trigger"
+                save_ghost_reject(
+                    ghost_id=ghost_id,
+                    stage=stage,
+                    reason=reject_reason,
+                    would_have_pnl_r=pnl_r,
+                )
+        except Exception as _rc_e:
+            logger.debug("[Ghost2] Reject chain kayıt hatası: %s", _rc_e)
+    # ────────────────────────────────────────────────────────────────────
 
     # ── SGD Online Learner update ──────────────────────────────────────
     # P1 BUG FIX: reject_reason == "ALLOW" olan kayıtlar gerçek trade'e
@@ -381,6 +414,14 @@ def summarize_ghost_results() -> dict:
 
         p1_total = int(p1["total"] or 0) if p1 else 0
 
+        # ── Reject chain istatistikleri ───────────────────────────────
+        reject_stats = []
+        try:
+            from database import get_ghost_reject_stats
+            reject_stats = get_ghost_reject_stats(days=30)
+        except Exception:
+            pass
+
         return {
             "total":          g2_total,
             "wins":           g2_wins,
@@ -392,6 +433,7 @@ def summarize_ghost_results() -> dict:
             "top_patterns":   top_patterns,
             "paper_v1_total": p1_total,
             "correct_skips":  int(p1["correct_skips"] or 0) if p1 else 0,
+            "reject_chain":   reject_stats,
         }
     except Exception as e:
         logger.error("[Ghost2] summarize_ghost_results hatası: %s", e)
