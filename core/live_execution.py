@@ -145,6 +145,7 @@ class LiveExecutionEngine:
         total_qty = float(qty_str)
         remaining_qty = total_qty
         max_duration = 3.0
+        allow_market_fallback = True
         tick_interval = 0.25 # 250ms
         
         # Calculate chase limits
@@ -178,9 +179,41 @@ class LiveExecutionEngine:
         start_time = time.time()
 
         while (time.time() - start_time) < max_duration and remaining_qty > 0:
-            # 1. Fetch current orderbook
+            # 1. Fetch current orderbook and measure latency (Phase N)
             try:
+                start_ob = time.time()
                 ob = self.client.futures_order_book(symbol=symbol, limit=5)
+                call_latency = int((time.time() - start_ob) * 1000)
+                
+                # Dynamic Endpoint Hot-Swap (Phase N)
+                if call_latency > 300:
+                    logger.warning(f"[Latency Guard] High REST latency detected: {call_latency}ms > 300ms. Triggering Endpoint Hot-Swap...")
+                    try:
+                        from binance.client import Client
+                        current_url = getattr(self.client, "FUTURES_API_URL", "") or getattr(Client, "FUTURES_API_URL", "")
+                        endpoints = [
+                            "https://fapi.binance.com",
+                            "https://fapi.binance.co",
+                            "https://fapi.binance.info",
+                            "https://fapi.binance.net"
+                        ]
+                        clean_curr = str(current_url).rstrip('/')
+                        next_url = endpoints[1]
+                        for idx, ep in enumerate(endpoints):
+                            if ep in clean_curr:
+                                next_url = endpoints[(idx + 1) % len(endpoints)]
+                                break
+                        Client.FUTURES_API_URL = next_url
+                        self.client.FUTURES_API_URL = next_url
+                        logger.warning(f"[Endpoint Hot-Swap] Switched Binance Futures endpoint to: {next_url}")
+                    except Exception as swap_err:
+                        logger.error(f"[Endpoint Hot-Swap] Failed: {swap_err}")
+                        
+                    # Latency-Arbitrage Clutch (disable market fallback)
+                    if allow_market_fallback:
+                        logger.warning("[Latency-Arbitrage Clutch] Disabling market fallback due to high latency.")
+                        allow_market_fallback = False
+                
                 bids = ob.get('bids', [])
                 asks = ob.get('asks', [])
                 if not bids or not asks:
@@ -294,7 +327,8 @@ class LiveExecutionEngine:
         if remaining_qty > 0:
             rem_qty_str = self._format_quantity(symbol, remaining_qty)
             if float(rem_qty_str) > 0:
-                allow_market_fallback = True
+                # Keep allow_market_fallback if it was disabled by the latency clutch
+                allow_market_fallback = allow_market_fallback and True
                 try:
                     from core.market_data import get_current_price
                     curr_price = get_current_price(symbol)

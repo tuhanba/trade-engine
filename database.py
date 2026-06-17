@@ -34,13 +34,17 @@ def retry_on_db_lock(max_retries=5, base_delay=0.05):
         import functools
         import time
         import random
+        import sqlite3 as _sqlite3
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             retries = 0
+            exceptions_to_catch = (_sqlite3.OperationalError,)
+            if psycopg2 is not None:
+                exceptions_to_catch += (psycopg2.OperationalError,)
             while True:
                 try:
                     return func(*args, **kwargs)
-                except psycopg2.OperationalError as e:
+                except exceptions_to_catch as e:
                     err_msg = str(e).lower()
                     if "locked" in err_msg or "busy" in err_msg:
                         retries += 1
@@ -1438,7 +1442,22 @@ def save_signal_candidate(
             ),
         )
         conn.commit()
-        return cur.lastrowid
+        last_id = cur.lastrowid
+        # Redis Hot-Swap Backup (Phase N)
+        try:
+            from core import redis_state
+            candidate_dict = {
+                "id": last_id,
+                "symbol": signal.symbol, "side": signal.side, "entry_price": signal.entry_price,
+                "stop_loss": signal.stop_loss, "tp1": signal.tp1, "tp2": signal.tp2, "tp3": signal.tp3,
+                "score": signal.score, "leverage": signal.leverage, "risk_pct": signal.risk_pct,
+                "decision": decision, "reason": reason, "source": signal.source,
+                "created_at": signal.created_at, "status": status, "metadata": signal.metadata
+            }
+            redis_state.set(f"backup:signal_candidates:{last_id}", candidate_dict)
+        except Exception as re_err:
+            logger.debug(f"[Redis Backup Signal Candidate] failed: {re_err}")
+        return last_id
     except Exception as exc:
         logger.error("Signal candidate kaydedilemedi: %s", exc)
         return None
@@ -1722,25 +1741,48 @@ def get_open_trades(environment: str | None = None) -> list[dict]:
         except Exception:
             pass
 
-    conn = get_connection()
     try:
-        rows = conn.execute(
-            "SELECT * FROM trades WHERE LOWER(status) IN ('open','tp1_hit','runner') AND environment = ? ORDER BY open_time DESC",
-            (environment,)
-        ).fetchall()
-        result = [dict(r) for r in rows]
-        if not is_testing:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE LOWER(status) IN ('open','tp1_hit','runner') AND environment = ? ORDER BY open_time DESC",
+                (environment,)
+            ).fetchall()
+            result = [dict(r) for r in rows]
+            if not is_testing:
+                try:
+                    from core import redis_state
+                    redis_state.set(cache_key, result, ttl=5)
+                except Exception:
+                    pass
+            return result
+        except Exception as exc:
+            logger.error("Open trades alınamadı: %s", exc)
+            # Fallback to Redis Backup (Phase N)
             try:
                 from core import redis_state
-                redis_state.set(cache_key, result, ttl=5)
+                backup = redis_state.get("backup:open_trades")
+                if backup is not None:
+                    filtered = [t for t in backup if t.get("environment") == environment]
+                    logger.info(f"[Redis Hot-Swap Backup] Recovered {len(filtered)} open trades from Redis.")
+                    return filtered
             except Exception:
                 pass
-        return result
-    except Exception as exc:
-        logger.error("Open trades alınamadı: %s", exc)
+            return []
+        finally:
+            conn.close()
+    except Exception as outer_exc:
+        # Fallback to Redis Backup if connection fails
+        try:
+            from core import redis_state
+            backup = redis_state.get("backup:open_trades")
+            if backup is not None:
+                filtered = [t for t in backup if t.get("environment") == environment]
+                logger.info(f"[Redis Hot-Swap Backup] SQLite connection failed, recovered {len(filtered)} open trades from Redis.")
+                return filtered
+        except Exception:
+            pass
         return []
-    finally:
-        conn.close()
 
 
 def get_recent_trades(limit: int = 100, environment: str | None = None) -> list[dict]:
@@ -1793,15 +1835,36 @@ def get_recent_signals(limit: int = 100) -> list[dict]:
 
 def get_trade_by_id(trade_id: int) -> Optional[dict]:
     """ID ile trade getirir."""
-    conn = get_connection()
     try:
-        row = conn.execute("SELECT * FROM trades WHERE id = ?", (trade_id,)).fetchone()
-        return dict(row) if row else None
-    except Exception as exc:
-        logger.error("Trade getirilemedi [%s]: %s", trade_id, exc)
+        conn = get_connection()
+        try:
+            row = conn.execute("SELECT * FROM trades WHERE id = ?", (trade_id,)).fetchone()
+            return dict(row) if row else None
+        except Exception as exc:
+            logger.error("Trade getirilemedi [%s]: %s", trade_id, exc)
+            # Fallback to Redis Backup (Phase N)
+            try:
+                from core import redis_state
+                backup = redis_state.get(f"backup:trades:{trade_id}")
+                if backup:
+                    logger.info(f"[Redis Hot-Swap Backup] Recovered trade #{trade_id} from Redis.")
+                    return backup
+            except Exception:
+                pass
+            return None
+        finally:
+            conn.close()
+    except Exception as outer_exc:
+        # Fallback to Redis Backup if connection itself fails
+        try:
+            from core import redis_state
+            backup = redis_state.get(f"backup:trades:{trade_id}")
+            if backup:
+                logger.info(f"[Redis Hot-Swap Backup] SQLite connection failed, recovered trade #{trade_id} from Redis.")
+                return backup
+        except Exception:
+            pass
         return None
-    finally:
-        conn.close()
 
 
 def get_partial_closes(trade_id: int) -> list[dict]:
@@ -2254,6 +2317,19 @@ def _get_trade_columns(conn):
     return _TRADE_COLUMNS
 
 
+def _sync_open_trades_backup(conn):
+    try:
+        from core import redis_state
+        cursor = conn.execute("SELECT * FROM trades WHERE status = 'OPEN'")
+        cols = [col[0] for col in cursor.description]
+        open_trades = []
+        for row in cursor.fetchall():
+            open_trades.append(dict(zip(cols, row)))
+        redis_state.set("backup:open_trades", open_trades)
+    except Exception as e:
+        logger.debug(f"[Redis Backup Open Trades] Sync failed: {e}")
+
+
 def save_trade(trade: dict) -> int:
     with get_conn() as conn:
         cols = _get_trade_columns(conn)
@@ -2268,6 +2344,18 @@ def save_trade(trade: dict) -> int:
         )
         trade_id = cursor.lastrowid
         logger.info(f"[DB] Trade #{trade_id} kaydedildi: {trade.get('symbol')}")
+        
+        # Redis Hot-Swap Backup (Phase N)
+        try:
+            from core import redis_state
+            full_trade = dict(trade)
+            full_trade["id"] = trade_id
+            redis_state.set(f"backup:trades:{trade_id}", full_trade)
+            if full_trade.get("status", "OPEN").upper() == "OPEN":
+                _sync_open_trades_backup(conn)
+        except Exception as re_err:
+            logger.debug(f"[Redis Backup Trade] Sync failed: {re_err}")
+            
         return trade_id
 
 
@@ -2282,6 +2370,16 @@ def update_trade(trade_id: int, updates: dict):
             f"UPDATE trades SET {set_clause} WHERE id = ?",
             list(filtered.values()) + [trade_id]
         )
+        
+        # Redis Hot-Swap Backup (Phase N)
+        try:
+            from core import redis_state
+            existing = get_trade_by_id(trade_id)
+            if existing:
+                redis_state.set(f"backup:trades:{trade_id}", existing)
+            _sync_open_trades_backup(conn)
+        except Exception as re_err:
+            logger.debug(f"[Redis Backup Trade] Update failed: {re_err}")
 
 
 def get_closed_trades(limit: int = 200, valid_only: bool = True, environment: str | None = None) -> list:
@@ -2548,7 +2646,7 @@ def save_scalp_signal(data: dict, decision: str = "ALLOW"):
 def save_signal_candidate_dict(data: dict):
     """Dict tabanlı sinyal adayını signal_candidates tablosuna kaydeder."""
     with get_conn() as conn:
-        conn.execute("""
+        cursor = conn.execute("""
             INSERT INTO signal_candidates
                 (uuid, symbol, direction, entry, sl, tp1, tp2, tp3,
                  setup_quality, final_score, decision, reason, market_regime,
@@ -2566,6 +2664,18 @@ def save_signal_candidate_dict(data: dict):
             data.get("volume", 0),
             data.get("volatility", 0),
         ))
+        last_id = cursor.lastrowid
+        # Redis Hot-Swap Backup (Phase N)
+        try:
+            from core import redis_state
+            full_data = dict(data)
+            if last_id:
+                full_data["id"] = last_id
+                redis_state.set(f"backup:signal_candidates:{last_id}", full_data)
+            if data.get("uuid"):
+                redis_state.set(f"backup:signal_candidates:uuid:{data.get('uuid')}", full_data)
+        except Exception as re_err:
+            logger.debug(f"[Redis Backup Signal Candidate Dict] failed: {re_err}")
 
 
 def get_active_scalp_signals(limit: int = 100) -> list:
@@ -3040,9 +3150,8 @@ def update_system_state(key: str, value: str):
     try:
         from core import redis_state
         redis_state.set_param(key, value)
+        redis_state.set(f"backup:system_state:{key}", value)
     except Exception:
-        # Redis senkronu başarısız olsa bile SQLite yazımı geçerli —
-        # redis_state.set_param kendi self-heal kuyruğunu yönetir.
         pass
     # ── RuntimeConfig process cache invalidasyonu ─────────────────────
     # Param değişince tüm çalışan process'lerin in-memory cache'ini temizle.
@@ -3061,8 +3170,17 @@ def get_system_state(key: str, default="-") -> str:
             ).fetchone()
             if row:
                 return str(row[0])
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error("system_state read failed for key=%s: %s", key, exc)
+        # Fallback to Redis Backup (Phase N)
+        try:
+            from core import redis_state
+            backup = redis_state.get(f"backup:system_state:{key}")
+            if backup is not None:
+                logger.info(f"[Redis Hot-Swap Backup] Recovered system_state key={key} from Redis.")
+                return str(backup)
+        except Exception:
+            pass
     return default
 
 
@@ -3210,6 +3328,7 @@ def reset_paper_data(force_delete=False):
 # TELEGRAM MESAJ TABLOSU
 # ─────────────────────────────────────────────────────────────────────────────
 
+@retry_on_db_lock()
 def save_telegram_message(sig_id, symbol: str, dedupe_key: str,
                           text: str, status: str = "queued") -> bool:
     """Telegram mesajını kuyruğa yaz. Duplicate dedupe_key'i reddeder."""
@@ -3242,6 +3361,7 @@ def save_telegram_message(sig_id, symbol: str, dedupe_key: str,
         return False
 
 
+@retry_on_db_lock()
 def mark_telegram_message_sent(dedupe_key: str):
     try:
         with get_conn() as conn:
@@ -3251,6 +3371,42 @@ def mark_telegram_message_sent(dedupe_key: str):
             )
     except Exception as e:
         logger.warning(f"[DB] mark_telegram_message_sent hatası: {e}")
+
+
+@retry_on_db_lock()
+def mark_telegram_message_failed(dedupe_key: str):
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE telegram_messages SET status = 'failed' WHERE dedupe_key = ?",
+                (dedupe_key,)
+            )
+    except Exception as e:
+        logger.warning(f"[DB] mark_telegram_message_failed hatası: {e}")
+
+
+@retry_on_db_lock()
+def check_telegram_message_exists(dedupe_key: str) -> bool:
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS telegram_messages (
+                    id SERIAL PRIMARY KEY,
+                    sig_id TEXT,
+                    symbol TEXT,
+                    dedupe_key TEXT UNIQUE,
+                    text TEXT,
+                    status TEXT DEFAULT 'queued',
+                    created_at TEXT DEFAULT (NOW())
+                )
+            """)
+            row = conn.execute(
+                "SELECT 1 FROM telegram_messages WHERE dedupe_key = ?", (dedupe_key,)
+            ).fetchone()
+            return row is not None
+    except Exception as e:
+        logger.warning(f"[DB] check_telegram_message_exists hatası: {e}")
+        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -331,6 +331,7 @@ _DYNAMIC_PARAMS_MAP = {
     "WEEKLY_PROFIT_LOCK_PCT":         ("weekly_profit_lock_pct", float),
     "RSI_LIMIT":                      ("rsi_limit", float),
     "CVD_FILTER_VAL":                 ("cvd_filter_val", float),
+    "TRAIL_ATR_MULT":                 ("trail_atr_mult", float),
     "MACRO_GUARD_ENABLED":            ("macro_guard_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
     "LATENCY_GUARD_ENABLED":          ("latency_guard_enabled", lambda v: v.strip().lower() in ("true", "1", "yes")),
     "BYPASS_LIVE_RISK_SHIELDS":       ("bypass_live_risk_shields", lambda v: v.strip().lower() in ("true", "1", "yes")),
@@ -428,6 +429,9 @@ def __getattr__(name: str) -> Any:
                 # Trade açlığı varsa daha da gevşet
                 if starvation:
                     val = max(15.0, val - 8.0)  # Min 15.0 (SHORT veto eşiği = RSI>85)
+                # Q-Learning shift
+                rl_shift = float(database.get_system_state("rl_rsi_limit_shift") or 0.0)
+                val += rl_shift
             except Exception:
                 pass
         elif name == "CVD_FILTER_VAL":
@@ -444,6 +448,17 @@ def __getattr__(name: str) -> Any:
                 # Trade açlığı varsa daha da gevşet
                 if starvation:
                     val = min(-0.40, val - 0.15)  # Max -0.40 (çok permissive)
+                # Q-Learning shift
+                rl_shift = float(database.get_system_state("rl_cvd_filter_shift") or 0.0)
+                val += rl_shift
+            except Exception:
+                pass
+        elif name == "TRAIL_ATR_MULT":
+            try:
+                import database
+                # Q-Learning shift
+                rl_shift = float(database.get_system_state("rl_trail_mult_shift") or 0.0)
+                val += rl_shift
             except Exception:
                 pass
         elif name == "TRADE_THRESHOLD":

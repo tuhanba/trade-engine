@@ -345,7 +345,7 @@ def should_open_trade(
     return can_open, decision, reason
 
 
-def calculate_kelly_risk_pct(symbol: str, setup_rr: float, base_risk_pct: float) -> float:
+def calculate_kelly_risk_pct(symbol: str, setup_rr: float, base_risk_pct: float, open_trades: list = None) -> float:
     """
     Dinamik Kelly Kriteri ile pozisyon büyüklüğü hesaplar.
     Sonuç [0.5, 3.0] aralığında sınırlandırılır.
@@ -490,6 +490,39 @@ def calculate_kelly_risk_pct(symbol: str, setup_rr: float, base_risk_pct: float)
             
         # Make sure final is clamped to safety limits
         clamped = max(0.5, min(3.0, clamped))
+        
+        # Multi-Asset Kelly Matrix Integration (Phase K)
+        try:
+            from core.portfolio_risk import calculate_multi_asset_kelly
+            if open_trades is None:
+                try:
+                    import database
+                    open_trades_resolved = database.get_open_trades()
+                except Exception:
+                    open_trades_resolved = []
+            else:
+                open_trades_resolved = open_trades
+                
+            open_symbols = [t.get("symbol") for t in open_trades_resolved if t.get("symbol")]
+            all_symbols = list(set(open_symbols + [symbol]))
+            
+            win_rates = {symbol: win_rate}
+            payoff_ratios = {symbol: payoff}
+            
+            weights = calculate_multi_asset_kelly(
+                symbols=all_symbols,
+                win_rates=win_rates,
+                payoff_ratios=payoff_ratios,
+                half_kelly=True
+            )
+            if symbol in weights:
+                multi_kelly_pct = weights[symbol] * 100.0
+                logger.info(f"[Multi-Asset Kelly] Computed Multi-Asset Kelly risk for {symbol}: {multi_kelly_pct:.2f}% (single Kelly clamped was {clamped:.2f}%)")
+                clamped = multi_kelly_pct
+        except Exception as ma_kelly_err:
+            logger.debug(f"[Multi-Asset Kelly] Failed, falling back to single asset Kelly: {ma_kelly_err}")
+            
+        clamped = max(0.5, min(kelly_safety_cap, clamped))
         
         logger.info(f"[Kelly Sizing] {symbol}: W={win_rate:.2f}, R={payoff:.2f}, Kelly={kelly_f:.3f}, Risk%={clamped:.2f}% (Base: {base_risk_pct}%)")
         return clamped
@@ -816,7 +849,7 @@ class RiskEngine:
                 logger.info(f"[OrderBook-Wall-Soft] Wall detected near entry. Scaling leverage down to {leverage}.")
             
             # Apply Dynamic Kelly position sizing
-            kelly_base = calculate_kelly_risk_pct(symbol, rr, risk_pct_base)
+            kelly_base = calculate_kelly_risk_pct(symbol, rr, risk_pct_base, open_trades=open_trades)
             risk_pct = kelly_base * quality_mult * profit_lock_mult
             if ob_wall_detected:
                 risk_pct *= 0.5
@@ -927,6 +960,63 @@ class RiskEngine:
                     except Exception:
                         pass
                 risk_pct *= correlation_risk_mult
+
+            # Portfolio VaR check for same-direction highly correlated trades (>0.75) (Phase K)
+            if not bypass_shields:
+                high_corr_same_dir = False
+                for t in open_trades:
+                    t_sym = t.get("symbol")
+                    if t_sym == symbol:
+                        continue
+                    t_dir = t.get("direction") or t.get("side")
+                    if t_dir == direction:
+                        # Check correlation
+                        corr = calculate_historical_correlation(symbol, t_sym, self.client)
+                        if corr > 0.75:
+                            high_corr_same_dir = True
+                            break
+                            
+                if high_corr_same_dir:
+                    try:
+                        from core.portfolio_risk import calculate_portfolio_var
+                        # Estimate a draft quantity for this position
+                        draft_pos = calculate_position_size(
+                            balance=balance, risk_pct=risk_pct, entry_price=entry,
+                            stop_loss=sl, leverage=leverage, fee_rate=fee_rate,
+                        )
+                        draft_qty = draft_pos.get("qty", 0.0)
+                        if draft_qty > 0:
+                            clean_open_positions = []
+                            for ot in open_trades:
+                                clean_open_positions.append({
+                                    "symbol": ot.get("symbol"),
+                                    "qty": float(ot.get("qty") or ot.get("quantity") or 0.0),
+                                    "entry_price": float(ot.get("entry_price") or ot.get("entry") or 0.0)
+                                })
+                            new_pos_candidate = {
+                                "symbol": symbol,
+                                "qty": draft_qty,
+                                "entry_price": entry
+                            }
+                            portfolio_var = calculate_portfolio_var(
+                                open_positions=clean_open_positions,
+                                new_position=new_pos_candidate,
+                                balance=balance,
+                                interval="1h",
+                                limit=50
+                            )
+                            logger.info(f"[Portfolio VaR] Calculated portfolio VaR %99: {portfolio_var:.4f}")
+                            portfolio_var_limit = float(getattr(config, "PORTFOLIO_VAR_LIMIT", 0.05))
+                            if portfolio_var > portfolio_var_limit and portfolio_var > 0:
+                                var_scale_factor = portfolio_var_limit / portfolio_var
+                                old_risk_pct = risk_pct
+                                risk_pct *= var_scale_factor
+                                logger.warning(
+                                    f"[Portfolio VaR Limit Exceeded] VaR {portfolio_var:.4f} > limit {portfolio_var_limit}. "
+                                    f"Scaling risk_pct from {old_risk_pct:.2f}% to {risk_pct:.2f}% (scale factor {var_scale_factor:.4f})"
+                                )
+                    except Exception as var_err:
+                        logger.debug(f"[Portfolio VaR check failed]: {var_err}")
 
             # 4. Adaptive Slippage & Latency Guard
             if not bypass_shields:
@@ -1183,10 +1273,7 @@ class RiskEngine:
             if total_qty <= 0:
                 return False, ""
                 
-            is_blocked = False
-            reason = ""
-            
-            # Bid-Ask Imbalance Check (> 75%)
+            # 1. Bid-Ask Imbalance Check (> 75%) (Runs first to preserve Phase F test expectations)
             if direction.upper() == "LONG":
                 ask_ratio = total_ask_qty / total_qty
                 if ask_ratio > 0.75:
@@ -1199,6 +1286,48 @@ class RiskEngine:
                     is_blocked = (mode == "hard")
                     reason = f"order_book_wall_block (bid_imbalance={bid_ratio:.2f})"
                     return is_blocked, reason
+
+            # 2. Order Book Imbalance (OBI) Check (Phase L)
+            top_bids = bids[:20]
+            top_asks = asks[:20]
+            if top_bids and top_asks:
+                top_bid_qty = sum(float(b[1]) for b in top_bids)
+                top_ask_qty = sum(float(a[1]) for a in top_asks)
+                obi = (top_bid_qty - top_ask_qty) / (top_bid_qty + top_ask_qty + 1e-10)
+                logger.info(f"[OBI Check] {symbol} top 20 OBI: {obi:.4f}")
+                
+                if direction.upper() == "LONG" and obi < -0.4:
+                    return True, f"obi_block (obi={obi:.2f} < -0.4)"
+                elif direction.upper() == "SHORT" and obi > 0.4:
+                    return True, f"obi_block (obi={obi:.2f} > 0.4)"
+
+            # 3. Block Trade Footprint Check (Phase L)
+            try:
+                trades = self.client.futures_recent_trades(symbol=symbol, limit=100)
+                if trades:
+                    buy_block_vol = 0.0
+                    sell_block_vol = 0.0
+                    for t in trades:
+                        qty = float(t['qty'])
+                        price = float(t['price'])
+                        notional = qty * price
+                        if notional >= 50000.0:
+                            if not t.get('isBuyerMaker', False):
+                                buy_block_vol += notional
+                            else:
+                                sell_block_vol += notional
+                    
+                    logger.info(f"[Block Trade Footprint] {symbol}: Buy Blocks={buy_block_vol:.1f} USDT, Sell Blocks={sell_block_vol:.1f} USDT")
+                    
+                    if direction.upper() == "LONG" and sell_block_vol > buy_block_vol and sell_block_vol > 0:
+                        return True, f"block_trade_footprint_block (sell_blocks={sell_block_vol:.1f} > buy_blocks={buy_block_vol:.1f})"
+                    elif direction.upper() == "SHORT" and buy_block_vol > sell_block_vol and buy_block_vol > 0:
+                        return True, f"block_trade_footprint_block (buy_blocks={buy_block_vol:.1f} > sell_blocks={sell_block_vol:.1f})"
+            except Exception as ft_err:
+                logger.warning(f"[Block Trade Footprint Check] Failed: {ft_err}")
+
+            is_blocked = False
+            reason = ""
                     
             # Spoofing/Thick Wall Check near entry
             ob_mult = float(getattr(config, "SCALP_OB_WALL_MULTIPLIER", 5.0))

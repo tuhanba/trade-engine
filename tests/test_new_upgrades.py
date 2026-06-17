@@ -824,6 +824,13 @@ def test_friday_sector_guard():
             environment TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE system_state (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT
+        )
+    """)
     # Insert 2 open trades in MEME sector (DOGE, SHIB)
     conn.execute("INSERT INTO trades (symbol, status, environment) VALUES ('DOGEUSDT', 'OPEN', 'paper')")
     conn.execute("INSERT INTO trades (symbol, status, environment) VALUES ('SHIBUSDT', 'OPEN', 'paper')")
