@@ -644,9 +644,13 @@ def api_ml_status():
 def api_logs():
     import re
     LOG_PATHS = [
+        # ── Faz 8: Engine ve Dashboard aynı /app klasöründen çalışıyorsa paylaşımlı log ──
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "bot.log"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "bot.log"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.log"),
         os.path.join(getattr(config, "LOG_DIR", "logs"), "ax_bot.log"),
+        os.path.join(getattr(config, "LOG_DIR", "logs"), "bot.log"),
+        "/root/trade-engine/logs/bot.log",
         "/root/trade_engine/logs/ax_bot.log",
         "/root/trade_engine/logs/bot.log",
         "/root/trade_engine/bot.log",
@@ -720,6 +724,92 @@ def api_logs():
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e), "data": []}), 500
+
+
+# ── /api/execution_quality ────────────────────────────────────────────────────
+@app.route("/api/execution_quality")
+def api_execution_quality():
+    """Coin bazında execution kalite skoru raporu (Faz 8.3).
+
+    En düşük skorlu coinler önce gelir — iyileştirme hedeflerini gösterir.
+    Parametreler:
+      days  (int, default=30): Kaç günlük trade'lere bak
+      limit (int, default=20): Kaç coin dönsün
+    """
+    try:
+        days  = int(request.args.get("days",  30))
+        limit = int(request.args.get("limit", 20))
+        data  = database.get_execution_quality_report(days=days, limit=limit)
+
+        # Toplam ortalama da hesapla
+        overall = {}
+        if data:
+            keys = ["avg_quality", "avg_slippage", "avg_mfe_util", "avg_sl_drift"]
+            for k in keys:
+                vals = [r.get(k) or 0 for r in data]
+                overall[k] = round(sum(vals) / len(vals), 3) if vals else 0
+
+        return jsonify({
+            "ok":      True,
+            "data":    data,
+            "overall": overall,
+            "days":    days,
+            "total":   len(data),
+        })
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+# ── /api/ghost_reject_stats ───────────────────────────────────────────────────
+@app.route("/api/ghost_reject_stats")
+def api_ghost_reject_stats():
+    """Ghost reject chain istatistikleri — hangi filtre fırsat kaçırıyor? (Faz 8.2)
+
+    Her reject stage × reason kombinasyonu için:
+    - Toplam reddedilen ghost sinyal sayısı
+    - Ortalama simüle P&L (pozitif = kaçırılan fırsat)
+    - Kazanacak olanların sayısı (would_win)
+
+    Parametreler:
+      days (int, default=30): Analiz penceresi
+    """
+    try:
+        days  = int(request.args.get("days", 30))
+        stats = database.get_ghost_reject_stats(days=days)
+
+        # Özet: stage bazında toplam
+        by_stage: dict = {}
+        for row in stats:
+            stage = row.get("reject_stage", "unknown")
+            if stage not in by_stage:
+                by_stage[stage] = {"total": 0, "would_win": 0, "avg_pnl_r": []}
+            by_stage[stage]["total"]    += row.get("total", 0)
+            by_stage[stage]["would_win"] += row.get("would_win", 0)
+            pnl = row.get("avg_pnl_r")
+            if pnl is not None:
+                by_stage[stage]["avg_pnl_r"].append(float(pnl))
+
+        stage_summary = [
+            {
+                "stage":      s,
+                "total":      v["total"],
+                "would_win":  v["would_win"],
+                "avg_pnl_r":  round(sum(v["avg_pnl_r"]) / len(v["avg_pnl_r"]), 3)
+                              if v["avg_pnl_r"] else 0,
+            }
+            for s, v in sorted(by_stage.items(), key=lambda x: -x[1]["total"])
+        ]
+
+        return jsonify({
+            "ok":           True,
+            "data":         stats,
+            "stage_summary": stage_summary,
+            "days":         days,
+            "total_rows":   len(stats),
+        })
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
 
 # ── /api/telegram_logs ────────────────────────────────────────────────────────
 @app.route("/api/telegram_logs")
