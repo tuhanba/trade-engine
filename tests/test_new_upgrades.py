@@ -1052,20 +1052,30 @@ def test_live_correlation_guard():
     
     mock_client.futures_klines.side_effect = lambda symbol, interval, limit: k_a if symbol == "BTCUSDT" else k_b
 
-    risk_engine = RiskEngine(mock_client, db_path="trading.db")
+    temp_db = "temp_correlation_test.db"
+    if os.path.exists(temp_db):
+        try: os.remove(temp_db)
+        except Exception: pass
+
+    risk_engine = RiskEngine(mock_client, db_path=temp_db)
 
     open_trades = [
         {"symbol": "BTCUSDT", "direction": "LONG", "margin_used": 10.0}
     ]
 
-    with patch("database.get_open_trades", return_value=open_trades), \
-         patch("database.get_system_state", return_value="-"):
-         
-        # Calculate correlation for ETHUSDT vs open trade BTCUSDT
-        # Since they are perfectly correlated (1.0), it should be blocked (> 0.85)
-        res = risk_engine.calculate("ETHUSDT", "LONG", 3000.0, "A", 1000.0)
-        assert res["valid"] is False
-        assert res["risk_reject_reason"] == "high_correlation_block"
+    try:
+        with patch("database.get_open_trades", return_value=open_trades), \
+             patch("database.get_system_state", return_value="-"):
+             
+            # Calculate correlation for ETHUSDT vs open trade BTCUSDT
+            # Since they are perfectly correlated (1.0), it should be blocked (> 0.85)
+            res = risk_engine.calculate("ETHUSDT", "LONG", 3000.0, "A", 1000.0)
+            assert res["valid"] is False
+            assert res["risk_reject_reason"] == "high_correlation_block"
+    finally:
+        if os.path.exists(temp_db):
+            try: os.remove(temp_db)
+            except Exception: pass
 
 
 def test_liquidity_sweep_detector():
@@ -1150,12 +1160,14 @@ def test_momentum_based_trailing_tp3_bypass():
 
     # 2. Under trending matching regime (BULLISH for LONG), hitting TP3 should bypass full close,
     # partial close half of the remaining (15%), and continue trailing
-    with patch("database.get_market_regime", return_value="BULLISH"):
+    with patch("database.get_market_regime", return_value="BULLISH"), \
+         patch("config.LET_IT_RUN_ENABLED", False, create=True), \
+         patch("config.CHANDELIER_EXIT_ENABLED", True, create=True):
         res = engine.evaluate(trade, 58100.0, state, atr=1000.0)
         assert res.should_full_close is False
         assert res.should_partial_close is True
         assert res.close_pct == 15.0
-        assert res.reason == "TP3_TRENDING_PARTIAL"
+        assert res.reason == "TP3_CHANDELIER_ACTIVE"
         assert state.trailing_active is True
 
 

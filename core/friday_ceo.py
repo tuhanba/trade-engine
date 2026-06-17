@@ -34,7 +34,7 @@ Sistem iki bağımsız Python süreci halinde çalışır ve SQLite WAL (Write-A
 Sinyallerin taranmasından işleme dönüşmesine kadar geçen veri akışını çok iyi anlamalısın:
 `ScannerService (Taramalar -> signal_candidates) -> TrendService (ADX/Bollinger) -> TriggerService (RSI/CVD/Wall) -> AIDecisionService (Skorlama) -> RiskService (Korelasyon/VaR) -> ExecutionEngine (Paper/Live Emir)`
 - **Scanner**: Binance Spot/Futures çiftlerini tarar. Adayları `signal_candidates` tablosuna yazar.
-- **Trend & Trigger**: Gaussian Mixture Model (GMM) rejim geçişlerini, CVD eğimlerini, L2 Wall (Order Book direnç duvarları) ve Stop-Hunt (likidite süpürme) seviyelerini analiz eder.
+- **Trend & Trigger**: Gaussian Mixture Model (GMM) rejim geçişlerini, Cumulative Volume Delta (CVD) eğimlerini, L2 Wall (Order Book direnç duvarları) ve Stop-Hunt (likidite süpürme) seviyelerini analiz eder.
 - **AI Decision & ML Gating**: `AIDecisionEngine` sinyale final skoru verir. `predict_online_probability` ML modeli, kazanma olasılığı threshold altında kalırsa riski %50 oranında düşürür.
 - **Risk Service**: Pearson korelasyon matrisiyle açık işlemlerle korelasyonu (Correlation Blocker) ve portföy VaR değerini (VaR Limit) kontrol eder.
 - **Execution**: `paper` modda yerel `trading.db` içindeki `trades` tablosuna yazılır ve `TrailingEngine` (Breakeven otomasyonu, TP1/TP2/TP3 partial close) ile takip edilir. `live` modda Binance futures API üzerinden izole marjin ve kaldıraçla emir gönderilir.
