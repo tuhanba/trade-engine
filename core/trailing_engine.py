@@ -239,7 +239,7 @@ class TrailingEngine:
                                 computed_sl = initial_sl + (entry - initial_sl) * decay_factor
                                 
                                 if side == "LONG":
-                                    if computed_sl > active_sl:
+                                    if active_sl == 0 or computed_sl > active_sl:
                                         logger.info(
                                             "[Trailing] Time Decay SL (LONG): #%s %s elapsed=%.1fm, "
                                             "Initial SL=%.4f, Entry=%.4f, Active SL=%.4f -> Decayed SL=%.4f",
@@ -290,7 +290,10 @@ class TrailingEngine:
                 if side == "LONG":
                     new_sl = max(active_sl, entry + be_offset)
                 else:
-                    new_sl = min(active_sl, entry - be_offset) if active_sl > 0 else entry - be_offset
+                    # B3 FIX: SHORT için breakeven = entry + offset (fiyat entry'e dönerse kapat)
+                    # Eski kod entry - offset kullanıyordu → SL yanlış tarafta kalıyordu
+                    be_sl = entry + be_offset
+                    new_sl = min(active_sl, be_sl) if active_sl > 0 else be_sl
                 state.breakeven_set = True
                 logger.info(
                     "[Trailing] TP1 hit → Breakeven SL: #%s %s  SL=%.4f → %.4f",
@@ -298,15 +301,25 @@ class TrailingEngine:
                 )
 
             state.current_sl = new_sl
-            state.qty_remaining_pct -= self.tp1_close_pct
+
+            # B4: Trending rejimde TP1'de daha az kapat — runner daha büyük kalsın
+            # Normal: %40 kapat. Trending: %20 kapat (%80 pozisyon devam eder)
+            tp1_actual_pct = self.tp1_close_pct
+            if is_trending_matching:
+                tp1_actual_pct = max(20.0, self.tp1_close_pct * 0.5)
+                logger.info(
+                    "[Trailing] TP1 (trending): Partial close azaltıldı %.0f%% → %.0f%% #%s %s",
+                    self.tp1_close_pct, tp1_actual_pct, trade_id, symbol,
+                )
+            state.qty_remaining_pct -= tp1_actual_pct
 
             logger.info(
-                "[Trailing] TP1 vuruldu: #%s %s @ %.4f  Partial close %s%%",
-                trade_id, symbol, current_price, self.tp1_close_pct,
+                "[Trailing] TP1 vuruldu: #%s %s @ %.4f  Partial close %.0f%%",
+                trade_id, symbol, current_price, tp1_actual_pct,
             )
             return PartialCloseResult(
                 should_partial_close=True,
-                close_pct=self.tp1_close_pct,
+                close_pct=tp1_actual_pct,
                 close_at_price=current_price,
                 reason="TP1_HIT",
                 new_sl=new_sl,
@@ -326,9 +339,17 @@ class TrailingEngine:
                     trade_id, symbol, state.current_sl, new_sl,
                 )
             else:
-                # ATR-bazlı trailing stop
+                # ATR-bazlı trailing stop — B2: Volatilite-normalize trail mesafesi
                 if atr and atr > 0:
-                    dynamic_mult = self.trail_atr_mult * 0.8 if is_trending_matching else self.trail_atr_mult
+                    # B2: ATR'yi fiyata bölerek normalize et; yüksek vol'da geniş, düşük'te dar trail
+                    atr_pct = atr / current_price if current_price > 0 else 0
+                    if atr_pct > 0.025:    # Yüksek volatilite → geniş trail (erken çıkma)
+                        vol_factor = 1.3
+                    elif atr_pct < 0.010:  # Düşük volatilite → dar trail (kârı koru)
+                        vol_factor = 0.8
+                    else:
+                        vol_factor = 1.0
+                    dynamic_mult = self.trail_atr_mult * (0.8 if is_trending_matching else 1.0) * vol_factor
                     trail_distance = atr * dynamic_mult
                     if side == "LONG":
                         new_sl = max(state.current_sl, current_price - trail_distance)
@@ -355,27 +376,45 @@ class TrailingEngine:
         # ── 5. TP3 / Runner kontrolü ─────────────────────────────────
         if tp3 > 0 and state.tp2_hit and not state.tp3_hit and self._tp_hit(side, current_price, tp3):
             chandelier_enabled = getattr(config, "CHANDELIER_EXIT_ENABLED", False)
-            if is_trending_matching or chandelier_enabled:
+            let_it_run = getattr(config, "LET_IT_RUN_ENABLED", True)
+
+            if is_trending_matching and let_it_run:
+                # B1: Trending'de TP3'te kapatma — SL'yi TP2 seviyesine çek ve sür
+                # Bu sayede trade TP3'ü geçip devam edebilir; SL=TP2 ile kâr kilitlendi
+                state.tp3_hit = True
+                state.trailing_active = True
+                # SL'yi TP2 düzeyine yükselt (kilitlenmiş kâr garantisi)
+                if tp2 > 0:
+                    if side == "LONG":
+                        new_locked_sl = max(state.current_sl, tp2)
+                    else:
+                        new_locked_sl = min(state.current_sl, tp2) if state.current_sl > 0 else tp2
+                    state.current_sl = new_locked_sl
+                    logger.info(
+                        "[Trailing] TP3 hit (LET IT RUN): #%s %s @ %.4f  SL kilitlendi TP2=%.4f → runner sürüyor",
+                        trade_id, symbol, current_price, tp2,
+                    )
+                return PartialCloseResult(new_sl=state.current_sl)  # Kapatma yok, sadece SL güncelle
+
+            elif chandelier_enabled:
                 half_runner = state.qty_remaining_pct / 2.0
                 state.tp3_hit = True
                 state.qty_remaining_pct -= half_runner
                 state.trailing_active = True
-                reason_str = "TP3_CHANDELIER_ACTIVE" if chandelier_enabled and not is_trending_matching else "TP3_TRENDING_PARTIAL"
                 logger.info(
-                    "[Trailing] TP3 hit bypassed for full close (%s). Partial closing half of runner (%s%%) to let profits run: #%s %s @ %.4f",
-                    reason_str, half_runner, trade_id, symbol, current_price
+                    "[Trailing] TP3 hit (Chandelier): %s%% runner kapatılıyor, kalan devam: #%s %s @ %.4f",
+                    half_runner, trade_id, symbol, current_price,
                 )
                 return PartialCloseResult(
                     should_partial_close=True,
                     close_pct=half_runner,
                     close_at_price=current_price,
-                    reason=reason_str,
-                    new_sl=state.current_sl
+                    reason="TP3_CHANDELIER_ACTIVE",
+                    new_sl=state.current_sl,
                 )
             else:
                 state.tp3_hit = True
                 state.qty_remaining_pct -= self.runner_close_pct
-
                 logger.info(
                     "[Trailing] TP3 vuruldu: #%s %s @ %.4f  Runner kapatılıyor",
                     trade_id, symbol, current_price,
@@ -409,7 +448,15 @@ class TrailingEngine:
                             trade_id, active_sl, new_trail_sl, state.highest_price, trail_distance
                         )
             else:
-                dynamic_mult = self.trail_atr_mult * 0.8 if is_trending_matching else self.trail_atr_mult
+                # B2: Volatilite-normalize trail mesafesi (aktif trailing döngüsü)
+                atr_pct = atr / current_price if current_price > 0 else 0
+                if atr_pct > 0.025:
+                    vol_factor = 1.3
+                elif atr_pct < 0.010:
+                    vol_factor = 0.8
+                else:
+                    vol_factor = 1.0
+                dynamic_mult = self.trail_atr_mult * (0.8 if is_trending_matching else 1.0) * vol_factor
                 trail_distance = atr * dynamic_mult
                 from database import get_market_regime
                 trailing_type = "step" if get_market_regime() in ("CHOPPY", "CHOPPY_HIGH_VOL", "CHOPPY_LOW_VOL") else getattr(config, "TRAILING_STOP_TYPE", "atr")
