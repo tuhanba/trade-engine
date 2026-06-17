@@ -64,6 +64,7 @@ DRY_RUN                 = _env_bool("DRY_RUN", True)
 CONFIRM_LIVE_TRADING    = _env_bool("CONFIRM_LIVE_TRADING", False)
 LIVE_CONFIRM            = _env_bool("LIVE_CONFIRM", False)
 USE_BINANCE_PRIVATE_API = _env_bool("USE_BINANCE_PRIVATE_API", False)
+CANARY_MODE             = _env_bool("CANARY_MODE", False)
 
 # API Keys
 BINANCE_API_KEY    = _env("BINANCE_API_KEY")

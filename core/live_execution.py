@@ -412,6 +412,12 @@ class LiveExecutionEngine:
             
         qty = risk_usd / sl_dist
         
+        is_canary = getattr(config, "CANARY_MODE", False)
+        if is_canary:
+            canary_usdt = 6.0
+            qty = canary_usdt / current_price
+            logger.info(f"[CANARY MODE] Islem buyuklugu minimuma cekildi: {canary_usdt} USDT (Qty: {qty})")
+        
         # Format Qty
         qty_str = self._format_quantity(symbol, qty)
         qty_float = float(qty_str)
@@ -592,6 +598,9 @@ class LiveExecutionEngine:
         meta_dict['binance_entry_order_id'] = chase_result.get('orderId')
         meta_dict['binance_entry_order_ids'] = chase_result.get('orderIds', [])
         meta_dict['binance_sl_order_id'] = sl_order_id
+        if is_canary:
+            meta_dict['CANARY'] = True
+            meta_dict['note'] = "CANARY_EXECUTION"
         if signal.metadata:
             meta_dict.update(signal.metadata)
         

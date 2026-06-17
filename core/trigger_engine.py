@@ -473,14 +473,26 @@ class TriggerEngine:
         # ── L2 Orderbook (Balina Duvarı) Kalkanı ─────────────────────────────
         ob_wall_detected = False
         bid_depth, ask_depth = 1.0, 1.0
+        bids, asks = [], []
         try:
-            if getattr(config, "ORDER_BOOK_WALL_FILTER_ENABLED", True) and not bypass_shields:
+            if not bypass_shields:
                 is_scalp = not getattr(config, "HUMAN_MODE", False)
                 ob_limit = 50 if is_scalp else 20
                 ob = self.client.futures_order_book(symbol=symbol, limit=ob_limit)
                 bids = ob.get("bids", [])
                 asks = ob.get("asks", [])
                 
+                if bids and asks:
+                    best_bid = float(bids[0][0])
+                    best_ask = float(asks[0][0])
+                    mid = (best_bid + best_ask) / 2.0
+                    if mid > 0:
+                        spread_pct = (best_ask - best_bid) / mid * 100.0
+                        if spread_pct > 0.1:
+                            logger.info(f"[TriggerEngine] {symbol} Vetoed: Spread too high ({spread_pct:.3f}%) > 0.1%")
+                            return {"quality": "D", "score": 0, "entry": 0, "reject_reason": f"high_spread_{spread_pct:.3f}%"}
+
+            if getattr(config, "ORDER_BOOK_WALL_FILTER_ENABLED", True) and not bypass_shields:
                 bid_depth = sum(float(b[0]) * float(b[1]) for b in bids)
                 ask_depth = sum(float(a[0]) * float(a[1]) for a in asks)
                 
