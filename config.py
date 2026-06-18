@@ -292,7 +292,46 @@ CVD_CONFIRM_BONUS   = _env_float("CVD_CONFIRM_BONUS", 1.0)    # CVD confirm bonu
 
 # Guvenlik
 def is_live_trading_allowed() -> bool:
-    return (__getattr__("EXECUTION_MODE") == "live" and LIVE_TRADING_ENABLED and CONFIRM_LIVE_TRADING)
+    """Full live safety gate (directive Section 18). Fails CLOSED.
+
+    All seven conditions must hold. live_readiness.check() embeds the
+    profit/expectancy/drawdown/uptime proof requirements, so PASS there
+    satisfies both profit_readiness and live_readiness intent.
+    """
+    # NEDEN: Canli trade'i 7 kapinin TAMAMI gecmeden imkansiz kil; herhangi
+    # bir hata/okuma basarisizligi => canli BLOKE (fail-closed). Paper modu
+    # etkilenmez.
+    try:
+        # --- env flag conditions ---
+        if __getattr__("EXECUTION_MODE") != "live":
+            return False
+        if not LIVE_TRADING_ENABLED:
+            return False
+        if DRY_RUN:                       # DRY_RUN must be explicitly false
+            return False
+        if not CONFIRM_LIVE_TRADING:
+            return False
+        if not USE_BINANCE_PRIVATE_API:
+            return False
+
+        # --- proof-of-edge condition (readiness gate) ---
+        # Lazy import to avoid circular import at module load.
+        from core import live_readiness
+        result = live_readiness.check()
+        if not result.get("ready"):
+            return False
+
+        return True
+    except Exception as e:
+        # Any failure to evaluate the gate => live BLOCKED.
+        try:
+            import logging
+            logging.getLogger("ax.config").error(
+                "is_live_trading_allowed() failed-closed: %s", e
+            )
+        except Exception:
+            pass
+        return False
 
 def is_private_api_allowed() -> bool:
     return USE_BINANCE_PRIVATE_API

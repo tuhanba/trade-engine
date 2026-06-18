@@ -400,8 +400,10 @@ class LiveExecutionEngine:
             return None
             
         if not config.is_live_trading_allowed():
-            logger.error("Canli islem ayarlardan kapali veya DRY_RUN acik!")
-            _log_reject("live_trading_disabled_or_dry_run")
+            # NEDEN: 7 kapili guvenlik kapisi (Section 18) bloke etti — sebep
+            # DRY_RUN, onay eksigi, private API kapali veya readiness FAIL olabilir.
+            logger.error("Canli islem guvenlik kapisindan gecemedi (LIVE_BLOCKED_BY_SAFETY_GATE)!")
+            _log_reject("LIVE_BLOCKED_BY_SAFETY_GATE")
             return None
 
         symbol = signal.symbol
