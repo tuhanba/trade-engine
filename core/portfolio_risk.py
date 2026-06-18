@@ -162,6 +162,8 @@ def calculate_portfolio_var(
         
         # Portföy Varyansı: W^T * Cov * W
         port_variance = np.dot(w_vec.T, np.dot(cov_matrix, w_vec))
+        if np.isnan(port_variance):
+            return 0.0
         port_volatility = math.sqrt(max(port_variance, 0.0))
         
         # Parametrik VaR %99 Güven Seviyesi -> Z = 2.33
