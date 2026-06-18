@@ -81,7 +81,12 @@ htmlcov/
 coverage.xml
 
 # ─── Claude / AI araç dosyaları ──────────────────────────────────────
-.claude/
+.claude/*
+# NEDEN: paylaşılan skill'ler (örn. /spec, /build) repoda izlensin; gerisi yoksayılı kalsın.
+# NEDEN: skill klasör adları yukarıdaki kurallarla çakışabildiği için (build/, dist/, models/...)
+#        tüm alt ağacı (**) zorla yeniden dahil ediyoruz; aksi halde git o klasöre inmez.
+!.claude/skills/
+!.claude/skills/**
 
 # ─── Patch & geçici script ───────────────────────────────────────────
 patch_*.py
