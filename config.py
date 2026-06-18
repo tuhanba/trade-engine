@@ -65,6 +65,11 @@ CONFIRM_LIVE_TRADING    = _env_bool("CONFIRM_LIVE_TRADING", False)
 LIVE_CONFIRM            = _env_bool("LIVE_CONFIRM", False)
 USE_BINANCE_PRIVATE_API = _env_bool("USE_BINANCE_PRIVATE_API", False)
 CANARY_MODE             = _env_bool("CANARY_MODE", False)
+# NEDEN (P0-2, directive Section 20): Otonom self-healing Optuna dongusu trade
+# parametrelerini (rsi_limit/cvd_filter_val) VARSAYILAN olarak UYGULAMAZ —
+# report-first. Acilirsa bile her degisiklik param_gate (backtest kaniti)
+# onayindan gecer. Kanit birikene kadar kapali kalir; fail-safe.
+SELF_HEALING_AUTO_APPLY = _env_bool("SELF_HEALING_AUTO_APPLY", False)
 
 # API Keys
 BINANCE_API_KEY    = _env("BINANCE_API_KEY")
