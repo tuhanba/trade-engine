@@ -480,9 +480,16 @@ class MLSignalScorer:
             logger.debug(f"ML model yüklenemedi (ilk çalıştırma): {e}")
 
     def get_status(self) -> dict:
+        ready = bool(self.trained and self.n_samples >= MIN_TRAIN_SAMPLES)
+        reason = "ready" if ready else "not_enough_samples"
         return {
+            "ready":       ready,
+            "reason":      reason,
+            "fallback":    None if ready else "rule_based_scoring_active",
             "trained":     self.trained,
             "n_samples":   self.n_samples,
+            "min_samples":  MIN_TRAIN_SAMPLES,
+            "mode":         "ml" if ready else "cold_start",
             "last_train":  str(self.last_train) if self.last_train else None,
             "threshold":   SCORE_THRESHOLD,
             "cv_accuracy": round(self.cv_accuracy, 3),

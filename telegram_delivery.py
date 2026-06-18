@@ -620,7 +620,8 @@ def recover_queued_messages():
 def _push_with_dedupe(text: str, dedupe_key: str,
                       symbol: str = "", sig_id: str = "",
                       photo_bytes: Optional[bytes] = None,
-                      reply_markup: Optional[dict] = None) -> bool:
+                      reply_markup: Optional[dict] = None,
+                      parse_mode: str = "HTML") -> bool:
     """DB'ye kaydet (duplicate kontrolü), kuyruğa ekle."""
     try:
         saved = save_telegram_message(sig_id, symbol, dedupe_key, text, status="queued")
@@ -629,7 +630,14 @@ def _push_with_dedupe(text: str, dedupe_key: str,
             return False
     except Exception as e:
         logger.warning("[Telegram] save_telegram_message: %s", e)
-    _queue.push(text, dedupe_key=dedupe_key, symbol=symbol, photo_bytes=photo_bytes, reply_markup=reply_markup)
+    _queue.push(
+        text,
+        parse_mode=parse_mode,
+        dedupe_key=dedupe_key,
+        symbol=symbol,
+        photo_bytes=photo_bytes,
+        reply_markup=reply_markup,
+    )
     return True
 
 
@@ -906,9 +914,25 @@ def deliver_signal(sig) -> bool:
         return False
 
 
-def send_message(text: str, parse_mode: str = "HTML", reply_markup: Optional[dict] = None) -> bool:
+def send_message(
+    text: str,
+    parse_mode: str = "HTML",
+    reply_markup: Optional[dict] = None,
+    dedupe_key: Optional[str] = None,
+    symbol: str = "",
+    sig_id: str = "",
+) -> bool:
     """Genel sistem mesajı — piyasa rejimi, uyarı, bilgi."""
     try:
+        if dedupe_key:
+            return _push_with_dedupe(
+                text,
+                dedupe_key,
+                symbol=symbol,
+                sig_id=sig_id,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
         _queue.push(text, parse_mode=parse_mode, reply_markup=reply_markup)
         return True
     except Exception as e:
