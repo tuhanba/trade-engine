@@ -17,7 +17,17 @@ from typing import Dict, Any, Optional
 import config
 
 logger = logging.getLogger("ax.rl_meta_learner")
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rl_meta_learner.pkl")
+
+_rl_model_env = os.getenv("RL_MODEL_PATH")
+if _rl_model_env:
+    MODEL_PATH = os.path.abspath(_rl_model_env)
+else:
+    try:
+        import config
+        base_dir = str(config.BASE_DIR)
+        MODEL_PATH = os.path.join(base_dir, "rl_meta_learner.pkl")
+    except Exception:
+        MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rl_meta_learner.pkl")
 
 
 class GMMRegimeClassifier:
