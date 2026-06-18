@@ -1,6 +1,23 @@
 # AurvexAI — Production docker-compose
 # Eklenenler: log rotasyonu (json-file max-size), redis healthcheck +
 # depends_on condition, redis restart dayanıklılığı.
+#
+# Fix H (deployment sertleştirme):
+#   - DB artık koddan AYRI bir named volume'da (db_data → /app/db). engine ve
+#     dashboard AYNI volume'u paylaşır (paylaşılan SQLite state). Bind-mount
+#     (./:/app) üzerinde iki-süreç SQLite kilidi bazı host FS'lerde (Docker
+#     Desktop/macOS/Windows/ağ FS) güvenilmezdi.
+#     ⚠️ YÜKSELTME NOTU: mevcut ./trading.db'yi bir kez db_data volume'una taşıyın:
+#        docker run --rm -v "$PWD":/src -v aurvex_db_data:/dst alpine \
+#          sh -c "cp /src/trading.db /dst/trading.db"
+#   - Postgres servisi KALDIRILDI: runtime DB katmanı SQLite (SSoT); psycopg2
+#     yalnız scripts/migrate_to_postgres.py'de (opt-in tek seferlik migrasyon).
+#     Boşuna ayakta postgres + engine'in "depends_on postgres: healthy" beklemesi
+#     boot'u geciktiriyordu. Gerçekten Postgres'e geçilecekse servis + bağımlılık
+#     bilinçli geri eklenir.
+#   - dashboard artık engine "service_healthy" (service_started değil) bekler —
+#     engine hazır olmadan dashboard kalkıp Komuta Merkezi'nde yanlış "SORUN"
+#     göstermesin.
 x-logging: &default-logging
   driver: json-file
   options:
@@ -22,27 +39,7 @@ services:
       timeout: 5s
       retries: 3
 
-  # 1. PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    container_name: aurvex_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-aurvex}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aurvexpass}
-      POSTGRES_DB: ${POSTGRES_DB:-aurvex}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    logging: *default-logging
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aurvex"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # 2. Trade Engine
+  # 1. Trade Engine
   engine:
     build: .
     container_name: aurvex_engine
@@ -51,14 +48,14 @@ services:
     env_file: .env
     volumes:
       - ./:/app
+      - db_data:/app/db            # Fix H: DB'yi koddan ayır (named volume)
     ports:
       - "8000:8000"
     environment:
       - TZ=UTC
+      - DB_PATH=/app/db/trading.db  # Fix H: paylaşılan DB tek noktada
     depends_on:
       redis:
-        condition: service_healthy
-      postgres:
         condition: service_healthy
     logging: *default-logging
     healthcheck:
@@ -76,16 +73,16 @@ services:
     env_file: .env
     volumes:
       - ./:/app
+      - db_data:/app/db            # Fix H: engine ile AYNI DB volume'u
     ports:
       - "5000:5000"
     environment:
       - TZ=UTC
+      - DB_PATH=/app/db/trading.db  # Fix H: engine ile aynı DB
     depends_on:
       engine:
-        condition: service_started
+        condition: service_healthy   # Fix H: service_started değil
       redis:
-        condition: service_healthy
-      postgres:
         condition: service_healthy
     logging: *default-logging
     healthcheck:
@@ -135,4 +132,4 @@ services:
 volumes:
   prometheus_data:
   grafana_data:
-  postgres_data:
+  db_data:                          # Fix H: koddan ayrı paylaşılan DB volume'u

@@ -83,7 +83,7 @@ def _get_health_impl() -> dict:
     return {
         "ok": db_ok,
         "db_connected": db_ok,
-        "execution_mode": database.get_state("tg_execution_mode") or bot_status.get("tg_execution_mode", {}).get("value") or getattr(config, "EXECUTION_MODE", "paper"),
+        "execution_mode": database.current_environment(),  # Fix D: tek ortam kaynağı
         "ax_mode": getattr(config, "AX_MODE", "execute"),
         "human_mode": str(database.get_state("tg_human_mode") or bot_status.get("tg_human_mode", {}).get("value")) == "True" if (database.get_state("tg_human_mode") or bot_status.get("tg_human_mode", {}).get("value")) is not None else bool(getattr(config, "HUMAN_MODE", False)),
         "live_trading_enabled": getattr(config, "LIVE_TRADING_ENABLED", False),
@@ -226,7 +226,7 @@ def get_ax_status() -> dict:
         return {
             "bot_running": bot_alive, "bot_status": status,
             "heartbeat": heartbeat, "last_seen_seconds": last_seen,
-            "execution_mode": database.get_state("tg_execution_mode") or bot_status.get("tg_execution_mode", {}).get("value") or getattr(config, "EXECUTION_MODE", "paper"),
+            "execution_mode": database.current_environment(),  # Fix D: tek ortam kaynağı
             "ax_mode": getattr(config, "AX_MODE", "execute"),
             "human_mode": str(database.get_state("tg_human_mode") or bot_status.get("tg_human_mode", {}).get("value")) == "True" if (database.get_state("tg_human_mode") or bot_status.get("tg_human_mode", {}).get("value")) is not None else bool(getattr(config, "HUMAN_MODE", False)),
             "paper_mode": getattr(config, "PAPER_MODE", True),

@@ -134,10 +134,19 @@ def test_reject_when_new_config_worse(test_db):
 # ── Friday entegrasyonu: gate=True reddi uygulamayı engeller ───────────────────
 
 def test_friday_apply_param_gate_rejection_keeps_old(test_db, monkeypatch):
+    """LIVE + kritik-olmayan (gated) key: param_gate RED → eski değer korunur.
+
+    NEDEN (Fix I): param_gate kanıt kapısı artık MOD-DUYARLI — paper'da bypass
+    (tam yetki), live+kritik'te onay. rsi_limit gated ama kritik DEĞİL → kanıt
+    kapısı bu yolda devrede kalır ve reddi eski değeri korur.
+    """
+    import config
     from core.friday_ceo import FridayCeo
 
+    test_db.update_system_state("tg_execution_mode", "live")
+    config._CONFIG_CACHE.pop("EXECUTION_MODE", None)
     # Eski değeri DB'ye koy
-    test_db.set_state("trade_threshold", "55.0")
+    test_db.set_state("rsi_limit", "30.0")
 
     # Gate'i RED dönecek şekilde monkeypatch'le (deterministik)
     monkeypatch.setattr(
@@ -145,11 +154,65 @@ def test_friday_apply_param_gate_rejection_keeps_old(test_db, monkeypatch):
         lambda key, old, new, **kw: (False, {"reason": "test red", "gated": True}),
     )
     ceo = FridayCeo()
-    result = ceo._apply_param_with_clamp("trade_threshold", 45.0, actor="friday",
+    result = ceo._apply_param_with_clamp("rsi_limit", 22.0, actor="friday",
                                          reason="llm", gate=True)
     # Reddedildi → eski değer korunur, uygulanmaz
-    assert result == pytest.approx(55.0)
-    assert test_db.get_state("trade_threshold") == "55.0"
+    assert result == pytest.approx(30.0)
+    assert test_db.get_state("rsi_limit") == "30.0"
+
+
+# ── Fix I: mod-duyarlı yetki kapısı ──────────────────────────────────────────
+
+def test_authority_paper_critical_applies_without_approval():
+    from core import authority
+    assert authority.requires_approval("risk_pct", "paper") is False
+
+
+def test_authority_live_critical_requires_approval():
+    from core import authority
+    assert authority.requires_approval("risk_pct", "live") is True
+
+
+def test_authority_live_noncritical_autonomous():
+    from core import authority
+    assert authority.requires_approval("rsi_limit", "live") is False
+
+
+def test_paper_full_authority_bypasses_gate(test_db, monkeypatch):
+    """PAPER'da param_gate RED dönse bile Friday değeri UYGULAR (tam yetki)."""
+    import config
+    from core.friday_ceo import FridayCeo
+
+    test_db.update_system_state("tg_execution_mode", "paper")
+    config._CONFIG_CACHE.pop("EXECUTION_MODE", None)
+    test_db.set_state("trade_threshold", "55.0")
+    monkeypatch.setattr(
+        "core.param_gate.validate_param_change",
+        lambda key, old, new, **kw: (False, {"reason": "paper'da bypass edilmeli", "gated": True}),
+    )
+    ceo = FridayCeo()
+    result = ceo._apply_param_with_clamp("trade_threshold", 50.0, actor="friday",
+                                         reason="llm", gate=True)
+    assert result == pytest.approx(50.0)
+    assert test_db.get_state("trade_threshold") == "50.0"
+
+
+def test_live_critical_requires_approval_not_applied(test_db, monkeypatch):
+    """LIVE + kritik (risk_pct) → otonom UYGULANMAZ, PENDING; eski değer kalır."""
+    import config
+    from core.friday_ceo import FridayCeo
+
+    test_db.update_system_state("tg_execution_mode", "live")
+    config._CONFIG_CACHE.pop("EXECUTION_MODE", None)
+    test_db.set_state("risk_pct", "1.0")
+    ceo = FridayCeo()
+    result = ceo._apply_param_with_clamp("risk_pct", 1.4, actor="friday",
+                                         reason="llm", gate=True)
+    # Onay bekliyor → uygulanmadı, eski değer korunur
+    assert result == pytest.approx(1.0)
+    assert test_db.get_state("risk_pct") == "1.0"
+    # PENDING kaydı oluşmuş olmalı
+    assert test_db.get_state("friday_pending_param:risk_pct") == "1.4"
 
 
 def test_friday_apply_param_no_gate_applies(test_db, monkeypatch):

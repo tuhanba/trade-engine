@@ -26,8 +26,12 @@ class EventBus:
             logger.debug(f"Unsubscribed {callback.__name__} from {event_type.name}")
 
     async def publish(self, event: Event):
-        if self._queue:
-            await self._queue.put(event)
+        # NEDEN (Fix E): queue None iken event'i sessizce düşürmek "sinyal kayboldu
+        # ama log temiz" tablosunu üretiyordu. Artık düşen event WARNING'e işlenir.
+        if not self._queue:
+            logger.warning("[EventBus] queue yok — event DÜŞTÜ: %s", event.type.name)
+            return
+        await self._queue.put(event)
 
     def publish_sync(self, event: Event):
         """Thread-safe way to publish events from synchronous code.
@@ -66,8 +70,18 @@ class EventBus:
                 if handlers:
                     # Run handlers concurrently
                     tasks = [asyncio.create_task(handler(event)) for handler in handlers]
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    # NEDEN (Fix E): gather sonuçları daha önce incelenmiyordu →
+                    # handler'daki yakalanmamış istisna sessizce yutuluyor, event
+                    # pipeline'da kayboluyordu. Artık her hata handler adıyla loglanır.
+                    for h, r in zip(handlers, results):
+                        if isinstance(r, Exception):
+                            logger.error(
+                                "[EventBus] %s handler hata (%s): %r",
+                                event.type.name, getattr(h, "__name__", h), r,
+                                exc_info=r,
+                            )
+
                 self._queue.task_done()
             except asyncio.CancelledError:
                 break

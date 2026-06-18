@@ -1722,11 +1722,7 @@ def close_trade(
 def get_open_trades(environment: str | None = None) -> list[dict]:
     """Açık trade'leri döner. Redis cache (5s TTL) → SQLite fallback."""
     if environment is None:
-        try:
-            import config
-            environment = getattr(config, "EXECUTION_MODE", "paper")
-        except Exception:
-            environment = "paper"
+        environment = current_environment()  # Fix D: tek ortam kaynağı
 
     cache_key = f"open_trades_cache_{environment}"
     import sys
@@ -1788,11 +1784,7 @@ def get_open_trades(environment: str | None = None) -> list[dict]:
 def get_recent_trades(limit: int = 100, environment: str | None = None) -> list[dict]:
     """Son trade'leri döner — sadece kapanmış olanları ve dashboard uyumlu alias'larla."""
     if environment is None:
-        try:
-            import config
-            environment = getattr(config, "EXECUTION_MODE", "paper")
-        except Exception:
-            environment = "paper"
+        environment = current_environment()  # Fix D: tek ortam kaynağı
             
     conn = get_connection()
     try:
@@ -1888,6 +1880,26 @@ def get_partial_closes(trade_id: int) -> list[dict]:
 import time as _time
 _stats_cache = {}
 
+def current_environment() -> str:
+    """Aktif ortam (paper/live) — TEK doğruluk kaynağı (Fix D).
+
+    NEDEN: Ortam/mod 3 ayrı yoldan çözülüyordu — config.EXECUTION_MODE (Telegram),
+    get_state('tg_execution_mode') (Dashboard) ve get_open_trades default'u — bu da
+    Telegram ile Dashboard'ın farklı ortam (ve dolayısıyla farklı PnL/bakiye)
+    göstermesini normalleştiriyordu. Artık tek nokta. config.__getattr__ Redis-first
+    + 2sn cache kullanır (SQLite lock baskısını ARTIRMAZ); Fix C sonrası gölge-atama
+    riski yoktur, bu yüzden config ve get_state aynı değeri verir.
+    """
+    try:
+        import config
+        env = getattr(config, "EXECUTION_MODE", None)
+        if env:
+            return env
+    except Exception:
+        pass
+    return get_state("tg_execution_mode") or "paper"
+
+
 def get_total_pnl(environment: str | None = None) -> dict:
     """
     Sistem genelinde tek PnL hesabı.
@@ -1899,11 +1911,7 @@ def get_total_pnl(environment: str | None = None) -> dict:
         total       : Üçünün toplamı
     """
     if environment is None:
-        try:
-            import config
-            environment = getattr(config, "EXECUTION_MODE", "paper")
-        except Exception:
-            environment = "paper"
+        environment = current_environment()  # Fix D: tek ortam kaynağı
             
     try:
         with get_conn() as conn:
@@ -1938,10 +1946,7 @@ def get_total_pnl(environment: str | None = None) -> dict:
 def get_dashboard_stats(environment: str | None = None) -> dict:
     """Dashboard için özet istatistikler."""
     if environment is None:
-        try:
-            environment = getattr(config, "EXECUTION_MODE", "paper")
-        except Exception:
-            environment = "paper"
+        environment = current_environment()  # Fix D: tek ortam kaynağı
 
     global _stats_cache
     now = _time.time()
@@ -2384,11 +2389,7 @@ def update_trade(trade_id: int, updates: dict):
 
 def get_closed_trades(limit: int = 200, valid_only: bool = True, environment: str | None = None) -> list:
     if environment is None:
-        try:
-            import config
-            environment = getattr(config, "EXECUTION_MODE", "paper")
-        except Exception:
-            environment = "paper"
+        environment = current_environment()  # Fix D: tek ortam kaynağı
             
     with get_conn() as conn:
         if valid_only:
@@ -2408,11 +2409,7 @@ def get_closed_trades(limit: int = 200, valid_only: bool = True, environment: st
 
 def get_stats(environment: str | None = None) -> dict:
     if environment is None:
-        try:
-            import config
-            environment = getattr(config, "EXECUTION_MODE", "paper")
-        except Exception:
-            environment = "paper"
+        environment = current_environment()  # Fix D: tek ortam kaynağı
             
     with get_conn() as conn:
         row = conn.execute("""
@@ -2480,7 +2477,7 @@ def get_active_balance(client=None) -> float:
     try:
         import config
         import time
-        exec_mode = getattr(config, "EXECUTION_MODE", "paper")
+        exec_mode = current_environment()  # Fix D: tek ortam kaynağı
         if exec_mode == "live":
             now = time.time()
             if now - _last_live_balance_fetch < 15.0 and _cached_live_balance > 0:
@@ -2517,7 +2514,7 @@ def get_active_balance_details(client=None) -> dict:
     try:
         import config
         import time
-        exec_mode = getattr(config, "EXECUTION_MODE", "paper")
+        exec_mode = current_environment()  # Fix D: tek ortam kaynağı
         if exec_mode == "live":
             now = time.time()
             if now - _last_live_details_fetch < 15.0 and _cached_live_details:

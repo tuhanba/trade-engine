@@ -247,43 +247,100 @@ class FridayCeo:
                 value = clamped
 
         if gate:
+            # NEDEN (Fix I): yetki MOD-DUYARLI tek noktadan uygulanır.
+            #   PAPER → Friday TAM YETKİ: param_gate (backtest kanıtı) BYPASS, doğrudan uygula.
+            #   LIVE + kritik key → otonom UYGULANMAZ; Telegram onayına alınır (PENDING).
+            #   LIVE + kritik-olmayan → kanıt-temelli param_gate (Faz 3.2 davranışı).
+            mode = _db.current_environment()
             try:
-                from core.param_gate import validate_param_change, GATED_KEYS
-                if key in GATED_KEYS:
+                from core import authority
+                if authority.requires_approval(key, mode):
                     old_val = _db.get_state(key)
                     try:
                         old_f = float(old_val) if old_val is not None else value
                     except (TypeError, ValueError):
                         old_f = value
-                    approved, gate_report = validate_param_change(key, old_f, value)
-                    if not approved:
-                        # NEDEN: Reddedilen otonom değişiklik UYGULANMAZ; eski değer kalır.
-                        logger.warning("[Friday/Gate] %s reddedildi: %s", key, gate_report.get("reason"))
+                    self._request_param_approval(key, old_f, value, reason)
+                    return old_f
+            except Exception as _ae:
+                logger.debug("[Friday/Authority] yetki kontrolü atlandı: %s", _ae)
+
+            if mode == "paper":
+                reason = (reason + " paper:full_authority").strip()
+            else:
+                try:
+                    from core.param_gate import validate_param_change, GATED_KEYS
+                    if key in GATED_KEYS:
+                        old_val = _db.get_state(key)
                         try:
-                            from core import friday_decisions as _fd
-                            _fd.log_decision("NOOP", param_key=key, old_value=old_f, new_value=value,
-                                             reasoning="param_gate RED: " + str(gate_report.get("reason", "")))
-                        except Exception:
-                            pass
-                        # NEDEN (Faz 6.4): Reddedilen öneri gölge A/B'ye kaydedilir —
-                        # 72h sonra "uygulasaydık ne olurdu" değerlendirilir.
-                        try:
-                            from core import shadow_eval as _sh
-                            _sh.record_shadow(key, old_f, value,
-                                              gate_report.get("old_expectancy_r"),
-                                              gate_report.get("new_expectancy_r"))
-                        except Exception:
-                            pass
-                        return old_f
-                    if gate_report.get("insufficient_data") and "applied_value" in gate_report:
-                        # Veri yetersiz → küçük adım kuralıyla kısıtlanmış değeri uygula
-                        value = float(gate_report["applied_value"])
-                        reason = (reason + " gate:small_step").strip()
-            except Exception as _ge:
-                logger.debug("[Friday/Gate] gate kontrolü atlandı: %s", _ge)
+                            old_f = float(old_val) if old_val is not None else value
+                        except (TypeError, ValueError):
+                            old_f = value
+                        approved, gate_report = validate_param_change(key, old_f, value)
+                        if not approved:
+                            # NEDEN: Reddedilen otonom değişiklik UYGULANMAZ; eski değer kalır.
+                            logger.warning("[Friday/Gate] %s reddedildi: %s", key, gate_report.get("reason"))
+                            try:
+                                from core import friday_decisions as _fd
+                                _fd.log_decision("NOOP", param_key=key, old_value=old_f, new_value=value,
+                                                 reasoning="param_gate RED: " + str(gate_report.get("reason", "")))
+                            except Exception:
+                                pass
+                            # NEDEN (Faz 6.4): Reddedilen öneri gölge A/B'ye kaydedilir —
+                            # 72h sonra "uygulasaydık ne olurdu" değerlendirilir.
+                            try:
+                                from core import shadow_eval as _sh
+                                _sh.record_shadow(key, old_f, value,
+                                                  gate_report.get("old_expectancy_r"),
+                                                  gate_report.get("new_expectancy_r"))
+                            except Exception:
+                                pass
+                            return old_f
+                        if gate_report.get("insufficient_data") and "applied_value" in gate_report:
+                            # Veri yetersiz → küçük adım kuralıyla kısıtlanmış değeri uygula
+                            value = float(gate_report["applied_value"])
+                            reason = (reason + " gate:small_step").strip()
+                except Exception as _ge:
+                    logger.debug("[Friday/Gate] gate kontrolü atlandı: %s", _ge)
 
         _db.set_state(key, str(value), actor=actor, reason=reason)
         return value
+
+    def _request_param_approval(self, key: str, old_value: float, new_value: float,
+                                reason: str = "") -> None:
+        """Fix I: LIVE'da kritik parametre değişikliğini insan onayına sunar (PENDING).
+
+        NEDEN: Live'da risk/kaldıraç/strateji/sermaye/mod değişiklikleri Friday
+        tarafından OTONOM uygulanmaz; Telegram onayı beklenir. Değişiklik 'pending'
+        olarak kaydedilir; onaylanana dek eski değer korunur. Onay altyapısı varsa
+        (send_fn) operatöre bildirim gönderilir.
+        """
+        import database as _db
+        try:
+            _db.set_state(f"friday_pending_param:{key}", str(new_value),
+                          actor="friday", reason="awaiting_approval")
+        except Exception:
+            pass
+        try:
+            from core import friday_decisions as _fd
+            _fd.log_decision("PENDING_APPROVAL", param_key=key,
+                             old_value=str(old_value), new_value=str(new_value),
+                             reasoning=("LIVE kritik değişiklik onay bekliyor. " + (reason or "")).strip())
+        except Exception:
+            pass
+        logger.info("[Friday/Authority] LIVE kritik '%s' %s→%s onaya alındı (PENDING).",
+                    key, old_value, new_value)
+        try:
+            send_fn = getattr(self, "send_fn", None)
+            if callable(send_fn):
+                send_fn(
+                    f"🔐 <b>LIVE Onay Gerekli</b>\n"
+                    f"Friday <code>{key}</code>: {old_value} → {new_value}\n"
+                    f"Sebep: {reason or '-'}\n"
+                    f"Uygulamak için: <code>/set {key} {new_value}</code>"
+                )
+        except Exception:
+            pass
 
     def _generate_text(self, provider: str, system_prompt: str, user_prompt: str, model_type: str = "subagent", tools: Optional[list] = None):
         """LLM çağrısı yapar.

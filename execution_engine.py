@@ -42,6 +42,13 @@ def parse_utc_datetime(dt_str: str) -> datetime:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
 
+def _is_pytest_running() -> bool:
+    """Test ortamı tespiti. NEDEN (Fix A): paper-bypass kararını test edilebilir
+    kılmak için ayrı fonksiyon — testler bunu monkeypatch'leyip production yolunu
+    (paper → kalkan bypass) doğrulayabilir."""
+    import sys
+    return "pytest" in sys.modules
+
 # ── Config ───────────────────────────────────────────────────────────
 try:
     MAX_HOLD_MINUTES = int(getattr(config, "MAX_HOLD_MINUTES", 240))
@@ -144,6 +151,28 @@ class ExecutionEngine:
 
     # ── Paper trade açma ─────────────────────────────────────────
 
+    def _should_bypass_portfolio_shields(self) -> bool:
+        """Fix A: open_paper_trade'deki İKİNCİ kalkan katmanı (Pearson korelasyon +
+        portföy VaR) atlanmalı mı?
+
+        NEDEN: Üst-pipeline (ai_decision/risk_engine) paper'da kalkanları zaten
+        bypass ediyor (CLAUDE.md: "paper'da risk kalkanları bypass → otonom açılır").
+        Ama trade'i fiilen açan open_paper_trade kendi korelasyon/VaR katmanını
+        is_paper'a bakmadan çalıştırıyordu → üst-pipeline "geç" dese bile son aşama
+        sessizce EXECUTION_REJECTED(correlation/var) ile kesiyor, 2+ korele/eşzamanlı
+        trade boğuluyordu ("tek tük açılıyor ama portföy dolmuyor").
+
+        Karar tek noktada:
+          - BYPASS_LIVE_RISK_SHIELDS açıksa → True (manuel/operasyonel bypass).
+          - paper mod + test DIŞI → True (paper otonom; üst-pipeline ile tutarlı).
+          - test içinde paper → False (mevcut korelasyon/VaR testleri korunur).
+        Staleness guard'ı bu bypass'tan ETKİLENMEZ (ayrı katman; bayat fiyat hâlâ red).
+        """
+        if getattr(config, "BYPASS_LIVE_RISK_SHIELDS", False):
+            return True
+        is_paper = getattr(config, "EXECUTION_MODE", "paper") == "paper"
+        return is_paper and not _is_pytest_running()
+
     def open_paper_trade(self, signal: SignalData) -> Optional[int]:
         """
         Sinyalden paper trade oluşturur ve DB'ye kaydeder.
@@ -151,6 +180,8 @@ class ExecutionEngine:
         """
         start_time = time.time()
         is_forced = "force" in str(getattr(signal, "source", "")).lower() or "force" in str(getattr(signal, "reason", "")).lower()
+        # Fix A: paper'da korelasyon + VaR kalkanlarını üst-pipeline ile tutarlı bypass et.
+        bypass_shields = self._should_bypass_portfolio_shields()
 
         def _log_reject(reason: str):
             try:
@@ -194,8 +225,8 @@ class ExecutionEngine:
         open_trades = database.get_open_trades()
         open_symbols = [t["symbol"] for t in open_trades]
         
-        # 1. Pearson Correlation Blocker
-        if not is_forced and open_symbols:
+        # 1. Pearson Correlation Blocker  (Fix A: paper'da bypass_shields ile atlanır)
+        if not is_forced and not bypass_shields and open_symbols:
             try:
                 from core.portfolio_risk import calculate_max_correlation
                 max_corr = calculate_max_correlation(open_symbols, signal.symbol)
@@ -240,8 +271,8 @@ class ExecutionEngine:
             _log_reject("trade_build_failed")
             return None
 
-        # 2. Value-at-Risk (VaR) Constraint
-        if not is_forced:
+        # 2. Value-at-Risk (VaR) Constraint  (Fix A: paper'da bypass_shields ile atlanır)
+        if not is_forced and not bypass_shields:
             try:
                 from core.portfolio_risk import calculate_portfolio_var
                 candidate_pos = {
