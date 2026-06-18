@@ -101,10 +101,15 @@ Sistem varsayılan olarak **Paper Trading** (Sanal Para) modunda başlar. Canlı
 ## 🛠️ Kurulum ve Çalıştırma
 
 ### 1. Yerel Kurulum (Python)
-Gerekli kütüphaneleri yükleyin ve `.env` dosyasını oluşturun:
+> **Not (PEP 668):** Sistem Python'ında doğrudan `pip install` *"externally-managed-environment"* hatası verebilir; daima izole bir sanal ortam (`.venv`) kullanın.
+
+Sanal ortam oluşturun, bağımlılıkları yükleyin ve `.env` dosyasını hazırlayın:
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install --upgrade pip
 pip install -r requirements.txt
-cp .env.example .env
+cp .env.example .env               # sonra .env içindeki anahtarları doldurun
 ```
 `.env` dosyasını açıp `BINANCE_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ANTHROPIC_API_KEY` ve `DASHBOARD_PIN` değerlerinizi girin.
 
@@ -136,12 +141,13 @@ Sistem kalitesini korumak için entegre test paketlerini ve derin sağlık taram
   ```
   *(Çıktıda 0 FAIL ve 39 OK sonucu alınmalıdır)*
 
-* **Dashboard ve Telegram API Entegrasyon Testlerini Çalıştırın:**
+* **Tüm Test Paketini Çalıştırın (CI bunu koşar):**
   ```bash
-  python -m unittest tests/test_dashboard_telegram_audit.py
+  python -m pytest tests/ -q
   ```
 
-* **Hiperparametre ve Otonom Testleri Çalıştırın:**
+* **Tek Bir Test Dosyasını Çalıştırın:**
   ```bash
-  python -m unittest tests/test_phase_g_quantum.py
+  python -m pytest tests/test_dashboard_telegram_audit.py -q
+  python -m pytest tests/test_phase_g_quantum.py -q
   ```

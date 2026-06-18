@@ -3,7 +3,7 @@
 ## Setup Standards
 - **Project path**: `/root/trade_engine`
 - **Python env**: `.venv`
-- **Bot file**: `scalp_bot_v3.py`
+- **Engine file**: `async_scalp_engine.py` (trade açan süreç)
 - **Dashboard file**: `app.py`
 - **Services**: `ax-bot`, `ax-dashboard`
 - **Mode**: PAPER-ONLY / LIVE-BLOCKED

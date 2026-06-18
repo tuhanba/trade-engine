@@ -17,6 +17,8 @@ env/
 .env.local
 .env.production
 .env.staging
+# NEDEN: .env.example gizli veri içermeyen bir şablondur — repoda izlensin.
+!.env.example
 secrets.py
 credentials.json
 
