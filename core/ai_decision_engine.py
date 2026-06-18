@@ -436,8 +436,9 @@ class AIDecisionEngine:
                 "oi_change_pct":    _oi_chg,
             }
             result = classify_signal(sig, _ctx)
+            decision = result.decision if result.decision in {"ALLOW", "WATCH", "VETO"} else "WATCH"
             return {
-                "decision":    result.decision,
+                "decision":    decision,
                 "final_score": float(result.score_adjusted or sig.score or 50.0),
                 "confidence":  float(result.confidence or 0.5),
                 "reason":      result.reason or "",
@@ -455,7 +456,12 @@ class AIDecisionEngine:
                 "confidence":  0.5,
                 "reason":      f"fallback_evaluate: {e}",
                 "ai_score":    score,
+                "agent_data":  {},
             }
+
+    def decide(self, sig) -> dict:
+        """Stable alias for callers that use decide(signal)."""
+        return self.evaluate(sig)
 
     def learn_from_outcome(self, symbol: str, net_pnl: float, reason: str):
         """

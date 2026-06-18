@@ -566,7 +566,81 @@ class RiskEngine:
         except Exception:
             self.db_path = db_path or "trading.db"
 
-    def calculate(self, symbol: str, direction: str, entry: float, quality: str, balance: float, score: float = 0.0) -> dict:
+    def _normalize_result(
+        self,
+        result: dict | None,
+        symbol: str,
+        direction: str,
+        entry: float,
+        quality: str,
+    ) -> dict:
+        """Return a stable risk contract for every caller."""
+        result = dict(result or {})
+        valid = bool(result.get("valid", False))
+        reason = (
+            result.get("reason")
+            or result.get("risk_reject_reason")
+            or ("ok" if valid else "unknown_risk_reject")
+        )
+
+        normalized = {
+            "valid": valid,
+            "reason": str(reason),
+            "risk_pct": float(result.get("risk_pct") or result.get("risk_percent") or 0.0),
+            "risk_usd": float(result.get("risk_usd") or result.get("risk_amount") or result.get("max_loss") or 0.0),
+            "entry": float(result.get("entry") or entry or 0.0),
+            "stop": float(result.get("stop") or result.get("sl") or result.get("stop_loss") or 0.0),
+            "tp1": float(result.get("tp1") or 0.0),
+            "tp2": float(result.get("tp2") or 0.0),
+            "tp3": float(result.get("tp3") or 0.0),
+            "leverage": int(result.get("leverage") or result.get("leverage_suggestion") or 0),
+            "position_size": float(result.get("position_size") or result.get("qty") or 0.0),
+        }
+        normalized.update(result)
+        normalized["valid"] = valid
+        normalized["reason"] = str(reason)
+        if not valid and not normalized.get("risk_reject_reason"):
+            normalized["risk_reject_reason"] = normalized["reason"]
+        elif valid:
+            normalized.setdefault("risk_reject_reason", None)
+        normalized.setdefault("sl", normalized["stop"])
+        normalized.setdefault("risk_amount", normalized["risk_usd"])
+        normalized.setdefault("max_loss", normalized["risk_usd"])
+        normalized.setdefault("symbol", symbol)
+        normalized.setdefault("direction", direction)
+        normalized.setdefault("quality", quality)
+        return normalized
+
+    def calculate(
+        self,
+        symbol: str,
+        direction: str,
+        entry: float,
+        quality: str,
+        balance: float,
+        score: float = 0.0,
+        atr_pct: float | None = None,
+    ) -> dict:
+        try:
+            result = self._calculate_raw(symbol, direction, entry, quality, balance, score=score, atr_pct=atr_pct)
+        except TypeError as exc:
+            logger.error("RiskEngine.calculate TypeError: %s", exc, exc_info=True)
+            result = {"valid": False, "score": 0, "risk_reject_reason": f"type_error_{exc}"}
+        except Exception as exc:
+            logger.error("RiskEngine.calculate: %s", exc, exc_info=True)
+            result = {"valid": False, "score": 0, "risk_reject_reason": f"exception_{type(exc).__name__}"}
+        return self._normalize_result(result, symbol, direction, entry, quality)
+
+    def _calculate_raw(
+        self,
+        symbol: str,
+        direction: str,
+        entry: float,
+        quality: str,
+        balance: float,
+        score: float = 0.0,
+        atr_pct: float | None = None,
+    ) -> dict:
         try:
             from core.accounting import calculate_position_size, calculate_rr as _calc_rr
             import database
@@ -786,7 +860,7 @@ class RiskEngine:
                 logger.warning(f"ATR fallback kullanıldı: {symbol} atr={atr_val:.6f}")
 
             # Volatility-Adaptive Risk Adjustments
-            atr_pct = atr_val / entry if entry > 0 else 0.02
+            atr_pct = float(atr_pct) if atr_pct is not None else (atr_val / entry if entry > 0 else 0.02)
             if atr_pct > 0.018:
                 sl_atr_mult *= 1.25
                 logger.info(f"[Volatility-Adaptive] High volatility ({atr_pct:.4f}) on {symbol}. sl_atr_mult scaled by 1.25x to {sl_atr_mult:.2f}")

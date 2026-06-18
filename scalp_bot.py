@@ -205,22 +205,16 @@ def main():
     import traceback
     
     logger.info("AX Scalp Engine başlatılıyor...")
-    try:
-        from telegram_delivery import send_message
-        mode_str = "📄 PAPER MODE" if EXECUTION_MODE != "live" else "🔴 LIVE MODE"
-        send_message(f"✅ <b>AX Trade Engine Başlatıldı</b>\nMod: {mode_str}\nKaldıraç: {MAX_LEVERAGE}x")
-    except Exception as e:
-        logger.warning(f"Telegram start mesajı gönderilemedi: {e}")
+
+    # DB ve hesap başlat
+    init_db()
+    init_paper_account()
 
     # Başlangıçta tüm bekleyen mesajları veritabanından kurtar
     try:
         recover_queued_messages()
     except Exception as e:
         logger.warning(f"Failed to recover queued telegram messages: {e}")
-
-    # DB ve hesap başlat
-    init_db()
-    init_paper_account()
 
     # Persist edilen HUMAN_MODE durumunu yükle
     try:
@@ -350,6 +344,7 @@ def main():
 
     _last_ai_adapt    = 0   # AI Brain periyodik adaptasyon (30 dakikada bir)
     _last_nightly_day = ""  # Nightly optimizer son çalışma günü (YYYY-MM-DD)
+    _startup_key = f"startup:scalp_bot:{datetime.now(timezone.utc).strftime('%Y%m%d')}"
     send_message(
         f"🚀 <b>AX Scalp Engine başlatıldı</b>\n"
         f"━━━━━━━━━━━━━━━━\n"
@@ -357,7 +352,8 @@ def main():
         f"Execution: {EXECUTION_MODE.upper()}\n"
         f"💰 Bakiye: ${get_paper_balance():.2f}\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"/help — Komutlar"
+        f"/help — Komutlar",
+        dedupe_key=_startup_key,
     )
 
     while True:
@@ -475,7 +471,7 @@ def main():
                     save_signal_event(signal_id, "SCANNED", symbol=symbol, reason="scanner_pass")
                     trend_result = trend.analyze(symbol)
                     if trend_result["direction"] == "NO TRADE":
-                        save_signal_event(signal_id, "REJECTED", symbol=symbol, reject_reason="weak_trend", reason="trend_engine_no_trade")
+                        save_signal_event(signal_id, "TREND_REJECTED", symbol=symbol, reject_reason="weak_trend", reason="trend_engine_no_trade")
                         if event_manager: event_manager.broadcast_signal_rejected(symbol, trend_result["direction"], "weak_trend")
                         continue
                     save_signal_event(signal_id, "TREND_CHECKED", symbol=symbol, reason="trend_pass")
@@ -488,7 +484,7 @@ def main():
                         trend_confluence=trend_result.get("confluence_raw", 1),
                     )
                     if trigger_result["quality"] == "D":
-                        save_signal_event(signal_id, "REJECTED", symbol=symbol, reject_reason="weak_trigger", reason="trigger_quality_d")
+                        save_signal_event(signal_id, "TRIGGER_REJECTED", symbol=symbol, reject_reason="weak_trigger", reason="trigger_quality_d")
                         if event_manager: event_manager.broadcast_signal_rejected(symbol, trend_result["direction"], "weak_trigger")
                         continue
                     save_signal_event(signal_id, "TRIGGER_CHECKED", symbol=symbol, reason="trigger_pass")
@@ -578,7 +574,8 @@ def main():
                         symbol, trend_result["direction"],
                         trigger_result["entry"],
                         trigger_result["quality"],
-                        balance
+                        balance,
+                        atr_pct=trigger_result.get("atr_pct"),
                     )
                     if not risk_result.get("valid"):
                         rk_id = save_candidate_signal({
@@ -596,7 +593,7 @@ def main():
                             "execution_status": "rejected",
                             "entry": trigger_result["entry"],
                         })
-                        save_signal_event(signal_id, "REJECTED", symbol=symbol, reject_reason=risk_result.get("risk_reject_reason", "risk_guard_failed"), reason="risk_engine_reject")
+                        save_signal_event(signal_id, "RISK_REJECTED", symbol=symbol, reject_reason=risk_result.get("risk_reject_reason", "risk_guard_failed"), reason="risk_engine_reject")
                         if event_manager: event_manager.broadcast_signal_rejected(symbol, trend_result["direction"], risk_result.get("risk_reject_reason", "risk_guard_failed"))
                         if PAPER_TRACK_REJECTED_CANDIDATES:
                             prv = risk.preview_for_paper(symbol, trend_result["direction"], trigger_result["entry"], balance)
@@ -696,7 +693,7 @@ def main():
                         sig.reject_reason = "low_confidence"
                         sig.telegram_status = "skip"
                         update_candidate_status(candidate_id, reject_reason="low_confidence", lifecycle_stage="REJECTED", execution_status="rejected")
-                        save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="low_confidence", reason="below_data_threshold")
+                        save_signal_event(sig.id, "AI_VETO", symbol=symbol, reject_reason="low_confidence", reason="below_data_threshold")
                         if event_manager: event_manager.broadcast_signal_rejected(symbol, sig.direction, "low_confidence")
                         save_scalp_signal(sig.to_dict())
                         if PAPER_TRACK_REJECTED_CANDIDATES:
@@ -731,7 +728,7 @@ def main():
                         sig.reject_reason = "ai_veto"
                         sig.telegram_status = "skip"
                         update_candidate_status(candidate_id, ai_veto_reason=decision["reason"], reject_reason="ai_veto", lifecycle_stage="REJECTED", execution_status="rejected")
-                        save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="ai_veto", reason=decision["reason"])
+                        save_signal_event(sig.id, "AI_VETO", symbol=symbol, reject_reason="ai_veto", reason=decision["reason"])
                         if event_manager: event_manager.broadcast_signal_rejected(symbol, sig.direction, "ai_veto")
                         save_scalp_signal(sig.to_dict())
                         logger.info(
@@ -816,15 +813,15 @@ def main():
                             and sig.setup_quality in EXECUTABLE_QUALITIES):  # B kalite execute edilmez
                         if sig.rr < MIN_RR:
                             update_candidate_status(candidate_id, reject_reason="bad_rr", lifecycle_stage="REJECTED", execution_status="rejected")
-                            save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="bad_rr", reason="trade_guard_min_rr")
+                            save_signal_event(sig.id, "ALLOW_BUT_EXECUTION_BLOCKED", symbol=symbol, reject_reason="bad_rr", reason="trade_guard_min_rr")
                             continue
                         if sig.leverage_suggestion > MAX_LEVERAGE:
                             update_candidate_status(candidate_id, reject_reason="risk_guard_failed", lifecycle_stage="REJECTED", execution_status="rejected")
-                            save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="risk_guard_failed", reason="trade_guard_max_leverage")
+                            save_signal_event(sig.id, "ALLOW_BUT_EXECUTION_BLOCKED", symbol=symbol, reject_reason="risk_guard_failed", reason="trade_guard_max_leverage")
                             continue
                         if EXECUTION_MODE == "live" and not LIVE_CONFIRM:
                             update_candidate_status(candidate_id, reject_reason="risk_guard_failed", lifecycle_stage="REJECTED", execution_status="rejected")
-                            save_signal_event(sig.id, "REJECTED", symbol=symbol, reject_reason="risk_guard_failed", reason="live_confirm_required")
+                            save_signal_event(sig.id, "LIVE_BLOCKED_BY_CONFIG", symbol=symbol, reject_reason="live_confirm_required", reason="live_confirm_required")
                             continue
                         bal_trade = get_paper_balance()
                         if correlation_blocks(open_trades_now, sig.direction):
@@ -836,7 +833,7 @@ def main():
                             )
                             save_signal_event(
                                 sig.id,
-                                "REJECTED",
+                                "ALLOW_BUT_EXECUTION_BLOCKED",
                                 symbol=symbol,
                                 reject_reason="correlation_risk",
                                 reason="max_correlated_positions",
@@ -852,7 +849,7 @@ def main():
                             )
                             save_signal_event(
                                 sig.id,
-                                "REJECTED",
+                                "ALLOW_BUT_EXECUTION_BLOCKED",
                                 symbol=symbol,
                                 reject_reason="max_portfolio_exposure",
                                 reason=f"cap_{MAX_PORTFOLIO_EXPOSURE_PCT}pct",
@@ -895,12 +892,32 @@ def main():
                         }
                         trade_id = open_trade(client, legacy_signal, ax_result)
                         if trade_id:
-                            save_signal_event(sig.id, "OPENED", symbol=symbol, reason=f"trade_id={trade_id}")
+                            opened_stage = "LIVE_OPENED" if EXECUTION_MODE == "live" else "PAPER_OPENED"
+                            save_signal_event(sig.id, opened_stage, symbol=symbol, reason=f"trade_id={trade_id}")
                             update_candidate_status(candidate_id, lifecycle_stage="OPENED", execution_status="opened")
                             logger.info(
                                 f"✅ TRADE AÇILDI #{trade_id} {symbol} {sig.direction} "
                                 f"score={sig.final_score:.1f} rr={sig.rr:.2f}"
                             )
+                        else:
+                            save_signal_event(sig.id, "ALLOW_BUT_EXECUTION_BLOCKED", symbol=symbol, reject_reason="execution_engine_returned_none", reason="open_trade_returned_none")
+                    else:
+                        blocked_reasons = []
+                        if AX_MODE != "execute":
+                            blocked_reasons.append("ax_mode_not_execute")
+                        if not EXECUTION_AVAILABLE:
+                            blocked_reasons.append("execution_engine_unavailable")
+                        if sig.final_score < _trade_thr:
+                            blocked_reasons.append("below_trade_threshold")
+                        if sig.setup_quality not in EXECUTABLE_QUALITIES:
+                            blocked_reasons.append("quality_not_executable")
+                        save_signal_event(
+                            sig.id,
+                            "ALLOW_BUT_EXECUTION_BLOCKED",
+                            symbol=symbol,
+                            reject_reason=";".join(blocked_reasons) or "execution_not_attempted",
+                            reason="execution_not_attempted",
+                        )
 
                     logger.info(
                         f"✅ SİNYAL [{sig.setup_quality}] {symbol} {sig.direction} "

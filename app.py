@@ -994,6 +994,11 @@ def api_signal_funnel():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/signal_stats/funnel")
+def api_signal_stats_funnel():
+    return api_signal_funnel()
+
+
 # ── /api/learning_metrics ─────────────────────────────────────────────────────
 @app.route("/api/learning_metrics")
 def api_learning_metrics():
