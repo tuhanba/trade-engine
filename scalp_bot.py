@@ -227,8 +227,10 @@ def main():
         import database as _db
         human_mode_val = _db.get_state("tg_human_mode")
         if human_mode_val is not None:
-            config.HUMAN_MODE = (human_mode_val == "True")
-            logger.info(f"Persistent config: HUMAN_MODE = {config.HUMAN_MODE} yüklendi.")
+            # NEDEN (Fix C): doğrudan config.HUMAN_MODE=... statik gölge yaratır →
+            # dinamik resolver ölür. Değer zaten DB'de; cache'i düşür.
+            config._CONFIG_CACHE.pop("HUMAN_MODE", None)
+            logger.info(f"Persistent config: HUMAN_MODE = {(human_mode_val == 'True')} yüklendi.")
     except Exception as e:
         logger.warning(f"Failed to load persistent HUMAN_MODE state: {e}")
 

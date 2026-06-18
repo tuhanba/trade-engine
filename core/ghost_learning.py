@@ -668,9 +668,30 @@ def _process_single(record: dict, client, now: datetime, prices: dict = None):
 
     if prices is not None:
         current_price = prices.get(symbol)
+        # Fix G: Fiyat-tazeliği guard'ı — BAYAT cache fiyatıyla ghost sonucu KAPATMA.
+        # NEDEN: process_pending_results cached WS fiyatlarıyla simüle eder; WS
+        # boşluğunda bayat fiyatla tp1_hit/sl_hit YANLIŞ etiketlenir → bozuk öğrenme.
+        # Bayatsa taze REST dene; o da yoksa kaydı ERTELE (pending kalsın).
+        try:
+            from core.market_data import get_price_age
+            import config as _cfg
+            max_age = float(getattr(_cfg, "PRICE_MAX_AGE_SEC", 120))
+            age = get_price_age(symbol)
+            if age is not None and age > max_age:
+                fresh = _get_price(client, symbol)  # REST fallback (taze fiyat)
+                if fresh:
+                    current_price = fresh
+                else:
+                    logger.debug(
+                        "[Ghost] #%d %s fiyatı bayat (%.0fsn>%.0fsn) + REST yok — sonuç ertelendi",
+                        record_id, symbol, age, max_age,
+                    )
+                    return
+        except Exception:
+            pass
     else:
         current_price = _get_price(client, symbol)
-        
+
     if not current_price:
         return
 

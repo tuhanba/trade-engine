@@ -67,13 +67,17 @@ class TelegramManager:
             human_mode_val = _db.get_state("tg_human_mode")
             if human_mode_val is not None:
                 self.human_mode = (human_mode_val == "True")
-                config.HUMAN_MODE = self.human_mode
+                # NEDEN (Fix C): config.HUMAN_MODE = ... DOĞRUDAN atama statik global'i
+                # yeniden yaratıp __getattr__ dinamik çözümleyiciyi kalıcı gölgeler.
+                # Değer zaten DB'de (tg_human_mode); cache'i düşür, resolver taze okusun.
+                config._CONFIG_CACHE.pop("HUMAN_MODE", None)
                 logger.info(f"Telegram human_mode yüklendi: {self.human_mode}")
                 
             exec_mode_val = _db.get_state("tg_execution_mode")
             if exec_mode_val:
-                config.EXECUTION_MODE = exec_mode_val
-                logger.info(f"Telegram execution_mode yüklendi: {config.EXECUTION_MODE}")
+                # NEDEN (Fix C): doğrudan atama yok — bkz. yukarı. Cache'i düşür.
+                config._CONFIG_CACHE.pop("EXECUTION_MODE", None)
+                logger.info(f"Telegram execution_mode yüklendi: {exec_mode_val}")
         except Exception as e:
             logger.warning(f"Telegram states load hatası: {e}")
         self._running = True
@@ -1316,31 +1320,30 @@ class TelegramManager:
             lines.append(f"{icon} | {sym} ({side})\n   └ Kâr: {pnl:+.3f}$ | Sebep: {reason}")
         self.send_fn("📜 <b>Kapanan Son 5 İşlemin Analizi</b>\n\n" + "\n\n".join(lines) + "\n\n💡 <i>Not: Neden kapandığına (reason) bakarak botun hangi stratejiyi uyguladığını (SL, TP, Trail) görebilirsin.</i>")
 
-    def _cmd_balance(self):
+    def _cmd_balance(self, env: str | None = None):
         import database
+        # NEDEN (Fix D): Telegram ve Dashboard AYNI tek kaynaktan beslenir.
+        # Ortam → current_environment(); PnL/bakiye → get_dashboard_stats (içinde
+        # get_total_pnl, tek PnL formülü). Eskiden Telegram "Toplam K/Z" = bal-init
+        # (yalnız realize) gösteriyordu, Dashboard total_pnl (unrealized dahil) —
+        # aynı anda farklı toplam çıkıyordu. Kural tek yerde: total_pnl = stats.
+        if env is None:
+            env = database.current_environment()
         details = database.get_active_balance_details()
-        mode_str = "Live (Gerçek)" if details.get("execution_mode") == "live" else "Sanal (Paper)"
-        bal = details.get("total", 0.0)
-        avail = details.get("available", 0.0)
-        init = getattr(config, "INITIAL_PAPER_BALANCE", 2000.0)
-        diff = bal - init
-        try:
-            with database.get_conn() as conn:
-                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                row   = conn.execute(
-                    "SELECT COALESCE(SUM(net_pnl),0) FROM trades WHERE DATE(close_time)=? AND status='closed' AND is_valid_for_stats=1 AND environment=?",
-                    (today, details.get("execution_mode", "paper"))
-                ).fetchone()
-            today_pnl = float(row[0]) if row else 0.0
-        except Exception:
-            today_pnl = 0.0
+        stats = database.get_dashboard_stats(env)
+        mode_str = "Live (Gerçek)" if env == "live" else "Sanal (Paper)"
+        bal = stats.get("balance", details.get("total", 0.0))
+        avail = details.get("available", bal)
+        init = stats.get("initial_balance", getattr(config, "INITIAL_PAPER_BALANCE", 2000.0))
+        total_pnl = stats.get("total_pnl", 0.0)
+        today_pnl = stats.get("today_pnl", 0.0)
         self.send_fn(
             f"💳 <b>Bakiye ve Kazanç Özeti [{mode_str}]</b>\n\n"
             f"Sisteme tanımlı başlangıç kasanız ve şu anki büyüme:\n\n"
             f"🔹 Başlangıç Kasası: ${init:.2f}\n"
             f"🔹 <b>Toplam Bakiye:</b> ${bal:.2f}\n"
             f"🔹 <b>Kullanılabilir Bakiye:</b> ${avail:.2f}\n"
-            f"🔹 Toplam Kâr/Zarar: ${diff:+.2f}\n"
+            f"🔹 Toplam Kâr/Zarar: ${total_pnl:+.2f}\n"
             f"🔹 Sadece Bugün Kazanılan: ${today_pnl:+.2f}\n\n"
             f"💡 <i>Canlı ticarete (Live Trading) geçtiğinizde burada gerçek Binance cüzdanınızı göreceksiniz.</i>"
         )
@@ -1936,9 +1939,11 @@ class TelegramManager:
         self.human_mode = True
         try:
             import config as _cfg
-            _cfg.HUMAN_MODE = True
             import database as _db
+            # NEDEN (Fix C): doğrudan _cfg.HUMAN_MODE=... statik gölge yaratır →
+            # dinamik resolver ölür. Tek yetkili yazım DB; sonra cache'i düşür.
             _db.set_state("tg_human_mode", "True")
+            _cfg._CONFIG_CACHE.pop("HUMAN_MODE", None)
         except Exception:
             pass
         self.send_fn(
@@ -1956,9 +1961,10 @@ class TelegramManager:
         self.human_mode = False
         try:
             import config as _cfg
-            _cfg.HUMAN_MODE = False
             import database as _db
+            # NEDEN (Fix C): doğrudan atama yok — DB + cache pop.
             _db.set_state("tg_human_mode", "False")
+            _cfg._CONFIG_CACHE.pop("HUMAN_MODE", None)
         except Exception:
             pass
         self.send_fn(
@@ -1974,9 +1980,11 @@ class TelegramManager:
     def _cmd_paper(self):
         try:
             import config as _cfg
-            _cfg.EXECUTION_MODE = "paper"
             import database as _db
+            # NEDEN (Fix C): doğrudan _cfg.EXECUTION_MODE=... statik gölge yaratır →
+            # mod tutarsızlığı (Telegram/Dashboard farklı görür). DB + cache pop.
             _db.set_state("tg_execution_mode", "paper")
+            _cfg._CONFIG_CACHE.pop("EXECUTION_MODE", None)
             self.send_fn("💵 <b>PAPER MODE AKTİF</b>\nSistem artık sanal parayla işlem yapacak. Gerçek paranız güvende.")
         except Exception as e:
             self.send_fn(f"Hata: {e}")
@@ -2026,9 +2034,10 @@ class TelegramManager:
         """LIVE moda gerçek geçiş — onay sonrası çağrılır (Faz 5.2)."""
         try:
             import config as _cfg
-            _cfg.EXECUTION_MODE = "live"
             import database as _db
+            # NEDEN (Fix C): doğrudan atama yok — DB + cache pop (mod tutarlılığı).
             _db.set_state("tg_execution_mode", "live")
+            _cfg._CONFIG_CACHE.pop("EXECUTION_MODE", None)
             _db.set_state("friday_emergency_clutch", "-")
             from datetime import datetime, timezone, timedelta
             _db.set_state("friday_clutch_cooldown_until", (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat())
