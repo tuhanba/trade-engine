@@ -81,7 +81,9 @@ htmlcov/
 coverage.xml
 
 # ─── Claude / AI araç dosyaları ──────────────────────────────────────
-.claude/
+.claude/*
+# NEDEN: paylaşılan skill'ler (örn. /spec) repoda izlensin; gerisi yoksayılı kalsın
+!.claude/skills/
 
 # ─── Patch & geçici script ───────────────────────────────────────────
 patch_*.py
