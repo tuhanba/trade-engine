@@ -24,11 +24,15 @@ FUNNEL_STAGES = [
     "SCANNED",
     "TREND_REJECTED",
     "TRIGGER_REJECTED",
+    "REGIME_REJECTED",
     "RISK_REJECTED",
     "AI_VETO",
+    "PENDING_APPROVAL",
     "ALLOW_BUT_EXECUTION_BLOCKED",
     "PAPER_OPENED",
     "LIVE_BLOCKED_BY_CONFIG",
+    "LIVE_BLOCKED_BY_PROFIT_GATE",
+    "LIVE_BLOCKED_BY_SAFETY_GATE",
     "LIVE_OPENED",
 ]
 
@@ -59,6 +63,23 @@ def _event_columns(conn) -> dict[str, str]:
     }
 
 
+def _live_block_bucket(reason: str) -> str | None:
+    """Map a reject reason to a LIVE_BLOCKED_* bucket, or None.
+
+    NEDEN (P0-5, directive Section 8): canli kapilarin (config / profit gate /
+    safety gate) reddini ayri kovalara ayir. P0-1 safety gate'i
+    reject_reason=LIVE_BLOCKED_BY_SAFETY_GATE ile loglar.
+    """
+    reason = (reason or "").lower()
+    if "safety_gate" in reason:
+        return "LIVE_BLOCKED_BY_SAFETY_GATE"
+    if "profit_gate" in reason or "profit_readiness" in reason:
+        return "LIVE_BLOCKED_BY_PROFIT_GATE"
+    if "live_trading_disabled" in reason or "live_confirm" in reason or "dry_run" in reason:
+        return "LIVE_BLOCKED_BY_CONFIG"
+    return None
+
+
 def normalize_stage(stage: str, reason: str = "", execution_mode: str = "paper") -> str:
     stage = (stage or "").upper()
     reason = (reason or "").lower()
@@ -67,10 +88,14 @@ def normalize_stage(stage: str, reason: str = "", execution_mode: str = "paper")
         return stage
     if stage in {"AI_VETOED"}:
         return "AI_VETO"
-    if stage in {"RISK_REJECTED", "SKIPPED_BY_RISK"}:
+    if stage in {"SKIPPED_BY_REGIME", "REGIME_BLOCKED"}:
+        return "REGIME_REJECTED"
+    if stage in {"AWAITING_APPROVAL", "PENDING_CONFIRMATION", "CONFIRMATION_PENDING"}:
+        return "PENDING_APPROVAL"
+    if stage in {"SKIPPED_BY_RISK"}:
         return "RISK_REJECTED"
     if stage in {"EXECUTION_REJECTED"}:
-        return "ALLOW_BUT_EXECUTION_BLOCKED"
+        return _live_block_bucket(reason) or "ALLOW_BUT_EXECUTION_BLOCKED"
     if stage in {"OPENED", "EXECUTED"}:
         return "LIVE_OPENED" if execution_mode == "live" else "PAPER_OPENED"
     if stage == "REJECTED":
@@ -78,11 +103,13 @@ def normalize_stage(stage: str, reason: str = "", execution_mode: str = "paper")
             return "TREND_REJECTED"
         if "trigger" in reason:
             return "TRIGGER_REJECTED"
+        if "regime" in reason:
+            return "REGIME_REJECTED"
         if "risk" in reason or "rr" in reason or "balance" in reason or "exposure" in reason:
             return "RISK_REJECTED"
         if "ai" in reason or "veto" in reason or "confidence" in reason:
             return "AI_VETO"
-        return "ALLOW_BUT_EXECUTION_BLOCKED"
+        return _live_block_bucket(reason) or "ALLOW_BUT_EXECUTION_BLOCKED"
     return stage or "UNKNOWN"
 
 
@@ -167,11 +194,15 @@ def main(argv: list[str] | None = None) -> int:
         "SCANNED": "scanned only",
         "TREND_REJECTED": "trend rejected",
         "TRIGGER_REJECTED": "trigger rejected",
+        "REGIME_REJECTED": "regime rejected",
         "RISK_REJECTED": "risk rejected",
         "AI_VETO": "AI veto",
+        "PENDING_APPROVAL": "pending approval",
         "ALLOW_BUT_EXECUTION_BLOCKED": "execution blocked",
         "PAPER_OPENED": "paper opened",
         "LIVE_BLOCKED_BY_CONFIG": "live blocked by config",
+        "LIVE_BLOCKED_BY_PROFIT_GATE": "live blocked by profit gate",
+        "LIVE_BLOCKED_BY_SAFETY_GATE": "live blocked by safety gate",
         "LIVE_OPENED": "live opened",
     }
     for stage in FUNNEL_STAGES:
