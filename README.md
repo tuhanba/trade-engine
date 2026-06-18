@@ -101,6 +101,14 @@ Sistem varsayılan olarak **Paper Trading** (Sanal Para) modunda başlar. Canlı
 ## 🛠️ Kurulum ve Çalıştırma
 
 ### 1. Yerel Kurulum (Python)
+
+**Hızlı yol (tek komut — venv + bağımlılıklar + `.env` + DB + testler):**
+```bash
+bash scripts/setup_env.sh          # testleri atlamak için: bash scripts/setup_env.sh --no-tests
+```
+
+Veya adım adım:
+
 > **Not (PEP 668):** Sistem Python'ında doğrudan `pip install` *"externally-managed-environment"* hatası verebilir; daima izole bir sanal ortam (`.venv`) kullanın.
 
 Sanal ortam oluşturun, bağımlılıkları yükleyin ve `.env` dosyasını hazırlayın:
