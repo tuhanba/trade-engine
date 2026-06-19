@@ -632,6 +632,13 @@ def main():
                     sig.trigger_score = trigger_result["score"]
                     sig.risk_score = risk_result["score"]
                     sig.setup_quality = trigger_result["quality"]
+                    # P1-1 (directive Section 4/9): zorunlu setup taksonomisi —
+                    # her sinyal siniflandirilir; siniflanamayan = UNKNOWN.
+                    try:
+                        from core import setup_classifier
+                        sig.setup_type, sig.setup_reason = setup_classifier.classify(sig)
+                    except Exception as _e:
+                        sig.setup_type, sig.setup_reason = "UNKNOWN", "classify_error"
                     sig.ml_score = trigger_result.get("ml_score", 50)
                     sig.confluence_score = trigger_result.get("confluence_total", 2)
                     sig.entry_zone = trigger_result["entry"]
