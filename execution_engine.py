@@ -195,7 +195,11 @@ class ExecutionEngine:
         open_symbols = [t["symbol"] for t in open_trades]
         
         # 1. Pearson Correlation Blocker
-        if not is_forced and open_symbols:
+        # NEDEN (FAZ 1.1): "Korelasyon Kalkanı" scalp modda KAPALI — kripto coinleri BTC
+        # ile yüksek korelasyonlu olduğundan, açık pozisyon varken bu sert VETO sürekli
+        # trade öldürüyordu. Doküman bunu kapatılan kalkanlar listesine alıyor. Portföy
+        # VaR tavanı (aşağıda) ve diğer sert risk vetoları korunur.
+        if not is_forced and open_symbols and not getattr(config, "SCALP_MODE", False):
             try:
                 from core.portfolio_risk import calculate_max_correlation
                 max_corr = calculate_max_correlation(open_symbols, signal.symbol)

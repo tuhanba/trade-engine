@@ -71,6 +71,15 @@ CANARY_MODE             = _env_bool("CANARY_MODE", False)
 # onayindan gecer. Kanit birikene kadar kapali kalir; fail-safe.
 SELF_HEALING_AUTO_APPLY = _env_bool("SELF_HEALING_AUTO_APPLY", False)
 
+# ── SCALP MODE (mode-gate) ────────────────────────────────────────────────────
+# NEDEN (CLAUDE_FIX_SCALP_SIMPLIFY): Sistemi "her şeyi yapmaya çalışan, hiç trade
+# etmeyen" yapıdan sade/hızlı gerçek scalp engine'e döndüren ANA bayrak. Beyin
+# SİLİNMEZ, KAPATILIR: SCALP_MODE=True iken çelişen filtreler/otonom eşik
+# oynamaları/optimizasyon döngüleri devre dışı kalır ve scalp parametreleri
+# (kısa hold, tight SL, düşük TRADE_THRESHOLD) uygulanır. Tam geri dönüş için
+# `SCALP_MODE=false` (env) — eski "brain" davranışı aynen geri gelir.
+SCALP_MODE = _env_bool("SCALP_MODE", True)
+
 # API Keys
 BINANCE_API_KEY    = _env("BINANCE_API_KEY")
 BINANCE_API_SECRET = _env("BINANCE_API_SECRET")
@@ -87,7 +96,7 @@ FRIDAY_LLM_DAILY_BUDGET = int(_env("FRIDAY_LLM_DAILY_BUDGET", "5"))
 # Risk & Compounding
 AUTO_COMPOUNDING           = _env_bool("AUTO_COMPOUNDING", True)
 BASE_ACCOUNT_SIZE          = _env_float("BASE_ACCOUNT_SIZE", 1000.0) # Eger auto-compounding kapaliysa baz alinacak bakiye
-RISK_PCT                   = _env_float("RISK_PCT", 0.75)
+RISK_PCT                   = _env_float("RISK_PCT", 0.5 if SCALP_MODE else 0.75)   # NEDEN: scalp = yüksek frekans, trade başı risk düşük
 MAX_OPEN_TRADES            = _env_int("MAX_OPEN_TRADES", 5)
 DAILY_MAX_LOSS_PCT         = _env_float("DAILY_MAX_LOSS_PCT", 5.0)
 MAX_LEVERAGE               = _env_int("MAX_LEVERAGE", 10)
@@ -100,25 +109,25 @@ COOLDOWN_LOSS_BASE_MINUTES = _env_float("COOLDOWN_LOSS_BASE_MINUTES", 60.0)
 MAX_CORRELATED_TRADES      = _env_int("MAX_CORRELATED_TRADES", 3)
 MAX_MARGIN_LOSS_PCT        = _env_float("MAX_MARGIN_LOSS_PCT", 0.40)
 MAX_PORTFOLIO_EXPOSURE_PCT = _env_float("MAX_PORTFOLIO_EXPOSURE_PCT", 95.0)
-MIN_RR                     = _env_float("MIN_RR", 1.5)   # v6.1 düzeltildi: 1.2→1.5
-MIN_EXPECTED_MFE_R         = _env_float("MIN_EXPECTED_MFE_R", 1.2)
+MIN_RR                     = _env_float("MIN_RR", 1.1 if SCALP_MODE else 1.5)   # scalp: daha sık kazanır, R küçük
+MIN_EXPECTED_MFE_R         = _env_float("MIN_EXPECTED_MFE_R", 0.8 if SCALP_MODE else 1.2)
 
 # Unified Capital & Risk Protection Package Settings
 DRAWDOWN_DEFENSIVE_PCT         = _env_float("DRAWDOWN_DEFENSIVE_PCT", 5.0)
 DRAWDOWN_LOCK_PCT              = _env_float("DRAWDOWN_LOCK_PCT", 10.0)
 EQUITY_CURVE_EMA_PERIOD        = _env_int("EQUITY_CURVE_EMA_PERIOD", 10)
 EQUITY_CURVE_RISK_REDUCTION    = _env_float("EQUITY_CURVE_RISK_REDUCTION", 0.5)
-EQUITY_CURVE_FILTER_ENABLED    = _env_bool("EQUITY_CURVE_FILTER_ENABLED", True)
+EQUITY_CURVE_FILTER_ENABLED    = _env_bool("EQUITY_CURVE_FILTER_ENABLED", not SCALP_MODE)   # scalp: kapalı
 MTF_TREND_ALIGN_RISK_REDUCTION = _env_float("MTF_TREND_ALIGN_RISK_REDUCTION", 0.4)
-MTF_TREND_ALIGN_ENABLED        = _env_bool("MTF_TREND_ALIGN_ENABLED", True)
+MTF_TREND_ALIGN_ENABLED        = _env_bool("MTF_TREND_ALIGN_ENABLED", not SCALP_MODE)   # scalp: sert kapı kapalı
 
 
 # TP / SL ATR multipliers  (fix-tp-sl-ratios: TP1=1.5R TP2=2.5R SL min %1.5)
 SL_ATR_MULT  = _env_float("SL_ATR_MULT", 1.8)   # v6.1 düzeltildi: 1.2→1.8 (gürültü koruması)
-TP1_R        = _env_float("TP1_R", 1.5)   # v6.1 düzeltildi: 1.0→1.5
-TP2_R        = _env_float("TP2_R", 2.5)   # v6.1 düzeltildi: 2.0→2.5
-TP3_R        = _env_float("TP3_R", 4.0)   # runner hedef
-MIN_SL_PCT   = _env_float("MIN_SL_PCT", 0.015)  # v6.1 düzeltildi: 0.008→0.015 (SL min %1.5)
+TP1_R        = _env_float("TP1_R", 1.0 if SCALP_MODE else 1.5)   # scalp: kârın çoğunu erken al
+TP2_R        = _env_float("TP2_R", 1.8 if SCALP_MODE else 2.5)
+TP3_R        = _env_float("TP3_R", 3.0 if SCALP_MODE else 4.0)   # runner, küçük pay
+MIN_SL_PCT   = _env_float("MIN_SL_PCT", 0.004 if SCALP_MODE else 0.015)  # scalp: %0.4 tight stop
 # HUMAN MODE parametreleri (.env'den override edilir)
 HUMAN_MODE              = _env_bool("HUMAN_MODE", False)
 HUMAN_SL_ATR_MULT       = _env_float("HUMAN_SL_ATR_MULT", 2.0)
@@ -128,12 +137,12 @@ HUMAN_TRADE_THRESHOLD   = _env_float("HUMAN_TRADE_THRESHOLD", 72.0)
 HUMAN_MAX_OPEN_TRADES   = _env_int("HUMAN_MAX_OPEN_TRADES", 2)
 
 # TP Splits — toplamı 100 olmalı (test_config_tp_logic)
-TP1_CLOSE_PCT    = _env_float("TP1_CLOSE_PCT", 40)   # 50→40: toplam=100
-TP2_CLOSE_PCT    = _env_float("TP2_CLOSE_PCT", 30)   # 35→30: toplam=100
-RUNNER_CLOSE_PCT = _env_float("RUNNER_CLOSE_PCT", 30) # 25→30: toplam=100
+TP1_CLOSE_PCT    = _env_float("TP1_CLOSE_PCT", 60 if SCALP_MODE else 40)   # scalp: kârın çoğunu erken al; toplam=100
+TP2_CLOSE_PCT    = _env_float("TP2_CLOSE_PCT", 25 if SCALP_MODE else 30)   # toplam=100
+RUNNER_CLOSE_PCT = _env_float("RUNNER_CLOSE_PCT", 15 if SCALP_MODE else 30) # toplam=100 (60+25+15)
 
 # Trailing
-TRAIL_ATR_MULT       = _env_float("TRAIL_ATR_MULT", 1.5)
+TRAIL_ATR_MULT       = _env_float("TRAIL_ATR_MULT", 1.0 if SCALP_MODE else 1.5)   # scalp: daha sıkı trailing
 BREAKEVEN_ENABLED    = _env_bool("BREAKEVEN_ENABLED", True)
 BREAKEVEN_OFFSET_PCT = _env_float("BREAKEVEN_OFFSET_PCT", 0.1)
 TRAILING_STOP_TYPE   = _env("TRAILING_STOP_TYPE", "atr")
@@ -146,8 +155,8 @@ LATENCY_GUARD_ENABLED = _env_bool("LATENCY_GUARD_ENABLED", True)
 BYPASS_LIVE_RISK_SHIELDS = _env_bool("BYPASS_LIVE_RISK_SHIELDS", False)
 REGIME_FILTER_ENABLED = _env_bool("REGIME_FILTER_ENABLED", True)
 REGIME_FILTER_MIN_QUALITY_IN_CHOPPY = _env("REGIME_FILTER_MIN_QUALITY_IN_CHOPPY", "B")
-ORDER_BOOK_WALL_FILTER_ENABLED = _env_bool("ORDER_BOOK_WALL_FILTER_ENABLED", True)
-CONNORS_RSI_ENABLED          = _env_bool("CONNORS_RSI_ENABLED", True)
+ORDER_BOOK_WALL_FILTER_ENABLED = _env_bool("ORDER_BOOK_WALL_FILTER_ENABLED", not SCALP_MODE)   # scalp: kapalı
+CONNORS_RSI_ENABLED          = _env_bool("CONNORS_RSI_ENABLED", not SCALP_MODE)   # scalp: kapalı
 ORDER_BOOK_WALL_FILTER_MODE  = _env("ORDER_BOOK_WALL_FILTER_MODE", "soft")
 REGIME_STABILIZATION_PERIODS = _env_int("REGIME_STABILIZATION_PERIODS", 3)
 FRIDAY_CEO_LOOP_INTERVAL = _env_int("FRIDAY_CEO_LOOP_INTERVAL", 3600)
@@ -175,7 +184,7 @@ TIME_DECAY_BREAKEVEN_MINUTES       = _env_int("TIME_DECAY_BREAKEVEN_MINUTES", 10
 
 # Scalp-specific Time Decay Stop Loss Settings
 SCALP_TIME_DECAY_START_MINUTES     = _env_int("SCALP_TIME_DECAY_START_MINUTES", 5)
-SCALP_TIME_DECAY_BREAKEVEN_MINUTES = _env_int("SCALP_TIME_DECAY_BREAKEVEN_MINUTES", 15)
+SCALP_TIME_DECAY_BREAKEVEN_MINUTES = _env_int("SCALP_TIME_DECAY_BREAKEVEN_MINUTES", 8 if SCALP_MODE else 15)
 
 # Spread & Fee-Aware Take-Profit Optimizer Settings
 SCALP_TP_OPTIMIZER_ENABLED         = _env_bool("SCALP_TP_OPTIMIZER_ENABLED", True)
@@ -184,18 +193,18 @@ MIN_TP_FEE_SPREAD_RATIO            = _env_float("MIN_TP_FEE_SPREAD_RATIO", 2.5)
 # Scalp Order Book Wall & CVD Divergence Filter Settings
 SCALP_OB_WALL_MULTIPLIER           = _env_float("SCALP_OB_WALL_MULTIPLIER", 5.0)
 SCALP_OB_WALL_PCT                  = _env_float("SCALP_OB_WALL_PCT", 0.002)
-SCALP_CVD_DIVERGENCE_FILTER_ENABLED = _env_bool("SCALP_CVD_DIVERGENCE_FILTER_ENABLED", True)
+SCALP_CVD_DIVERGENCE_FILTER_ENABLED = _env_bool("SCALP_CVD_DIVERGENCE_FILTER_ENABLED", not SCALP_MODE)   # scalp: kapalı
 RSI_LIMIT = 30.0
 CVD_FILTER_VAL = -0.10
 
 # Paper / Timing
 INITIAL_PAPER_BALANCE = _env_float("INITIAL_PAPER_BALANCE", 2000.0)
-MAX_HOLD_MINUTES      = _env_int("MAX_HOLD_MINUTES", 240)
+MAX_HOLD_MINUTES      = _env_int("MAX_HOLD_MINUTES", 25 if SCALP_MODE else 240)   # scalp: pozisyon dakikalar içinde kapanır
 
 # Scan
 SCAN_INTERVAL            = _env_int("SCAN_INTERVAL", 45)   # 60→45s
 MIN_VOLUME_USDT          = _env_float("MIN_VOLUME_USDT", 3_000_000.0)
-MIN_MOVE_PCT             = _env_float("MIN_MOVE_PCT", 0.3)
+MIN_MOVE_PCT             = _env_float("MIN_MOVE_PCT", 0.2 if SCALP_MODE else 0.3)   # scalp: küçük hareketten doğar
 SCAN_INCLUDE_WATCH       = _env_bool("SCAN_INCLUDE_WATCH", True)
 WATCHLIST_MIN_SCAN_SCORE = _env_float("WATCHLIST_MIN_SCAN_SCORE", 45.0)
 MAX_COINS_PER_SCAN_LOOP  = _env_int("MAX_COINS_PER_SCAN_LOOP", 40)
@@ -207,10 +216,13 @@ MAX_SIGNALS_PER_COIN     = _env_int("MAX_SIGNALS_PER_COIN", 3)  # coin başına 
 DATA_THRESHOLD      = _env_float("DATA_THRESHOLD", 20.0)
 WATCHLIST_THRESHOLD = _env_float("WATCHLIST_THRESHOLD", 28.0) # 35→28: TELEGRAM'dan düşük olmalı
 TELEGRAM_THRESHOLD  = _env_float("TELEGRAM_THRESHOLD", 35.0)  # v6.0 gevşetildi (28→35)
-TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 55.0)     # v6.0 gevşetildi
+TRADE_THRESHOLD     = _env_float("TRADE_THRESHOLD", 45.0 if SCALP_MODE else 55.0)     # scalp: tek statik eşik (FAZ 3.3)
 
 # Phase G: Quantum & Hedge Fund Automation Configuration
-DYNAMIC_THRESHOLD_ENABLED = _env_bool("DYNAMIC_THRESHOLD_ENABLED", True)
+# NEDEN (FAZ 3.1): scalp modda rejim/RL/dinamik eşik oynaması KAPALI — "tek statik
+# hakikat". Kapalıyken __getattr__ rejim-skalalamasını atlar ve ML online-prob
+# kapısı (execution_engine) ile self-healing param mutasyonu da devre dışı kalır.
+DYNAMIC_THRESHOLD_ENABLED = _env_bool("DYNAMIC_THRESHOLD_ENABLED", not SCALP_MODE)
 MAX_CORRELATION_THRESHOLD = _env_float("MAX_CORRELATION_THRESHOLD", 0.75)
 PORTFOLIO_VAR_LIMIT = _env_float("PORTFOLIO_VAR_LIMIT", 0.05)
 MIN_ONLINE_PROBABILITY_THRESHOLD = _env_float("MIN_ONLINE_PROBABILITY_THRESHOLD", 0.45)
@@ -232,10 +244,10 @@ EXECUTABLE_QUALITIES       = _env("EXECUTABLE_QUALITIES", "S,A+,A,B,C,M").split(
 # London (08-12 UTC) + NY (13-17 UTC) = en aktif seanslar
 GOOD_HOURS_UTC             = list(range(8, 22))   # 08-21 UTC (NY kapanışına kadar)
 BAD_HOURS_UTC              = list(range(0, 6))    # 00-05 UTC (Asian close)
-SESSION_FILTER_ENABLED     = _env_bool("SESSION_FILTER_ENABLED", True)
+SESSION_FILTER_ENABLED     = _env_bool("SESSION_FILTER_ENABLED", not SCALP_MODE)   # scalp: seans bonus/penaltısı gürültü
 SESSION_SCORE_BONUS        = _env_float("SESSION_SCORE_BONUS", 5.0)
 SESSION_SCORE_PENALTY      = _env_float("SESSION_SCORE_PENALTY", -5.0)
-SHORT_REQUIRES_BTC_BEARISH = True
+SHORT_REQUIRES_BTC_BEARISH = (not SCALP_MODE)   # scalp: SHORT için BTC-bearish zorunluluğu kapalı
 BTC_TREND_INTERVAL         = "4h"
 ADX_MIN_THRESHOLD          = 18  # eskiden 20
 MIN_ADX_5M_FILTER          = _env_float("MIN_ADX_5M_FILTER", 20.0)
@@ -447,7 +459,10 @@ def __getattr__(name: str) -> Any:
         val = _STATIC_DEFAULTS.get(name)
         
     # Dynamic scaling based on market regime and starvation alarm
-    if val is not None:
+    # NEDEN (FAZ 3.1): DYNAMIC_THRESHOLD_ENABLED=False (scalp) iken rejim/RL/starvation
+    # bazlı eşik oynaması TAMAMEN atlanır — değer DB'den/statik varsayılandan geldiği
+    # gibi döner ("tek statik hakikat"). Manuel /set yine çalışır (DB okuması korunur).
+    if val is not None and globals().get("DYNAMIC_THRESHOLD_ENABLED", True):
         if name == "RISK_PCT":
             try:
                 import database
@@ -606,6 +621,13 @@ def _read_dynamic_param_from_db(name: str) -> Any:
                 break
 
     if name in _AI_PARAMS_MAP:
+        # NEDEN (FAZ 2 / 3.3): scalp modda (DYNAMIC_THRESHOLD_ENABLED=False) RISK_PCT ve
+        # TP2_R, AI-tuner'ın `params` tablosundan DEĞİL statik scalp varsayılanından gelir
+        # ("tek statik hakikat"; tuner zaten FAZ 4'te kapalı). SL_ATR_MULT eskisi gibi
+        # `params`'tan okunur — doküman onu değiştirmiyor. None döndürmek __getattr__'ı
+        # _STATIC_DEFAULTS'a düşürür.
+        if not globals().get("DYNAMIC_THRESHOLD_ENABLED", True) and name in ("RISK_PCT", "TP2_R"):
+            return None
         db_col, cast_fn = _AI_PARAMS_MAP[name]
         for attempt in range(max_retries):
             try:

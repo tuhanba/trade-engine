@@ -218,8 +218,16 @@ class AsyncScalpEngine:
         from core.event_types import Event, EventType
         event_bus.subscribe(EventType.TRADE_OPENED, on_trade_opened)
 
+        # NEDEN (FAZ 4): scalp modda gereksiz arka plan döngüleri (ML eğitim,
+        # tuner/optimizasyon, self-healing, Friday raporlama) ATLANIR — CPU +
+        # karmaşıklık azaltma; trade açımını etkilemez, yalnız gürültüyü keser.
+        # Heartbeat / market-data / execution / trailing / ghost-result / db-bakım
+        # döngüleri KORUNUR.
+        scalp_mode = getattr(config, "SCALP_MODE", False)
+
         # Start ML Background Training Loop
-        asyncio.create_task(self._ml_training_loop())
+        if not scalp_mode:
+            asyncio.create_task(self._ml_training_loop())
 
         # Start DB Maintenance Loop
         asyncio.create_task(self._db_maintenance_loop())
@@ -231,13 +239,15 @@ class AsyncScalpEngine:
         asyncio.create_task(self._ghost_learning_loop())
 
         # Start AI Brain Nightly Optimizer
-        asyncio.create_task(self._ai_brain_loop())
+        if not scalp_mode:
+            asyncio.create_task(self._ai_brain_loop())
 
         # Start Market Regime Loop
         asyncio.create_task(self._market_regime_loop())
 
         # Start Self-Healing Parameter Optimization Loop
-        asyncio.create_task(self._self_healing_optuna_loop())
+        if not scalp_mode:
+            asyncio.create_task(self._self_healing_optuna_loop())
 
         # Start Weekly Telegram Performance Digest Loop
         asyncio.create_task(self._weekly_digest_loop())
@@ -246,19 +256,23 @@ class AsyncScalpEngine:
         asyncio.create_task(self._daily_summary_loop())
 
         # Start Optuna Hyperparameter Tuner Loop
-        asyncio.create_task(self._optuna_tuning_loop())
+        if not scalp_mode:
+            asyncio.create_task(self._optuna_tuning_loop())
 
         # Start Friday CEO Agent Loop
         self.friday_ceo = None
         try:
             from core.friday_ceo import FridayCeo
             self.friday_ceo = FridayCeo(self.client)
-            asyncio.create_task(self._friday_ceo_loop())
-            asyncio.create_task(self._friday_monitor_loop())
-            # Faz 2.1: Karar günlüğü sonuç takibi (saatte bir outcome doldurur)
-            asyncio.create_task(self._friday_outcome_loop())
-            # Faz 2.4: Sabah brifingi (06:00 UTC / 09:00 TR, idempotent)
-            asyncio.create_task(self._friday_morning_brief_loop())
+            # NEDEN (FAZ 4): Friday otonom döngüleri scalp modda kapalı (raporlama/gürültü;
+            # trade'i etkilemez). FridayCeo nesnesi Telegram komutları için ayakta kalır.
+            if not scalp_mode:
+                asyncio.create_task(self._friday_ceo_loop())
+                asyncio.create_task(self._friday_monitor_loop())
+                # Faz 2.1: Karar günlüğü sonuç takibi (saatte bir outcome doldurur)
+                asyncio.create_task(self._friday_outcome_loop())
+                # Faz 2.4: Sabah brifingi (06:00 UTC / 09:00 TR, idempotent)
+                asyncio.create_task(self._friday_morning_brief_loop())
         except Exception as e:
             logger.error(f"Friday CEO başlatılamadı: {e}")
 
@@ -560,8 +574,12 @@ class AsyncScalpEngine:
                     logger.debug(f"[Ghost] process_pending_results (cached): {processed} sinyal işlendi")
                 
                 # 2. Periyodik optimizasyon analizi ve eşik güncellemesi (10 dakikada bir)
+                # NEDEN (FAZ 3.3): scalp modda otonom eşik/ağırlık mutasyonu KAPALI —
+                # "tek statik hakikat". Yalnız sonuç işleme (yukarıda) çalışmaya devam eder;
+                # hiçbir otonom döngü trade_threshold'u oynatmaz.
                 now = time.time()
-                if now - last_suggestion_time >= SUGGESTION_INTERVAL:
+                _scalp = getattr(config, "SCALP_MODE", False)
+                if not _scalp and now - last_suggestion_time >= SUGGESTION_INTERVAL:
                     logger.info("[Ghost] Otonom optimizasyon analizi tetikleniyor...")
                     await asyncio.to_thread(generate_threshold_suggestions)
                     applied = await asyncio.to_thread(apply_ghost_suggestions_v2)
@@ -584,7 +602,7 @@ class AsyncScalpEngine:
                 # Son trade'den bu yana geçen süreyi kontrol et
                 # 6 saat = 21600 saniye. 2 saat = 7200 saniye.
                 elapsed_since_trade = now - self._last_trade_opened_at
-                if elapsed_since_trade >= 21600:
+                if not _scalp and elapsed_since_trade >= 21600:
                     decay_steps = int((elapsed_since_trade - 21600) / 7200)
                     decay_amount = float(decay_steps + 1)
                     
