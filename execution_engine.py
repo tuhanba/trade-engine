@@ -319,23 +319,22 @@ class ExecutionEngine:
                     min_threshold = getattr(config, "MIN_ONLINE_PROBABILITY_THRESHOLD", 0.45)
                     
                 from core.online_learning import get_learner
+                from core.ml_coldstart import compute_coldstart_gate
                 learner = get_learner()
-                if learner.trained:
-                    if learner.n_samples >= 30:
-                        if prob < min_threshold:
-                            logger.info(
-                                f"[ML Online Gate] Risk reduced for {signal.symbol}: "
-                                f"win prob ({prob:.2%}) < threshold ({min_threshold:.2%}). Scaling risk 0.5x."
-                            )
-                            signal.risk_pct = (getattr(signal, 'risk_pct', 1.0) or 1.0) * 0.5
-                            signal.position_size = (getattr(signal, 'position_size', 0) or 0) * 0.5
-                            signal.notional_size = (getattr(signal, 'notional_size', 0) or 0) * 0.5
-                            signal.max_loss = (getattr(signal, 'max_loss', 0) or 0) * 0.5
-                    else:
-                        logger.info(
-                            f"[ML Online Gate] Model warming up (Samples: {learner.n_samples}/30). "
-                            f"Allowing trade with predicted win probability {prob:.2%}."
-                        )
+                # NEDEN: ikili (gate yok <30 / tam gate >=30) yerine kademeli
+                # cold-start bantları (directive §17) — olgunlukla artan ihtiyat,
+                # asla blok yok (öğrenmek için trade gerekir).
+                gate = compute_coldstart_gate(
+                    getattr(learner, "n_samples", 0), prob, min_threshold,
+                    trained=getattr(learner, "trained", False),
+                )
+                mult = gate["risk_multiplier"]
+                logger.info(f"[ML Cold-Start Gate] {signal.symbol} band={gate['band']}: {gate['reason']}")
+                if mult < 1.0:
+                    signal.risk_pct = (getattr(signal, 'risk_pct', 1.0) or 1.0) * mult
+                    signal.position_size = (getattr(signal, 'position_size', 0) or 0) * mult
+                    signal.notional_size = (getattr(signal, 'notional_size', 0) or 0) * mult
+                    signal.max_loss = (getattr(signal, 'max_loss', 0) or 0) * mult
             except Exception as e:
                 logger.error(f"Error checking ML Online gating: {e}")
 
