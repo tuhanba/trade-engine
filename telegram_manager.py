@@ -222,6 +222,10 @@ class TelegramManager:
             "/expectancy":       self._cmd_expectancy,
             "/beklenti":         self._cmd_expectancy,
             "/readiness":        self._cmd_readiness,
+            "/profit_readiness": self._cmd_profit_readiness,
+            "/kar_hazir":        self._cmd_profit_readiness,
+            "/setup_report":     self._cmd_setup_report,
+            "/setuplar":         self._cmd_setup_report,
             "/funnel":           self._cmd_funnel,
             "/huni":             self._cmd_funnel,
             "/journal":          self._cmd_journal,
@@ -971,6 +975,8 @@ class TelegramManager:
             "🔹 <code>/expectancy</code> — 30 günlük beklenti (E/işlem, kuzey yıldızı metrik).\n"
             "🔹 <code>/funnel</code> — Sinyal hunisi + en sık 3 reddetme sebebi.\n"
             "🔹 <code>/readiness</code> — Canlıya geçiş için 5 kapı kontrolü.\n"
+            "🔹 <code>/profit_readiness</code> — Go-live kâr kanıtı kapısı (PASS/FAIL).\n"
+            "🔹 <code>/setup_report</code> — Setup başına expectancy + öneri.\n"
             "🔹 <code>/friday_decisions</code> — Friday'in son 10 kararı + sonuç skorları.\n"
             "🔹 <code>/ghost</code> — Yapay zekanın (Ghost Learning) arka planda ne kadar öğrendiğini gösterir.\n"
             "🔹 <code>/ml</code> — Yapay Zeka (ML) durum ve tahmin parametrelerini listeler.\n"
@@ -2101,6 +2107,22 @@ class TelegramManager:
         except Exception as e:
             self.send_fn(f"⚠️ Readiness raporu alınamadı: {e}")
 
+    def _cmd_profit_readiness(self):
+        """P1-4: Go-live kâr kanıtı kapısı (PASS/FAIL, directive §10)."""
+        try:
+            from scripts.profit_readiness import collect
+            self.send_fn(format_profit_readiness(collect()))
+        except Exception as e:
+            self.send_fn(f"⚠️ Kâr hazırlığı alınamadı: {e}")
+
+    def _cmd_setup_report(self):
+        """P1-4: Setup başına expectancy + öneri (directive §11)."""
+        try:
+            from scripts.setup_expectancy_report import collect
+            self.send_fn(format_setup_report(collect()))
+        except Exception as e:
+            self.send_fn(f"⚠️ Setup raporu alınamadı: {e}")
+
     def _cmd_heatmap(self):
         try:
             import telegram_delivery
@@ -2287,4 +2309,44 @@ class TelegramManager:
             self.send_fn(format_decisions_table(10))
         except Exception as e:
             self.send_fn(f"⚠️ Friday karar günlüğü alınamadı: {e}")
+
+
+# ── P1-4: kâr-kanıt formatlayıcıları (saf, test edilebilir) ──────────────────
+
+def format_profit_readiness(result: dict) -> str:
+    """scripts.profit_readiness.collect() çıktısını Telegram mesajına çevirir."""
+    m = result.get("metrics", {}) or {}
+    head = "✅ HAZIR" if result.get("ready") else "❌ HAZIR DEĞİL"
+    lines = [f"💰 <b>Kâr Hazırlığı:</b> {head}", "━━━━━━━━━━━━━━"]
+    if m:
+        lines += [
+            f"İşlem: <b>{m.get('n_trades', 0)}</b>  •  Net: <b>{m.get('net_pnl', 0):+.2f}</b>",
+            f"Expectancy: <b>{m.get('expectancy_r', 0):+.3f}R</b>  •  PF: <b>{m.get('profit_factor', 0)}</b>",
+            f"Kazanç: <b>%{m.get('win_rate', 0) * 100:.0f}</b>  •  MaxDD: <b>%{m.get('max_drawdown_pct', 0):.2f}</b>",
+        ]
+    for g in result.get("gates", []):
+        mark = "✅" if g.get("pass") else "❌"
+        lines.append(f"{mark} {g.get('detail', g.get('gate', ''))}")
+    if not result.get("gates"):
+        lines.append(f"<i>{result.get('summary', 'veri yok')}</i>")
+    return "\n".join(lines)
+
+
+def format_setup_report(result: dict) -> str:
+    """scripts.setup_expectancy_report.collect() çıktısını Telegram mesajına çevirir."""
+    setups = result.get("setups", {}) or {}
+    if not setups:
+        return "📋 Henüz setup verisi yok (kapanmış paper işlem gerekli)."
+    emoji = {"ENABLE": "🟢", "PAPER_ONLY": "🟡", "LOWER_RISK": "🟠",
+             "DISABLE": "🔴", "NEEDS_MORE_DATA": "⚪"}
+    lines = [f"📋 <b>Setup Expectancy</b> ({result.get('n_trades', 0)} işlem)", "━━━━━━━━━━━━━━"]
+    ordered = sorted(setups.items(), key=lambda kv: kv[1].get("expectancy_r", 0), reverse=True)
+    for setup, mm in ordered:
+        e = emoji.get(mm.get("recommendation"), "•")
+        lines.append(
+            f"{e} <b>{setup}</b>\n"
+            f"   n={mm.get('sample_size', 0)}  E={mm.get('expectancy_r', 0):+.2f}R  "
+            f"PF={mm.get('profit_factor', 0)}  WR=%{mm.get('win_rate', 0) * 100:.0f}  → {mm.get('recommendation', '?')}"
+        )
+    return "\n".join(lines)
 

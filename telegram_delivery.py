@@ -700,6 +700,7 @@ def format_signal(sig) -> str:
         f"🚀 TP3    <code>{_fmt(_tp3)}</code>{tp3_pct}\n"
         f"{LINE}\n"
         f"📊 Skor   <b>{_score:.1f}</b>  ·  RR  <b>{_rr:.2f}R</b>\n"
+        f"🧩 Setup  <b>{getattr(sig, 'setup_type', 'UNKNOWN')}</b>\n"
         f"💰 Risk   <b>${_loss:.2f}</b>  ({_risk:.1f}%)  ·  {_lev}x\n"
         f"🧠 Güven  {conf_bar}  {conf_pct}%\n"
         f"{LINE}\n"
@@ -1091,6 +1092,7 @@ def format_trade_open(trade: dict) -> str:
         f"📍 Giriş  <code>{_fmt(trade.get('entry', 0))}</code>\n"
         f"🛑 SL     <code>{_fmt(trade.get('sl', 0))}</code>\n"
         f"🎯 TP1    <code>{_fmt(trade.get('tp1', 0))}</code>\n"
+        f"🧩 Setup  <b>{trade.get('setup_type', 'UNKNOWN')}</b>\n"
         f"⚖️ RR     <b>{_fmt(trade.get('rr', 0), 2)}R</b>\n"
         f"⏰ {_now_utc()}"
     )
@@ -1111,6 +1113,7 @@ def format_trade_close(trade: dict, pnl: float, reason: str) -> str:
         f"🏁 Çıkış  <code>{_fmt(trade.get('close_price', 0))}</code>\n"
         f"💰 PnL    <b>{'+' if pnl >= 0 else ''}{pnl:.3f}$</b>\n"
         f"📋 Sebep  {reason_map.get(reason, reason.upper() if reason else '?')}\n"
+        f"🧩 Setup  <b>{trade.get('setup_type', 'UNKNOWN')}</b>\n"
         f"⏰ {_now_utc()}"
     )
 
