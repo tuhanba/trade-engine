@@ -13,6 +13,12 @@ os.environ["DASHBOARD_PIN"] = ""
 os.environ["ALLOWED_IPS"] = ""
 os.environ["REDIS_ENABLED"] = "False"
 os.environ["EXECUTION_MODE"] = "paper"
+# NEDEN (CLAUDE_FIX_SCALP_SIMPLIFY): test paketi tam "brain" davranışını (rejim/RL
+# dinamik eşikler, kalkanlar, order-book wall, starvation gevşemesi) doğrular — bu
+# yüzden SCALP_MODE testlerde KAPALI sabitlenir (EXECUTION_MODE=paper gibi). Scalp
+# modu kontratı ayrıca tests/test_scalp_mode.py'de açıkça doğrulanır. Production'da
+# env verilmez → SCALP_MODE varsayılanı True (scalp açık).
+os.environ["SCALP_MODE"] = "false"
 
 @pytest.fixture(autouse=True, scope="session")
 def setup_test_environment():
