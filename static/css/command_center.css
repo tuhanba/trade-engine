@@ -172,6 +172,12 @@
 .cc-gate.pass .cc-gate-icon { color: var(--cc-health); }
 .cc-gate.fail .cc-gate-icon { color: var(--cc-copper); }
 
+/* P1-5: bayat-veri uyarı bandı */
+.cc-stale { padding: 8px 12px; margin-bottom: 8px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+.cc-stale-high { background: rgba(192,83,62,0.18); border: 1px solid var(--cc-copper); color: var(--cc-copper); }
+.cc-stale-med { background: rgba(192,83,62,0.10); border: 1px solid rgba(192,83,62,0.4); }
+.cc-stale-low { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); opacity: 0.85; }
+
 /* ── Boş durumlar ────────────────────────────────────────────────────── */
 .cc-empty { color: var(--cc-text-dim); font-size: 11px; font-style: italic; padding: 14px 4px; text-align: center; }
 
