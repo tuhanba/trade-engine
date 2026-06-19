@@ -52,6 +52,7 @@ from core.trend_engine import TrendEngine
 from core.trigger_engine import TriggerEngine
 from core.risk_engine import RiskEngine
 from core.ai_decision_engine import AIDecisionEngine
+from core import execution_gate
 from telegram_delivery import deliver_signal, send_message, recover_queued_messages
 from websocket_events import event_manager
 
@@ -811,6 +812,17 @@ def main():
                     if (AX_MODE == "execute" and EXECUTION_AVAILABLE
                             and sig.final_score >= _trade_thr
                             and sig.setup_quality in EXECUTABLE_QUALITIES):  # B kalite execute edilmez
+                        # NEDEN (P0-6, directive Section 7.3): Yurutme kapisi AI
+                        # kararini (ALLOW sart) ve risk gecerliligini ACIKCA
+                        # yeniden dogrular. decision (652) ve risk_result (573)
+                        # ayni iterasyonda hesaplandi. WATCH/non-ALLOW asla trade
+                        # ACMAZ (yalniz paper-track) — P0-4 WATCH'i etkili kilar.
+                        _gate_block = execution_gate.execution_block_reason(decision, risk_result)
+                        if _gate_block:
+                            _stage = "RISK_REJECTED" if _gate_block == "risk_invalid_at_gate" else "ALLOW_BUT_EXECUTION_BLOCKED"
+                            update_candidate_status(candidate_id, reject_reason=_gate_block, lifecycle_stage="REJECTED", execution_status="rejected")
+                            save_signal_event(sig.id, _stage, symbol=symbol, reject_reason=_gate_block, reason="execution_gate_reassert")
+                            continue
                         if sig.rr < MIN_RR:
                             update_candidate_status(candidate_id, reject_reason="bad_rr", lifecycle_stage="REJECTED", execution_status="rejected")
                             save_signal_event(sig.id, "ALLOW_BUT_EXECUTION_BLOCKED", symbol=symbol, reject_reason="bad_rr", reason="trade_guard_min_rr")
