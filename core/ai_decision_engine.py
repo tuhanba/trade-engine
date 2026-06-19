@@ -447,16 +447,36 @@ class AIDecisionEngine:
             }
         except Exception as e:
             logger.warning("evaluate() fallback: %s", e)
+            # NEDEN (P0-4, directive Section 7.4): AI degerlendirmesi cokerse
+            # fail-safe karar ver. LIVE modda DAIMA VETO (ai_error_live_veto) —
+            # hicbir canli trade fallback'tan acilamaz. Paper'da WATCH
+            # (ai_fallback_paper): uygulanmaz, yalniz gozlem. Eski davranis
+            # ("ALLOW if score>=30") kanitlanmamis sinyali normal trade gibi
+            # gecirip track record'u kirletiyordu.
+            import config as _cfg
+            try:
+                _mode = str(_cfg.__getattr__("EXECUTION_MODE")).lower()
+            except Exception:
+                _mode = str(getattr(_cfg, "EXECUTION_MODE", "paper")).lower()
             score = float(getattr(sig, 'score', 0) or 0)
             if score <= 0:
                 score = 50.0
+            if _mode == "live":
+                return {
+                    "decision":    "VETO",
+                    "final_score": score,
+                    "confidence":  0.0,
+                    "reason":      "ai_error_live_veto",
+                    "ai_score":    score,
+                    "agent_data":  {"fallback": True, "error": str(e)},
+                }
             return {
-                "decision":    "ALLOW" if score >= 30 else "VETO",
+                "decision":    "WATCH",
                 "final_score": score,
                 "confidence":  0.5,
-                "reason":      f"fallback_evaluate: {e}",
+                "reason":      "ai_fallback_paper",
                 "ai_score":    score,
-                "agent_data":  {},
+                "agent_data":  {"fallback": True, "error": str(e)},
             }
 
     def decide(self, sig) -> dict:

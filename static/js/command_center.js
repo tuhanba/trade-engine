@@ -256,6 +256,33 @@
     ).join("");
   }
 
+  // ── KATMAN 4: ANALİZ — Profit-Readiness (go-live kâr kanıtı) ────────
+  function renderProfitReadiness(pr) {
+    const host = $("ccProfitReadiness");
+    if (!host) return;
+    if (!pr || !pr.gates || !pr.gates.length) { host.innerHTML = `<div class="cc-empty">Kâr kanıtı verisi yok.</div>`; return; }
+    const m = pr.metrics || {};
+    const head = `<div style="font-weight:700;margin-bottom:6px;color:${pr.ready ? "var(--cc-health)" : "var(--cc-copper)"}">
+      ${pr.ready ? "✅ KÂR KANITI GEÇTİ" : "⛔ KÂR KANITI YOK"} — ${pr.summary || ""}</div>
+      <div class="cc-pr-metrics" style="font-size:.85em;opacity:.85;margin-bottom:8px">
+        İşlem ${m.n_trades || 0} · E ${(Number(m.expectancy_r) || 0).toFixed(3)}R · PF ${m.profit_factor} · MaxDD %${(Number(m.max_drawdown_pct) || 0).toFixed(1)}</div>`;
+    host.innerHTML = head + pr.gates.map((g) =>
+      `<div class="cc-gate ${g.pass ? "pass" : "fail"}">
+         <span class="cc-gate-icon">${g.pass ? "🟢" : "🔴"}</span><span>${g.detail}</span></div>`
+    ).join("");
+  }
+
+  // Bayat-veri uyarı bandı (engine heartbeat vb.)
+  function renderStale(stale) {
+    const host = $("ccStaleBanner");
+    if (!host) return;
+    if (!stale || !stale.warnings || !stale.warnings.length) { host.style.display = "none"; host.innerHTML = ""; return; }
+    host.style.display = "block";
+    host.innerHTML = stale.warnings.map((w) =>
+      `<div class="cc-stale cc-stale-${w.severity || "low"}">⚠️ ${w.msg}</div>`
+    ).join("");
+  }
+
   // ── Ana render + polling ───────────────────────────────────────────
   async function refresh() {
     try {
@@ -271,6 +298,8 @@
       renderGhost(d.ghost);
       renderRegime(d.regime);
       renderReadiness(d.readiness);
+      renderProfitReadiness(d.profit_readiness);
+      renderStale(d.stale);
     } catch (e) {
       // sessiz — bir sonraki tur dener (ölü ekran hissi yok, eski veri durur)
     }

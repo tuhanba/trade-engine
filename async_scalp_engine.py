@@ -685,44 +685,35 @@ class AsyncScalpEngine:
                     res = await asyncio.to_thread(optimize_ghost_filters, config.DB_PATH)
                     if res:
                         best_rsi_limit, best_cvd_filter_val, best_val = res
-                        
-                        # Save to db
-                        from database import update_system_state
-                        await asyncio.to_thread(update_system_state, "rsi_limit", str(round(best_rsi_limit, 1)))
-                        await asyncio.to_thread(update_system_state, "cvd_filter_val", str(round(best_cvd_filter_val, 4)))
-                        
-                        logger.info(f"[Self-Healing] Parameters updated: RSI_LIMIT={best_rsi_limit:.1f}, CVD_FILTER_VAL={best_cvd_filter_val:.4f}")
-                        
-                        # Send voice note
-                        msg = (
-                            f"Canım boss'um, son yirmi işlemimizdeki başarı oranı yüzde ellinin altına düşünce hemen işe koyuldum "
-                            f"ve ghost sinyallerimizi otonom olarak taradım! Piyasaya daha iyi uyum sağlamak için "
-                            f"yeni RSI limitini {best_rsi_limit:.1f} ve yeni CVD filtre değerini {best_cvd_filter_val:.4f} olarak güncelledim. "
-                            f"Artık çok daha güvendeyiz tatlım, işlemlerimiz ışıldasın!"
+
+                        # NEDEN (P0-2, directive Section 20): Dogrudan
+                        # update_system_state YOK. Oneri report-first kapidan
+                        # gecer — varsayilan UYGULANMAZ; SELF_HEALING_AUTO_APPLY
+                        # acikken bile param_gate (backtest) onayi sart.
+                        from core.self_healing import evaluate_self_healing
+                        res_apply = await asyncio.to_thread(
+                            evaluate_self_healing,
+                            {"rsi_limit": round(best_rsi_limit, 1),
+                             "cvd_filter_val": round(best_cvd_filter_val, 4)},
                         )
-                        
-                        if self.friday_ceo:
-                            voice_bytes = await asyncio.to_thread(self.friday_ceo.generate_voice_from_text, msg)
-                            if voice_bytes:
-                                import telegram_delivery
-                                await asyncio.to_thread(
-                                    telegram_delivery.send_voice, 
-                                    voice_bytes, 
-                                    caption="Friday Otonom Parametre İyileştirme"
-                                )
-                                logger.info("[Self-Healing] Sent voice note to boss.")
-                            else:
-                                import telegram_delivery
-                                await asyncio.to_thread(
-                                    telegram_delivery.send_message,
-                                    f"👻 <b>Friday Otonom Parametre İyileştirme</b>\n\n{msg}"
-                                )
+                        applied = res_apply.get("applied") or {}
+                        proposed = res_apply.get("proposed") or {}
+                        notes = "; ".join(res_apply.get("notes") or [])
+
+                        if applied:
+                            head = "👻 <b>Friday Self-Healing — UYGULANDI (param_gate onaylı)</b>"
+                            body = ", ".join(f"{k}={v}" for k, v in applied.items())
+                            logger.info("[Self-Healing] Applied via gate: %s", applied)
                         else:
-                            import telegram_delivery
-                            await asyncio.to_thread(
-                                telegram_delivery.send_message,
-                                f"👻 <b>Friday Otonom Parametre İyileştirme</b>\n\n{msg}"
-                            )
+                            head = "👻 <b>Friday Self-Healing — ÖNERİ (uygulanmadı, kanıt toplanıyor)</b>"
+                            body = ", ".join(f"{k}={v}" for k, v in proposed.items())
+                            logger.info("[Self-Healing] Report-first (not applied): %s", proposed)
+
+                        import telegram_delivery
+                        await asyncio.to_thread(
+                            telegram_delivery.send_message,
+                            f"{head}\n\nÖnerilen/Uygulanan: {body}\n<i>{notes}</i>",
+                        )
                 else:
                     logger.debug("[Self-Healing] Win rate check passed (>=50% or not enough trades).")
             except Exception as e:

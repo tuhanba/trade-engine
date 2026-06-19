@@ -65,6 +65,11 @@ CONFIRM_LIVE_TRADING    = _env_bool("CONFIRM_LIVE_TRADING", False)
 LIVE_CONFIRM            = _env_bool("LIVE_CONFIRM", False)
 USE_BINANCE_PRIVATE_API = _env_bool("USE_BINANCE_PRIVATE_API", False)
 CANARY_MODE             = _env_bool("CANARY_MODE", False)
+# NEDEN (P0-2, directive Section 20): Otonom self-healing Optuna dongusu trade
+# parametrelerini (rsi_limit/cvd_filter_val) VARSAYILAN olarak UYGULAMAZ —
+# report-first. Acilirsa bile her degisiklik param_gate (backtest kaniti)
+# onayindan gecer. Kanit birikene kadar kapali kalir; fail-safe.
+SELF_HEALING_AUTO_APPLY = _env_bool("SELF_HEALING_AUTO_APPLY", False)
 
 # API Keys
 BINANCE_API_KEY    = _env("BINANCE_API_KEY")
@@ -335,6 +340,22 @@ def is_live_trading_allowed() -> bool:
 
 def is_private_api_allowed() -> bool:
     return USE_BINANCE_PRIVATE_API
+
+# NEDEN (P0-3, directive Section 12/18): Otonom aktorler (Friday, Ghost,
+# self-healing) bu key'leri ASLA yazamaz — canli kontrol + risk kalkani
+# parametreleri. Yalniz acik insan komutu (/live, /set) degistirebilir.
+# "No component may bypass the live gate."
+AUTONOMOUS_FORBIDDEN_KEYS = frozenset({
+    "EXECUTION_MODE", "LIVE_TRADING_ENABLED", "DRY_RUN", "CONFIRM_LIVE_TRADING",
+    "LIVE_CONFIRM", "USE_BINANCE_PRIVATE_API", "BYPASS_LIVE_RISK_SHIELDS",
+})
+
+def is_autonomous_forbidden(key: str) -> bool:
+    """True if `key` may NOT be set by an autonomous actor (Friday/Ghost/etc.).
+
+    Live-control and risk-shield params are human-command only.
+    """
+    return str(key).upper().strip() in AUTONOMOUS_FORBIDDEN_KEYS
 
 def safety_summary() -> dict:
     return {

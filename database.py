@@ -463,6 +463,8 @@ CREATE TABLE IF NOT EXISTS trades (
     mfe                 REAL DEFAULT 0,
     mae                 REAL DEFAULT 0,
     setup_quality       TEXT,
+    setup_type          TEXT DEFAULT 'UNKNOWN',
+    setup_reason        TEXT DEFAULT '',
     final_score         REAL DEFAULT 0,
     market_regime       TEXT,
     is_valid_for_stats  INTEGER DEFAULT 1,
@@ -501,6 +503,8 @@ CREATE TABLE IF NOT EXISTS signal_candidates (
     entry           REAL DEFAULT 0,
     sl              REAL DEFAULT 0,
     setup_quality   TEXT DEFAULT '',
+    setup_type      TEXT DEFAULT 'UNKNOWN',
+    setup_reason    TEXT DEFAULT '',
     final_score     REAL DEFAULT 0,
     market_regime   TEXT DEFAULT '',
     risk_status     TEXT DEFAULT '',
@@ -1497,9 +1501,9 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
                  risk_pct, status, open_time, current_price,
                  unrealized_pnl, realized_pnl, net_pnl,
                  remaining_qty, original_qty, close_price, close_reason,
-                 total_fee, fee_rate, ax_mode, setup_quality, final_score, metadata, environment,
+                 total_fee, fee_rate, ax_mode, setup_quality, setup_type, final_score, metadata, environment,
                  slippage, latency_ms)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 trade.symbol,
@@ -1532,6 +1536,7 @@ def create_trade(trade: TradeData, metadata: str = "{}") -> Optional[int]:
                 getattr(trade, 'fee_rate', 0.0004) or 0.0004,
                 getattr(trade, 'ax_mode', None),
                 getattr(trade, 'setup_quality', ''),
+                getattr(trade, 'setup_type', 'UNKNOWN'),
                 getattr(trade, 'final_score', 0.0),
                 metadata or "{}",
                 env,

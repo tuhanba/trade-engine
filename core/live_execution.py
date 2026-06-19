@@ -406,6 +406,14 @@ class LiveExecutionEngine:
             _log_reject("LIVE_BLOCKED_BY_SAFETY_GATE")
             return None
 
+        # NEDEN (P1-1, directive Section 9): setup_type zorunlu — bos/UNKNOWN
+        # sinyal ASLA canli acilmaz (siniflandirilamayan setup = guvenli ret).
+        _stype = str(getattr(signal, "setup_type", "") or "").strip().upper()
+        if _stype in ("", "UNKNOWN"):
+            logger.error("Canli islem reddedildi: setup_type eksik/UNKNOWN")
+            _log_reject("setup_type_missing")
+            return None
+
         symbol = signal.symbol
         direction = signal.direction
         side = "BUY" if direction == "LONG" else "SELL"

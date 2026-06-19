@@ -87,6 +87,16 @@ class SignalData:
     telegram_status: str = ""
     is_liquidity_sweep: bool = False
     is_sfp: bool = False
+    # ── Setup taksonomisi (P1-1, directive Section 4/9)
+    setup_type: str = "UNKNOWN"
+    setup_reason: str = ""
+    opportunity_score: float = 0.0
+    late_entry_score: float = 0.0
+    expected_r: float = 0.0
+    fee_adjusted_expected_r: float = 0.0
+    spread_pct: float = 0.0
+    slippage_estimate: float = 0.0
+    session: str = ""
     # ── ID alanı (deliver_signal dedupe için)
     id: Optional[str] = None
 
@@ -106,6 +116,8 @@ class SignalData:
         sig.final_score   = float(d.get("final_score") or 0)
         sig.score         = sig.final_score
         sig.setup_quality = d.get("setup_quality", "C")
+        sig.setup_type    = d.get("setup_type", "UNKNOWN")
+        sig.setup_reason  = d.get("setup_reason", "")
         sig.leverage      = int(d.get("leverage_suggestion") or d.get("leverage") or 10)
         sig.risk_pct      = float(d.get("risk_percent") or d.get("risk_pct") or 0.75)
         sig.position_size = float(d.get("position_size") or 0)
@@ -181,6 +193,7 @@ class TradeData:
     exit_price: float = 0.0
     close_reason: str = ""
     setup_quality: str = ""
+    setup_type: str = "UNKNOWN"      # P1-1: zorunlu setup taksonomisi
     final_score: float = 0.0
     metadata: Optional[dict[str, Any]] = None
     slippage: float = 0.0
@@ -285,6 +298,16 @@ class _SignalRecord:
         self.trigger_score: float = 0.0
         self.risk_score: float = 0.0
         self.setup_quality: str = ""
+        # ── Setup taksonomisi (P1-1, directive Section 4/9)
+        self.setup_type: str = "UNKNOWN"
+        self.setup_reason: str = ""
+        self.opportunity_score: float = 0.0
+        self.late_entry_score: float = 0.0
+        self.expected_r: float = 0.0
+        self.fee_adjusted_expected_r: float = 0.0
+        self.spread_pct: float = 0.0
+        self.slippage_estimate: float = 0.0
+        self.session: str = ""
         self.ml_score: float = 50.0
         self.confluence_score: float = 0.0
         self.entry_zone: float = 0.0
@@ -347,6 +370,15 @@ class _SignalRecord:
             "tp3": self.tp3,
             "rr": self.rr,
             "setup_quality": self.setup_quality,
+            "setup_type": self.setup_type,
+            "setup_reason": self.setup_reason,
+            "opportunity_score": self.opportunity_score,
+            "late_entry_score": self.late_entry_score,
+            "expected_r": self.expected_r,
+            "fee_adjusted_expected_r": self.fee_adjusted_expected_r,
+            "spread_pct": self.spread_pct,
+            "slippage_estimate": self.slippage_estimate,
+            "session": self.session,
             "final_score": self.final_score,
             "confidence": self.confidence,
             "reason": self.reason,

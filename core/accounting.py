@@ -664,6 +664,8 @@ def build_trade_from_signal(
         risk_pct=dynamic_risk,
         status=TradeStatus.OPEN.value,
         current_price=signal.entry_price,
+        setup_quality=getattr(signal, "setup_quality", "") or "",
+        setup_type=getattr(signal, "setup_type", "UNKNOWN") or "UNKNOWN",
     )
 
 

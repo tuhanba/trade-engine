@@ -973,6 +973,16 @@ class FridayCeo:
         params = decisions.get("parameters", {})
         for key, val in params.items():
             key_upper = key.upper()
+            # NEDEN (P0-3, directive Section 12/18): Friday canli-kontrol /
+            # risk-kalkani key'lerini YAZAMAZ (EXECUTION_MODE,
+            # BYPASS_LIVE_RISK_SHIELDS, ...). Yalniz acik insan komutu
+            # degistirebilir — "no component may bypass the live gate".
+            if config.is_autonomous_forbidden(key_upper):
+                logger.warning("[Friday CEO] BLOCKED forbidden live-control key: %s=%s", key_upper, val)
+                _log("BLOCKED_FORBIDDEN_KEY", param_key=key_upper, old=None, new=val,
+                     why="otonom aktor canli-kontrol/risk key'ini degistiremez")
+                applied_msgs.append(f"⛔ <b>{key_upper}</b> reddedildi (otonom yazim yasak)")
+                continue
             from config import _DYNAMIC_PARAMS_MAP, _AI_PARAMS_MAP
             if key_upper in _DYNAMIC_PARAMS_MAP:
                 db_key, cast_fn = _DYNAMIC_PARAMS_MAP[key_upper]

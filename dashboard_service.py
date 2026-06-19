@@ -597,6 +597,56 @@ def get_correlation_matrix(environment: str | None = None) -> dict:
         return {"symbols": [], "matrix": [], "max_pair": None, "error": str(e)}
 
 
+def get_profit_readiness_panel(environment: str | None = None) -> dict:
+    """P1-5: go-live kâr-kanıt kapısının (directive §10) dashboard özeti."""
+    try:
+        from scripts.profit_readiness import collect
+        r = collect(environment=environment or "paper")
+    except Exception as e:
+        return {"ready": False, "summary": f"hata: {e}", "metrics": {}, "gates": []}
+    m = r.get("metrics", {}) or {}
+    return {
+        "ready": bool(r.get("ready")),
+        "summary": r.get("summary", ""),
+        "metrics": {
+            "n_trades": m.get("n_trades", 0),
+            "expectancy_r": m.get("expectancy_r", 0.0),
+            "profit_factor": m.get("profit_factor", 0.0),
+            "max_drawdown_pct": m.get("max_drawdown_pct", 0.0),
+            "net_pnl": m.get("net_pnl", 0.0),
+            "win_rate": m.get("win_rate", 0.0),
+        },
+        "gates": [
+            {"gate": g.get("gate"), "pass": bool(g.get("pass")), "detail": g.get("detail", "")}
+            for g in r.get("gates", [])
+        ],
+    }
+
+
+def get_stale_warnings() -> dict:
+    """P1-5: bayat veri uyarıları — engine heartbeat tazeliği (directive §6).
+
+    NEDEN: Dashboard yalnız okur; engine süreci durmuşsa veriler bayatlar ve
+    operatör 'sistem çalışıyor' sanabilir. Heartbeat >120sn ise yüksek-önem uyarı.
+    """
+    warnings: list[dict] = []
+    try:
+        ax = get_ax_status()
+        last_seen = ax.get("last_seen_seconds")
+        if last_seen is None:
+            warnings.append({"kind": "heartbeat", "severity": "high",
+                             "msg": "Engine heartbeat yok — motor süreci çalışmıyor olabilir"})
+        elif last_seen > 120:
+            warnings.append({"kind": "heartbeat", "severity": "high", "age_sec": int(last_seen),
+                             "msg": f"Engine heartbeat {int(last_seen)}sn bayat (>120sn)"})
+        if ax.get("circuit_breaker_active"):
+            warnings.append({"kind": "circuit_breaker", "severity": "med",
+                             "msg": "Circuit breaker aktif — yeni trade durduruldu"})
+    except Exception as e:
+        warnings.append({"kind": "error", "severity": "low", "msg": f"durum alınamadı: {e}"})
+    return {"stale": any(w.get("severity") == "high" for w in warnings), "warnings": warnings}
+
+
 def get_command_center(environment: str | None = None) -> dict:
     """Faz 4: Komuta Merkezi'nin tüm katman verisini TEK çağrıda döndürür.
 
@@ -650,6 +700,12 @@ def get_command_center(environment: str | None = None) -> dict:
         out["readiness"] = _readiness_check()
     except Exception:
         out["readiness"] = {"ready": False, "gates": []}
+
+    # P1-5: go-live kâr-kanıt kapısı + bayat-veri uyarıları
+    out["profit_readiness"] = _safe_call(
+        get_profit_readiness_panel,
+        {"ready": False, "summary": "veri yok", "metrics": {}, "gates": []}, env)
+    out["stale"] = _safe_call(get_stale_warnings, {"stale": False, "warnings": []})
 
     # Coin reputations for Phase G
     out["coin_reputations"] = _safe_call(get_coin_reputations, [])
