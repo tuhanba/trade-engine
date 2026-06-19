@@ -193,6 +193,7 @@ class TradeData:
     exit_price: float = 0.0
     close_reason: str = ""
     setup_quality: str = ""
+    setup_type: str = "UNKNOWN"      # P1-1: zorunlu setup taksonomisi
     final_score: float = 0.0
     metadata: Optional[dict[str, Any]] = None
     slippage: float = 0.0
